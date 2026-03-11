@@ -166,6 +166,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 |-----------|---------|--------|
 | Status channel messages (boot-report/offline/error) | `src/discord/status-channel.ts` | **done** |
 | MCP server detection (startup health logging) | `src/mcp-detect.ts`, `src/mcp-detect.test.ts` | **done** |
+| MCP detection in boot report | `src/discord/status-channel.ts`, `src/index.ts`, `src/index.post-connect.ts` | **done** |
 | Pino structured logging | throughout | **done** |
 | Per-run trace store (structured invoke/tool/action/error/outcome events keyed by `traceId`; currently instrumented for message flow with operator inspection via `!trace`) | `src/observability/trace-store.ts`, `src/observability/trace-store.test.ts`, `src/discord/trace-command.ts`, `src/discord/trace-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
 | Admin dashboard (terminal UI + loopback-by-default web UI for service state, config doctor, model overrides, and service actions; supports private Tailscale access through trusted host allowlisting) | `src/cli/dashboard.ts`, `src/cli/dashboard.test.ts`, `src/dashboard/server.ts`, `src/dashboard/page.ts`, `src/service-control.ts`, `src/health/config-doctor.ts` | **done** |

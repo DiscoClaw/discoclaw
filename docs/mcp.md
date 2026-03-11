@@ -76,13 +76,34 @@ DiscoClaw does a lightweight startup validation pass on `.mcp.json` so bad confi
 Current validation covers:
 
 - malformed JSON
+- non-object JSON roots
 - missing or non-object `mcpServers`
 - non-object server entries
-- missing `command`
+- server entries missing both a non-empty `command` and a non-empty `url`
 - `env` present but not an object
 - non-string `env` values
 - empty `env` objects, which log a warning because they usually mean incomplete config
+- `env` values containing `${...}` placeholders, which log a warning because `.mcp.json` values are not shell-interpolated
 - server names longer than 64 characters, which log a warning because Anthropic tool names have a hard length limit
+
+### URL-based servers
+
+DiscoClaw also recognizes MCP server entries that use a `url` instead of a `command`, for example hosted SSE or streamable HTTP endpoints:
+
+```json
+{
+  "mcpServers": {
+    "hosted-search": {
+      "url": "https://mcp.example.com/sse",
+      "env": {
+        "API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+For these URL-type entries, DiscoClaw only validates that the `url` field is present and non-empty. It does not validate transport details, handshake behavior, auth flow, or endpoint reachability at startup.
 
 ## Trust boundary
 
@@ -120,6 +141,7 @@ If the API error still occurs at runtime, the error message will direct you here
 - **MCP servers not loading:** Verify `.mcp.json` is in your workspace directory and is valid JSON. Check startup logs for MCP-related errors.
 - **`env` validation error:** Every `env` value must be a string.
 - **Empty `env` warning:** Remove the empty object if it is unused, or fill in the expected values.
+- **`${VAR}` in `env` values:** `.mcp.json` is parsed as JSON, not by a shell. DiscoClaw warns on `${...}` placeholders because they are passed through literally unless you generate the file yourself before startup.
 - **Slow startup:** An MCP server that takes too long to initialize can delay the first response. Check server health independently before adding it to your config.
 - **Server crashes:** MCP server failures don't crash DiscoClaw — the runtime continues without the failed server's tools. Check logs for connection errors.
 - **`tool_use.name` API 400 error:** An MCP server name exceeds 64 chars. Rename it in `workspace/.mcp.json`. See [Server name length limit](#server-name-length-limit) above.
