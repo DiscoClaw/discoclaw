@@ -77,6 +77,43 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
   - `CLAUDE_OUTPUT_FORMAT=stream-json` (preferred; DiscoClaw parses JSONL and streams text)
   - `CLAUDE_OUTPUT_FORMAT=text` (fallback if your local CLI doesn't support stream-json)
 
+## Codex CLI Runtime
+
+- Adapter: `src/runtime/codex-cli.ts` (thin wrapper around `cli-adapter.ts` + `strategies/codex-strategy.ts`)
+- Transport split:
+  - `invoke()` always uses `codex exec` / `codex exec resume` through the shared CLI adapter.
+  - The Codex app-server is a **side-channel only** for `steer()` and `interrupt()`. It never creates turns, never replaces `codex exec`, and never changes Codex sandbox/approval behavior.
+- Env var:
+  | Var | Default | Purpose |
+  |-----|---------|---------|
+  | `CODEX_APP_SERVER_URL` | *(unset)* | Optional Codex app-server base URL (for example `http://127.0.0.1:4321/api/`). Unset = no runtime steering/interrupt support. |
+- Capability declaration:
+  - When `CODEX_APP_SERVER_URL` is set, the runtime adds `mid_turn_steering` to its capabilities and exposes `RuntimeAdapter.steer()` + `RuntimeAdapter.interrupt()`.
+  - When unset, the Codex adapter behaves exactly as before: normal `codex exec` transport, no control methods, no extra capability.
+- Lifecycle tracking:
+  - The adapter learns app-server control state from the **CLI JSONL stream**, not from Discord.
+  - `thread.started` stores the active Codex thread for a `sessionKey`.
+  - `turn.started` stores the active turn ID for that thread.
+  - `turn.completed`, `turn.cancelled`, `turn.interrupted`, and `turn.failed` clear the active turn.
+- Steering semantics:
+  - `steer(sessionKey, message)` is best-effort and returns `false` instead of throwing if there is no tracked active turn or the app-server call fails.
+  - Successful steering POSTs `turn/steer` with `threadId`, `expectedTurnId`, and a text input block. If the server returns a replacement `turnId`, the runtime updates its active-turn pointer so later steering/interrupt calls stay aligned.
+- Interrupt semantics:
+  - `interrupt(sessionKey)` is also best-effort and only works while a tracked turn is active.
+  - Successful interrupt POSTs `turn/interrupt` with `threadId` + `turnId`, then clears the active-turn pointer locally.
+- Auth resolution:
+  - App-server requests use a bearer token from the Codex CLI OAuth file: `CODEX_HOME/auth.json` when `CODEX_HOME` is set, otherwise `~/.codex/auth.json`.
+  - The token provider shares the same refresh flow as the Codex auth helper: expired/unreadable tokens fail closed, and a `401` from the app-server triggers one forced refresh + one retry.
+  - Refreshed tokens are persisted back to `auth.json` best-effort; failure to save does not block the in-memory token from being used for the current request.
+- Launcher-state retry degradation:
+  - `invoke()` still owns recovery from Codex session DB corruption (`state db missing rollout path`, stale rollout path).
+  - On that specific spawn-time failure, the shared CLI layer retries **once** with `CODEX_HOME` pointed at `DISCOCLAW_CODEX_STABLE_HOME` or `<cwd>/.codex-home-discoclaw`.
+  - Steering/interrupt degrade gracefully during this recovery window: until the retried CLI process emits a fresh `thread.started` / `turn.started`, there is no active turn to control, so `steer()` / `interrupt()` return `false`.
+  - If a launcher-state retry happens on an image-forced session reset and the retry still fails before a new thread starts, DiscoClaw preserves the prior thread mapping so the next normal resume can continue the old conversation.
+- Phase boundary:
+  - This phase only establishes the **runtime-level** control surface.
+  - Discord routing is intentionally deferred: pre-queue steering interception and `!stop` → `turn/interrupt` mapping land in Phase 2 after the app-server path is validated end-to-end.
+
 ## Gemini CLI Runtime
 
 - Adapter: `src/runtime/gemini-cli.ts` (thin wrapper around `cli-adapter.ts` + `strategies/gemini-strategy.ts`)
