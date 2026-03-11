@@ -342,6 +342,24 @@ describe('bootReport', () => {
     expect(msg.indexOf('Dashboard · http://127.0.0.1:9401/')).toBeLessThan(msg.indexOf('Model · (default)'));
   });
 
+  it('includes Dashboard failure line when dashboardError is provided', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, dashboardError: 'port in use — pid 1234 (node)' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Dashboard · FAILED (port in use — pid 1234 (node))');
+    expect(msg.indexOf('Dashboard · FAILED (port in use — pid 1234 (node))')).toBeLessThan(msg.indexOf('Model · (default)'));
+  });
+
+  it('includes Dashboard fallback line when dashboard is enabled without url or error', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, dashboardEnabled: true });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Dashboard · disabled');
+    expect(msg.indexOf('Dashboard · disabled')).toBeLessThan(msg.indexOf('Model · (default)'));
+  });
+
   it('omits Dashboard line when dashboardUrl is absent', async () => {
     const ch = mockChannel();
     const poster = createStatusPoster(ch);

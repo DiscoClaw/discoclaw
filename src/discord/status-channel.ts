@@ -98,8 +98,10 @@ export type BootReportData = {
   // Runtime
   runtimeModel?: string;
   bootDurationMs?: number;
+  dashboardEnabled?: boolean;
   buildVersion?: string;
   dashboardUrl?: string;
+  dashboardError?: string;
   // MCP startup validation
   mcpStatus?: BootReportMcpStatus;
   mcpWarnings?: number;
@@ -264,6 +266,10 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       if (data.bootDurationMs !== undefined) lines.push(`Boot Time · ${data.bootDurationMs}ms`);
       if (data.dashboardUrl) {
         lines.push(`Dashboard · ${data.dashboardUrl}`);
+      } else if (data.dashboardError) {
+        lines.push(`Dashboard · FAILED (${data.dashboardError})`);
+      } else if (data.dashboardEnabled) {
+        lines.push('Dashboard · disabled');
       }
       lines.push(`Model · ${data.runtimeModel || '(default)'}`);
       if (data.permissionsStatus) {
