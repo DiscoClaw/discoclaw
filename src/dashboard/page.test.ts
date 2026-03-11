@@ -30,6 +30,7 @@ describe('renderDashboardPage', () => {
     expect(html).toContain('>Current Models<');
     expect(html).toContain('>Update Saved Model<');
     expect(html).toContain('>Config Doctor<');
+    expect(html).toContain('>MCP Status<');
     expect(html).toContain('>Advanced Details<');
     expect(html).toContain('Pick a role, then choose one of its valid saved options.');
     expect(html).toContain('id="model-form-help"');
@@ -42,6 +43,9 @@ describe('renderDashboardPage', () => {
     expect(html).toContain('>Apply Safe Fixes<');
     expect(html).toContain('id="doctor-fix-btn" type="button" disabled');
     expect(html).toContain('id="doctor-helper"');
+    expect(html).toContain('id="mcp-warning-pill"');
+    expect(html).toContain('id="mcp-summary"');
+    expect(html).toContain('id="mcp-servers"');
     expect(html).toContain('Cleanup suggestions');
     expect(html).toContain('manual cleanup');
     expect(html).toContain('safe auto-fix');
