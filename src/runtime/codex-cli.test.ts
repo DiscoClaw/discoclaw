@@ -3,10 +3,35 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineEvent } from './types.js';
 
+const { appServerInstances, CodexAppServerClientMock, mockExeca } = vi.hoisted(() => {
+  const appServerInstances: any[] = [];
+  const CodexAppServerClientMock = vi.fn().mockImplementation((opts: { baseUrl: string }) => {
+    const instance = {
+      opts,
+      noteThreadStarted: vi.fn(),
+      noteTurnStarted: vi.fn(),
+      noteTurnCompleted: vi.fn(),
+      getSessionState: vi.fn(),
+      steer: vi.fn(async () => true),
+      interrupt: vi.fn(async () => true),
+    };
+    appServerInstances.push(instance);
+    return instance;
+  });
+
+  return {
+    appServerInstances,
+    CodexAppServerClientMock,
+    mockExeca: vi.fn(),
+  };
+});
+
 // We mock execa at the module level so createCodexCliRuntime uses our mock.
-const mockExeca = vi.fn();
 vi.mock('execa', () => ({
   execa: (...args: any[]) => mockExeca(...args),
+}));
+vi.mock('./codex-app-server.js', () => ({
+  CodexAppServerClient: CodexAppServerClientMock,
 }));
 
 // Import after mock setup.
@@ -126,11 +151,15 @@ function createMockSubprocess(opts: {
 describe('Codex CLI runtime adapter', () => {
   const originalHardening = process.env.DISCOCLAW_CLI_LAUNCHER_STATE_HARDENING;
   const originalStableHome = process.env.DISCOCLAW_CODEX_STABLE_HOME;
+  const originalAppServerUrl = process.env.CODEX_APP_SERVER_URL;
 
   beforeEach(() => {
     mockExeca.mockReset();
+    CodexAppServerClientMock.mockClear();
+    appServerInstances.length = 0;
     delete process.env.DISCOCLAW_CLI_LAUNCHER_STATE_HARDENING;
     delete process.env.DISCOCLAW_CODEX_STABLE_HOME;
+    delete process.env.CODEX_APP_SERVER_URL;
   });
 
   afterEach(() => {
@@ -143,6 +172,11 @@ describe('Codex CLI runtime adapter', () => {
       delete process.env.DISCOCLAW_CODEX_STABLE_HOME;
     } else {
       process.env.DISCOCLAW_CODEX_STABLE_HOME = originalStableHome;
+    }
+    if (originalAppServerUrl === undefined) {
+      delete process.env.CODEX_APP_SERVER_URL;
+    } else {
+      process.env.CODEX_APP_SERVER_URL = originalAppServerUrl;
     }
   });
 
@@ -939,6 +973,60 @@ describe('Codex CLI runtime adapter', () => {
     const callArgs = mockExeca.mock.calls[0][1] as string[];
     const devInstr = callArgs.find((a) => a.startsWith('developer_instructions='));
     expect(devInstr).toBe('developer_instructions="Say \\"hello\\" to the user."');
+  });
+
+  it('does not expose steering controls when CODEX_APP_SERVER_URL is unset', () => {
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    expect(rt.capabilities.has('mid_turn_steering')).toBe(false);
+    expect(rt.steer).toBeUndefined();
+    expect(rt.interrupt).toBeUndefined();
+    expect(CodexAppServerClientMock).not.toHaveBeenCalled();
+  });
+
+  it('adds mid-turn steering controls and tracks turn lifecycle when CODEX_APP_SERVER_URL is set', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'http://127.0.0.1:4321/api';
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: jsonl([
+        '{"type":"thread.started","thread_id":"thread-1"}',
+        '{"type":"turn.started","turn_id":"turn-1"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"hello"}}',
+        '{"type":"turn.completed","turn_id":"turn-1","usage":{}}',
+      ]),
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    expect(rt.capabilities.has('mid_turn_steering')).toBe(true);
+    expect(CodexAppServerClientMock).toHaveBeenCalledWith(expect.objectContaining({
+      baseUrl: 'http://127.0.0.1:4321/api',
+    }));
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'steer-session',
+    }));
+
+    expect((events.find((evt) => evt.type === 'text_final') as { text: string }).text).toBe('hello');
+
+    const client = appServerInstances[0]!;
+    expect(client.noteThreadStarted).toHaveBeenCalledWith('steer-session', 'thread-1');
+    expect(client.noteTurnStarted).toHaveBeenCalledWith('steer-session', 'thread-1', 'turn-1');
+    expect(client.noteTurnCompleted).toHaveBeenCalledWith('steer-session', 'turn-1');
+
+    await expect(rt.steer?.('steer-session', 'keep going')).resolves.toBe(true);
+    await expect(rt.interrupt?.('steer-session')).resolves.toBe(true);
+    expect(client.steer).toHaveBeenCalledWith('steer-session', 'keep going');
+    expect(client.interrupt).toHaveBeenCalledWith('steer-session');
   });
 
   // --- Session persistence tests ---

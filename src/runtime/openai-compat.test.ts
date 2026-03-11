@@ -327,7 +327,7 @@ describe('OpenAI-compat runtime adapter', () => {
     let callCount = 0;
     globalThis.fetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
       callCount++;
-      capturedHeaders.push(init?.headers && (init.headers as Record<string, string>)['Authorization'] || '');
+      capturedHeaders.push(new Headers(init?.headers).get('Authorization') ?? '');
       if (callCount === 1) {
         // First call returns 401
         return Promise.resolve(new Response('Unauthorized', { status: 401, statusText: 'Unauthorized' }));

@@ -24,6 +24,9 @@ type ChatGptOAuthOpts = CommonOpts & {
 };
 
 export type OpenAICompatOpts = ApiKeyOpts | ChatGptOAuthOpts;
+export type OpenAIBearerAuth =
+  | { auth?: 'api_key'; apiKey: string }
+  | { auth: 'chatgpt_oauth'; tokenProvider: ChatGptTokenProvider };
 
 const TOOL_LOOP_CAP = 25;
 
@@ -76,6 +79,55 @@ function parseSSEData(line: string): string | undefined {
   return undefined;
 }
 
+function toBearerAuth(opts: OpenAICompatOpts): OpenAIBearerAuth {
+  return opts.auth === 'chatgpt_oauth'
+    ? { auth: 'chatgpt_oauth', tokenProvider: opts.tokenProvider }
+    : { auth: 'api_key', apiKey: opts.apiKey };
+}
+
+function withBearerAuthorization(
+  headers: HeadersInit | undefined,
+  bearerToken: string,
+): Headers {
+  const nextHeaders = new Headers(headers);
+  nextHeaders.set('Authorization', `Bearer ${bearerToken}`);
+  return nextHeaders;
+}
+
+export async function fetchWithOpenAIBearerAuth(opts: {
+  url: string;
+  auth: OpenAIBearerAuth;
+  init?: Omit<RequestInit, 'headers'> & { headers?: HeadersInit };
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+  log?: { debug(...args: unknown[]): void };
+  debugScope?: string;
+}): Promise<Response> {
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  const requestInit = opts.init ?? {};
+  let bearerToken = opts.auth.auth === 'chatgpt_oauth'
+    ? await opts.auth.tokenProvider.getAccessToken()
+    : opts.auth.apiKey;
+
+  let response = await fetchImpl(opts.url, {
+    ...requestInit,
+    headers: withBearerAuthorization(requestInit.headers, bearerToken),
+    signal: opts.signal ?? requestInit.signal,
+  });
+
+  if (!response.ok && response.status === 401 && opts.auth.auth === 'chatgpt_oauth') {
+    opts.log?.debug(`${opts.debugScope ?? 'openai-auth'}: 401 received, force-refreshing OAuth token`);
+    bearerToken = await opts.auth.tokenProvider.getAccessToken(true);
+    response = await fetchImpl(opts.url, {
+      ...requestInit,
+      headers: withBearerAuthorization(requestInit.headers, bearerToken),
+      signal: opts.signal ?? requestInit.signal,
+    });
+  }
+
+  return response;
+}
+
 export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapter {
   const hybridEnabled = opts.enableHybridPipeline ?? true;
   const caps: RuntimeCapability[] = ['streaming_text'];
@@ -83,40 +135,7 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
     caps.push('tools_fs', 'tools_exec');
   }
   const capabilities: ReadonlySet<RuntimeCapability> = new Set(caps);
-
-  /** Shared fetch with OAuth 401 retry logic. Used by both streaming and tool-loop paths. */
-  async function fetchWithAuth(url: string, body: string, signal: AbortSignal): Promise<Response> {
-    let bearerToken = opts.auth === 'chatgpt_oauth'
-      ? await opts.tokenProvider.getAccessToken()
-      : (opts as ApiKeyOpts).apiKey;
-
-    let response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${bearerToken}`,
-        'Content-Type': 'application/json',
-      },
-      body,
-      signal,
-    });
-
-    // On 401 with OAuth, force-refresh the token and retry once
-    if (!response.ok && response.status === 401 && opts.auth === 'chatgpt_oauth') {
-      opts.log?.debug('openai-compat: 401 received, force-refreshing OAuth token');
-      bearerToken = await opts.tokenProvider.getAccessToken(true);
-      response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${bearerToken}`,
-          'Content-Type': 'application/json',
-        },
-        body,
-        signal,
-      });
-    }
-
-    return response;
-  }
+  const auth = toBearerAuth(opts);
 
   return {
     id: opts.id ?? 'openai',
@@ -181,7 +200,18 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
                 ...tokenField,
               });
 
-              const response = await fetchWithAuth(url, body, controller.signal);
+              const response = await fetchWithOpenAIBearerAuth({
+                url,
+                auth,
+                signal: controller.signal,
+                init: {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body,
+                },
+                log: opts.log,
+                debugScope: 'openai-compat',
+              });
 
               if (!response.ok) {
                 let detail = '';
@@ -275,7 +305,18 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
 
             let accumulated = '';
 
-            const response = await fetchWithAuth(url, body, controller.signal);
+            const response = await fetchWithOpenAIBearerAuth({
+              url,
+              auth,
+              signal: controller.signal,
+              init: {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body,
+              },
+              log: opts.log,
+              debugScope: 'openai-compat',
+            });
 
             if (!response.ok) {
               let detail = '';

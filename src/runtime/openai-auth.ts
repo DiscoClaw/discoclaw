@@ -1,3 +1,4 @@
+import os from 'node:os';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -32,6 +33,14 @@ type Logger = {
 export type ChatGptTokenProvider = {
   getAccessToken(forceRefresh?: boolean): Promise<string>;
 };
+
+/** Resolve the Codex CLI OAuth auth.json path from the current process environment. */
+export function resolveCodexAuthFilePath(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(
+    env.CODEX_HOME || path.join(os.homedir(), '.codex'),
+    'auth.json',
+  );
+}
 
 /** Read and parse the Codex auth file. Expects an absolute path. */
 export async function loadAuthFile(filePath: string): Promise<AuthFileData> {

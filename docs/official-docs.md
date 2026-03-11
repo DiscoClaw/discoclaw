@@ -24,7 +24,7 @@ Completeness pass for this index was cross-checked against:
 | Provider | What DiscoClaw uses | Official docs |
 |----------|----------------------|---------------|
 | Anthropic | Claude model families via `src/runtime/anthropic-rest.ts` and Claude Code CLI runtime | Models overview: <https://docs.anthropic.com/en/docs/about-claude/models/overview><br>Messages API: <https://platform.claude.com/docs/en/api/messages><br>Claude Code docs: <https://code.claude.com/docs/en/overview> |
-| OpenAI | OpenAI-compatible runtime, Codex runtime docs, OpenAI voice, embeddings, and image generation | Model IDs: <https://developers.openai.com/api/model-ids/><br>API reference overview: <https://platform.openai.com/docs/api-reference><br>Codex docs: <https://developers.openai.com/codex/> |
+| OpenAI | OpenAI-compatible runtime, Codex runtime docs, OpenAI voice, embeddings, and image generation | Model IDs: <https://developers.openai.com/api/model-ids/><br>API reference overview: <https://platform.openai.com/docs/api-reference><br>Codex docs: <https://developers.openai.com/codex/><br>Codex app-server API: <https://developers.openai.com/codex/app-server> |
 | Google | Gemini CLI runtime and Gemini/Imagen image generation | Gemini models: <https://ai.google.dev/models/gemini><br>Gemini API docs: <https://ai.google.dev/gemini-api/docs><br>Gemini CLI: <https://github.com/google-gemini/gemini-cli> |
 | OpenRouter | OpenRouter runtime through `src/runtime/openai-compat.ts` | Model list: <https://openrouter.ai/models><br>API docs: <https://openrouter.ai/docs/api/reference/overview> |
 
