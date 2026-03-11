@@ -389,6 +389,7 @@ export async function executeCronAction(
 
       const updates: Partial<typeof record> = {};
       const changes: string[] = [];
+      const warnings: string[] = [];
 
       // Silent mode.
       if (action.silent !== undefined) {
@@ -466,7 +467,7 @@ export async function executeCronAction(
           return { ok: false, error: 'state must be a JSON object' };
         }
         updates.state = parsed;
-        changes.push('state updated');
+        changes.push(Object.keys(parsed).length === 0 ? 'state cleared' : 'state updated');
       }
 
       // Definition changes (schedule, timezone, channel, prompt).
@@ -525,6 +526,10 @@ export async function executeCronAction(
         updates.timezone = newTimezone;
         updates.channel = newChannel;
         updates.prompt = newPrompt;
+      }
+
+      if (action.prompt !== undefined && action.state === undefined && Object.keys(record.state ?? {}).length > 0) {
+        warnings.push('prompt updated but existing persistent state was kept; clear stale state with state: "{}" if it no longer applies');
       }
 
       await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, updates);
@@ -602,7 +607,8 @@ export async function executeCronAction(
         } catch {}
       }
 
-      return { ok: true, summary: `Cron ${action.cronId} updated: ${changes.join(', ') || 'no changes'}` };
+      const summary = `Cron ${action.cronId} updated: ${changes.join(', ') || 'no changes'}`;
+      return { ok: true, summary: warnings.length > 0 ? `${summary}. Warning: ${warnings.join('; ')}` : summary };
     }
 
     case 'cronList': {
@@ -937,6 +943,7 @@ export function cronActionsPromptSection(): string {
 - \`allowedActions\` (optional): Update the allowed action types list. Empty string clears the restriction.
 - \`chain\` (optional): Update downstream pipeline jobs (comma-separated cronIds). Empty string clears the chain. Cycles are detected and rejected.
 - \`state\` (optional): JSON string to replace the job's persistent state object (e.g., \`"{\\"cursor\\":\\"abc\\"}"\`). Must be a JSON object. Used for manual state manipulation; normally state is managed by the job itself.
+- When updating \`prompt\`, consider clearing stale state with \`state: "{}"\` if the old prompt's state schema no longer applies.
 
 **cronList** — List all cron jobs:
 \`\`\`
