@@ -1,12 +1,22 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-export type McpServerEntry = {
+export type McpStdioServerEntry = {
+  type: 'stdio';
   name: string;
   command: string;
   args?: string[];
   env?: Record<string, string>;
 };
+
+export type McpUrlServerEntry = {
+  type: 'url';
+  name: string;
+  url: string;
+  env?: Record<string, string>;
+};
+
+export type McpServerEntry = McpStdioServerEntry | McpUrlServerEntry;
 
 export type McpDetectResult =
   | { status: 'found'; servers: McpServerEntry[] }
@@ -56,6 +66,25 @@ export function validateMcpServerEnv(servers: McpServerEntry[]): string[] {
 }
 
 /**
+ * Returns warning strings for env values that appear to rely on shell interpolation.
+ * Pure function — no logging side-effects.
+ */
+export function validateMcpEnvInterpolation(servers: McpServerEntry[]): string[] {
+  return servers.flatMap((server) =>
+    Object.entries(server.env ?? {})
+      .filter(([, envValue]) => envValue.includes('${'))
+      .map(
+        ([envKey, envValue]) =>
+          `MCP server "${server.name}" env "${envKey}" contains uninterpolated placeholder syntax: ${envValue}`,
+      ),
+  );
+}
+
+function formatMcpServerName(server: McpServerEntry): string {
+  return server.type === 'url' ? `${server.name} (url)` : server.name;
+}
+
+/**
  * Detect MCP servers configured in the workspace `.mcp.json` file.
  * Returns structured info for startup health logging.
  */
@@ -99,12 +128,16 @@ export async function detectMcpServers(workspaceCwd: string): Promise<McpDetectR
       return { status: 'invalid', reason: `server "${name}" must be an object` };
     }
     const entry = value;
-    if (typeof entry.command !== 'string' || !entry.command) {
+    let server: McpServerEntry;
+    if (typeof entry.command === 'string' && entry.command) {
+      server = { type: 'stdio', name, command: entry.command };
+      if (Array.isArray(entry.args)) {
+        server.args = entry.args.filter((a): a is string => typeof a === 'string');
+      }
+    } else if (typeof entry.url === 'string' && entry.url) {
+      server = { type: 'url', name, url: entry.url };
+    } else {
       return { status: 'invalid', reason: `server "${name}" missing "command"` };
-    }
-    const server: McpServerEntry = { name, command: entry.command };
-    if (Array.isArray(entry.args)) {
-      server.args = entry.args.filter((a): a is string => typeof a === 'string');
     }
     if (entry.env !== undefined) {
       if (!isPlainObject(entry.env)) {
@@ -135,18 +168,30 @@ export async function detectMcpServers(workspaceCwd: string): Promise<McpDetectR
 export function logMcpDetection(
   result: McpDetectResult,
   context: { claudeInUse: boolean; strictMcpConfig: boolean },
-  log: { info(obj: Record<string, unknown>, msg: string): void; warn(obj: Record<string, unknown>, msg: string): void },
+  log: {
+    info(obj: Record<string, unknown>, msg: string): void;
+    warn(obj: Record<string, unknown>, msg: string): void;
+    error(obj: Record<string, unknown>, msg: string): void;
+  },
 ): void {
   switch (result.status) {
     case 'missing':
       log.info({}, 'mcp: no .mcp.json found — MCP servers not configured');
       break;
     case 'invalid':
-      log.warn({ reason: result.reason }, 'mcp: .mcp.json is invalid — MCP servers will not load');
+      if (context.strictMcpConfig) {
+        log.error({ reason: result.reason }, 'mcp: .mcp.json is invalid — MCP servers will not load');
+      } else {
+        log.warn({ reason: result.reason }, 'mcp: .mcp.json is invalid — MCP servers will not load');
+      }
       break;
     case 'found': {
-      const names = result.servers.map((s) => s.name);
-      const warnings = [...validateMcpServerNames(result.servers), ...validateMcpServerEnv(result.servers)];
+      const names = result.servers.map(formatMcpServerName);
+      const warnings = [
+        ...validateMcpServerNames(result.servers),
+        ...validateMcpServerEnv(result.servers),
+        ...validateMcpEnvInterpolation(result.servers),
+      ];
       if (names.length === 0) {
         log.info({}, 'mcp: .mcp.json found but no servers configured');
       } else {

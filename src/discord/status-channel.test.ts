@@ -236,6 +236,61 @@ describe('bootReport', () => {
     expect(msg).toContain('Permissions · standard');
   });
 
+  it('renders MCP server names when MCP servers are found', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({
+      ...baseData,
+      mcpStatus: {
+        status: 'found',
+        servers: [
+          { name: 'filesystem', type: 'stdio' },
+          { name: 'brave-search', type: 'stdio' },
+          { name: 'remote-db', type: 'url' },
+        ],
+      },
+    });
+    const msg = sentContent(ch);
+    expect(msg).toContain('MCP · 3 servers (filesystem, brave-search, remote-db (url))');
+  });
+
+  it('renders "none" when MCP config is missing', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({
+      ...baseData,
+      mcpStatus: { status: 'missing' },
+    });
+    const msg = sentContent(ch);
+    expect(msg).toContain('MCP · none');
+  });
+
+  it('renders the invalid MCP reason when config is invalid', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({
+      ...baseData,
+      mcpStatus: { status: 'invalid', reason: 'missing "mcpServers" key' },
+    });
+    const msg = sentContent(ch);
+    expect(msg).toContain('MCP · invalid config (missing "mcpServers" key)');
+  });
+
+  it('appends MCP warning count when warnings are present', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({
+      ...baseData,
+      mcpStatus: {
+        status: 'found',
+        servers: [{ name: 'filesystem', type: 'stdio' }],
+      },
+      mcpWarnings: 2,
+    });
+    const msg = sentContent(ch);
+    expect(msg).toContain('MCP · 1 server (filesystem) · 2 warnings');
+  });
+
   it('shows "(latest)" when npmVersion equals npmLatestVersion', async () => {
     const ch = mockChannel();
     const poster = createStatusPoster(ch);

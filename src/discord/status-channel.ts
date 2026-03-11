@@ -1,5 +1,6 @@
 import type { MessageMentionOptions } from 'discord.js';
 import type { LoggerLike } from '../logging/logger-like.js';
+import type { McpDetectResult, McpServerEntry } from '../mcp-detect.js';
 import type { TaskSyncResult } from '../tasks/types.js';
 import type { StartupContext } from './shutdown-context.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
@@ -59,6 +60,11 @@ export function sanitizePhaseError(phaseId: string, raw: string, timeoutMs?: num
   return `Phase **${phaseId}** failed: ${sanitizeErrorMessage(raw)}`.slice(0, 500);
 }
 
+export type BootReportMcpStatus =
+  | { status: 'found'; servers: Array<Pick<McpServerEntry, 'name' | 'type'>> }
+  | Extract<McpDetectResult, { status: 'missing' }>
+  | Extract<McpDetectResult, { status: 'invalid' }>;
+
 export type BootReportData = {
   startupType: StartupContext['type'];
   // Shutdown context fields (present on intentional/graceful-unknown)
@@ -94,6 +100,9 @@ export type BootReportData = {
   bootDurationMs?: number;
   buildVersion?: string;
   dashboardUrl?: string;
+  // MCP startup validation
+  mcpStatus?: BootReportMcpStatus;
+  mcpWarnings?: number;
   // npm version check (informational)
   npmVersion?: string;
   npmLatestVersion?: string | null;
@@ -142,6 +151,38 @@ export function formatVersionLine(data: Pick<BootReportData, 'npmVersion' | 'npm
   }
 
   return parts.length > 0 ? parts.join(' · ') : '(unknown)';
+}
+
+function formatMcpServerSummary(server: Pick<McpServerEntry, 'name' | 'type'>): string {
+  return server.type === 'url' ? `${server.name} (url)` : server.name;
+}
+
+function formatMcpLine(data: Pick<BootReportData, 'mcpStatus' | 'mcpWarnings'>): string | null {
+  if (!data.mcpStatus) return null;
+
+  let label: string;
+  switch (data.mcpStatus.status) {
+    case 'found': {
+      const names = data.mcpStatus.servers.map(formatMcpServerSummary);
+      label = `${names.length} server${names.length !== 1 ? 's' : ''}`;
+      if (names.length > 0) {
+        label += ` (${names.join(', ')})`;
+      }
+      break;
+    }
+    case 'missing':
+      label = 'none';
+      break;
+    case 'invalid':
+      label = `invalid config (${data.mcpStatus.reason})`;
+      break;
+  }
+
+  if (data.mcpWarnings && data.mcpWarnings > 0) {
+    label += ` · ${data.mcpWarnings} warning${data.mcpWarnings !== 1 ? 's' : ''}`;
+  }
+
+  return `MCP · ${label}`;
 }
 
 export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): StatusPoster {
@@ -223,6 +264,11 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
         lines.push(`Permissions · ${permLabel}`);
       } else {
         lines.push(`Permissions · ${data.permissionsTier || '(unset)'}`);
+      }
+
+      const mcpLine = formatMcpLine(data);
+      if (mcpLine) {
+        lines.push(mcpLine);
       }
 
       if (data.shutdownReason) {
