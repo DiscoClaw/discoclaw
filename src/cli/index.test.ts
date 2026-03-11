@@ -99,6 +99,27 @@ describe('runDashboardCliCommand', () => {
     );
   });
 
+  it('checks the target port before boot and aborts when another TCP listener owns it', async () => {
+    const { port } = await listenTcpServer();
+    const deps = makeDashboardDeps({
+      parseDashboardPort: vi.fn(() => port),
+      probePort: probeTcpPortOccupancy,
+    });
+
+    const exitCode = await runDashboardCliCommand({
+      argv: ['node', 'discoclaw', 'dashboard'],
+      cwd: '/repo',
+      env: {},
+      deps,
+    });
+
+    expect(exitCode).toBe(1);
+    expect(deps.startDashboardServer).not.toHaveBeenCalled();
+    expect(deps.log.error).toHaveBeenCalledWith(
+      formatDashboardPortConflictMessage('127.0.0.1', port),
+    );
+  });
+
   it('starts the dashboard server when the port probe fails to connect', async () => {
     const close = vi.fn(async () => undefined);
     const deps = makeDashboardDeps({
