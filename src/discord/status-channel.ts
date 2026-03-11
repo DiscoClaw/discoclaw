@@ -1,5 +1,6 @@
 import type { MessageMentionOptions } from 'discord.js';
 import type { LoggerLike } from '../logging/logger-like.js';
+import type { CodexAppServerStatus } from '../health/config-doctor.js';
 import type { McpDetectResult, McpServerEntry } from '../mcp-detect.js';
 import type { TaskSyncResult } from '../tasks/types.js';
 import type { StartupContext } from './shutdown-context.js';
@@ -103,6 +104,7 @@ export type BootReportData = {
   dashboardUrl?: string;
   dashboardError?: string;
   codexAppServerConfigured?: boolean;
+  codexAppServerState?: Exclude<CodexAppServerStatus, 'configured'>;
   // MCP startup validation
   mcpStatus?: BootReportMcpStatus;
   mcpWarnings?: number;
@@ -274,6 +276,10 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       }
       if (data.codexAppServerConfigured) {
         lines.push('Codex App-Server · configured');
+      } else if (data.codexAppServerState === 'invalid') {
+        lines.push('Codex App-Server · INVALID');
+      } else if (data.codexAppServerState === 'dormant') {
+        lines.push('Codex App-Server · dormant');
       }
       lines.push(`Model · ${data.runtimeModel || '(default)'}`);
       if (data.permissionsStatus) {

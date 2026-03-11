@@ -12,6 +12,8 @@ import {
   detectInstallDrift,
   detectMissingSecrets,
   detectStaleRuntimeAndModelOverrides,
+  deriveCodexAppServerBootReportState,
+  getCodexAppServerStatus,
   inspect,
   loadDoctorContext,
 } from './config-doctor.js';
@@ -132,7 +134,43 @@ describe('detectCodexAppServerStatus', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.id).toBe('codex-app-server:invalid-url');
     expect(findings[0]?.severity).toBe('warn');
-    expect(findings[0]?.message).toContain('not-a-url');
+    expect(findings[0]?.message).not.toContain('not-a-url');
+  });
+
+  it('emits a warn finding when CODEX_APP_SERVER_URL uses a non-http protocol', async () => {
+    const cwd = await makeTempInstall('doctor-codex-app-server-invalid-protocol');
+
+    const ctx = await loadDoctorContext({
+      cwd,
+      env: { CODEX_APP_SERVER_URL: 'ftp://127.0.0.1/api' },
+    });
+    const findings = detectCodexAppServerStatus(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.id).toBe('codex-app-server:invalid-url');
+    expect(findings[0]?.severity).toBe('warn');
+  });
+});
+
+describe('getCodexAppServerStatus', () => {
+  it.each([
+    ['dormant when unset', {}, 'dormant'],
+    ['configured for valid http url', { CODEX_APP_SERVER_URL: 'http://127.0.0.1:4321/api' }, 'configured'],
+    ['invalid for empty string', { CODEX_APP_SERVER_URL: '   ' }, 'invalid'],
+    ['invalid for malformed url', { CODEX_APP_SERVER_URL: 'not-a-url' }, 'invalid'],
+    ['invalid for unsupported protocol', { CODEX_APP_SERVER_URL: 'ftp://127.0.0.1/api' }, 'invalid'],
+  ] as const)('returns %s', (_label, env, expected) => {
+    expect(getCodexAppServerStatus(env)).toBe(expected);
+  });
+});
+
+describe('deriveCodexAppServerBootReportState', () => {
+  it.each([
+    [{ runtimeHasMidTurnSteering: true, env: { CODEX_APP_SERVER_URL: 'http://127.0.0.1:4321/api' } }, { configured: true }],
+    [{ runtimeHasMidTurnSteering: true, env: { CODEX_APP_SERVER_URL: 'not-a-url' } }, { configured: false, state: 'invalid' }],
+    [{ runtimeHasMidTurnSteering: false, env: {} }, { configured: false, state: 'dormant' }],
+  ] as const)('returns %j for %j', (input, expected) => {
+    expect(deriveCodexAppServerBootReportState(input)).toEqual(expected);
   });
 });
 

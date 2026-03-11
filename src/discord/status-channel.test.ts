@@ -377,13 +377,29 @@ describe('bootReport', () => {
     expect(msg.indexOf('Codex App-Server · configured')).toBeLessThan(msg.indexOf('Model · (default)'));
   });
 
+  it('includes Codex App-Server line when dormant', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, codexAppServerConfigured: false, codexAppServerState: 'dormant' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Codex App-Server · dormant');
+  });
+
+  it('includes Codex App-Server line when status is invalid', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, codexAppServerConfigured: false, codexAppServerState: 'invalid' });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Codex App-Server · INVALID');
+  });
+
   it.each([
     ['false', false],
     ['undefined', undefined],
   ])('omits Codex App-Server line when configured flag is %s', async (_label, codexAppServerConfigured) => {
     const ch = mockChannel();
     const poster = createStatusPoster(ch);
-    await poster.bootReport!({ ...baseData, codexAppServerConfigured });
+    await poster.bootReport!({ ...baseData, codexAppServerConfigured, codexAppServerState: undefined });
     const msg = sentContent(ch);
     expect(msg).not.toContain('Codex App-Server ·');
   });

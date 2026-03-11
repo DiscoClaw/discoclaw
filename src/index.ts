@@ -76,6 +76,7 @@ import { CronSyncCoordinator } from './cron/cron-sync-coordinator.js';
 import { startCronTagMapWatcher } from './cron/cron-tag-map-watcher.js';
 import { ensureForumTags, isSnowflake } from './discord/system-bootstrap.js';
 import { parseConfig } from './config.js';
+import { deriveCodexAppServerBootReportState, formatCodexAppServerUrl } from './health/config-doctor.js';
 import { startWebhookServer } from './webhook/server.js';
 import type { WebhookServer } from './webhook/server.js';
 import { startDashboardServer } from './dashboard/server.js';
@@ -859,6 +860,10 @@ const codexRuntimeRaw = createCodexCliRuntime({
   log,
 });
 const codexAppServerConfigured = codexRuntimeRaw.capabilities.has('mid_turn_steering');
+const codexAppServerBootReport = deriveCodexAppServerBootReportState({
+  runtimeHasMidTurnSteering: codexAppServerConfigured,
+  env: process.env,
+});
 registerRuntime('codex', codexRuntimeRaw);
 log.info(
   {
@@ -874,7 +879,7 @@ log.info(
 log.info(
   {
     appServerConfigured: codexAppServerConfigured,
-    appServerUrl: codexAppServerUrl,
+    appServerUrl: formatCodexAppServerUrl(codexAppServerUrl),
   },
   'runtime:codex app-server configuration',
 );
@@ -2509,7 +2514,8 @@ publishBootReport({
   mcpStatus: bootReportMcpStatus,
   mcpWarnings,
   runtimeModel,
-  codexAppServerConfigured,
+  codexAppServerConfigured: codexAppServerBootReport.configured,
+  codexAppServerState: codexAppServerBootReport.state,
   bootDurationMs: Date.now() - bootStartMs,
   buildVersion: gitHash ?? undefined,
   npmVersion,
