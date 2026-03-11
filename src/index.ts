@@ -847,6 +847,7 @@ if (cfg.openrouterApiKey) {
 }
 
 // Register Codex CLI runtime.
+const codexAppServerUrl = process.env.CODEX_APP_SERVER_URL?.trim() || null;
 const codexRuntimeRaw = createCodexCliRuntime({
   codexBin: cfg.codexBin,
   defaultModel: cfg.codexModel,
@@ -857,6 +858,7 @@ const codexRuntimeRaw = createCodexCliRuntime({
   appendSystemPrompt,
   log,
 });
+const codexAppServerConfigured = codexRuntimeRaw.capabilities.has('mid_turn_steering');
 registerRuntime('codex', codexRuntimeRaw);
 log.info(
   {
@@ -868,6 +870,13 @@ log.info(
     itemTypeDebug: cfg.codexItemTypeDebug,
   },
   'runtime:codex registered',
+);
+log.info(
+  {
+    appServerConfigured: codexAppServerConfigured,
+    appServerUrl: codexAppServerUrl,
+  },
+  'runtime:codex app-server configuration',
 );
 
 // Register Gemini runtime — prefer REST API when GEMINI_API_KEY is set (zero startup
@@ -2500,6 +2509,7 @@ publishBootReport({
   mcpStatus: bootReportMcpStatus,
   mcpWarnings,
   runtimeModel,
+  codexAppServerConfigured,
   bootDurationMs: Date.now() - bootStartMs,
   buildVersion: gitHash ?? undefined,
   npmVersion,

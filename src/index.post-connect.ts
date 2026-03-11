@@ -148,6 +148,7 @@ export function publishBootReport(opts: {
   mcpStatus?: BootReportMcpStatus;
   mcpWarnings?: number;
   runtimeModel: string;
+  codexAppServerConfigured: boolean;
   bootDurationMs: number;
   buildVersion?: string;
   npmVersion?: string;
@@ -186,6 +187,7 @@ export function publishBootReport(opts: {
     dashboardUrl: opts.dashboardUrl,
     dashboardError: opts.dashboardError,
     runtimeModel: opts.runtimeModel,
+    codexAppServerConfigured: opts.codexAppServerConfigured,
     bootDurationMs: opts.bootDurationMs,
     buildVersion: opts.buildVersion,
     npmVersion: opts.npmVersion,
