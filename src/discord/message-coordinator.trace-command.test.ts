@@ -126,6 +126,34 @@ describe('message coordinator !trace command', () => {
     }));
   });
 
+  it('replies with MCP status without queueing', async () => {
+    const queue = { run: vi.fn(async () => undefined) };
+    const params = makeParams();
+    params.mcpStatus = {
+      status: 'found',
+      servers: [
+        { name: 'filesystem', type: 'stdio' },
+        { name: 'remote-db', type: 'url' },
+      ],
+    };
+    params.mcpWarnings = 2;
+    const handler = createMessageCreateHandler(params, queue as any);
+    const msg = makeMessage('!mcp');
+
+    await handler(msg as any);
+
+    expect(queue.run).not.toHaveBeenCalled();
+    expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('MCP Status'),
+    }));
+    expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('Server count: 2'),
+    }));
+    expect(msg.reply).toHaveBeenCalledWith(expect.objectContaining({
+      content: expect.stringContaining('- remote-db: url'),
+    }));
+  });
+
   it('replies with an empty list when traces only exist in a different channel', async () => {
     const otherChannelTraces: RunTrace[] = [
       {

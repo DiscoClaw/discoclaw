@@ -1354,6 +1354,8 @@ const botParams = {
     activeProviders,
     coldStorageChunkCount: coldStorageSubsystem?.store.chunkCount(),
   },
+  mcpStatus: bootReportMcpStatus,
+  mcpWarnings,
 };
 
 // Apply forge-drafter and forge-auditor from models.json — their source vars are const so botParams must be patched here.

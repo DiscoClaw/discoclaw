@@ -13,6 +13,7 @@ export function handleHelpCommand(): string {
     '- `!memory` — view or edit durable memory; `!memory help` for details',
     '- `!secret` — manage API keys and secrets via DM; `!secret help` for details',
     '- `!models` — show or change model assignments; `!models help` for details',
+    '- `!mcp` — show boot-time MCP server configuration status and warnings',
     '- `!health` — show bot health and metrics; `!health verbose` for full config',
     '- `!doctor` — alias for `!health doctor`; inspect config drift, deprecated env vars, stale overrides, and missing secrets',
     '- `!health doctor` — inspect config drift, deprecated env vars, stale overrides, and missing secrets; add `fix` to apply safe remediations',
