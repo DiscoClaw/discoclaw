@@ -96,7 +96,7 @@ import {
 } from './health-command.js';
 import { parseStatusCommand, collectStatusSnapshot, renderStatusReport } from './status-command.js';
 import { parseTraceCommand, renderTraceDetail, renderTraceList } from './trace-command.js';
-import { parseMcpCommand, handleMcpCommand } from './mcp-command.js';
+import { parseMcpCommand, isMcpCommandPrefix, handleMcpCommand } from './mcp-command.js';
 import type { StatusCommandContext } from './status-command.js';
 import { parseRestartCommand, handleRestartCommand } from './restart-command.js';
 import { parseModelsCommand, handleModelsCommand } from './models-command.js';
@@ -1049,8 +1049,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         return;
       }
 
-      const mcpCmd = parseMcpCommand(String(msg.content ?? ''));
-      if (!isBotMessage && mcpCmd) {
+      if (!isBotMessage && isMcpCommandPrefix(String(msg.content ?? ''))) {
+        const mcpCmd = parseMcpCommand(String(msg.content ?? ''));
+        if (!mcpCmd) {
+          await msg.reply({
+            content: 'Unknown `!mcp` subcommand. Valid usage: `!mcp`, `!mcp list`, `!mcp help`.',
+            allowedMentions: NO_MENTIONS,
+          });
+          return;
+        }
+
         const report = handleMcpCommand(mcpCmd, {
           mcpStatus: params.mcpStatus,
           mcpWarnings: params.mcpWarnings ?? 0,
