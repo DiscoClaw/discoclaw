@@ -1177,18 +1177,19 @@ describe('Codex CLI runtime adapter', () => {
     expect(events).toContainEqual({ type: 'text_final', text: 'resumed after native fallback' });
   });
 
-  it('keeps addDirs turns on the legacy codex exec path even when native mode is enabled', async () => {
+  it('allows addDirs turns onto the native app-server path when native mode is enabled', async () => {
     process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
     process.env.CODEX_APP_SERVER_NATIVE = '1';
-    mockExeca.mockImplementation(() => createMockSubprocess({
-      stdout: 'cli addDirs fallback',
-      exitCode: 0,
-    }));
 
     const rt = createCodexCliRuntime({
       codexBin: 'codex',
       defaultModel: 'gpt-5.3-codex',
     });
+    const client = appServerInstances[0]!;
+    client.invokeViaTurn.mockImplementation((params: any) => eventStream([
+      { type: 'text_final', text: `native addDirs:${(params.addDirs ?? []).join(',')}` },
+      { type: 'done' },
+    ]));
 
     const events = await collectEvents(rt.invoke({
       prompt: 'Hi',
@@ -1197,9 +1198,12 @@ describe('Codex CLI runtime adapter', () => {
       addDirs: ['/tmp/extra'],
     }));
 
-    expect(appServerInstances[0]?.invokeViaTurn).not.toHaveBeenCalled();
-    expect(mockExeca).toHaveBeenCalledTimes(1);
-    expect(events).toContainEqual({ type: 'text_final', text: 'cli addDirs fallback' });
+    expect(mockExeca).not.toHaveBeenCalled();
+    expect(client.invokeViaTurn).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: process.cwd(),
+      addDirs: ['/tmp/extra'],
+    }));
+    expect(events).toContainEqual({ type: 'text_final', text: 'native addDirs:/tmp/extra' });
   });
 
   it('falls back to codex exec when the native app-server websocket cannot connect', async () => {

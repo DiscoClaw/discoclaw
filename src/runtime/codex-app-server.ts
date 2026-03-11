@@ -123,6 +123,20 @@ function makeError(message: string, cause?: unknown): Error {
   return error;
 }
 
+function makeJsonRpcError(
+  message: string,
+  responseError: NonNullable<JsonRpcResponse['error']>,
+): Error {
+  const error = new Error(message);
+  if (typeof responseError.code === 'number') {
+    Object.assign(error, { code: responseError.code });
+  }
+  if (responseError.data !== undefined) {
+    Object.assign(error, { data: responseError.data });
+  }
+  return error;
+}
+
 function makeAbortError(): Error {
   const error = new Error('aborted');
   error.name = 'AbortError';
@@ -166,6 +180,19 @@ function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
 function shouldPropagateNativeFallbackError(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
   return NATIVE_FALLBACK_ERROR_MESSAGES.has(message);
+}
+
+function getJsonRpcErrorCode(err: unknown): number | undefined {
+  if (!err || typeof err !== 'object' || !('code' in err)) return undefined;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'number' ? code : undefined;
+}
+
+function isMethodNotFoundError(err: unknown): boolean {
+  const code = getJsonRpcErrorCode(err);
+  if (code === -32601) return true;
+  const message = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return message.includes('method not found') || message.includes('unknown method');
 }
 
 function asFiniteNumber(value: unknown): number | undefined {
@@ -297,7 +324,10 @@ class JsonRpcSocket {
     clearTimeout(pending.timer);
 
     if (response.error) {
-      pending.reject(new Error(response.error.message || 'codex app-server request failed'));
+      pending.reject(makeJsonRpcError(
+        response.error.message || 'codex app-server request failed',
+        response.error,
+      ));
       return;
     }
 
@@ -378,14 +408,22 @@ export class CodexAppServerClient {
   ): Promise<string> {
     throwIfAborted(signal);
     const socket = await withAbort(this.getSocket(), signal);
-    const result = await withAbort(socket.request<unknown>(
-      'thread/create',
-      buildCreateThreadParams(opts, this.dangerouslyBypassApprovalsAndSandbox),
-    ), signal);
+    const params = buildCreateThreadParams(opts, this.dangerouslyBypassApprovalsAndSandbox);
+    let result: unknown;
+
+    try {
+      result = await withAbort(socket.request<unknown>('thread/start', params), signal);
+    } catch (err) {
+      if (!isMethodNotFoundError(err)) {
+        throw err;
+      }
+      this.log?.debug?.({ err }, 'codex-app-server: thread/start unavailable; retrying legacy thread/create');
+      result = await withAbort(socket.request<unknown>('thread/create', params), signal);
+    }
     const threadId = extractThreadId(result);
 
     if (!threadId) {
-      throw new Error('codex app-server thread/create response missing threadId');
+      throw new Error('codex app-server thread start response missing threadId');
     }
 
     if (sessionKey) {

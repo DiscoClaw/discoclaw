@@ -59,10 +59,6 @@ function hasNonDefaultCwd(cwd: string, defaultCwd: string): boolean {
   return path.resolve(cwd) !== defaultCwd;
 }
 
-function hasAdditionalReadableRoots(addDirs: string[] | undefined): boolean {
-  return (addDirs ?? []).some((dir) => dir.trim().length > 0);
-}
-
 export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter {
   const appServerUrl = process.env.CODEX_APP_SERVER_URL?.trim();
   const nativeEnabled = isTruthyEnv(process.env.CODEX_APP_SERVER_NATIVE);
@@ -100,7 +96,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
           return;
         }
 
-        if (hasNonDefaultCwd(params.cwd, defaultCwd) || hasAdditionalReadableRoots(params.addDirs)) {
+        if (hasNonDefaultCwd(params.cwd, defaultCwd)) {
           for await (const event of baseAdapter.invoke(params)) {
             yield event;
           }

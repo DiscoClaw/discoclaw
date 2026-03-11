@@ -87,7 +87,7 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
 - Activation and fallback:
   - Native invoke is opt-in via `CODEX_APP_SERVER_NATIVE=1`.
   - Native invoke also requires `CODEX_APP_SERVER_URL` to point at a reachable websocket endpoint.
-  - If the native flag is off, the URL is unset, or the turn hits an images / non-default `cwd` / `addDirs` bypass gate, DiscoClaw uses the legacy `codex exec` / `codex exec resume` transport instead.
+  - If the native flag is off, the URL is unset, or the turn hits an images / non-default `cwd` bypass gate, DiscoClaw uses the legacy `codex exec` / `codex exec resume` transport instead.
   - If native invoke is selected but the websocket connection cannot be established, DiscoClaw falls back to `codex exec` for that turn rather than failing closed.
 - Env vars:
   | Var | Default | Purpose |
@@ -97,7 +97,7 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
 - Native bypass gates:
   - **Images:** turns with `images` bypass native invoke and stay on `codex exec`, because image parity is not guaranteed on the app-server path.
   - **Non-default `cwd`:** turns whose `cwd` differs from the process working directory bypass native invoke and stay on `codex exec`, which is the only path that can shape the subprocess working directory per turn.
-  - **`addDirs`:** turns that need extra readable roots bypass native invoke and stay on `codex exec`, which already has the required filesystem-shaping behavior.
+  - **`addDirs`:** native invoke passes extra readable roots through to the app-server sandbox as additional `readableRoots`, so standard Discord turns can still stay on the websocket path.
   - **Connection failure:** if the runtime cannot connect/initialize against the app-server websocket, it immediately drops back to `codex exec` for that invocation.
 - Capability declaration:
   - When native invoke is enabled and the app-server is configured, the runtime adds `mid_turn_steering` and exposes `RuntimeAdapter.steer()` + `RuntimeAdapter.interrupt()`.

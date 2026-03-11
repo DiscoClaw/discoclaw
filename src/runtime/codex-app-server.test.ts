@@ -94,7 +94,7 @@ describe('CodexAppServerClient', () => {
     return events;
   }
 
-  it('creates a thread and stores the returned threadId', async () => {
+  it('starts a thread and stores the returned threadId', async () => {
     const client = makeClient();
 
     const createPromise = client.createThread('session-1', {
@@ -105,7 +105,7 @@ describe('CodexAppServerClient', () => {
 
     const socket = sockets[0]!;
     primeHandshake(socket);
-    socket.onMethod('thread/create', (message) => {
+    socket.onMethod('thread/start', (message) => {
       socket.reply(message.id, { threadId: 'thread-1' });
     });
     socket.open();
@@ -114,7 +114,7 @@ describe('CodexAppServerClient', () => {
     expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
     expect(socket.sent[2]).toEqual({
       id: 2,
-      method: 'thread/create',
+      method: 'thread/start',
       params: {
         cwd: '/tmp/discoclaw',
         model: 'gpt-5.4',
@@ -124,7 +124,7 @@ describe('CodexAppServerClient', () => {
     });
   });
 
-  it('times out when thread/create does not return', async () => {
+  it('times out when thread/start does not return', async () => {
     const client = makeClient(10);
 
     const createPromise = client.createThread('session-1', { cwd: '/tmp/discoclaw', model: 'gpt-5.4' });
@@ -132,7 +132,45 @@ describe('CodexAppServerClient', () => {
     primeHandshake(socket);
     socket.open();
 
-    await expect(createPromise).rejects.toThrow('codex app-server request timed out (thread/create)');
+    await expect(createPromise).rejects.toThrow('codex app-server request timed out (thread/start)');
+  });
+
+  it('falls back to thread/create when thread/start is unavailable', async () => {
+    const client = makeClient();
+
+    const createPromise = client.createThread('session-1', { cwd: '/tmp/discoclaw', model: 'gpt-5.4' });
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('thread/start', (message) => {
+      socket.emit('message', Buffer.from(JSON.stringify({
+        id: message.id,
+        error: { code: -32601, message: 'Unknown method thread/start. Did you mean thread/create?' },
+      })));
+    });
+    socket.onMethod('thread/create', (message) => {
+      socket.reply(message.id, { threadId: 'thread-legacy-1' });
+    });
+    socket.open();
+
+    await expect(createPromise).resolves.toBe('thread-legacy-1');
+    expect(socket.sent[2]).toEqual({
+      id: 2,
+      method: 'thread/start',
+      params: {
+        cwd: '/tmp/discoclaw',
+        model: 'gpt-5.4',
+        ...readOnlySandbox,
+      },
+    });
+    expect(socket.sent[3]).toEqual({
+      id: 3,
+      method: 'thread/create',
+      params: {
+        cwd: '/tmp/discoclaw',
+        model: 'gpt-5.4',
+        ...readOnlySandbox,
+      },
+    });
   });
 
   it('rejects createThread when the server returns a JSON-RPC error', async () => {
@@ -141,7 +179,7 @@ describe('CodexAppServerClient', () => {
     const createPromise = client.createThread('session-1', { cwd: '/tmp/discoclaw', model: 'gpt-5.4' });
     const socket = sockets[0]!;
     primeHandshake(socket);
-    socket.onMethod('thread/create', (message) => {
+    socket.onMethod('thread/start', (message) => {
       socket.fail(message.id, 'cannot create thread');
     });
     socket.open();
@@ -248,7 +286,7 @@ describe('CodexAppServerClient', () => {
 
     const socket = sockets[0]!;
     primeHandshake(socket);
-    socket.onMethod('thread/create', (message) => {
+    socket.onMethod('thread/start', (message) => {
       expect(message.params).toEqual({
         cwd: '/tmp/discoclaw',
         model: 'gpt-5.4',
@@ -530,7 +568,7 @@ describe('CodexAppServerClient', () => {
 
     const socket = sockets[0]!;
     primeHandshake(socket);
-    socket.onMethod('thread/create', (message) => {
+    socket.onMethod('thread/start', (message) => {
       socket.reply(message.id, { threadId: 'thread-1' });
     });
     socket.onMethod('turn/start', (message) => {
@@ -659,7 +697,7 @@ describe('CodexAppServerClient', () => {
     const socket = sockets[0]!;
     primeHandshake(socket);
     let turnIndex = 0;
-    socket.onMethod('thread/create', (message) => {
+    socket.onMethod('thread/start', (message) => {
       socket.reply(message.id, { threadId: 'thread-1' });
     });
     socket.onMethod('turn/start', (message) => {
@@ -706,7 +744,7 @@ describe('CodexAppServerClient', () => {
       return typeof entry === 'object'
         && entry !== null
         && 'method' in entry
-        && (entry as { method?: string }).method === 'thread/create';
+        && (entry as { method?: string }).method === 'thread/start';
     });
     expect(createCalls).toHaveLength(1);
   });
@@ -725,7 +763,7 @@ describe('CodexAppServerClient', () => {
 
     const socket = sockets[0]!;
     primeHandshake(socket);
-    socket.onMethod('thread/create', (message) => {
+    socket.onMethod('thread/start', (message) => {
       socket.reply(message.id, { threadId: 'thread-1' });
     });
     socket.onMethod('turn/start', (message) => {
