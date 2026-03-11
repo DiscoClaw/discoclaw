@@ -32,7 +32,7 @@ import type { DeferActionRequest } from './discord/actions-defer.js';
 import { configureDeferredScheduler, type ConfigureDeferredSchedulerOpts } from './discord/deferred-runner.js';
 import { configureLoopScheduler } from './discord/actions-loop.js';
 import { startDiscordBot, getActiveForgeId } from './discord.js';
-import type { StatusPoster } from './discord/status-channel.js';
+import { toBootReportMcpStatus, type StatusPoster } from './discord/status-channel.js';
 import { LongRunWatchdog, type LongRunWatchdogRun } from './discord/long-run-watchdog.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
@@ -577,6 +577,7 @@ const mcpWarnings = mcpResult.status === 'found'
       ...validateMcpEnvInterpolation(mcpResult.servers),
     ].length
   : 0;
+const bootReportMcpStatus = toBootReportMcpStatus(mcpResult);
 
 // --- Resolve bot display name ---
 const botDisplayName = await resolveDisplayName({
@@ -2427,6 +2428,8 @@ if (cfg.dashboardEnabled) {
       trustedHosts: cfg.dashboardTrustedHosts,
       cwd: process.cwd(),
       env: process.env,
+      startupMcpStatus: bootReportMcpStatus,
+      startupMcpWarnings: mcpWarnings,
       log,
     });
     const address = dashboardServer.server.address();
@@ -2489,7 +2492,7 @@ publishBootReport({
   permProbe,
   credentialReport,
   credentialCheckReport,
-  mcpStatus: mcpResult,
+  mcpStatus: bootReportMcpStatus,
   mcpWarnings,
   runtimeModel,
   bootDurationMs: Date.now() - bootStartMs,

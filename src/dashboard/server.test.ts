@@ -2,6 +2,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DashboardDeps, DashboardSnapshot } from '../cli/dashboard.js';
+import type { BootReportMcpStatus } from '../discord/status-channel.js';
 import type { DoctorContext, DoctorReport, FixResult } from '../health/config-doctor.js';
 import {
   startDashboardServer,
@@ -31,6 +32,8 @@ type StartServerOptions = {
   restartExecutor?: (cmd: string, args: string[]) => void;
   host?: string;
   trustedHosts?: Set<string>;
+  startupMcpStatus?: BootReportMcpStatus;
+  startupMcpWarnings?: number;
 };
 
 let handle: DashboardServer | null = null;
@@ -233,6 +236,8 @@ async function startServer(
     trustedHosts: options.trustedHosts,
     cwd: '/repo',
     env: {},
+    startupMcpStatus: options.startupMcpStatus,
+    startupMcpWarnings: options.startupMcpWarnings,
     deps: fullDeps,
     restartExecutor: options.restartExecutor,
     log: mockLog(),
@@ -289,6 +294,19 @@ describe('startDashboardServer', () => {
       source: 'override',
       overrideValue: 'opus',
     });
+  });
+
+  it('returns the boot-time MCP snapshot when provided by the runtime', async () => {
+    const { port } = await startServer({}, {
+      startupMcpStatus: { status: 'invalid', reason: 'missing "mcpServers" key' },
+      startupMcpWarnings: 2,
+    });
+    const response = await makeRequest(port, { path: '/api/snapshot' });
+    const body = parseJson<DashboardSnapshotApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.snapshot.mcpStatus).toEqual({ status: 'invalid', reason: 'missing "mcpServers" key' });
+    expect(body.snapshot.mcpWarnings).toBe(2);
   });
 
   it('rejects read requests with a non-loopback Host header', async () => {
@@ -678,6 +696,30 @@ describe('startDashboardServer', () => {
     expect(body.snapshot.doctorSummary).toBe('0 findings (errors=0, warnings=0, info=0)');
     expect(inspect).toHaveBeenCalledTimes(3);
     expect(applyFixes).toHaveBeenCalledWith(initialReport, { cwd: '/repo', env: {} });
+  });
+
+  it('keeps the boot-time MCP snapshot in mutation responses', async () => {
+    const { port } = await startServer({}, {
+      startupMcpStatus: {
+        status: 'found',
+        servers: [{ name: 'filesystem', type: 'stdio' }],
+      },
+      startupMcpWarnings: 1,
+    });
+
+    const response = await makeRequest(port, {
+      path: '/api/doctor/fix',
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const body = parseJson<DashboardDoctorFixApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.snapshot.mcpStatus).toEqual({
+      status: 'found',
+      servers: [{ name: 'filesystem', type: 'stdio' }],
+    });
+    expect(body.snapshot.mcpWarnings).toBe(1);
   });
 
   it('validates model role names on /api/model', async () => {

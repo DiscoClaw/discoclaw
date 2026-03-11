@@ -153,6 +153,17 @@ export function formatVersionLine(data: Pick<BootReportData, 'npmVersion' | 'npm
   return parts.length > 0 ? parts.join(' · ') : '(unknown)';
 }
 
+export function toBootReportMcpStatus(status: McpDetectResult): BootReportMcpStatus {
+  if (status.status !== 'found') {
+    return status;
+  }
+
+  return {
+    status: 'found',
+    servers: status.servers.map(({ name, type }) => ({ name, type })),
+  };
+}
+
 function formatMcpServerSummary(server: Pick<McpServerEntry, 'name' | 'type'>): string {
   return server.type === 'url' ? `${server.name} (url)` : server.name;
 }
