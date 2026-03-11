@@ -318,6 +318,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 | `!restart` | Triggers graceful restart | `src/discord/restart-command.ts` | **done** |
 | `!stop` | Shuts down the bot process | `src/discord/message-coordinator.ts` | **done** |
 | `!models` | Lists registered runtime adapters | `src/discord/models-command.ts` | **done** |
+| `!mcp` | Shows boot-time MCP server configuration status and validation warnings; `list` repeats the default view and `help` shows command usage | `src/discord/mcp-command.ts`, `src/discord/mcp-command.test.ts`, `src/discord/message-coordinator.ts`, `src/discord/message-coordinator.mcp-command.test.ts` | **done** |
 | `!update` | Pulls latest code and restarts | `src/discord/update-command.ts` | **done** |
 | `!memory` | Memory read/write subcommands (see section 4) | `src/discord/memory-commands.ts` | **done** |
 | `!plan` | Plan management subcommands, including targeted phase controls (`run-phase`, `skip-to`) and regeneration resequencing (`phases --regenerate --keep-done`) | `src/discord/plan-commands.ts` | **done** |
