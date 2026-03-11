@@ -76,6 +76,7 @@ import { CronSyncCoordinator } from './cron/cron-sync-coordinator.js';
 import { startCronTagMapWatcher } from './cron/cron-tag-map-watcher.js';
 import { ensureForumTags, isSnowflake } from './discord/system-bootstrap.js';
 import { parseConfig } from './config.js';
+import { deriveCodexAppServerBootReportState, formatCodexAppServerUrl } from './health/config-doctor.js';
 import { startWebhookServer } from './webhook/server.js';
 import type { WebhookServer } from './webhook/server.js';
 import { startDashboardServer } from './dashboard/server.js';
@@ -847,6 +848,7 @@ if (cfg.openrouterApiKey) {
 }
 
 // Register Codex CLI runtime.
+const codexAppServerUrl = process.env.CODEX_APP_SERVER_URL?.trim() || null;
 const codexRuntimeRaw = createCodexCliRuntime({
   codexBin: cfg.codexBin,
   defaultModel: cfg.codexModel,
@@ -856,6 +858,11 @@ const codexRuntimeRaw = createCodexCliRuntime({
   itemTypeDebug: cfg.codexItemTypeDebug,
   appendSystemPrompt,
   log,
+});
+const codexAppServerConfigured = codexRuntimeRaw.capabilities.has('mid_turn_steering');
+const codexAppServerBootReport = deriveCodexAppServerBootReportState({
+  runtimeHasMidTurnSteering: codexAppServerConfigured,
+  env: process.env,
 });
 registerRuntime('codex', codexRuntimeRaw);
 log.info(
@@ -868,6 +875,13 @@ log.info(
     itemTypeDebug: cfg.codexItemTypeDebug,
   },
   'runtime:codex registered',
+);
+log.info(
+  {
+    appServerConfigured: codexAppServerConfigured,
+    appServerUrl: formatCodexAppServerUrl(codexAppServerUrl),
+  },
+  'runtime:codex app-server configuration',
 );
 
 // Register Gemini runtime — prefer REST API when GEMINI_API_KEY is set (zero startup
@@ -2500,6 +2514,8 @@ publishBootReport({
   mcpStatus: bootReportMcpStatus,
   mcpWarnings,
   runtimeModel,
+  codexAppServerConfigured: codexAppServerBootReport.configured,
+  codexAppServerState: codexAppServerBootReport.state,
   bootDurationMs: Date.now() - bootStartMs,
   buildVersion: gitHash ?? undefined,
   npmVersion,

@@ -42,6 +42,29 @@ export type InspectOptions = {
 
 type EnvMap = Record<string, string | undefined>;
 
+export type CodexAppServerStatus = 'dormant' | 'configured' | 'invalid';
+
+export type CodexAppServerBootReportState = {
+  configured: boolean;
+  state?: Exclude<CodexAppServerStatus, 'configured'>;
+};
+
+export function formatCodexAppServerUrl(rawValue: string | undefined | null): string | null {
+  const trimmed = trimValue(rawValue ?? undefined);
+  if (!trimmed) return null;
+
+  try {
+    const parsed = new URL(trimmed);
+    parsed.username = '';
+    parsed.password = '';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return '[invalid URL redacted]';
+  }
+}
+
 type EnvFileState = {
   exists: boolean;
   path: string;
@@ -371,6 +394,80 @@ export function detectDeprecatedEnvVars(ctx: DoctorContext): DoctorFinding[] {
   return findings;
 }
 
+export function detectCodexAppServerStatus(ctx: DoctorContext): DoctorFinding[] {
+  const rawValue = ctx.env.CODEX_APP_SERVER_URL;
+  if (rawValue == null) return [];
+
+  const trimmed = rawValue.trim();
+  if (trimmed === '') {
+    return [{
+      id: 'codex-app-server:empty-url',
+      severity: 'warn',
+      message: 'CODEX_APP_SERVER_URL is set but empty, so the Codex app-server integration cannot start cleanly.',
+      recommendation: 'Set CODEX_APP_SERVER_URL to a valid http(s) URL or remove it to keep the integration dormant.',
+      autoFixable: false,
+    }];
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      const displayUrl = formatCodexAppServerUrl(trimmed) ?? '[invalid URL redacted]';
+      return [{
+        id: 'codex-app-server:configured',
+        severity: 'info',
+        message: `CODEX_APP_SERVER_URL is configured as "${displayUrl}", so the Codex app-server integration will be enabled at startup.`,
+        recommendation: 'No action required unless this install should leave the Codex app-server integration dormant.',
+        autoFixable: false,
+      }];
+    }
+  } catch {
+    // Fall through to the malformed URL finding below.
+  }
+
+  return [{
+    id: 'codex-app-server:invalid-url',
+    severity: 'warn',
+    message: 'CODEX_APP_SERVER_URL is malformed or uses an unsupported protocol.',
+    recommendation: 'Set CODEX_APP_SERVER_URL to a valid http(s) URL or remove it to keep the integration dormant.',
+    autoFixable: false,
+  }];
+}
+
+export function getCodexAppServerStatus(env: EnvMap): CodexAppServerStatus {
+  const rawValue = env.CODEX_APP_SERVER_URL;
+  if (rawValue == null) return 'dormant';
+
+  const trimmed = rawValue.trim();
+  if (trimmed === '') return 'invalid';
+
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+      ? 'configured'
+      : 'invalid';
+  } catch {
+    return 'invalid';
+  }
+}
+
+export function deriveCodexAppServerBootReportState(opts: {
+  runtimeHasMidTurnSteering: boolean;
+  env: EnvMap;
+}): CodexAppServerBootReportState {
+  const status = getCodexAppServerStatus(opts.env);
+
+  if (opts.runtimeHasMidTurnSteering && status === 'configured') {
+    return { configured: true };
+  }
+
+  if (status === 'dormant' || status === 'invalid') {
+    return { configured: false, state: status };
+  }
+
+  return { configured: false };
+}
+
 export function detectConflictingOverrides(ctx: DoctorContext): DoctorFinding[] {
   const findings: DoctorFinding[] = [];
 
@@ -635,6 +732,7 @@ export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> 
     ...detectInvalidModelsFile(ctx),
     ...detectInstallDrift(ctx),
     ...detectDeprecatedEnvVars(ctx),
+    ...detectCodexAppServerStatus(ctx),
     ...detectConflictingOverrides(ctx),
     ...detectStaleRuntimeAndModelOverrides(ctx),
     ...detectInvalidPersistedModelAssignments(ctx),
