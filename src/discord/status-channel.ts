@@ -102,6 +102,7 @@ export type BootReportData = {
   buildVersion?: string;
   dashboardUrl?: string;
   dashboardError?: string;
+  codexAppServerConfigured?: boolean;
   // MCP startup validation
   mcpStatus?: BootReportMcpStatus;
   mcpWarnings?: number;
@@ -270,6 +271,9 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
         lines.push(`Dashboard · FAILED (${data.dashboardError})`);
       } else if (data.dashboardEnabled) {
         lines.push('Dashboard · disabled');
+      }
+      if (data.codexAppServerConfigured) {
+        lines.push('Codex App-Server · configured');
       }
       lines.push(`Model · ${data.runtimeModel || '(default)'}`);
       if (data.permissionsStatus) {

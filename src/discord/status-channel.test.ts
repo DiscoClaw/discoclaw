@@ -368,6 +368,26 @@ describe('bootReport', () => {
     expect(msg).not.toContain('Dashboard ·');
   });
 
+  it('includes Codex App-Server line when configured', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, codexAppServerConfigured: true });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Codex App-Server · configured');
+    expect(msg.indexOf('Codex App-Server · configured')).toBeLessThan(msg.indexOf('Model · (default)'));
+  });
+
+  it.each([
+    ['false', false],
+    ['undefined', undefined],
+  ])('omits Codex App-Server line when configured flag is %s', async (_label, codexAppServerConfigured) => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData, codexAppServerConfigured });
+    const msg = sentContent(ch);
+    expect(msg).not.toContain('Codex App-Server ·');
+  });
+
   it('includes cold in Memory line when memoryColdOn is true with chunk count', async () => {
     const ch = mockChannel();
     const poster = createStatusPoster(ch);
