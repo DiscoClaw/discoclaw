@@ -793,6 +793,8 @@ When state is corrupted or the schema needs to change, reset via `cronUpdate`:
 
 This clears all stored state. The next run sees `{}` and the defensive prompt handles it as a fresh start.
 
+When you update a cron's prompt and the old state schema no longer applies, include `state: "{}"` in the same `cronUpdate` so stale state is not injected into every subsequent run. The system warns when a prompt change leaves existing state intact.
+
 ### Migrating State Schema
 
 When you need to rename keys or change the structure, update the prompt to handle both old and new formats during the transition:
