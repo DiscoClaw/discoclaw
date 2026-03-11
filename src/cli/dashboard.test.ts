@@ -16,6 +16,8 @@ import {
   collectDashboardSnapshot,
   renderDashboard,
   runDashboard,
+  type DashboardDeps,
+  type DashboardSnapshot,
   updateModelConfig,
 } from './dashboard.js';
 
@@ -23,7 +25,18 @@ const tempDirs: string[] = [];
 const originalDashboardEnv = {
   DISCOCLAW_DATA_DIR: process.env.DISCOCLAW_DATA_DIR,
   DISCOCLAW_SERVICE_NAME: process.env.DISCOCLAW_SERVICE_NAME,
+  WORKSPACE_CWD: process.env.WORKSPACE_CWD,
 };
+
+function makeConfigPaths(cwd: string, dataDir = path.join(cwd, 'data')): DoctorReport['configPaths'] {
+  return {
+    cwd,
+    env: path.join(cwd, '.env'),
+    dataDir,
+    models: path.join(dataDir, 'models.json'),
+    runtimeOverrides: path.join(dataDir, 'runtime-overrides.json'),
+  };
+}
 
 function makeDoctorContext(overrides: Partial<DoctorContext> = {}): DoctorContext {
   return {
@@ -105,6 +118,74 @@ function makeFixResult(overrides: Partial<FixResult> = {}): FixResult {
   };
 }
 
+function makeDashboardDeps(overrides: Partial<DashboardDeps> = {}): DashboardDeps {
+  return {
+    inspect: vi.fn(async () => makeDoctorReport()),
+    applyFixes: vi.fn(async () => makeFixResult()),
+    loadDoctorContext: vi.fn(async () => makeDoctorContext()),
+    saveModelConfig: vi.fn(async () => undefined),
+    saveOverrides: vi.fn(async () => undefined),
+    runCommand: vi.fn(async () => ({
+      stdout: 'Active: active (running)\n',
+      stderr: '',
+      exitCode: 0,
+    })),
+    getLocalVersion: vi.fn(() => '1.2.3'),
+    isNpmManaged: vi.fn(async () => false),
+    getGitHash: vi.fn(async () => 'abc1234'),
+    platform: 'linux',
+    homeDir: '/Users/david',
+    getUid: () => 501,
+    ...overrides,
+  };
+}
+
+function makeSnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot {
+  const ctx = makeDoctorContext();
+  const report = makeDoctorReport();
+  return {
+    cwd: '/repo',
+    version: '1.2.3',
+    installMode: 'source',
+    gitHash: 'abc1234',
+    serviceName: 'discoclaw-beta',
+    serviceSummary: 'active (running)',
+    doctorSummary: formatDoctorSummaryForTest([]),
+    roles: [
+      'chat',
+      'plan-run',
+      'fast',
+      'summary',
+      'cron',
+      'cron-exec',
+      'voice',
+      'forge-drafter',
+      'forge-auditor',
+    ],
+    modelOptions: {},
+    modelRows: buildModelRows(ctx),
+    configPaths: report.configPaths,
+    runtimeOverrides: {
+      fastRuntime: ctx.runtimeOverrides.fastRuntime,
+      voiceRuntime: ctx.runtimeOverrides.voiceRuntime,
+    },
+    mcpStatus: { status: 'missing' },
+    mcpWarnings: 0,
+    ...overrides,
+  };
+}
+
+function formatDoctorSummaryForTest(findings: DoctorReport['findings']): string {
+  const counts = findings.reduce(
+    (acc, finding) => {
+      acc[finding.severity] += 1;
+      return acc;
+    },
+    { error: 0, warn: 0, info: 0 },
+  );
+  return `${findings.length} findings (errors=${counts.error}, warnings=${counts.warn}, info=${counts.info})`;
+}
+
 function makeIo(answers: string[]) {
   const frames: string[] = [];
   return {
@@ -145,6 +226,11 @@ afterEach(async () => {
     delete process.env.DISCOCLAW_SERVICE_NAME;
   } else {
     process.env.DISCOCLAW_SERVICE_NAME = originalDashboardEnv.DISCOCLAW_SERVICE_NAME;
+  }
+  if (originalDashboardEnv.WORKSPACE_CWD === undefined) {
+    delete process.env.WORKSPACE_CWD;
+  } else {
+    process.env.WORKSPACE_CWD = originalDashboardEnv.WORKSPACE_CWD;
   }
   await Promise.all(
     tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
@@ -312,6 +398,187 @@ describe('collectDashboardSnapshot', () => {
       source: 'default',
       overrideValue: undefined,
     });
+  });
+
+  it('returns found MCP status with warning count and strips server details from the snapshot', async () => {
+    const cwd = await makeTempInstall('dashboard-mcp-found');
+    await writeJson(path.join(cwd, 'workspace', '.mcp.json'), {
+      mcpServers: {
+        filesystem: {
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-filesystem'],
+          env: {},
+        },
+        'remote-db': {
+          url: 'https://example.com/mcp',
+          env: {
+            API_TOKEN: '${API_TOKEN}',
+          },
+        },
+      },
+    });
+
+    const snapshot = await collectDashboardSnapshot(
+      { cwd, env: {} },
+      makeDashboardDeps({
+        inspect: vi.fn(async () => makeDoctorReport({ configPaths: makeConfigPaths(cwd) })),
+        loadDoctorContext: vi.fn(async () => makeDoctorContext({
+          cwd,
+          configPaths: makeConfigPaths(cwd),
+        })),
+      }),
+    );
+
+    expect(snapshot.mcpStatus).toEqual({
+      status: 'found',
+      servers: [
+        { name: 'filesystem', type: 'stdio' },
+        { name: 'remote-db', type: 'url' },
+      ],
+    });
+    expect(snapshot.mcpWarnings).toBe(2);
+    expect(JSON.stringify(snapshot.mcpStatus)).not.toContain('"command":');
+    expect(JSON.stringify(snapshot.mcpStatus)).not.toContain('"args":');
+    expect(JSON.stringify(snapshot.mcpStatus)).not.toContain('"env":');
+    expect(JSON.stringify(snapshot.mcpStatus)).not.toContain('"url":');
+  });
+
+  it('returns missing MCP status when no workspace .mcp.json exists', async () => {
+    const cwd = await makeTempInstall('dashboard-mcp-missing');
+
+    const snapshot = await collectDashboardSnapshot(
+      { cwd, env: {} },
+      makeDashboardDeps({
+        inspect: vi.fn(async () => makeDoctorReport({ configPaths: makeConfigPaths(cwd) })),
+        loadDoctorContext: vi.fn(async () => makeDoctorContext({
+          cwd,
+          configPaths: makeConfigPaths(cwd),
+        })),
+      }),
+    );
+
+    expect(snapshot.mcpStatus).toEqual({ status: 'missing' });
+    expect(snapshot.mcpWarnings).toBe(0);
+  });
+
+  it('uses path.join(cwd, \"workspace\") when no workspace env overrides are set', async () => {
+    const cwd = await makeTempInstall('dashboard-mcp-default-workspace');
+    await writeJson(path.join(cwd, 'workspace', '.mcp.json'), {
+      mcpServers: {
+        filesystem: {
+          command: 'npx',
+        },
+      },
+    });
+
+    const snapshot = await collectDashboardSnapshot(
+      { cwd, env: {} },
+      makeDashboardDeps({
+        inspect: vi.fn(async () => makeDoctorReport({ configPaths: makeConfigPaths(cwd) })),
+        loadDoctorContext: vi.fn(async () => makeDoctorContext({
+          cwd,
+          configPaths: makeConfigPaths(cwd),
+        })),
+      }),
+    );
+
+    expect(snapshot.mcpStatus).toEqual({
+      status: 'found',
+      servers: [{ name: 'filesystem', type: 'stdio' }],
+    });
+  });
+
+  it('honors WORKSPACE_CWD over the default workspace path', async () => {
+    const cwd = await makeTempInstall('dashboard-mcp-workspace-override');
+    await writeJson(path.join(cwd, 'workspace', '.mcp.json'), {
+      mcpServers: {
+        filesystem: {
+          command: 'npx',
+        },
+      },
+    });
+    await writeJson(path.join(cwd, 'custom-workspace', '.mcp.json'), {
+      mcpServers: {
+        'brave-search': {
+          command: 'npx',
+        },
+      },
+    });
+
+    const snapshot = await collectDashboardSnapshot(
+      { cwd, env: { WORKSPACE_CWD: './custom-workspace' } },
+      makeDashboardDeps({
+        inspect: vi.fn(async () => makeDoctorReport({ configPaths: makeConfigPaths(cwd) })),
+        loadDoctorContext: vi.fn(async () => makeDoctorContext({
+          cwd,
+          configPaths: makeConfigPaths(cwd),
+        })),
+      }),
+    );
+
+    expect(snapshot.mcpStatus).toEqual({
+      status: 'found',
+      servers: [{ name: 'brave-search', type: 'stdio' }],
+    });
+  });
+
+  it('uses DISCOCLAW_DATA_DIR/workspace when WORKSPACE_CWD is not set', async () => {
+    const cwd = await makeTempInstall('dashboard-mcp-data-dir-workspace');
+    await writeJson(path.join(cwd, 'workspace', '.mcp.json'), {
+      mcpServers: {
+        filesystem: {
+          command: 'npx',
+        },
+      },
+    });
+    await writeJson(path.join(cwd, 'ops-data', 'workspace', '.mcp.json'), {
+      mcpServers: {
+        'remote-db': {
+          url: 'https://example.com/mcp',
+        },
+      },
+    });
+
+    const snapshot = await collectDashboardSnapshot(
+      { cwd, env: { DISCOCLAW_DATA_DIR: './ops-data' } },
+      makeDashboardDeps({
+        inspect: vi.fn(async () => makeDoctorReport({ configPaths: makeConfigPaths(cwd) })),
+        loadDoctorContext: vi.fn(async () => makeDoctorContext({
+          cwd,
+          configPaths: makeConfigPaths(cwd),
+        })),
+      }),
+    );
+
+    expect(snapshot.mcpStatus).toEqual({
+      status: 'found',
+      servers: [{ name: 'remote-db', type: 'url' }],
+    });
+  });
+});
+
+describe('renderDashboard', () => {
+  it('includes an MCP line for found, missing, and invalid states', () => {
+    expect(renderDashboard(makeSnapshot({
+      mcpStatus: {
+        status: 'found',
+        servers: [
+          { name: 'filesystem', type: 'stdio' },
+          { name: 'remote-db', type: 'url' },
+        ],
+      },
+      mcpWarnings: 2,
+    }))).toContain('MCP · 2 servers (filesystem, remote-db (url)) · 2 warnings');
+
+    expect(renderDashboard(makeSnapshot({
+      mcpStatus: { status: 'missing' },
+      mcpWarnings: 0,
+    }))).toContain('MCP · none');
+
+    expect(renderDashboard(makeSnapshot({
+      mcpStatus: { status: 'invalid', reason: 'invalid JSON' },
+      mcpWarnings: 0,
+    }))).toContain('MCP · invalid config (invalid JSON)');
   });
 });
 

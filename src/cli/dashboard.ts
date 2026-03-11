@@ -8,8 +8,15 @@ import { getLocalVersion, isNpmManaged } from '../npm-managed.js';
 import { isModelTier, listKnownModelValues } from '../runtime/model-tiers.js';
 import { getGitHash } from '../version.js';
 import type { DashboardServer, DashboardServerOptions } from '../dashboard/server.js';
+import type { BootReportMcpStatus } from '../discord/status-channel.js';
 import type { DoctorContext, DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext } from '../health/config-doctor.js';
+import {
+  detectMcpServers,
+  validateMcpEnvInterpolation,
+  validateMcpServerEnv,
+  validateMcpServerNames,
+} from '../mcp-detect.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
 import { saveOverrides, type RuntimeOverrides } from '../runtime-overrides.js';
 import type { CommandResult, ServiceControlDeps } from '../service-control.js';
@@ -68,6 +75,8 @@ export type DashboardSnapshot = {
     fastRuntime?: string;
     voiceRuntime?: string;
   };
+  mcpStatus: BootReportMcpStatus;
+  mcpWarnings: number;
 };
 
 export type DashboardIo = {
@@ -234,6 +243,68 @@ function normalizeRuntimeName(value: string | undefined): string | undefined {
   return KNOWN_RUNTIMES.has(normalized) ? normalized : undefined;
 }
 
+function trimEnvValue(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function resolveConfiguredPath(cwd: string, value: string | undefined): string | undefined {
+  const trimmed = trimEnvValue(value);
+  if (!trimmed) return undefined;
+  return path.isAbsolute(trimmed) ? trimmed : path.resolve(cwd, trimmed);
+}
+
+function resolveWorkspaceCwd(cwd: string, env: NodeJS.ProcessEnv): string {
+  const workspaceOverride = resolveConfiguredPath(cwd, env.WORKSPACE_CWD);
+  if (workspaceOverride) return workspaceOverride;
+
+  const dataDir = resolveConfiguredPath(cwd, env.DISCOCLAW_DATA_DIR);
+  if (dataDir) return path.join(dataDir, 'workspace');
+
+  return path.join(cwd, 'workspace');
+}
+
+function toBootReportMcpStatus(status: Awaited<ReturnType<typeof detectMcpServers>>): BootReportMcpStatus {
+  if (status.status !== 'found') {
+    return status;
+  }
+
+  return {
+    status: 'found',
+    servers: status.servers.map(({ name, type }) => ({ name, type })),
+  };
+}
+
+function formatMcpServerSummary(server: Extract<BootReportMcpStatus, { status: 'found' }>['servers'][number]): string {
+  return server.type === 'url' ? `${server.name} (url)` : server.name;
+}
+
+function formatMcpLine(data: Pick<DashboardSnapshot, 'mcpStatus' | 'mcpWarnings'>): string {
+  let label: string;
+  switch (data.mcpStatus.status) {
+    case 'found': {
+      const names = data.mcpStatus.servers.map(formatMcpServerSummary);
+      label = `${names.length} server${names.length !== 1 ? 's' : ''}`;
+      if (names.length > 0) {
+        label += ` (${names.join(', ')})`;
+      }
+      break;
+    }
+    case 'missing':
+      label = 'none';
+      break;
+    case 'invalid':
+      label = `invalid config (${data.mcpStatus.reason})`;
+      break;
+  }
+
+  if (data.mcpWarnings > 0) {
+    label += ` · ${data.mcpWarnings} warning${data.mcpWarnings !== 1 ? 's' : ''}`;
+  }
+
+  return `MCP · ${label}`;
+}
+
 async function confirmAction(io: DashboardIo, prompt: string): Promise<boolean> {
   const answer = normalizeActionInput(await io.prompt(prompt));
   return answer === 'y' || answer === 'yes';
@@ -324,15 +395,24 @@ export async function collectDashboardSnapshot(
 ): Promise<DashboardSnapshot> {
   const cwd = path.resolve(opts.cwd ?? process.cwd());
   const inspectOpts = { cwd, env: opts.env ?? process.env };
-  const [ctx, report, npmManaged, gitHash] = await Promise.all([
+  const workspaceCwd = resolveWorkspaceCwd(cwd, inspectOpts.env);
+  const [ctx, report, npmManaged, gitHash, mcpDetectResult] = await Promise.all([
     deps.loadDoctorContext(inspectOpts),
     deps.inspect(inspectOpts),
     deps.isNpmManaged(),
     deps.getGitHash(),
+    detectMcpServers(workspaceCwd),
   ]);
   const serviceName = normalizeServiceName(ctx.env.DISCOCLAW_SERVICE_NAME);
   const serviceStatus = await getServiceStatus(serviceName, deps as ServiceControlDeps);
   const serviceSummary = summarizeServiceStatus(serviceStatus, deps.platform);
+  const mcpWarnings = mcpDetectResult.status === 'found'
+    ? [
+        ...validateMcpServerNames(mcpDetectResult.servers),
+        ...validateMcpServerEnv(mcpDetectResult.servers),
+        ...validateMcpEnvInterpolation(mcpDetectResult.servers),
+      ].length
+    : 0;
 
   return {
     cwd,
@@ -350,6 +430,8 @@ export async function collectDashboardSnapshot(
       fastRuntime: ctx.runtimeOverrides.fastRuntime,
       voiceRuntime: ctx.runtimeOverrides.voiceRuntime,
     },
+    mcpStatus: toBootReportMcpStatus(mcpDetectResult),
+    mcpWarnings,
   };
 }
 
@@ -380,6 +462,7 @@ export function renderDashboard(snapshot: DashboardSnapshot, detail = ''): strin
   if (snapshot.runtimeOverrides.voiceRuntime) {
     lines.push(`${'voice-runtime'.padEnd(roleWidth)}  ${snapshot.runtimeOverrides.voiceRuntime}  [override]`);
   }
+  lines.push(formatMcpLine(snapshot));
 
   lines.push(
     '',

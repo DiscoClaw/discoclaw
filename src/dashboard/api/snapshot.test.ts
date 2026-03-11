@@ -150,6 +150,10 @@ describe('buildSnapshotResponse', () => {
           fastRuntime: 'openrouter',
           voiceRuntime: undefined,
         },
+        mcpStatus: {
+          status: 'missing',
+        },
+        mcpWarnings: 0,
       },
     });
   });

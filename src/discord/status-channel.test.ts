@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createStatusPoster, formatVersionLine, sanitizeErrorMessage, sanitizePhaseError } from './status-channel.js';
+import { createStatusPoster, formatVersionLine, sanitizeErrorMessage, sanitizePhaseError, toBootReportMcpStatus } from './status-channel.js';
 
 function mockChannel() {
   return { send: vi.fn().mockResolvedValue(undefined) } as any;
@@ -382,6 +382,41 @@ describe('bootReport', () => {
     const msg = sentContent(ch);
     expect(msg).toContain('Memory · off');
     expect(msg).not.toContain('cold');
+  });
+});
+
+describe('toBootReportMcpStatus', () => {
+  it('strips MCP server internals before surfacing boot status', () => {
+    const result = toBootReportMcpStatus({
+      status: 'found',
+      servers: [
+        {
+          type: 'stdio',
+          name: 'filesystem',
+          command: 'npx',
+          args: ['-y', '@modelcontextprotocol/server-filesystem'],
+          env: { API_TOKEN: 'secret' },
+        },
+        {
+          type: 'url',
+          name: 'remote-db',
+          url: 'https://example.com/mcp',
+          env: { API_TOKEN: 'secret' },
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      status: 'found',
+      servers: [
+        { name: 'filesystem', type: 'stdio' },
+        { name: 'remote-db', type: 'url' },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain('"command":');
+    expect(JSON.stringify(result)).not.toContain('"args":');
+    expect(JSON.stringify(result)).not.toContain('"env":');
+    expect(JSON.stringify(result)).not.toContain('"url":');
   });
 });
 

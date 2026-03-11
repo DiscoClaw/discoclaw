@@ -570,6 +570,18 @@ export function renderDashboardPage(): string {
       <section class="card span-5">
         <div class="card-header">
           <div>
+            <h2>MCP Status</h2>
+            <p class="card-copy">Configured MCP servers and validation warnings from startup detection.</p>
+          </div>
+          <div id="mcp-warning-pill" class="pill" hidden></div>
+        </div>
+        <div id="mcp-summary" class="status"></div>
+        <div id="mcp-servers" class="metrics"></div>
+      </section>
+
+      <section class="card span-5">
+        <div class="card-header">
+          <div>
             <h2>Advanced Details</h2>
             <p class="card-copy">Runtime adapter overrides and the files backing this install.</p>
           </div>
@@ -599,6 +611,9 @@ export function renderDashboardPage(): string {
     const modelFormHelp = document.getElementById('model-form-help');
     const roleSelect = document.getElementById('role-select');
     const modelSelect = document.getElementById('model-select');
+    const mcpSummary = document.getElementById('mcp-summary');
+    const mcpServers = document.getElementById('mcp-servers');
+    const mcpWarningPill = document.getElementById('mcp-warning-pill');
     const ROLE_LABELS = {
       chat: 'Chat',
       'plan-run': 'Plan Run',
@@ -686,6 +701,55 @@ export function renderDashboardPage(): string {
 
     function appendRuntimeOverride(parent, label, value) {
       appendMetric(parent, label, value);
+    }
+
+    function formatMcpServerType(server) {
+      return server.type === 'url' ? 'URL server' : 'stdio server';
+    }
+
+    function renderMcpStatus(snapshot) {
+      clearNode(mcpServers);
+
+      const warningCount = Number(snapshot.mcpWarnings) || 0;
+      if (warningCount > 0) {
+        mcpWarningPill.hidden = false;
+        mcpWarningPill.textContent = warningCount + ' warning' + (warningCount === 1 ? '' : 's');
+      } else {
+        mcpWarningPill.hidden = true;
+        mcpWarningPill.textContent = '';
+      }
+
+      if (!snapshot.mcpStatus) {
+        setStatus(mcpSummary, 'MCP status unavailable.', '');
+        return;
+      }
+
+      switch (snapshot.mcpStatus.status) {
+        case 'found': {
+          const servers = Array.isArray(snapshot.mcpStatus.servers) ? snapshot.mcpStatus.servers : [];
+          setStatus(
+            mcpSummary,
+            servers.length + ' server' + (servers.length === 1 ? '' : 's') + ' configured.',
+            'ok',
+          );
+          if (servers.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'empty';
+            empty.textContent = 'No MCP servers listed in .mcp.json.';
+            mcpServers.append(empty);
+            return;
+          }
+
+          servers.forEach((server) => appendMetric(mcpServers, server.name, formatMcpServerType(server)));
+          return;
+        }
+        case 'missing':
+          setStatus(mcpSummary, 'MCP not configured.', '');
+          return;
+        case 'invalid':
+          setStatus(mcpSummary, 'Invalid MCP config: ' + snapshot.mcpStatus.reason, 'warn');
+          return;
+      }
     }
 
     function updateDashboardLocation() {
@@ -848,6 +912,7 @@ export function renderDashboardPage(): string {
       clearNode(runtimeOverrides);
       appendRuntimeOverride(runtimeOverrides, 'fast runtime', snapshot.runtimeOverrides.fastRuntime || 'default');
       appendRuntimeOverride(runtimeOverrides, 'voice runtime', snapshot.runtimeOverrides.voiceRuntime || 'default');
+      renderMcpStatus(snapshot);
 
       populateModelForm(selectedRole, selectedModel, false);
       heroServicePill.textContent = 'Service: ' + formatServicePill(snapshot.serviceSummary);

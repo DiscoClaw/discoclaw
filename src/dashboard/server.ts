@@ -3,6 +3,7 @@ import http from 'node:http';
 import { isIP } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import type { BootReportMcpStatus } from '../discord/status-channel.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { getLocalVersion, isNpmManaged } from '../npm-managed.js';
 import { getGitHash } from '../version.js';
@@ -59,6 +60,8 @@ export type DashboardServerOptions = {
   trustedHosts?: Set<string>;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  startupMcpStatus?: BootReportMcpStatus;
+  startupMcpWarnings?: number;
   log?: LoggerLike;
   deps?: Partial<DashboardDeps>;
   restartExecutor?: (cmd: string, args: string[]) => void;
@@ -321,6 +324,25 @@ async function buildDoctorFixResponse(
   };
 }
 
+function withStartupMcpSnapshot<T extends { snapshot: DashboardSnapshot }>(
+  response: T,
+  startupMcpStatus?: BootReportMcpStatus,
+  startupMcpWarnings?: number,
+): T {
+  if (startupMcpStatus === undefined && startupMcpWarnings === undefined) {
+    return response;
+  }
+
+  return {
+    ...response,
+    snapshot: {
+      ...response.snapshot,
+      ...(startupMcpStatus !== undefined ? { mcpStatus: startupMcpStatus } : {}),
+      ...(startupMcpWarnings !== undefined ? { mcpWarnings: startupMcpWarnings } : {}),
+    },
+  };
+}
+
 type DeferredRestart = {
   response: DashboardRestartApiResponse;
   deferred: () => void;
@@ -493,7 +515,15 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
       }
 
       if (method === 'GET' && pathname === '/api/snapshot') {
-        respondJson(res, 200, await buildSnapshotResponse(inspectOpts, deps));
+        respondJson(
+          res,
+          200,
+          withStartupMcpSnapshot(
+            await buildSnapshotResponse(inspectOpts, deps),
+            opts.startupMcpStatus,
+            opts.startupMcpWarnings,
+          ),
+        );
         return;
       }
 
@@ -543,7 +573,15 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
           return;
         }
-        respondJson(res, 200, await buildDoctorFixResponse(inspectOpts, deps));
+        respondJson(
+          res,
+          200,
+          withStartupMcpSnapshot(
+            await buildDoctorFixResponse(inspectOpts, deps),
+            opts.startupMcpStatus,
+            opts.startupMcpWarnings,
+          ),
+        );
         return;
       }
 
@@ -557,7 +595,15 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           return;
         }
         const body = await readJsonBody(req);
-        respondJson(res, 200, await buildModelResponse(body, inspectOpts, deps, KNOWN_RUNTIMES));
+        respondJson(
+          res,
+          200,
+          withStartupMcpSnapshot(
+            await buildModelResponse(body, inspectOpts, deps, KNOWN_RUNTIMES),
+            opts.startupMcpStatus,
+            opts.startupMcpWarnings,
+          ),
+        );
         return;
       }
 
