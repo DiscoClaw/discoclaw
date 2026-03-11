@@ -80,39 +80,44 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
 ## Codex CLI Runtime
 
 - Adapter: `src/runtime/codex-cli.ts` (thin wrapper around `cli-adapter.ts` + `strategies/codex-strategy.ts`)
-- Transport split:
-  - `invoke()` always uses `codex exec` / `codex exec resume` through the shared CLI adapter.
-  - The Codex app-server is a **side-channel only** for `steer()` and `interrupt()`. It never creates turns, never replaces `codex exec`, and never changes Codex sandbox/approval behavior.
-- Env var:
+- Primary transport:
+  - The preferred Codex path is now the **app-server-native invoke path**. For eligible turns, DiscoClaw uses the Codex app-server websocket as the main transport for `thread/start`, `turn/start`, streaming output, `turn/steer`, and `turn/interrupt`.
+  - This replaces the old `codex exec` + side-channel steering design where the CLI subprocess owned the turn lifecycle and the websocket was only used after best-effort JSONL lifecycle discovery.
+  - The native path still uses Codex's local app-server auth/session state, so no public API key is required.
+- Activation and fallback:
+  - Native invoke is opt-in via `CODEX_APP_SERVER_NATIVE=1`.
+  - Native invoke also requires `CODEX_APP_SERVER_URL` to point at a reachable websocket endpoint.
+  - If the native flag is off, the URL is unset, or the turn hits an images / non-default `cwd` / `addDirs` bypass gate, DiscoClaw uses the legacy `codex exec` / `codex exec resume` transport instead.
+  - If native invoke is selected but the websocket connection cannot be established, DiscoClaw falls back to `codex exec` for that turn rather than failing closed.
+- Env vars:
   | Var | Default | Purpose |
   |-----|---------|---------|
-  | `CODEX_APP_SERVER_URL` | *(unset)* | Optional Codex app-server base URL (for example `http://127.0.0.1:4321/api/`). Unset = no runtime steering/interrupt support. |
+  | `CODEX_APP_SERVER_NATIVE` | `0` | Enables the app-server-native invoke path for eligible turns. |
+  | `CODEX_APP_SERVER_URL` | *(unset)* | Codex app-server websocket URL (for example `ws://127.0.0.1:4321`) used by the native path. |
+- Native bypass gates:
+  - **Images:** turns with `images` bypass native invoke and stay on `codex exec`, because image parity is not guaranteed on the app-server path.
+  - **Non-default `cwd`:** turns whose `cwd` differs from the process working directory bypass native invoke and stay on `codex exec`, which is the only path that can shape the subprocess working directory per turn.
+  - **`addDirs`:** turns that need extra readable roots bypass native invoke and stay on `codex exec`, which already has the required filesystem-shaping behavior.
+  - **Connection failure:** if the runtime cannot connect/initialize against the app-server websocket, it immediately drops back to `codex exec` for that invocation.
 - Capability declaration:
-  - When `CODEX_APP_SERVER_URL` is set, the runtime adds `mid_turn_steering` to its capabilities and exposes `RuntimeAdapter.steer()` + `RuntimeAdapter.interrupt()`.
-  - When unset, the Codex adapter behaves exactly as before: normal `codex exec` transport, no control methods, no extra capability.
-- Lifecycle tracking:
-  - The adapter learns app-server control state from the **CLI JSONL stream**, not from Discord.
-  - `thread.started` stores the active Codex thread for a `sessionKey`.
-  - `turn.started` stores the active turn ID for that thread.
-  - `turn.completed`, `turn.cancelled`, `turn.interrupted`, and `turn.failed` clear the active turn.
-- Steering semantics:
-  - `steer(sessionKey, message)` is best-effort and returns `false` instead of throwing if there is no tracked active turn or the app-server call fails.
-  - Successful steering POSTs `turn/steer` with `threadId`, `expectedTurnId`, and a text input block. If the server returns a replacement `turnId`, the runtime updates its active-turn pointer so later steering/interrupt calls stay aligned.
-- Interrupt semantics:
-  - `interrupt(sessionKey)` is also best-effort and only works while a tracked turn is active.
-  - Successful interrupt POSTs `turn/interrupt` with `threadId` + `turnId`, then clears the active-turn pointer locally.
-- Auth resolution:
-  - App-server requests use a bearer token from the Codex CLI OAuth file: `CODEX_HOME/auth.json` when `CODEX_HOME` is set, otherwise `~/.codex/auth.json`.
-  - The token provider shares the same refresh flow as the Codex auth helper: expired/unreadable tokens fail closed, and a `401` from the app-server triggers one forced refresh + one retry.
-  - Refreshed tokens are persisted back to `auth.json` best-effort; failure to save does not block the in-memory token from being used for the current request.
-- Launcher-state retry degradation:
-  - `invoke()` still owns recovery from Codex session DB corruption (`state db missing rollout path`, stale rollout path).
-  - On that specific spawn-time failure, the shared CLI layer retries **once** with `CODEX_HOME` pointed at `DISCOCLAW_CODEX_STABLE_HOME` or `<cwd>/.codex-home-discoclaw`.
-  - Steering/interrupt degrade gracefully during this recovery window: until the retried CLI process emits a fresh `thread.started` / `turn.started`, there is no active turn to control, so `steer()` / `interrupt()` return `false`.
-  - If a launcher-state retry happens on an image-forced session reset and the retry still fails before a new thread starts, DiscoClaw preserves the prior thread mapping so the next normal resume can continue the old conversation.
-- Phase boundary:
-  - This phase only establishes the **runtime-level** control surface.
-  - Discord routing is intentionally deferred: pre-queue steering interception and `!stop` → `turn/interrupt` mapping land in Phase 2 after the app-server path is validated end-to-end.
+  - When native invoke is enabled and the app-server is configured, the runtime adds `mid_turn_steering` and exposes `RuntimeAdapter.steer()` + `RuntimeAdapter.interrupt()`.
+  - When native invoke is inactive, the Codex adapter behaves like the legacy CLI runtime: no control methods and no extra capability.
+- Lifecycle and streaming:
+  - For native turns, the runtime creates or reuses a thread with `thread/start`, starts the turn with `turn/start`, and tracks the active turn directly from the app-server response/notifications.
+  - Streaming reply text comes from agent-message delta/completed notifications; tool progress comes from item start/completion notifications; terminal turn notifications clear the active turn and finish the stream.
+  - Because the runtime receives the live `turnId` from the app-server itself, steering and interrupt can target the active turn reliably instead of depending on `codex exec --json` to surface it mid-turn.
+- Session semantics:
+  - Reusing the same `sessionKey` reuses the same native `threadId`, so repeated turns continue the same Codex thread.
+  - Omitting `sessionKey` creates an ephemeral native thread for that invocation only.
+  - `disableSessions` strips `sessionKey` before dispatch, so native turns become ephemeral and never reuse a prior thread.
+- Steering / interrupt semantics:
+  - `steer(sessionKey, message)` is best-effort and returns `false` instead of throwing when there is no tracked active turn or the app-server request fails.
+  - Successful steering sends `turn/steer` with `threadId` plus `expectedTurnId`; if the server returns a replacement `turnId`, the runtime updates its active-turn pointer.
+  - `interrupt(sessionKey)` is also best-effort and sends `turn/interrupt` with the active `threadId` + `turnId`, then clears local active-turn state.
+- Tradeoffs vs `codex exec`:
+  - Native invoke is better when reliable live control matters: it owns thread/turn lifecycle directly, exposes the active `turnId`, and avoids the fragile CLI JSONL side-channel.
+  - `codex exec` remains the compatibility path for turns that need unsupported invocation shapes or when the app-server is unavailable.
+  - Keeping both paths preserves local Codex auth and session behavior while letting DiscoClaw incrementally move traffic onto the app-server transport.
 
 ## Gemini CLI Runtime
 
