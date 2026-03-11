@@ -130,6 +130,7 @@ export function publishBootReport(opts: {
   botStatus: StatusPoster | null;
   startupCtx: StartupContext;
   dashboardUrl?: string;
+  dashboardError?: string;
   tasksEnabled: boolean;
   forumResolved: boolean;
   cronsEnabled: boolean;
@@ -183,6 +184,7 @@ export function publishBootReport(opts: {
     mcpStatus: opts.mcpStatus,
     mcpWarnings: opts.mcpWarnings,
     dashboardUrl: opts.dashboardUrl,
+    dashboardError: opts.dashboardError,
     runtimeModel: opts.runtimeModel,
     bootDurationMs: opts.bootDurationMs,
     buildVersion: opts.buildVersion,

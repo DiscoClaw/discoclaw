@@ -2421,6 +2421,7 @@ if (cfg.webhookEnabled && savedCronExecCtx) {
 }
 
 let dashboardUrl: string | undefined;
+let dashboardError: string | undefined;
 if (cfg.dashboardEnabled) {
   const dashboardHost = resolveDashboardBindHost(cfg.dashboardTrustedHosts);
   try {
@@ -2442,6 +2443,7 @@ if (cfg.dashboardEnabled) {
     );
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
+    dashboardError = detail;
     log.error(
       { err, host: dashboardHost, port: cfg.dashboardPort },
       `dashboard:server failed to start: ${detail}`,
@@ -2480,6 +2482,7 @@ publishBootReport({
   botStatus,
   startupCtx,
   dashboardUrl,
+  dashboardError,
   tasksEnabled,
   forumResolved: Boolean(taskCtx?.forumId),
   cronsEnabled: Boolean(cronEnabled && botParams.cronCtx),
