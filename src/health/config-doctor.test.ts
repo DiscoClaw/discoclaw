@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   applyFixes,
   detectConflictingOverrides,
+  detectCodexAppServerStatus,
   detectDeprecatedEnvVars,
   detectInvalidPersistedModelAssignments,
   detectInvalidModelsFile,
@@ -77,6 +78,61 @@ describe('detectDeprecatedEnvVars', () => {
       findings.find((finding) => finding.id === 'deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL')
         ?.autoFixable,
     ).toBe(true);
+  });
+});
+
+describe('detectCodexAppServerStatus', () => {
+  it('emits no finding when CODEX_APP_SERVER_URL is absent', async () => {
+    const cwd = await makeTempInstall('doctor-codex-app-server-absent');
+
+    const ctx = await loadDoctorContext({ cwd });
+    const findings = detectCodexAppServerStatus(ctx);
+
+    expect(findings).toEqual([]);
+  });
+
+  it('emits an info finding when CODEX_APP_SERVER_URL is a valid HTTP URL', async () => {
+    const cwd = await makeTempInstall('doctor-codex-app-server-valid');
+
+    const ctx = await loadDoctorContext({
+      cwd,
+      env: { CODEX_APP_SERVER_URL: 'http://127.0.0.1:4321/api' },
+    });
+    const findings = detectCodexAppServerStatus(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.id).toBe('codex-app-server:configured');
+    expect(findings[0]?.severity).toBe('info');
+    expect(findings[0]?.message).toContain('http://127.0.0.1:4321/api');
+  });
+
+  it('emits a warn finding when CODEX_APP_SERVER_URL is empty or whitespace', async () => {
+    const cwd = await makeTempInstall('doctor-codex-app-server-empty');
+
+    const ctx = await loadDoctorContext({
+      cwd,
+      env: { CODEX_APP_SERVER_URL: '   ' },
+    });
+    const findings = detectCodexAppServerStatus(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.id).toBe('codex-app-server:empty-url');
+    expect(findings[0]?.severity).toBe('warn');
+  });
+
+  it('emits a warn finding when CODEX_APP_SERVER_URL is not a valid URL', async () => {
+    const cwd = await makeTempInstall('doctor-codex-app-server-invalid');
+
+    const ctx = await loadDoctorContext({
+      cwd,
+      env: { CODEX_APP_SERVER_URL: 'not-a-url' },
+    });
+    const findings = detectCodexAppServerStatus(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.id).toBe('codex-app-server:invalid-url');
+    expect(findings[0]?.severity).toBe('warn');
+    expect(findings[0]?.message).toContain('not-a-url');
   });
 });
 

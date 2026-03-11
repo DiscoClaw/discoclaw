@@ -371,6 +371,45 @@ export function detectDeprecatedEnvVars(ctx: DoctorContext): DoctorFinding[] {
   return findings;
 }
 
+export function detectCodexAppServerStatus(ctx: DoctorContext): DoctorFinding[] {
+  const rawValue = ctx.env.CODEX_APP_SERVER_URL;
+  if (rawValue == null) return [];
+
+  const trimmed = rawValue.trim();
+  if (trimmed === '') {
+    return [{
+      id: 'codex-app-server:empty-url',
+      severity: 'warn',
+      message: 'CODEX_APP_SERVER_URL is set but empty, so the Codex app-server integration cannot start cleanly.',
+      recommendation: 'Set CODEX_APP_SERVER_URL to a valid http(s) URL or remove it to keep the integration dormant.',
+      autoFixable: false,
+    }];
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return [{
+        id: 'codex-app-server:configured',
+        severity: 'info',
+        message: `CODEX_APP_SERVER_URL is configured as "${trimmed}", so the Codex app-server integration will be enabled at startup.`,
+        recommendation: 'No action required unless this install should leave the Codex app-server integration dormant.',
+        autoFixable: false,
+      }];
+    }
+  } catch {
+    // Fall through to the malformed URL finding below.
+  }
+
+  return [{
+    id: 'codex-app-server:invalid-url',
+    severity: 'warn',
+    message: `CODEX_APP_SERVER_URL="${trimmed}" is malformed or uses an unsupported protocol.`,
+    recommendation: 'Set CODEX_APP_SERVER_URL to a valid http(s) URL or remove it to keep the integration dormant.',
+    autoFixable: false,
+  }];
+}
+
 export function detectConflictingOverrides(ctx: DoctorContext): DoctorFinding[] {
   const findings: DoctorFinding[] = [];
 
@@ -635,6 +674,7 @@ export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> 
     ...detectInvalidModelsFile(ctx),
     ...detectInstallDrift(ctx),
     ...detectDeprecatedEnvVars(ctx),
+    ...detectCodexAppServerStatus(ctx),
     ...detectConflictingOverrides(ctx),
     ...detectStaleRuntimeAndModelOverrides(ctx),
     ...detectInvalidPersistedModelAssignments(ctx),
