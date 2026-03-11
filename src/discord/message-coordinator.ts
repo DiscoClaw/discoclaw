@@ -122,6 +122,7 @@ import {
   RuntimeSignalBudgetTracker,
   runtimeSupportsNativeThinkingStream,
 } from './runtime-signal-budget.js';
+import { buildRunStateGuidance } from './run-state-guidance.js';
 
 // Re-export output-utils symbols for consumers that import them from discord.ts.
 export { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, formatRuntimePreviewSignal };
@@ -3032,6 +3033,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             ].filter((line): line is string => Boolean(line));
             prompt += `\n\n---\n${noteLines.join('\n')}\n`;
           }
+
+          prompt += `\n\n---\n${buildRunStateGuidance(channelCtx.channelId)}\n`;
 
           // Separator and user message — absolute last in prompt.
           // User message lands at the end to maximize recency bias.
