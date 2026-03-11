@@ -919,6 +919,39 @@ describe('executeCronAction', () => {
     );
   });
 
+  it('cronUpdate with empty object state reports "state cleared" in summary', async () => {
+    const cronCtx = makeCronCtx({
+      statsStore: makeStatsStore([makeRecord({ state: { old: 'value' } })]),
+    });
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', state: '{}' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('state cleared');
+      expect(result.summary).not.toContain('state updated');
+    }
+  });
+
+  it('cronUpdate with prompt change and existing non-empty state warns about stale state', async () => {
+    const cronCtx = makeCronCtx({
+      statsStore: makeStatsStore([makeRecord({ state: { seen_ids: ['a1'] }, prompt: 'Old prompt' })]),
+    });
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', prompt: 'New prompt' },
+      makeActionCtx(),
+      cronCtx,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('Warning:');
+      expect(result.summary).toContain('existing persistent state was kept');
+      expect(result.summary).toContain('state: "{}"');
+    }
+  });
+
   it('cronShow includes state when present', async () => {
     const cronCtx = makeCronCtx({
       statsStore: makeStatsStore([makeRecord({ state: { cursor: 'xyz', count: 10 } })]),

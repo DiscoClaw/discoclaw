@@ -72,6 +72,13 @@ Format notes:
 
 ## Lessons
 
+### 2026-03-10 - Prompt changes can orphan cron state
+Tags: #workflow #cron #state
+Lesson: When a cron prompt is updated, existing persisted state may become obsolete (for example, dedup IDs for a strategy the prompt no longer uses). The system warns but does not auto-clear, because some prompt changes are compatible with existing state. Operators must explicitly clear stale state via `cronUpdate` with `state: "{}"` in the same action that changes the prompt.
+Source: task thread ws-1211 - email cron carried stale seen_ids state after prompt moved dedup to shell script
+Applied: docs/compound-lessons.md
+Status: active
+
 ### 2026-03-10 - Keep interactive Discord trigger context in sync
 Tags: #workflow #task #discord
 Lesson: Interactive Discord trigger paths, including the message handler and reaction handler, must hydrate equivalent conversational context, including nearby channel history. When adding or changing an interactive trigger path, audit it against the main message handler's context-gathering steps so the AI does not ask for information that is already present in-channel; cron and webhook paths are non-interactive and exempt from this invariant.
