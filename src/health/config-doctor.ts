@@ -151,6 +151,10 @@ function parseBoolean(value: string | undefined, defaultValue: boolean): boolean
   return defaultValue;
 }
 
+function isCodexAppServerNativeEnabled(env: EnvMap): boolean {
+  return parseBoolean(env.CODEX_APP_SERVER_NATIVE, false);
+}
+
 function resolvePath(cwd: string, maybeRelative: string | undefined, fallback: string): string {
   const trimmed = trimValue(maybeRelative);
   if (!trimmed) return path.join(cwd, fallback);
@@ -396,7 +400,17 @@ export function detectDeprecatedEnvVars(ctx: DoctorContext): DoctorFinding[] {
 
 export function detectCodexAppServerStatus(ctx: DoctorContext): DoctorFinding[] {
   const rawValue = ctx.env.CODEX_APP_SERVER_URL;
-  if (rawValue == null) return [];
+  const nativeEnabled = isCodexAppServerNativeEnabled(ctx.env);
+  if (rawValue == null) {
+    if (!nativeEnabled) return [];
+    return [{
+      id: 'codex-app-server:missing-url',
+      severity: 'warn',
+      message: 'CODEX_APP_SERVER_NATIVE=1 is set, but CODEX_APP_SERVER_URL is missing, so the native Codex app-server transport cannot activate.',
+      recommendation: 'Set CODEX_APP_SERVER_URL to a valid ws(s) URL or remove CODEX_APP_SERVER_NATIVE=1 to keep the integration dormant.',
+      autoFixable: false,
+    }];
+  }
 
   const trimmed = rawValue.trim();
   if (trimmed === '') {
@@ -404,19 +418,30 @@ export function detectCodexAppServerStatus(ctx: DoctorContext): DoctorFinding[] 
       id: 'codex-app-server:empty-url',
       severity: 'warn',
       message: 'CODEX_APP_SERVER_URL is set but empty, so the Codex app-server integration cannot start cleanly.',
-      recommendation: 'Set CODEX_APP_SERVER_URL to a valid http(s) URL or remove it to keep the integration dormant.',
+      recommendation: 'Set CODEX_APP_SERVER_URL to a valid ws(s) URL or remove it to keep the integration dormant.',
       autoFixable: false,
     }];
   }
 
   try {
     const parsed = new URL(trimmed);
-    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+    if (parsed.protocol === 'ws:' || parsed.protocol === 'wss:') {
       const displayUrl = formatCodexAppServerUrl(trimmed) ?? '[invalid URL redacted]';
+      if (!nativeEnabled) {
+        return [{
+          id: 'codex-app-server:dormant',
+          severity: 'info',
+          message:
+            `CODEX_APP_SERVER_URL is configured as "${displayUrl}", but native Codex turns stay dormant until CODEX_APP_SERVER_NATIVE=1 is also set.`,
+          recommendation:
+            'Set CODEX_APP_SERVER_NATIVE=1 to activate the native app-server transport, or remove the URL to keep it dormant.',
+          autoFixable: false,
+        }];
+      }
       return [{
         id: 'codex-app-server:configured',
         severity: 'info',
-        message: `CODEX_APP_SERVER_URL is configured as "${displayUrl}", so the Codex app-server integration will be enabled at startup.`,
+        message: `CODEX_APP_SERVER_URL is configured as "${displayUrl}", so Codex turns will use the app-server transport at startup.`,
         recommendation: 'No action required unless this install should leave the Codex app-server integration dormant.',
         autoFixable: false,
       }];
@@ -429,23 +454,25 @@ export function detectCodexAppServerStatus(ctx: DoctorContext): DoctorFinding[] 
     id: 'codex-app-server:invalid-url',
     severity: 'warn',
     message: 'CODEX_APP_SERVER_URL is malformed or uses an unsupported protocol.',
-    recommendation: 'Set CODEX_APP_SERVER_URL to a valid http(s) URL or remove it to keep the integration dormant.',
+    recommendation: 'Set CODEX_APP_SERVER_URL to a valid ws(s) URL or remove it to keep the integration dormant.',
     autoFixable: false,
   }];
 }
 
 export function getCodexAppServerStatus(env: EnvMap): CodexAppServerStatus {
   const rawValue = env.CODEX_APP_SERVER_URL;
-  if (rawValue == null) return 'dormant';
+  const nativeEnabled = isCodexAppServerNativeEnabled(env);
+  if (rawValue == null) return nativeEnabled ? 'invalid' : 'dormant';
 
   const trimmed = rawValue.trim();
   if (trimmed === '') return 'invalid';
 
   try {
     const parsed = new URL(trimmed);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
-      ? 'configured'
-      : 'invalid';
+    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+      return 'invalid';
+    }
+    return nativeEnabled ? 'configured' : 'dormant';
   } catch {
     return 'invalid';
   }
