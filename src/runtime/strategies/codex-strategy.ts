@@ -36,6 +36,14 @@ function asFiniteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function getStringField(record: Record<string, unknown>, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.length > 0) return value;
+  }
+  return undefined;
+}
+
 function compactText(value: string, max = CODEX_PREVIEW_TEXT_MAX): string {
   const oneLine = value.replace(/\r\n?/g, '\n').replace(/\s+/g, ' ').trim();
   if (oneLine.length <= max) return oneLine;
@@ -88,9 +96,16 @@ function sanitizeCodexError(raw: string): string {
  * Create a Codex CLI adapter strategy.
  * Factory function because defaultModel varies per runtime instance.
  */
+export type CodexLifecycleEvent = {
+  eventType: 'thread.started' | 'turn.started' | 'turn.completed' | 'turn.cancelled' | 'turn.interrupted' | 'turn.failed';
+  threadId: string;
+  turnId?: string;
+};
+
 type CodexStrategyOptions = {
   verbosePreview?: boolean;
   itemTypeDebug?: boolean;
+  onLifecycleEvent?: (event: CodexLifecycleEvent) => void;
 };
 
 export function createCodexStrategy(
@@ -100,6 +115,43 @@ export function createCodexStrategy(
   const verbosePreview = Boolean(strategyOpts.verbosePreview);
   const itemTypeDebug = Boolean(strategyOpts.itemTypeDebug);
   const forceReasoningSummaryAuto = verbosePreview || itemTypeDebug;
+  const onLifecycleEvent = strategyOpts.onLifecycleEvent;
+
+  function emitLifecycleEvent(evt: Record<string, unknown>, ctx: CliInvokeContext): void {
+    if (!onLifecycleEvent) return;
+
+    const eventType = getStringField(evt, 'type');
+    if (!eventType) return;
+
+    if (eventType === 'thread.started') {
+      const threadId = getStringField(evt, 'thread_id', 'threadId');
+      if (!threadId) return;
+      try {
+        onLifecycleEvent({ eventType, threadId });
+      } catch {}
+      return;
+    }
+
+    if (
+      eventType !== 'turn.started'
+      && eventType !== 'turn.completed'
+      && eventType !== 'turn.cancelled'
+      && eventType !== 'turn.interrupted'
+      && eventType !== 'turn.failed'
+    ) {
+      return;
+    }
+
+    const sessionKey = ctx.params.sessionKey;
+    const threadId = getStringField(evt, 'thread_id', 'threadId')
+      ?? (sessionKey ? ctx.sessionMap?.get(sessionKey) : undefined);
+    if (!threadId) return;
+
+    const turnId = getStringField(evt, 'turn_id', 'turnId', 'id');
+    try {
+      onLifecycleEvent({ eventType, threadId, ...(turnId ? { turnId } : {}) });
+    } catch {}
+  }
 
   function itemDebugEvent(phase: 'started' | 'completed', item: Record<string, unknown>) {
     const itemType = typeof item.type === 'string' ? item.type : 'item';
@@ -289,6 +341,7 @@ export function createCodexStrategy(
 
     parseLine(evt: unknown, ctx: CliInvokeContext): ParsedLineResult | null {
       const anyEvt = evt as Record<string, unknown>;
+      emitLifecycleEvent(anyEvt, ctx);
 
       // Capture thread_id for session resume on subsequent calls.
       if (anyEvt.type === 'thread.started' && anyEvt.thread_id && ctx.params.sessionKey && ctx.sessionMap) {
