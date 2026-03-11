@@ -169,7 +169,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | MCP detection in boot report | `src/discord/status-channel.ts`, `src/index.ts`, `src/index.post-connect.ts` | **done** |
 | Pino structured logging | throughout | **done** |
 | Per-run trace store (structured invoke/tool/action/error/outcome events keyed by `traceId`; currently instrumented for message flow with operator inspection via `!trace`) | `src/observability/trace-store.ts`, `src/observability/trace-store.test.ts`, `src/discord/trace-command.ts`, `src/discord/trace-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
-| Admin dashboard (terminal UI + loopback-by-default web UI for service state, config doctor, model overrides, and service actions; supports private Tailscale access through trusted host allowlisting) | `src/cli/dashboard.ts`, `src/cli/dashboard.test.ts`, `src/dashboard/server.ts`, `src/dashboard/page.ts`, `src/service-control.ts`, `src/health/config-doctor.ts` | **done** |
+| Admin dashboard (terminal UI + loopback-by-default web UI for service state, config doctor, model overrides, MCP server detection/validation status, and service actions; supports private Tailscale access through trusted host allowlisting) | `src/cli/dashboard.ts`, `src/cli/dashboard.test.ts`, `src/dashboard/server.ts`, `src/dashboard/page.ts`, `src/service-control.ts`, `src/health/config-doctor.ts` | **done** |
 | Metrics | — | *stub — not started* |
 
 ## 13. Ops & Deploy
