@@ -477,6 +477,7 @@ async function startWatchdogRun(opts: {
   messageId: string;
   sessionKey?: string;
   stillRunningDelayMs?: number;
+  notifyOnCompletion?: boolean;
   log?: LoggerLike;
   flow: string;
 }): Promise<void> {
@@ -488,6 +489,7 @@ async function startWatchdogRun(opts: {
       messageId: opts.messageId,
       sessionKey: opts.sessionKey,
       stillRunningDelayMs: opts.stillRunningDelayMs,
+      notifyOnCompletion: opts.notifyOnCompletion,
     });
   } catch (err) {
     opts.log?.warn({ err, runId: opts.runId }, `${opts.flow}: watchdog start failed`);
@@ -2768,6 +2770,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             messageId: reply.id,
             sessionKey,
             stillRunningDelayMs: params.longRunStillRunningDelayMs,
+            notifyOnCompletion: false,
             log: params.log,
             flow: 'message',
           });

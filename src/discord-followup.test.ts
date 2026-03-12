@@ -265,6 +265,50 @@ describe('shouldTriggerFollowUp', () => {
 // ---------------------------------------------------------------------------
 
 describe('auto-follow-up for query actions', () => {
+  it('starts normal message watchdog runs without generic completion notices', async () => {
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        yield { type: 'text_final', text: 'Here is the answer.' } as any;
+      }),
+    } as any;
+    const watchdog = {
+      start: vi.fn(async () => ({ run: {} as any, deduped: false })),
+      complete: vi.fn(async () => null),
+      startupSweep: vi.fn(async () => ({
+        interruptedRuns: 0,
+        finalRetried: 0,
+        finalPosted: 0,
+        finalFailed: 0,
+      })),
+    };
+    const replyObj = {
+      id: 'reply-1',
+      edit: vi.fn(async () => {}),
+      delete: vi.fn(async () => {}),
+      react: vi.fn(async () => ({ remove: vi.fn(async () => {}) })),
+    };
+    const msg = makeMsg({
+      reply: vi.fn(async () => replyObj),
+    });
+
+    const handler = createMessageCreateHandler(
+      baseParams(runtime, {
+        longRunWatchdog: watchdog,
+        longRunStillRunningDelayMs: 43210,
+      }),
+      makeQueue(),
+    );
+    await handler(msg);
+
+    expect(watchdog.start).toHaveBeenCalledWith(expect.objectContaining({
+      runId: 'message:chan:msg1',
+      channelId: 'chan',
+      messageId: 'reply-1',
+      stillRunningDelayMs: 43210,
+      notifyOnCompletion: false,
+    }));
+  });
+
   it('triggers follow-up when a query action (channelList) is present', async () => {
     let callCount = 0;
     const runtime = {

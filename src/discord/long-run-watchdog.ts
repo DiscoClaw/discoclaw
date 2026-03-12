@@ -17,6 +17,7 @@ export type LongRunWatchdogRun = {
   channelId: string;
   messageId: string;
   sessionKey: string;
+  notifyOnCompletion: boolean;
   status: RunStatus;
   startedAt: number;
   checkInDueAt: number;
@@ -37,6 +38,7 @@ export type StartLongRunInput = {
   messageId: string;
   sessionKey?: string;
   stillRunningDelayMs?: number;
+  notifyOnCompletion?: boolean;
 };
 
 export type CompleteLongRunInput = {
@@ -118,6 +120,7 @@ function normalizeRun(runId: string, raw: Record<string, unknown>, now: number):
     channelId,
     messageId,
     sessionKey: asString(raw.sessionKey),
+    notifyOnCompletion: asBoolean(raw.notifyOnCompletion, true),
     status,
     startedAt,
     checkInDueAt,
@@ -180,6 +183,7 @@ export class LongRunWatchdog {
         channelId: input.channelId,
         messageId: input.messageId,
         sessionKey: input.sessionKey ?? '',
+        notifyOnCompletion: input.notifyOnCompletion ?? true,
         status: 'running',
         startedAt: now,
         checkInDueAt: now + delayMs,
@@ -463,6 +467,7 @@ export class LongRunWatchdog {
 
   private requiresFinalPost(run: LongRunWatchdogRun): boolean {
     if (run.completion === 'interrupted') return true;
+    if (!run.notifyOnCompletion) return false;
     if (run.checkInPosted) return true;
     if (run.completedAt !== null && run.completedAt >= run.checkInDueAt) return true;
     return false;
