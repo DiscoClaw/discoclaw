@@ -1,7 +1,7 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ChannelType } from 'discord.js';
 import { runCronSync } from './cron-sync.js';
-import type { CronSyncOptions } from './cron-sync.js';
+import { buildCronThreadName } from './discord-sync.js';
 import type { CronRunStats, CronRunRecord } from './run-stats.js';
 import type { CronScheduler } from './scheduler.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
@@ -66,8 +66,38 @@ function makeScheduler(jobs: Array<{ id: string; threadId: string; cronId: strin
   } as unknown as CronScheduler;
 }
 
-function makeForum(threads: Array<{ id: string; name: string; parentId: string; appliedTags?: string[] }>) {
-  const threadMap = new Map(threads.map((t) => [t.id, { ...t, appliedTags: t.appliedTags ?? [], edit: vi.fn(), setName: vi.fn() }]));
+type ForumThreadFixture = {
+  id: string;
+  name: string;
+  parentId: string;
+  appliedTags?: string[];
+  client?: { rest: object };
+  edit?: (this: any, payload: { appliedTags?: string[]; name?: string }) => Promise<unknown>;
+  setName?: (this: any, name: string) => Promise<unknown>;
+};
+
+function makeForum(threads: ForumThreadFixture[]) {
+  const threadMap = new Map(threads.map((fixture) => {
+    const thread = {
+      id: fixture.id,
+      name: fixture.name,
+      parentId: fixture.parentId,
+      appliedTags: fixture.appliedTags ?? [],
+      client: fixture.client ?? { rest: {} },
+    } as any;
+
+    thread.edit = fixture.edit ?? vi.fn(async function (this: any, payload: { appliedTags?: string[]; name?: string }) {
+      if (payload.appliedTags) this.appliedTags = payload.appliedTags;
+      if (payload.name) this.name = payload.name;
+      return this;
+    });
+    thread.setName = fixture.setName ?? vi.fn(async function (this: any, name: string) {
+      this.name = name;
+      return this;
+    });
+
+    return [thread.id, thread];
+  }));
   return {
     id: 'forum-1',
     type: ChannelType.GuildForum,
@@ -198,6 +228,88 @@ describe('runCronSync', () => {
     });
 
     expect(result.namesUpdated).toBe(1);
+  });
+
+  it('phase 2: keeps setName bound to the live thread instance', async () => {
+    const expectedName = buildCronThreadName('Daily Check', 'daily');
+    const edit = vi.fn(async function (this: any, payload: { name?: string }) {
+      void this.client.rest;
+      if (payload.name) this.name = payload.name;
+      return this;
+    });
+    const setName = async function (this: any, name: string) {
+      return this.edit({ name });
+    };
+    const forum = makeForum([{ id: 'thread-2', name: 'Old Name', parentId: 'forum-1', edit, setName }]);
+    const client = makeClient(forum);
+    const log = mockLog();
+    const record = makeRecord({ cronId: 'cron-2', threadId: 'thread-2', cadence: 'daily', purposeTags: ['monitoring'], model: 'haiku' });
+    const scheduler = makeScheduler([{ id: 'thread-2', threadId: 'thread-2', cronId: 'cron-2', name: 'Daily Check', schedule: '0 7 * * *', prompt: 'Check things' }]);
+
+    const result = await runCronSync({
+      client: client as any,
+      forumId: 'forum-1',
+      scheduler,
+      statsStore: makeStatsStore([record]),
+      runtime: makeMockRuntime('monitoring'),
+      tagMap: { ...defaultTagMap },
+      autoTag: false,
+      autoTagModel: 'haiku',
+      cwd: '/tmp',
+      log,
+      throttleMs: 0,
+    });
+
+    expect(result.namesUpdated).toBe(1);
+    const thread = (await forum.threads.fetchActive()).threads.get('thread-2') as any;
+    expect(thread.name).toBe(expectedName);
+    expect(edit).toHaveBeenCalledWith({ name: expectedName });
+    expect(log.warn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: 'thread-2' }),
+      'cron-sync:phase2 name update failed',
+    );
+  });
+
+  it('phase 1: keeps edit bound to the live thread instance', async () => {
+    const edit = vi.fn(async function (this: any, payload: { appliedTags?: string[] }) {
+      void this.client.rest;
+      if (payload.appliedTags) this.appliedTags = payload.appliedTags;
+      return this;
+    });
+    const forum = makeForum([{ id: 'thread-1', name: 'Test Job', parentId: 'forum-1', edit }]);
+    const client = makeClient(forum);
+    const log = mockLog();
+    const record = makeRecord({
+      cronId: 'cron-1',
+      threadId: 'thread-1',
+      cadence: 'daily',
+      purposeTags: ['monitoring'],
+      model: 'fast',
+    });
+    const scheduler = makeScheduler([{ id: 'thread-1', threadId: 'thread-1', cronId: 'cron-1', name: 'Test Job', schedule: '0 7 * * *', prompt: 'Monitor health' }]);
+
+    const result = await runCronSync({
+      client: client as any,
+      forumId: 'forum-1',
+      scheduler,
+      statsStore: makeStatsStore([record]),
+      runtime: makeMockRuntime('monitoring'),
+      tagMap: { ...defaultTagMap },
+      autoTag: true,
+      autoTagModel: 'haiku',
+      cwd: '/tmp',
+      log,
+      throttleMs: 0,
+    });
+
+    expect(result.tagsApplied).toBe(1);
+    const thread = (await forum.threads.fetchActive()).threads.get('thread-1') as any;
+    expect(thread.appliedTags).toEqual(['tag-1', 'tag-3']);
+    expect(edit).toHaveBeenCalledWith({ appliedTags: ['tag-1', 'tag-3'] });
+    expect(log.warn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: 'thread-1' }),
+      'cron-sync:phase1 tag apply failed',
+    );
   });
 
   it('continues with metadata/status phases when fetchActive fails', async () => {

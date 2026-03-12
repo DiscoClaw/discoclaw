@@ -104,13 +104,15 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
     }
     const appliedTags =
       Array.isArray(t.appliedTags) ? t.appliedTags.filter((id): id is string => typeof id === 'string') : undefined;
+    const sourceThread = value as EditableCronThread;
     return {
       id: t.id,
       parentId: t.parentId,
       name: t.name,
       appliedTags,
-      edit: t.edit as EditableCronThread['edit'],
-      setName: t.setName as EditableCronThread['setName'],
+      // Discord.js thread mutators read `this.client.rest`, so keep the live thread instance as `this`.
+      edit: (t.edit as EditableCronThread['edit']).bind(sourceThread),
+      setName: (t.setName as EditableCronThread['setName']).bind(sourceThread),
     };
   };
 
