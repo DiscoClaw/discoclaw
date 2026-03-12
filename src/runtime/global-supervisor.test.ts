@@ -239,6 +239,38 @@ describe('withGlobalSupervisor', () => {
     expect(bail?.retryable).toBe(false);
   });
 
+  it('does not retry native Codex app-server disconnects', async () => {
+    let calls = 0;
+    const runtime: RuntimeAdapter = {
+      id: 'other',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        calls += 1;
+        yield { type: 'error', message: 'codex app-server websocket closed' };
+        yield { type: 'done' };
+      },
+    };
+
+    const wrapped = withGlobalSupervisor(runtime, {
+      env: { [GLOBAL_SUPERVISOR_ENABLED_ENV]: '1' },
+      limits: { maxCycles: 6, maxRetries: 5 },
+    });
+
+    const events = await collectEvents(wrapped.invoke({
+      prompt: 'x',
+      model: 'm',
+      cwd: '/tmp',
+      supervisor: { profile: 'plan_phase' },
+    }));
+    const bailMsg = findBailError(events);
+    const bail = bailMsg ? parseGlobalSupervisorBail(bailMsg) : null;
+
+    expect(calls).toBe(1);
+    expect(bail?.reason).toBe('non_retryable_failure');
+    expect(bail?.failureKind).toBe('hard_error');
+    expect(bail?.retryable).toBe(false);
+  });
+
   it('allows per-invocation supervisor disable override', async () => {
     let calls = 0;
     const runtime: RuntimeAdapter = {

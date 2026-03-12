@@ -2134,6 +2134,35 @@ describe('ForgeOrchestrator', () => {
     expect(progress.some((p) => p.includes('Forge failed'))).toBe(true);
   });
 
+  it('fails forge cleanly on native Codex app-server disconnects without retrying the draft', async () => {
+    const tmpDir = await makeTmpDir();
+    let callCount = 0;
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const]),
+      invoke(_params) {
+        callCount++;
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'error', message: 'codex app-server websocket closed' };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const progress: string[] = [];
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toContain('Draft failed: Pipeline step 0 failed: codex app-server websocket closed');
+    expect(callCount).toBe(1);
+    expect(progress.every((p) => !p.includes('retrying'))).toBe(true);
+    expect(progress.some((p) => p.includes('Forge failed'))).toBe(true);
+  });
+
   it('cancel set during first failure prevents retry from being attempted', async () => {
     const tmpDir = await makeTmpDir();
     let orchestrator!: ForgeOrchestrator;

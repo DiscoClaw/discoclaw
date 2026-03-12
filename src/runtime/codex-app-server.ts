@@ -567,10 +567,7 @@ export class CodexAppServerClient {
       if (shouldPropagateNativeFallbackError(err)) {
         throw err;
       }
-      yield {
-        type: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      };
+      yield createRuntimeErrorEvent(err instanceof Error ? err : String(err));
       yield { type: 'done' };
     } finally {
       await imageCleanup?.().catch(() => {});
@@ -841,7 +838,7 @@ export class CodexAppServerClient {
     for (const [sessionKey, streamState] of this.turnStreams.entries()) {
       this.clearActiveTurn(sessionKey, streamState.turnId);
       if (!streamState.closed) {
-        this.enqueueTurnStreamEvent(streamState, { type: 'error', message });
+        this.enqueueTurnStreamEvent(streamState, createRuntimeErrorEvent(message));
         this.finishTurnStream(streamState);
       }
     }

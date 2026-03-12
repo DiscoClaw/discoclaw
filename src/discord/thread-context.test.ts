@@ -140,6 +140,27 @@ describe('resolveThreadContext', () => {
     expect(result!.section).toContain('[PinnedUser (pinned)]: Important pinned note');
   });
 
+  it('supports discord.js fetchPins() paginated responses when includePinned is true', async () => {
+    const pinned = fakeMsg('pinned-2', 'Paginated pinned note', 'PinnedUser');
+    const ch = fakeThread({
+      name: 'pinned-thread',
+      starter: {
+        id: '1',
+        author: { username: 'Bob', displayName: 'Bob', bot: false },
+        content: 'Starter content',
+      },
+      messages: [],
+    });
+    ch.messages.fetchPins = async () => ({
+      items: [{ message: pinned }],
+    });
+
+    const result = await resolveThreadContext(ch, 'current', { includePinned: true });
+    expect(result).not.toBeNull();
+    expect(result!.section).toContain('Pinned thread messages:');
+    expect(result!.section).toContain('[PinnedUser (pinned)]: Paginated pinned note');
+  });
+
   it('deduplicates starter message from recent messages', async () => {
     const starter: ThreadMessage = {
       id: '1',

@@ -1671,6 +1671,45 @@ describe('bead resolution dispatch wiring', () => {
       expect(content).toContain('Pinned message:');
       expect(content).toContain('[TestBot]: Pinned note: keep the UX consistent (pinned id:pinned-1)');
     });
+
+    it('!plan create inside a task thread accepts fetchPins() paginated pin payloads', async () => {
+      const { queue, params, workspaceCwd } = makePlanForgeParams({ messageHistoryBudget: 3000 });
+      const handler = createMessageCreateHandler(params, queue);
+
+      const pinnedMessage = {
+        id: 'pinned-2',
+        content: 'Pinned note from fetchPins',
+        author: { username: 'Discoclaw', displayName: 'Discoclaw', bot: true },
+      };
+
+      await handler(makeMsg({
+        content: '!plan fix the thread bug',
+        channelId: 'thread-plan-context-fetchpins',
+        channel: {
+          send: vi.fn(async () => {}),
+          isThread: () => true,
+          parentId: 'parent-thread',
+          name: 'thread-name',
+          id: 'thread-plan-context-fetchpins',
+          fetchStarterMessage: vi.fn(async () => null),
+          messages: {
+            fetch: vi.fn(async () => new Map()),
+            fetchPins: vi.fn(async () => ({
+              items: [{ message: pinnedMessage }],
+              hasMore: false,
+            })),
+          },
+        },
+      }));
+
+      const plansDir = path.join(workspaceCwd, 'plans');
+      const files = await fs.readdir(plansDir);
+      const planFile = files.find((f) => f.endsWith('.md'));
+      expect(planFile).toBeTruthy();
+      const content = await fs.readFile(path.join(plansDir, planFile!), 'utf-8');
+      expect(content).toContain('Pinned message:');
+      expect(content).toContain('[TestBot]: Pinned note from fetchPins (pinned id:pinned-2)');
+    });
   });
 
   // -------------------------------------------------------------------------
