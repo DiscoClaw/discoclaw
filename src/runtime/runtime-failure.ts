@@ -558,7 +558,6 @@ function classifyRawRuntimeFailure(rawMessage: string): RuntimeFailure {
       retryable: false,
     });
   }
-
   if (lc.includes('unauthorized') || lc.includes('authentication') || lc.includes('not logged in')) {
     return createRuntimeFailure({
       source: 'runtime',

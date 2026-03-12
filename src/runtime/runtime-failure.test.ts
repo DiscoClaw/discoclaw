@@ -133,7 +133,6 @@ describe('normalizeRuntimeFailure', () => {
       retryable: false,
     });
   });
-
   it('falls back to unknown runtime failures without dropping the message', () => {
     const failure = normalizeRuntimeFailure('some new runtime error');
 
