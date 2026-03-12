@@ -10,6 +10,7 @@ class MockWebSocket extends EventEmitter {
 
   readyState = MockWebSocket.CONNECTING;
   readonly sent: unknown[] = [];
+  pingCount = 0;
   private readonly handlers = new Map<string, (message: Record<string, unknown>) => void>();
 
   send(payload: string): void {
@@ -19,10 +20,18 @@ class MockWebSocket extends EventEmitter {
     this.handlers.get(method)?.(parsed);
   }
 
+  ping(): void {
+    this.pingCount += 1;
+  }
+
   close(): void {
+    this.closeWith();
+  }
+
+  closeWith(code = 1000, reason = ''): void {
     if (this.readyState === MockWebSocket.CLOSED) return;
     this.readyState = MockWebSocket.CLOSED;
-    this.emit('close');
+    this.emit('close', code, Buffer.from(reason));
   }
 
   open(): void {
@@ -790,6 +799,46 @@ describe('CodexAppServerClient', () => {
     ]);
   });
 
+  it('logs websocket close details when the native socket disconnects mid-stream', async () => {
+    const log = { info: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+    const client = makeClient({ log });
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.open();
+    await startPromise;
+
+    const eventsPromise = collect(client.consumeStream('session-1'));
+    socket.notify('item/agentMessage/delta', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'msg-1',
+      delta: 'partial',
+    });
+    socket.closeWith(1011, 'upstream dropped');
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'partial' },
+      expect.objectContaining({
+        type: 'error',
+        message: 'codex app-server websocket closed',
+      }),
+      { type: 'done' },
+    ]);
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        closeCode: 1011,
+        closeReason: 'upstream dropped',
+      }),
+      'codex-app-server: websocket closed',
+    );
+  });
+
   it('invokeViaTurn drives createThread, startTurn, and stream consumption end to end', async () => {
     const client = makeClient();
 
@@ -903,6 +952,37 @@ describe('CodexAppServerClient', () => {
         { type: 'done' },
       ]);
       expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sends websocket keepalive pings while connected', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient();
+
+      const createPromise = client.createThread('session-1', {
+        cwd: '/tmp/discoclaw',
+        model: 'gpt-5.4',
+      });
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.open();
+
+      await expect(createPromise).resolves.toBe('thread-1');
+      expect(socket.pingCount).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(socket.pingCount).toBe(1);
+
+      socket.closeWith(1000, 'normal shutdown');
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(socket.pingCount).toBe(1);
     } finally {
       vi.useRealTimers();
     }
