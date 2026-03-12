@@ -109,6 +109,7 @@ type TurnStreamState = {
   progressStallTimeoutMs?: number;
   initialProgressTimeoutMs?: number;
   progressStallTimer?: ReturnType<typeof setTimeout>;
+  firstNotificationLogged: boolean;
   progressObserved: boolean;
 };
 
@@ -468,7 +469,15 @@ export class CodexAppServerClient {
     throwIfAborted(signal);
     const socket = await withAbort(this.getSocket(), signal);
     const params = buildCreateThreadParams(opts, this.dangerouslyBypassApprovalsAndSandbox);
+    let requestMethod = 'thread/start';
     let result: unknown;
+
+    this.log?.info?.({
+      sessionKey,
+      cwd: opts.cwd,
+      model: opts.model,
+      ephemeral: Boolean(opts.ephemeral),
+    }, 'codex-app-server: thread/start requested');
 
     try {
       result = await withAbort(socket.request<unknown>('thread/start', params), signal);
@@ -476,6 +485,7 @@ export class CodexAppServerClient {
       if (!isMethodNotFoundError(err)) {
         throw err;
       }
+      requestMethod = 'thread/create';
       this.log?.debug?.({ err }, 'codex-app-server: thread/start unavailable; retrying legacy thread/create');
       result = await withAbort(socket.request<unknown>('thread/create', params), signal);
     }
@@ -488,6 +498,12 @@ export class CodexAppServerClient {
     if (sessionKey) {
       this.setThread(sessionKey, threadId);
     }
+
+    this.log?.info?.({
+      sessionKey,
+      threadId,
+      requestMethod,
+    }, 'codex-app-server: thread ready');
 
     return threadId;
   }
@@ -507,6 +523,13 @@ export class CodexAppServerClient {
     const socket = await withAbort(this.getSocket(), signal);
     const streamState = this.createTurnStream(sessionKey, state.threadId);
 
+    this.log?.info?.({
+      sessionKey,
+      threadId: state.threadId,
+      model: opts.model,
+      promptChars: prompt.length,
+    }, 'codex-app-server: turn/start requested');
+
     try {
       const result = await withAbort(socket.request<unknown>('turn/start', {
         threadId: state.threadId,
@@ -521,6 +544,12 @@ export class CodexAppServerClient {
           this.setActiveTurn(sessionKey, state.threadId, turnId);
         }
       }
+      this.log?.info?.({
+        sessionKey,
+        threadId: state.threadId,
+        ...(turnId ? { turnId } : {}),
+        turnIdKnown: Boolean(turnId),
+      }, 'codex-app-server: turn ready');
       this.configureTurnStreamLiveness(sessionKey, streamState, opts);
 
       return {
@@ -777,6 +806,7 @@ export class CodexAppServerClient {
       eventState: {
         agentMessageTextByItemId: new Map(),
       },
+      firstNotificationLogged: false,
       progressObserved: false,
     };
 
@@ -810,18 +840,40 @@ export class CodexAppServerClient {
         streamState.turnId = turnId;
         this.setActiveTurn(sessionKey, streamState.threadId, turnId);
       }
+      this.log?.info?.(this.buildTurnLogContext(sessionKey, streamState), 'codex-app-server: turn started');
+    }
+
+    if (!streamState.firstNotificationLogged) {
+      streamState.firstNotificationLogged = true;
+      this.log?.info?.({
+        ...this.buildTurnLogContext(sessionKey, streamState),
+        notificationMethod: message.method,
+      }, 'codex-app-server: first turn notification received');
     }
 
     const events = mapNotificationToEngineEvents(message, streamState.eventState, {
       verbosePreview: this.verbosePreview,
       itemTypeDebug: this.itemTypeDebug,
     });
-    this.noteTurnStreamProgress(sessionKey, streamState, events);
+    this.noteTurnStreamProgress(sessionKey, streamState, message.method, events);
     for (const event of events) {
       this.enqueueTurnStreamEvent(streamState, event);
     }
 
     if (isTerminalNotification(message.method)) {
+      const status = extractTerminalTurnStatus(message.method, asRecord(message.params));
+      if (status === 'completed') {
+        this.log?.info?.({
+          ...this.buildTurnLogContext(sessionKey, streamState),
+          status,
+        }, 'codex-app-server: turn completed');
+      } else {
+        this.log?.warn?.({
+          ...this.buildTurnLogContext(sessionKey, streamState),
+          status,
+          error: buildTerminalTurnErrorMessage(message.method, asRecord(message.params)),
+        }, 'codex-app-server: turn ended before completion');
+      }
       const turnId = extractNotificationTurnId(message.params);
       this.clearActiveTurn(sessionKey, turnId);
       this.finishTurnStream(streamState, { includeDone: !events.some((event) => event.type === 'done') });
@@ -1001,10 +1053,18 @@ export class CodexAppServerClient {
   private noteTurnStreamProgress(
     sessionKey: string,
     streamState: TurnStreamState,
+    notificationMethod: string,
     events: EngineEvent[],
   ): void {
     if (!events.some((event) => isProgressEvent(event))) {
       return;
+    }
+    if (!streamState.progressObserved) {
+      this.log?.info?.({
+        ...this.buildTurnLogContext(sessionKey, streamState),
+        notificationMethod,
+        eventTypes: events.map((event) => event.type),
+      }, 'codex-app-server: first turn progress observed');
     }
     streamState.progressObserved = true;
     this.resetTurnProgressTimer(sessionKey, streamState);
@@ -1027,6 +1087,13 @@ export class CodexAppServerClient {
 
   private failTurnStream(sessionKey: string, streamState: TurnStreamState, error: Error): void {
     if (streamState.closed) return;
+    this.log?.warn?.({
+      ...this.buildTurnLogContext(sessionKey, streamState),
+      errorCode: (error as { code?: unknown }).code,
+      error: error.message,
+      progressObserved: streamState.progressObserved,
+      firstNotificationLogged: streamState.firstNotificationLogged,
+    }, 'codex-app-server: turn failed before terminal notification');
     void this.interrupt(sessionKey).catch(() => false);
     this.clearActiveTurn(sessionKey, streamState.turnId);
     this.enqueueTurnStreamEvent(streamState, createRuntimeErrorEvent(error));
@@ -1041,6 +1108,17 @@ export class CodexAppServerClient {
         this.finishTurnStream(streamState);
       }
     }
+  }
+
+  private buildTurnLogContext(
+    sessionKey: string,
+    streamState: Pick<TurnStreamState, 'threadId' | 'turnId'>,
+  ): Record<string, unknown> {
+    return {
+      sessionKey,
+      threadId: streamState.threadId,
+      ...(streamState.turnId ? { turnId: streamState.turnId } : {}),
+    };
   }
 }
 
