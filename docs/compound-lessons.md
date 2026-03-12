@@ -72,6 +72,13 @@ Format notes:
 
 ## Lessons
 
+### 2026-03-12 - Preserve Discord.js instance context in narrowed thread wrappers
+Tags: #discord #cron #task
+Lesson: When narrowing Discord.js channel or thread objects into custom interfaces, either keep the original object and call its methods directly or bind any copied prototype mutators before invoking them. Methods like `edit()` and `setName()` depend on the live Discord.js instance context (`this.client.rest`), so unbound wrappers can throw before any REST request is attempted.
+Source: task-thread lifecycle fix `ws-925` plus task thread `ws-1220` - both exposed wrapper code that copied Discord.js thread mutators without preserving `this`
+Applied: docs/compound-lessons.md
+Status: active
+
 ### 2026-03-10 - Prompt changes can orphan cron state
 Tags: #workflow #cron #state
 Lesson: When a cron prompt is updated, existing persisted state may become obsolete (for example, dedup IDs for a strategy the prompt no longer uses). The system warns but does not auto-clear, because some prompt changes are compatible with existing state. Operators must explicitly clear stale state via `cronUpdate` with `state: "{}"` in the same action that changes the prompt.
