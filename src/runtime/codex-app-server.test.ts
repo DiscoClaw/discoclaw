@@ -75,6 +75,11 @@ describe('CodexAppServerClient', () => {
       progressStallTimeoutMs?: number;
       verbosePreview?: boolean;
       itemTypeDebug?: boolean;
+      log?: {
+        debug?: (...args: unknown[]) => void;
+        info?: (...args: unknown[]) => void;
+        warn?: (...args: unknown[]) => void;
+      };
     } = 50,
   ): CodexAppServerClient {
     const timeoutMs = typeof timeoutMsOrOpts === 'number'
@@ -94,6 +99,9 @@ describe('CodexAppServerClient', () => {
         : {}),
       ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.itemTypeDebug !== undefined
         ? { itemTypeDebug: timeoutMsOrOpts.itemTypeDebug }
+        : {}),
+      ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.log !== undefined
+        ? { log: timeoutMsOrOpts.log }
         : {}),
       wsFactory: () => {
         const socket = new MockWebSocket();
@@ -900,6 +908,122 @@ describe('CodexAppServerClient', () => {
     }
   });
 
+  it('logs native lifecycle milestones through first progress and completion', async () => {
+    const log = { info: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+    const client = makeClient({ timeoutMs: 50, log });
+
+    const eventsPromise = collect(client.invokeViaTurn({
+      prompt: 'answer this',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('thread/start', (message) => {
+      socket.reply(message.id, { threadId: 'thread-1' });
+    });
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+      socket.notify('turn/started', {
+        threadId: 'thread-1',
+        turn: { id: 'turn-1', status: 'inProgress' },
+      });
+      socket.notify('turn/text_delta', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        text: 'first chunk',
+      });
+      socket.notify('turn/completed', {
+        threadId: 'thread-1',
+        turn: { id: 'turn-1', status: 'completed', error: null },
+      });
+    });
+    socket.open();
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'first chunk' },
+      { type: 'text_final', text: 'first chunk' },
+      { type: 'done' },
+    ]);
+
+    expect(log.info.mock.calls).toEqual(expect.arrayContaining([
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          cwd: '/tmp/discoclaw',
+          model: 'gpt-5.4',
+          ephemeral: false,
+        }),
+        'codex-app-server: thread/start requested',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          requestMethod: 'thread/start',
+        }),
+        'codex-app-server: thread ready',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          model: 'gpt-5.4',
+          promptChars: 'answer this'.length,
+        }),
+        'codex-app-server: turn/start requested',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          turnIdKnown: true,
+        }),
+        'codex-app-server: turn ready',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+        }),
+        'codex-app-server: turn started',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          notificationMethod: 'turn/started',
+        }),
+        'codex-app-server: first turn notification received',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          notificationMethod: 'turn/text_delta',
+          eventTypes: ['text_delta'],
+        }),
+        'codex-app-server: first turn progress observed',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          status: 'completed',
+        }),
+        'codex-app-server: turn completed',
+      ],
+    ]));
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
   it('invokeViaTurn fails cleanly when a native turn goes idle after initial progress', async () => {
     vi.useFakeTimers();
     try {
@@ -945,6 +1069,59 @@ describe('CodexAppServerClient', () => {
         { type: 'done' },
       ]);
       expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('logs native turn failures that never reach a terminal notification', async () => {
+    vi.useFakeTimers();
+    try {
+      const log = { info: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+      const client = makeClient({ timeoutMs: 50, log });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+
+      await vi.advanceTimersByTimeAsync(45_001);
+
+      await expect(eventsPromise).resolves.toEqual([
+        expect.objectContaining({
+          type: 'error',
+          message: 'progress stall: no runtime progress for 45000ms (native turn produced no text or tool events)',
+        }),
+        { type: 'done' },
+      ]);
+
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          errorCode: 'codex_app_server_progress_stall',
+          error: 'progress stall: no runtime progress for 45000ms (native turn produced no text or tool events)',
+          progressObserved: false,
+          firstNotificationLogged: false,
+        }),
+        'codex-app-server: turn failed before terminal notification',
+      );
     } finally {
       vi.useRealTimers();
     }
