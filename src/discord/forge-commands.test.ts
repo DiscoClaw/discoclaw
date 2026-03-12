@@ -456,6 +456,11 @@ describe('isRetryableError', () => {
     expect(isRetryableError('stdin write failed: broken pipe')).toBe(true);
   });
 
+  it('matches native Codex app-server disconnects', () => {
+    expect(isRetryableError('codex app-server websocket closed')).toBe(true);
+    expect(isRetryableError('codex app-server websocket is closed')).toBe(true);
+  });
+
   it('matches drafter echoed the template', () => {
     expect(isRetryableError('drafter echoed the template')).toBe(true);
   });
@@ -2134,16 +2139,23 @@ describe('ForgeOrchestrator', () => {
     expect(progress.some((p) => p.includes('Forge failed'))).toBe(true);
   });
 
-  it('fails forge cleanly on native Codex app-server disconnects without retrying the draft', async () => {
+  it('retries forge draft once on native Codex app-server disconnects', async () => {
     const tmpDir = await makeTmpDir();
     let callCount = 0;
+    const draftPlan = '# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n';
+    const auditClean = '**Verdict:** Ready to approve.';
     const runtime: RuntimeAdapter = {
       id: 'claude_code' as const,
       capabilities: new Set(['streaming_text' as const]),
       invoke(_params) {
         callCount++;
         return (async function* (): AsyncGenerator<EngineEvent> {
-          yield { type: 'error', message: 'codex app-server websocket closed' };
+          if (callCount === 1) {
+            yield { type: 'error', message: 'codex app-server websocket closed' };
+            yield { type: 'done' };
+            return;
+          }
+          yield { type: 'text_final', text: callCount === 2 ? draftPlan : auditClean };
           yield { type: 'done' };
         })();
       },
@@ -2157,10 +2169,11 @@ describe('ForgeOrchestrator', () => {
       progress.push(msg);
     });
 
-    expect(result.error).toContain('Draft failed: Pipeline step 0 failed: codex app-server websocket closed');
-    expect(callCount).toBe(1);
-    expect(progress.every((p) => !p.includes('retrying'))).toBe(true);
-    expect(progress.some((p) => p.includes('Forge failed'))).toBe(true);
+    expect(result.error).toBeUndefined();
+    expect(result.rounds).toBe(1);
+    expect(callCount).toBe(3);
+    expect(progress.some((p) => p.includes('Draft') && p.includes('retrying'))).toBe(true);
+    expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
   });
 
   it('cancel set during first failure prevents retry from being attempted', async () => {

@@ -698,6 +698,7 @@ function wrapWithEventForwarding(
  *  - 'timed out'                   — general timeout (e.g. AbortController deadline)
  *  - 'process exited unexpectedly' — subprocess crash before completing output
  *  - 'stdin write failed'          — broken pipe writing to subprocess stdin
+ *  - 'codex app-server websocket closed' — transient native transport disconnect; retry starts a fresh turn
  */
 export function isRetryableError(msg: string): boolean {
   const lower = msg.toLowerCase();
@@ -708,6 +709,8 @@ export function isRetryableError(msg: string): boolean {
     lower.includes('timed out') ||
     lower.includes('process exited unexpectedly') ||
     lower.includes('stdin write failed') ||
+    lower.includes('codex app-server websocket closed') ||
+    lower.includes('codex app-server websocket is closed') ||
     lower.includes('drafter echoed the template')
   );
 }

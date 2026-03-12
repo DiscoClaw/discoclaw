@@ -797,6 +797,7 @@ describe('CodexAppServerClient', () => {
       }),
       { type: 'done' },
     ]);
+    expect(client.getSessionState('session-1')).toBeUndefined();
   });
 
   it('logs websocket close details when the native socket disconnects mid-stream', async () => {
@@ -1369,6 +1370,89 @@ describe('CodexAppServerClient', () => {
         && (entry as { method?: string }).method === 'thread/start';
     });
     expect(createCalls).toHaveLength(1);
+  });
+
+  it('invokeViaTurn starts a fresh thread after a websocket disconnect resets the active session', async () => {
+    const client = makeClient();
+
+    const firstEvents = collect(client.invokeViaTurn({
+      prompt: 'first',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    const firstSocket = sockets[0]!;
+    primeHandshake(firstSocket);
+    firstSocket.onMethod('thread/start', (message) => {
+      firstSocket.reply(message.id, { threadId: 'thread-1' });
+    });
+    firstSocket.onMethod('turn/start', (message) => {
+      firstSocket.reply(message.id, { turnId: 'turn-1' });
+      firstSocket.notify('turn/text_delta', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        text: 'partial',
+      });
+      firstSocket.closeWith(1006, '');
+    });
+    firstSocket.open();
+
+    await expect(firstEvents).resolves.toEqual([
+      { type: 'text_delta', text: 'partial' },
+      expect.objectContaining({
+        type: 'error',
+        message: 'codex app-server websocket closed',
+      }),
+      { type: 'done' },
+    ]);
+    expect(client.getSessionState('session-1')).toBeUndefined();
+
+    const secondEvents = collect(client.invokeViaTurn({
+      prompt: 'second',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    const secondSocket = sockets[1]!;
+    primeHandshake(secondSocket);
+    secondSocket.onMethod('thread/start', (message) => {
+      secondSocket.reply(message.id, { threadId: 'thread-2' });
+    });
+    secondSocket.onMethod('turn/start', (message) => {
+      secondSocket.reply(message.id, { turnId: 'turn-2' });
+      secondSocket.notify('item/completed', {
+        threadId: 'thread-2',
+        turnId: 'turn-2',
+        item: {
+          type: 'agentMessage',
+          id: 'msg-2',
+          text: 'second done',
+          phase: null,
+        },
+      });
+      secondSocket.notify('turn/completed', {
+        threadId: 'thread-2',
+        turn: { id: 'turn-2', items: [], status: 'completed', error: null },
+      });
+    });
+    secondSocket.open();
+
+    await expect(secondEvents).resolves.toEqual([
+      { type: 'text_delta', text: 'second done' },
+      { type: 'text_final', text: 'second done' },
+      { type: 'done' },
+    ]);
+    expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-2' });
+
+    const secondCreateCalls = secondSocket.sent.filter((entry) => {
+      return typeof entry === 'object'
+        && entry !== null
+        && 'method' in entry
+        && (entry as { method?: string }).method === 'thread/start';
+    });
+    expect(secondCreateCalls).toHaveLength(1);
   });
 
   it('invokeViaTurn honors AbortSignal by interrupting the active turn and emitting aborted', async () => {

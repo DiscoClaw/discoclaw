@@ -1127,7 +1127,7 @@ export class CodexAppServerClient {
 
   private failAllTurnStreams(message: string): void {
     for (const [sessionKey, streamState] of this.turnStreams.entries()) {
-      this.clearActiveTurn(sessionKey, streamState.turnId);
+      this.sessions.delete(sessionKey);
       if (!streamState.closed) {
         this.enqueueTurnStreamEvent(streamState, createRuntimeErrorEvent(message));
         this.finishTurnStream(streamState);
