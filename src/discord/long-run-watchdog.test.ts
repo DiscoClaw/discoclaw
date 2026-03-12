@@ -102,6 +102,43 @@ describe('LongRunWatchdog', () => {
     watchdog.dispose();
   });
 
+  it('skips generic final notices when completion notifications are disabled', async () => {
+    const filePath = path.join(tmpDir, 'watchdog.json');
+    const postStillRunning = vi.fn(async () => {});
+    const postFinal = vi.fn(async () => {});
+    const watchdog = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning,
+      postFinal,
+      stillRunningDelayMs: 1_000,
+    });
+
+    await watchdog.start({
+      runId: 'run-chat',
+      channelId: 'chan-1',
+      messageId: 'msg-1',
+      notifyOnCompletion: false,
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await watchdog._waitForIdleForTest();
+    expect(postStillRunning).toHaveBeenCalledTimes(1);
+
+    await watchdog.complete('run-chat', { outcome: 'succeeded' });
+
+    expect(postFinal).toHaveBeenCalledTimes(0);
+    const state = await watchdog.getRun('run-chat');
+    expect(state?.notifyOnCompletion).toBe(false);
+    expect(state?.status).toBe('completed');
+    expect(state?.checkInPosted).toBe(true);
+    expect(state?.finalPosted).toBe(false);
+
+    const sweep = await watchdog.startupSweep();
+    expect(sweep.finalRetried).toBe(0);
+    expect(sweep.finalPosted).toBe(0);
+    expect(sweep.finalFailed).toBe(0);
+    watchdog.dispose();
+  });
+
   it('posts a single deferred still-running check-in via timer', async () => {
     const filePath = path.join(tmpDir, 'watchdog.json');
     const postStillRunning = vi.fn(async () => {});
