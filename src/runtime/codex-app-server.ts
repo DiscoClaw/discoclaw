@@ -42,7 +42,7 @@ type PendingRequest = {
 
 type NotificationListener = (message: JsonRpcNotification) => void;
 
-type WebSocketLike = Pick<WebSocket, 'on' | 'send' | 'close' | 'readyState'>;
+type WebSocketLike = Pick<WebSocket, 'on' | 'send' | 'close' | 'readyState' | 'ping'>;
 
 export type CodexAppServerSessionState = {
   threadId: string;
@@ -115,6 +115,7 @@ type TurnStreamState = {
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_INITIAL_PROGRESS_TIMEOUT_MS = 45_000;
+const APP_SERVER_PING_INTERVAL_MS = 30_000;
 const APP_SERVER_DISCONNECT_MESSAGE = 'codex app-server websocket closed';
 const EPHEMERAL_SESSION_PREFIX = '__codex_app_server_ephemeral__:';
 const STREAM_STALL_ERROR_CODE = 'codex_app_server_stream_stall';
@@ -258,6 +259,7 @@ class JsonRpcSocket {
   private readonly onClose?: () => void;
   private readonly pending = new Map<JsonRpcRequestId, PendingRequest>();
   private readonly notificationListeners = new Set<NotificationListener>();
+  private readonly keepaliveTimer?: ReturnType<typeof setInterval>;
   private nextRequestId = 1;
   private closed = false;
 
@@ -273,11 +275,27 @@ class JsonRpcSocket {
     ws.on('error', (err: Error) => {
       this.log?.debug?.({ err }, 'codex-app-server: websocket error');
     });
-    ws.on('close', () => {
+    ws.on('close', (code: number, reason: Buffer) => {
       this.closed = true;
+      this.stopKeepalive();
+      this.log?.warn?.({
+        ...(typeof code === 'number' && code > 0 ? { closeCode: code } : {}),
+        ...(reason.length > 0 ? { closeReason: reason.toString('utf8') } : {}),
+      }, 'codex-app-server: websocket closed');
       this.rejectAll(new Error(APP_SERVER_DISCONNECT_MESSAGE));
       this.onClose?.();
     });
+
+    if (typeof ws.ping === 'function') {
+      this.keepaliveTimer = setInterval(() => {
+        if (this.closed) return;
+        try {
+          ws.ping();
+        } catch (err) {
+          this.log?.debug?.({ err }, 'codex-app-server: websocket ping failed');
+        }
+      }, APP_SERVER_PING_INTERVAL_MS);
+    }
   }
 
   async initialize(): Promise<void> {
@@ -334,6 +352,7 @@ class JsonRpcSocket {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.stopKeepalive();
     this.rejectAll(new Error(APP_SERVER_DISCONNECT_MESSAGE));
     this.ws.close();
   }
@@ -392,6 +411,12 @@ class JsonRpcSocket {
       pending.reject(error);
     }
     this.pending.clear();
+  }
+
+  private stopKeepalive(): void {
+    if (this.keepaliveTimer) {
+      clearInterval(this.keepaliveTimer);
+    }
   }
 }
 
