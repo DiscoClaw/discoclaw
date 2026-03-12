@@ -551,7 +551,14 @@ describe('CodexAppServerClient', () => {
 
     await expect(eventsPromise).resolves.toEqual([
       { type: 'text_delta', text: 'partial' },
-      { type: 'error', message: 'codex app-server websocket closed' },
+      expect.objectContaining({
+        type: 'error',
+        message: 'codex app-server websocket closed',
+        failure: expect.objectContaining({
+          code: 'CODEX_APP_SERVER_DISCONNECTED',
+          retryable: false,
+        }),
+      }),
       { type: 'done' },
     ]);
   });

@@ -1,4 +1,5 @@
 import type { LoggerLike } from '../logging/logger-like.js';
+import { countPinnedMessages, normalizePinnedMessages } from './pinned-message-utils.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,6 +19,7 @@ export type ThreadLikeChannel = {
   messages: {
     fetch(opts: { before?: string; limit?: number }): Promise<Map<string, ThreadMessage>>;
     fetchPinned?(): Promise<Map<string, ThreadMessage>>;
+    fetchPins?(): Promise<unknown>;
   };
 };
 
@@ -127,12 +129,21 @@ export async function resolveThreadContext(
 
   // 3. Pinned thread messages (optional)
   if (opts.includePinned && remaining > 50) {
-    const fetchPinned = channel.messages.fetchPinned;
-    if (typeof fetchPinned === 'function') {
+    const fetchFns = [
+      typeof channel.messages.fetchPins === 'function' ? channel.messages.fetchPins : undefined,
+      typeof channel.messages.fetchPinned === 'function' ? channel.messages.fetchPinned : undefined,
+    ].filter((fn): fn is () => Promise<unknown> => typeof fn === 'function');
+    if (fetchFns.length > 0) {
       try {
-        const pinned = await fetchPinned.call(channel.messages);
-        if (pinned && pinned.size > 0) {
-          const sorted = Array.from(pinned.values())
+        let pinnedMessages: ThreadMessage[] = [];
+        for (const fetchPinned of fetchFns) {
+          const pinnedRaw = await fetchPinned.call(channel.messages);
+          pinnedMessages = normalizePinnedMessages<ThreadMessage>(pinnedRaw);
+          const detectedCount = countPinnedMessages(pinnedRaw, -1);
+          if (pinnedMessages.length > 0 || detectedCount === 0) break;
+        }
+        if (pinnedMessages.length > 0) {
+          const sorted = pinnedMessages
             .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
           const pinnedLines: string[] = [];

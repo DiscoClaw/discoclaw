@@ -98,6 +98,7 @@ describe('normalizeRuntimeFailure', () => {
       'CODEX_MODEL_UNSUPPORTED',
       false,
     ],
+    ['codex app-server websocket closed', 'CODEX_APP_SERVER_DISCONNECTED', false],
     ['configuration error: missing required channel context for #ops', 'CHANNEL_CONTEXT_MISSING', false],
     ['context_length_exceeded', 'CONTEXT_LIMIT_EXCEEDED', false],
     ['tool_use.name must be at most 200 characters', 'MCP_TOOL_NAME_TOO_LONG', false],
@@ -113,6 +114,18 @@ describe('normalizeRuntimeFailure', () => {
     const classification = classifyRuntimeFailureForGlobalSupervisor(
       'ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-5-mini\' model is not supported when using Codex with a ChatGPT account."}}',
       { treatAbortedAsRetryable: false, signalAborted: false },
+    );
+
+    expect(classification).toEqual({
+      kind: 'hard_error',
+      retryable: false,
+    });
+  });
+
+  it('treats native Codex app-server disconnects as hard errors for the global supervisor', () => {
+    const classification = classifyRuntimeFailureForGlobalSupervisor(
+      'codex app-server websocket closed',
+      { treatAbortedAsRetryable: true, signalAborted: false },
     );
 
     expect(classification).toEqual({

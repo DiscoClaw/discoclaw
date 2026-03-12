@@ -163,4 +163,37 @@ describe('message coordinator run-state prompt guidance', () => {
     expect(seenPrompt).toContain('Tracked forge/plan run state: a forge or plan run is currently active in this channel.');
     expect(seenPrompt).not.toContain('there is no active forge or plan run in this channel right now');
   });
+
+  it('injects the active-run note in a task thread when the run is registered with both thread and parent forum IDs', async () => {
+    addRunningPlan('plan-1219', ['thread-1', 'forum-1']);
+
+    let seenPrompt = '';
+    const runtime = {
+      id: 'test-runtime',
+      capabilities: new Set(),
+      invoke: vi.fn(async function* (p: any) {
+        seenPrompt = String(p.prompt ?? '');
+        yield { type: 'text_final', text: 'ok' } as any;
+      }),
+    } as any;
+
+    const summaryDir = await fs.mkdtemp(path.join(os.tmpdir(), 'message-run-state-thread-'));
+    const handler = createMessageCreateHandler(makeParams(runtime, summaryDir), makeQueue());
+
+    await handler({
+      ...makeMsg('Status?', 'r3'),
+      channelId: 'thread-1',
+      channel: {
+        send: vi.fn(async () => {}),
+        isThread: () => true,
+        parentId: 'forum-1',
+        name: 'ws-1221',
+        id: 'thread-1',
+        messages: { fetch: vi.fn(async () => makeHistoryCollection([])) },
+      },
+    } as any);
+
+    expect(seenPrompt).toContain('Tracked forge/plan run state: a forge or plan run is currently active in this channel.');
+    expect(seenPrompt).not.toContain('there is no active forge or plan run in this channel right now');
+  });
 });

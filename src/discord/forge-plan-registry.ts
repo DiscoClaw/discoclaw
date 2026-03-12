@@ -34,11 +34,40 @@ export function acquireWriterLock(): Promise<() => void> {
 
 let _activeOrchestrator: ForgeOrchestrator | null = null;
 let _activeForgeChannelId: string | undefined;
+let _activeForgeChannelIds = new Set<string>();
+
+type ActiveChannelIdInput = string | Iterable<string | null | undefined> | null | undefined;
+
+function normalizeChannelIds(input: ActiveChannelIdInput): string[] {
+  const values = typeof input === 'string'
+    ? [input]
+    : input
+      ? Array.from(input)
+      : [];
+
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const trimmed = typeof value === 'string' ? value.trim() : '';
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    out.push(trimmed);
+  }
+  return out;
+}
 
 /** Set the active forge orchestrator (or null to clear). */
-export function setActiveOrchestrator(orch: ForgeOrchestrator | null, channelId?: string): void {
+export function setActiveOrchestrator(orch: ForgeOrchestrator | null, channelIds?: ActiveChannelIdInput): void {
   _activeOrchestrator = orch;
-  _activeForgeChannelId = orch ? channelId : undefined;
+  if (!orch) {
+    _activeForgeChannelId = undefined;
+    _activeForgeChannelIds = new Set();
+    return;
+  }
+
+  const normalized = normalizeChannelIds(channelIds);
+  _activeForgeChannelIds = new Set(normalized);
+  _activeForgeChannelId = normalized[0];
 }
 
 /** Get the active forge orchestrator, if any. */
@@ -62,18 +91,20 @@ export function getActiveForgeChannelId(): string | undefined {
  * Returns false when no forge is running, the forge has no channel info, or the channel doesn't match.
  */
 export function isForgeInChannel(channelId: string): boolean {
-  return _activeOrchestrator?.isRunning === true && _activeForgeChannelId === channelId;
+  return _activeOrchestrator?.isRunning === true && _activeForgeChannelIds.has(channelId);
 }
 
 // ---------------------------------------------------------------------------
 // Running plan IDs — tracks which plans have active phase runs.
 // ---------------------------------------------------------------------------
 
-const _runningPlanIds = new Map<string, string>();
+const _runningPlanIds = new Map<string, string[]>();
 
 /** Mark a plan as having an active phase run, associated with a channel/thread. */
-export function addRunningPlan(planId: string, channelId: string): void {
-  _runningPlanIds.set(planId, channelId);
+export function addRunningPlan(planId: string, channelIds: ActiveChannelIdInput): void {
+  const normalized = normalizeChannelIds(channelIds);
+  if (normalized.length === 0) return;
+  _runningPlanIds.set(planId, normalized);
 }
 
 /** Remove a plan from the active runs set. */
@@ -98,8 +129,8 @@ export function getRunningPlanIds(): ReadonlySet<string> {
  */
 export function isRunActiveInChannel(channelId: string): boolean {
   if (isForgeInChannel(channelId)) return true;
-  for (const ch of _runningPlanIds.values()) {
-    if (ch === channelId) return true;
+  for (const channelIds of _runningPlanIds.values()) {
+    if (channelIds.includes(channelId)) return true;
   }
   return false;
 }
@@ -134,5 +165,6 @@ export function _resetForTest(): void {
   writerLockChain = Promise.resolve();
   _activeOrchestrator = null;
   _activeForgeChannelId = undefined;
+  _activeForgeChannelIds.clear();
   _runningPlanIds.clear();
 }

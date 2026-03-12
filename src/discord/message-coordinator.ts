@@ -15,6 +15,7 @@ import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './
 import type { DeferScheduler } from './defer-scheduler.js';
 import type { DeferActionRequest } from './actions-defer.js';
 import { shouldTriggerFollowUp } from './action-categories.js';
+import { countPinnedMessages, normalizePinnedMessages } from './pinned-message-utils.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import type { CronContext } from './actions-crons.js';
 import type { ForgeContext } from './actions-forge.js';
@@ -381,6 +382,7 @@ type CoordinatorMessage = {
       send: (opts: { content: string; allowedMentions?: unknown; files?: unknown[] }) => Promise<ReplyTarget>;
       messages: {
         fetch: (arg: unknown) => Promise<unknown>;
+        fetchPins?: () => Promise<unknown>;
         fetchPinned?: () => Promise<{ size: number; values(): Iterable<PinnedMessageLike> } | Map<string, unknown>>;
       };
     };
@@ -418,6 +420,7 @@ type PinnedMessageLike = {
 
 type PinnedFetchChannel = {
   messages?: {
+    fetchPins?: () => Promise<unknown>;
     fetchPinned?: () => Promise<{ size: number; values(): Iterable<PinnedMessageLike> }>;
   };
 };
@@ -595,24 +598,36 @@ async function resolvePinnedMessagesSummary(
   maxChars = 600,
 ): Promise<string | undefined> {
   const mgr = channel?.messages as Record<string, unknown> | undefined;
-  // Use fetchPins (non-deprecated) if available, fall back to fetchPinned.
-  // Bind to the manager so `this.client` resolves correctly inside discord.js.
-  const fetchFn = typeof mgr?.fetchPins === 'function'
-    ? (mgr.fetchPins as () => Promise<{ size: number; values(): Iterable<PinnedMessageLike> }>).bind(mgr)
-    : typeof mgr?.fetchPinned === 'function'
-      ? (mgr.fetchPinned as () => Promise<{ size: number; values(): Iterable<PinnedMessageLike> }>).bind(mgr)
-      : undefined;
-  if (!fetchFn) return undefined;
+  const fetchFns = [
+    typeof mgr?.fetchPins === 'function'
+      ? (mgr.fetchPins as () => Promise<unknown>).bind(mgr)
+      : undefined,
+    typeof mgr?.fetchPinned === 'function'
+      ? (mgr.fetchPinned as () => Promise<unknown>).bind(mgr)
+      : undefined,
+  ].filter((fn): fn is () => Promise<unknown> => typeof fn === 'function');
+  if (fetchFns.length === 0) return undefined;
 
   try {
-    const pinned = await fetchFn();
-    if (!pinned || pinned.size === 0) return undefined;
+    let pinnedMessages: PinnedMessageLike[] = [];
+    let pinnedCount = 0;
+    for (const fetchFn of fetchFns) {
+      const pinnedRaw = await fetchFn();
+      pinnedMessages = normalizePinnedMessages<PinnedMessageLike>(pinnedRaw);
+      const detectedCount = countPinnedMessages(pinnedRaw, -1);
+      if (pinnedMessages.length > 0 || detectedCount === 0) {
+        pinnedCount = detectedCount === -1 ? pinnedMessages.length : detectedCount;
+        break;
+      }
+    }
+    if (pinnedMessages.length === 0) return undefined;
+    if (pinnedCount <= 0) pinnedCount = pinnedMessages.length;
 
     const lines: string[] = [];
     let remaining = maxChars;
     const maxMessages = 3;
 
-    for (const pinnedMsg of pinned.values()) {
+    for (const pinnedMsg of pinnedMessages) {
       if (lines.length >= maxMessages) break;
       let content = String(pinnedMsg.content ?? '').replace(/\s+/g, ' ').trim();
       if (!content) {
@@ -639,7 +654,7 @@ async function resolvePinnedMessagesSummary(
 
     if (lines.length === 0) return undefined;
 
-    const header = pinned.size === 1 ? 'Pinned message:' : `Pinned messages (${pinned.size} total):`;
+    const header = pinnedCount === 1 ? 'Pinned message:' : `Pinned messages (${pinnedCount} total):`;
     return [header, ...lines].join('\n');
   } catch (err) {
     log?.warn({ err }, 'discord:context pinned fetch failed');
@@ -1665,7 +1680,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   return;
                 }
 
-                addRunningPlan(planId, msg.channelId);
+                addRunningPlan(planId, [msg.channelId, threadParentId]);
                 try { // outer try: guarantees addRunningPlan cleanup
 
                   // Acquire lock for initial validation only
@@ -2412,7 +2427,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   planForgeHeartbeatIntervalMs: params.planForgeHeartbeatIntervalMs,
                   log: params.log,
                 });
-                setActiveOrchestrator(resumeOrchestrator, msg.channelId);
+                setActiveOrchestrator(resumeOrchestrator, [msg.channelId, threadParentId]);
 
                 const resumeStatus = found.header.status;
                 const resumeProgressMessage = resumeStatus === 'DRAFT' || resumeStatus === 'REVIEW'
@@ -2560,7 +2575,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 taskDescription: taskSummary?.description,
                 pinnedThreadSummary: ctxResult.pinnedSummary,
               });
-              setActiveOrchestrator(createOrchestrator, msg.channelId);
+              setActiveOrchestrator(createOrchestrator, [msg.channelId, threadParentId]);
 
               // Send initial progress message
               const progressReply = await msg.reply({

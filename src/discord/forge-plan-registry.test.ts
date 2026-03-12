@@ -142,6 +142,12 @@ describe('isForgeInChannel', () => {
     expect(isForgeInChannel('channel-456')).toBe(false);
   });
 
+  it('returns true for a parent forum alias when forge was registered from a thread', () => {
+    const fake = { isRunning: true, activePlanId: 'plan-001' } as any;
+    setActiveOrchestrator(fake, ['thread-123', 'forum-123']);
+    expect(isForgeInChannel('forum-123')).toBe(true);
+  });
+
   it('returns false when forge is not running', () => {
     const fake = { isRunning: false, activePlanId: undefined } as any;
     setActiveOrchestrator(fake, 'channel-123');
@@ -200,6 +206,12 @@ describe('running plan IDs', () => {
     addRunningPlan('plan-001', 'ch-1');
     addRunningPlan('plan-001', 'ch-1');
     expect(getRunningPlanIds().size).toBe(1);
+  });
+
+  it('tracks both thread and parent forum aliases for a running plan', () => {
+    addRunningPlan('plan-001', ['thread-123', 'forum-123']);
+    expect(isRunActiveInChannel('thread-123')).toBe(true);
+    expect(isRunActiveInChannel('forum-123')).toBe(true);
   });
 });
 
@@ -270,6 +282,12 @@ describe('isRunActiveInChannel', () => {
     setActiveOrchestrator({ isRunning: true, activePlanId: 'plan-001' } as any, 'ch-1');
     addRunningPlan('plan-002', 'ch-1');
     expect(isRunActiveInChannel('ch-1')).toBe(true);
+  });
+
+  it('returns true when a thread-registered forge or plan run is queried via the parent forum channel', () => {
+    setActiveOrchestrator({ isRunning: true, activePlanId: 'plan-001' } as any, ['thread-1', 'forum-1']);
+    addRunningPlan('plan-002', ['thread-2', 'forum-1']);
+    expect(isRunActiveInChannel('forum-1')).toBe(true);
   });
 
   it('returns true for channel with plan run even if forge is in different channel', () => {

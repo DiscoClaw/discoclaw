@@ -34,6 +34,7 @@ import { configureLoopScheduler } from './discord/actions-loop.js';
 import { startDiscordBot, getActiveForgeId } from './discord.js';
 import { toBootReportMcpStatus, type StatusPoster } from './discord/status-channel.js';
 import { LongRunWatchdog, type LongRunWatchdogRun } from './discord/long-run-watchdog.js';
+import { postLongRunWatchdogNoticeToChannel } from './discord/long-run-watchdog-notice.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
 import { CronScheduler } from './cron/scheduler.js';
@@ -487,17 +488,11 @@ async function postLongRunWatchdogNotice(run: Pick<LongRunWatchdogRun, 'runId' |
       fetch?: (id: string) => Promise<unknown>;
     };
   };
-  const fetchMessage = channelLike.messages?.fetch;
-  if (typeof fetchMessage === 'function') {
-    const source = await fetchMessage.call(channelLike.messages, run.messageId).catch(() => null);
-    const reply = (source as { reply?: unknown } | null)?.reply;
-    if (typeof reply === 'function') {
-      await reply.call(source, { content, allowedMentions: NO_MENTIONS });
-      return;
-    }
-  }
-
-  await channelLike.send({ content, allowedMentions: NO_MENTIONS });
+  await postLongRunWatchdogNoticeToChannel(channelLike, {
+    messageId: run.messageId,
+    content,
+    botUserId: clientRef.user?.id ?? undefined,
+  });
 }
 
 function buildLongRunFinalNotice(run: Pick<LongRunWatchdogRun, 'completion'>, source: 'complete' | 'startup-sweep'): string {

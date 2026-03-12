@@ -215,7 +215,7 @@ export async function executeForgeAction(
         existingTaskId: threadTask.existingTaskId,
         taskDescription: threadTask.taskDescription,
       });
-      setActiveOrchestrator(orchestrator, ctx.channelId);
+      setActiveOrchestrator(orchestrator, [ctx.channelId, ctx.threadParentId]);
       const watchdog = forgeCtx.longRunWatchdog;
       const watchdogRunId = buildForgeWatchdogId('create', ctx, action.description.trim().slice(0, 64) || 'run');
       if (watchdog) {
@@ -319,7 +319,7 @@ export async function executeForgeAction(
           : `Resuming forge review for **${found.header.planId}**...`,
       );
       const orchestrator = forgeCtx.orchestratorFactory();
-      setActiveOrchestrator(orchestrator, ctx.channelId);
+      setActiveOrchestrator(orchestrator, [ctx.channelId, ctx.threadParentId]);
       const watchdog = forgeCtx.longRunWatchdog;
       const watchdogRunId = buildForgeWatchdogId('resume', ctx, found.header.planId);
       if (watchdog) {
