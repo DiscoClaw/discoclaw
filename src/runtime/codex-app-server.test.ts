@@ -527,6 +527,65 @@ describe('CodexAppServerClient', () => {
     expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
   });
 
+  it.each([
+    [
+      'turn/interrupted',
+      {
+        threadId: 'thread-1',
+        turn: {
+          id: 'turn-1',
+          status: 'interrupted',
+          error: { message: 'provider interrupted the turn' },
+        },
+      },
+      'provider interrupted the turn',
+    ],
+    [
+      'turn/cancelled',
+      {
+        threadId: 'thread-1',
+        turn: {
+          id: 'turn-1',
+          status: 'cancelled',
+        },
+      },
+      'codex app-server turn cancelled',
+    ],
+  ] as const)('consumeStream treats %s as terminal instead of hanging', async (method, payload, expectedMessage) => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.open();
+    await startPromise;
+
+    const eventsPromise = collect(client.consumeStream('session-1'));
+    socket.notify('thread/tokenUsage/updated', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      tokenUsage: {
+        last: {
+          totalTokens: 12,
+          inputTokens: 7,
+          outputTokens: 5,
+        },
+      },
+    });
+    socket.notify(method, payload);
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'error', message: expectedMessage },
+      { type: 'usage', inputTokens: 7, outputTokens: 5, totalTokens: 12 },
+      { type: 'done' },
+    ]);
+    expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+  });
+
   it('consumeStream emits an error and done when the websocket disconnects mid-stream', async () => {
     const client = makeClient();
     client.setThread('session-1', 'thread-1');

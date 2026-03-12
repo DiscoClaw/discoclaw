@@ -1002,12 +1002,35 @@ function extractUsage(params: Record<string, unknown> | null): Extract<EngineEve
   };
 }
 
-function extractFailureMessage(params: Record<string, unknown> | null): string {
+function extractTerminalTurnStatus(
+  method: string,
+  params: Record<string, unknown> | null,
+): 'completed' | 'failed' | 'interrupted' | 'cancelled' | undefined {
   const turn = asRecord(params?.turn);
-  return getStringField(params ?? {}, 'message')
+  const status = getStringField(turn ?? {}, 'status');
+  if (status === 'completed' || status === 'failed' || status === 'interrupted' || status === 'cancelled') {
+    return status;
+  }
+  if (method === 'turn/failed') return 'failed';
+  if (method === 'turn/interrupted') return 'interrupted';
+  if (method === 'turn/cancelled') return 'cancelled';
+  if (method === 'turn/completed') return 'completed';
+  return undefined;
+}
+
+function buildTerminalTurnErrorMessage(
+  method: string,
+  params: Record<string, unknown> | null,
+): string {
+  const nestedMessage = getStringField(params ?? {}, 'message')
     ?? getStringField(asRecord(params?.error) ?? {}, 'message')
-    ?? getStringField(asRecord(turn?.error) ?? {}, 'message')
-    ?? 'codex app-server turn failed';
+    ?? getStringField(asRecord(asRecord(params?.turn)?.error) ?? {}, 'message');
+  if (nestedMessage) return nestedMessage;
+
+  const status = extractTerminalTurnStatus(method, params);
+  if (status === 'interrupted') return 'codex app-server turn interrupted';
+  if (status === 'cancelled') return 'codex app-server turn cancelled';
+  return 'codex app-server turn failed';
 }
 
 function selectTerminalUsage(
@@ -1120,13 +1143,15 @@ function mapNotificationToEngineEvents(
       }];
     }
 
-    case 'turn/completed': {
-      const turn = asRecord(params?.turn);
-      const status = getStringField(turn ?? {}, 'status');
+    case 'turn/completed':
+    case 'turn/failed':
+    case 'turn/interrupted':
+    case 'turn/cancelled': {
+      const status = extractTerminalTurnStatus(message.method, params);
       const events: EngineEvent[] = [];
 
-      if (status === 'failed') {
-        events.push({ type: 'error', message: extractFailureMessage(params) });
+      if (status === 'failed' || status === 'interrupted' || status === 'cancelled') {
+        events.push({ type: 'error', message: buildTerminalTurnErrorMessage(message.method, params) });
       } else if (status === 'completed' && state.latestAgentMessageText) {
         events.push({ type: 'text_final', text: state.latestAgentMessageText });
       }
@@ -1138,16 +1163,6 @@ function mapNotificationToEngineEvents(
 
       return dedupeUsageEvents(events);
     }
-
-    case 'turn/failed': {
-      const events: EngineEvent[] = [{ type: 'error', message: extractFailureMessage(params) }];
-      const usage = selectTerminalUsage(params, state);
-      if (usage) {
-        events.push(usage);
-      }
-      return dedupeUsageEvents(events);
-    }
-
     default:
       return [];
   }
@@ -1353,5 +1368,8 @@ function isToolFailureStatus(status: string | undefined): boolean {
 }
 
 function isTerminalNotification(method: string): boolean {
-  return method === 'turn/completed' || method === 'turn/failed';
+  return method === 'turn/completed'
+    || method === 'turn/failed'
+    || method === 'turn/interrupted'
+    || method === 'turn/cancelled';
 }
