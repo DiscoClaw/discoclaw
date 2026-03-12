@@ -1281,6 +1281,22 @@ describe('Codex CLI runtime adapter', () => {
     expect(events).toContainEqual({ type: 'text_final', text: 'native addDirs:/tmp/extra' });
   });
 
+  it('passes stream stall policy through to the native app-server client', () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+
+    createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      streamStallTimeoutMs: 4321,
+    });
+
+    expect(CodexAppServerClientMock).toHaveBeenCalledWith(expect.objectContaining({
+      baseUrl: 'ws://127.0.0.1:4321',
+      streamStallTimeoutMs: 4321,
+    }));
+  });
+
   it('falls back to codex exec when the native app-server websocket cannot connect', async () => {
     process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
     process.env.CODEX_APP_SERVER_NATIVE = '1';

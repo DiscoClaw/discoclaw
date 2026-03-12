@@ -17,6 +17,7 @@ export function killActiveCodexSubprocesses(): void {
 export type CodexCliRuntimeOpts = {
   codexBin: string;
   defaultModel: string;
+  streamStallTimeoutMs?: number;
   dangerouslyBypassApprovalsAndSandbox?: boolean;
   disableSessions?: boolean;
   verbosePreview?: boolean;
@@ -111,6 +112,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
 
   const appServerClient = new CodexAppServerClient({
     baseUrl: appServerUrl,
+    streamStallTimeoutMs: opts.streamStallTimeoutMs,
     dangerouslyBypassApprovalsAndSandbox: opts.dangerouslyBypassApprovalsAndSandbox,
     log: opts.log,
   });

@@ -847,6 +847,7 @@ const codexAppServerUrl = process.env.CODEX_APP_SERVER_URL?.trim() || null;
 const codexRuntimeRaw = createCodexCliRuntime({
   codexBin: cfg.codexBin,
   defaultModel: cfg.codexModel,
+  streamStallTimeoutMs,
   dangerouslyBypassApprovalsAndSandbox: cfg.codexDangerouslyBypassApprovalsAndSandbox,
   disableSessions: cfg.codexDisableSessions,
   verbosePreview: cfg.codexVerbosePreview,

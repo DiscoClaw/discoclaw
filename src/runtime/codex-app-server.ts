@@ -50,6 +50,7 @@ export type CodexAppServerSessionState = {
 export type CodexAppServerClientOpts = {
   baseUrl: string;
   timeoutMs?: number;
+  streamStallTimeoutMs?: number;
   dangerouslyBypassApprovalsAndSandbox?: boolean;
   log?: Logger;
   wsFactory?: (url: string) => WebSocketLike;
@@ -70,6 +71,9 @@ type CodexAppServerThreadCreateOpts = Partial<Pick<RuntimeInvokeParams, 'cwd' | 
 
 type CodexAppServerStartTurnOpts = Partial<Pick<RuntimeInvokeParams, 'cwd' | 'model' | 'reasoningEffort' | 'addDirs'>> & {
   localImagePaths?: string[];
+  hardTimeoutMs?: number;
+  deadlineAt?: number;
+  streamStallTimeoutMs?: number;
 };
 
 export type CodexAppServerTurnHandle = {
@@ -91,11 +95,18 @@ type TurnStreamState = {
   waiters: Array<() => void>;
   closed: boolean;
   eventState: TurnStreamEventState;
+  hardTimeoutMs?: number;
+  deadlineAt?: number;
+  hardTimeoutTimer?: ReturnType<typeof setTimeout>;
+  streamStallTimeoutMs?: number;
+  streamStallTimer?: ReturnType<typeof setTimeout>;
 };
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const APP_SERVER_DISCONNECT_MESSAGE = 'codex app-server websocket closed';
 const EPHEMERAL_SESSION_PREFIX = '__codex_app_server_ephemeral__:';
+const STREAM_STALL_ERROR_CODE = 'codex_app_server_stream_stall';
+const HARD_TIMEOUT_ERROR_CODE = 'codex_app_server_timeout';
 const NATIVE_FALLBACK_ERROR_MESSAGES = new Set([
   'codex app-server websocket failed',
   'codex app-server websocket connect timed out',
@@ -197,6 +208,24 @@ function isMethodNotFoundError(err: unknown): boolean {
 
 function asFiniteNumber(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function asPositiveFiniteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function makeStreamStallError(ms: number): Error {
+  const error = new Error(
+    `stream stall: no output for ${ms}ms — increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS to allow longer gaps (current: ${ms}ms)`,
+  );
+  Object.assign(error, { code: STREAM_STALL_ERROR_CODE });
+  return error;
+}
+
+function makeRuntimeTimeoutError(ms: number): Error {
+  const error = new Error(`codex timed out after ${ms}ms`);
+  Object.assign(error, { code: HARD_TIMEOUT_ERROR_CODE });
+  return error;
 }
 
 class JsonRpcSocket {
@@ -346,6 +375,7 @@ class JsonRpcSocket {
 export class CodexAppServerClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
+  private readonly streamStallTimeoutMs?: number;
   private readonly dangerouslyBypassApprovalsAndSandbox: boolean;
   private readonly log?: Logger;
   private readonly wsFactory: (url: string) => WebSocketLike;
@@ -359,6 +389,7 @@ export class CodexAppServerClient {
   constructor(opts: CodexAppServerClientOpts) {
     this.baseUrl = opts.baseUrl;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.streamStallTimeoutMs = asPositiveFiniteNumber(opts.streamStallTimeoutMs);
     this.dangerouslyBypassApprovalsAndSandbox = Boolean(opts.dangerouslyBypassApprovalsAndSandbox);
     this.log = opts.log;
     this.wsFactory = opts.wsFactory ?? ((url) => new WebSocket(url));
@@ -462,6 +493,7 @@ export class CodexAppServerClient {
           this.setActiveTurn(sessionKey, state.threadId, turnId);
         }
       }
+      this.configureTurnStreamLiveness(sessionKey, streamState, opts);
 
       return {
         threadId: state.threadId,
@@ -524,6 +556,8 @@ export class CodexAppServerClient {
 
     const sessionKey = params.sessionKey ?? this.allocateEphemeralSessionKey();
     const persistentSessionKey = params.sessionKey ?? null;
+    const hardTimeoutMs = asPositiveFiniteNumber(params.timeoutMs);
+    const deadlineAt = hardTimeoutMs ? Date.now() + hardTimeoutMs : undefined;
     let imageCleanup: (() => Promise<void>) | undefined;
 
     try {
@@ -553,6 +587,9 @@ export class CodexAppServerClient {
         reasoningEffort: params.reasoningEffort,
         addDirs: params.addDirs,
         localImagePaths,
+        hardTimeoutMs,
+        deadlineAt,
+        streamStallTimeoutMs: this.resolveEffectiveStreamStallTimeout(hardTimeoutMs),
       }, params.signal);
 
       for await (const event of handle.stream) {
@@ -735,6 +772,7 @@ export class CodexAppServerClient {
     if (!streamMatch) return;
 
     const [sessionKey, streamState] = streamMatch;
+    this.resetTurnStreamStallTimer(sessionKey, streamState);
 
     if (message.method === 'turn/started') {
       const turnId = extractNotificationTurnId(message.params);
@@ -764,6 +802,7 @@ export class CodexAppServerClient {
 
     for (const entry of this.turnStreams.entries()) {
       const [sessionKey, streamState] = entry;
+      if (streamState.closed) continue;
       if (threadId && streamState.threadId !== threadId) continue;
       if (turnId && streamState.turnId && streamState.turnId !== turnId) continue;
       if (turnId && !streamState.turnId) {
@@ -790,6 +829,7 @@ export class CodexAppServerClient {
     opts: { includeDone?: boolean } = {},
   ): void {
     if (streamState.closed) return;
+    this.clearTurnStreamTimers(streamState);
     streamState.closed = true;
     if (opts.includeDone !== false) {
       streamState.queue.push({ type: 'done' });
@@ -832,6 +872,67 @@ export class CodexAppServerClient {
       signal.addEventListener('abort', onAbort, { once: true });
       streamState.waiters.push(waiter);
     });
+  }
+
+  private configureTurnStreamLiveness(
+    sessionKey: string,
+    streamState: TurnStreamState,
+    opts: Pick<CodexAppServerStartTurnOpts, 'hardTimeoutMs' | 'deadlineAt' | 'streamStallTimeoutMs'>,
+  ): void {
+    streamState.hardTimeoutMs = asPositiveFiniteNumber(opts.hardTimeoutMs);
+    streamState.deadlineAt = asPositiveFiniteNumber(opts.deadlineAt);
+    streamState.streamStallTimeoutMs = asPositiveFiniteNumber(opts.streamStallTimeoutMs);
+    this.clearTurnStreamTimers(streamState);
+
+    if (streamState.hardTimeoutMs && streamState.deadlineAt) {
+      const remainingMs = streamState.deadlineAt - Date.now();
+      if (remainingMs <= 0) {
+        this.failTurnStream(sessionKey, streamState, makeRuntimeTimeoutError(streamState.hardTimeoutMs));
+        return;
+      }
+      streamState.hardTimeoutTimer = setTimeout(() => {
+        this.failTurnStream(sessionKey, streamState, makeRuntimeTimeoutError(streamState.hardTimeoutMs!));
+      }, remainingMs);
+    }
+
+    this.resetTurnStreamStallTimer(sessionKey, streamState);
+  }
+
+  private resolveEffectiveStreamStallTimeout(hardTimeoutMs?: number): number | undefined {
+    const stallTimeoutMs = this.streamStallTimeoutMs;
+    if (stallTimeoutMs === undefined) return undefined;
+    if (hardTimeoutMs === undefined) return stallTimeoutMs;
+    return Math.min(stallTimeoutMs, hardTimeoutMs);
+  }
+
+  private resetTurnStreamStallTimer(sessionKey: string, streamState: TurnStreamState): void {
+    const timeoutMs = streamState.streamStallTimeoutMs;
+    if (!timeoutMs || streamState.closed) return;
+    if (streamState.streamStallTimer) {
+      clearTimeout(streamState.streamStallTimer);
+    }
+    streamState.streamStallTimer = setTimeout(() => {
+      this.failTurnStream(sessionKey, streamState, makeStreamStallError(timeoutMs));
+    }, timeoutMs);
+  }
+
+  private clearTurnStreamTimers(streamState: TurnStreamState): void {
+    if (streamState.hardTimeoutTimer) {
+      clearTimeout(streamState.hardTimeoutTimer);
+      streamState.hardTimeoutTimer = undefined;
+    }
+    if (streamState.streamStallTimer) {
+      clearTimeout(streamState.streamStallTimer);
+      streamState.streamStallTimer = undefined;
+    }
+  }
+
+  private failTurnStream(sessionKey: string, streamState: TurnStreamState, error: Error): void {
+    if (streamState.closed) return;
+    void this.interrupt(sessionKey).catch(() => false);
+    this.clearActiveTurn(sessionKey, streamState.turnId);
+    this.enqueueTurnStreamEvent(streamState, createRuntimeErrorEvent(error));
+    this.finishTurnStream(streamState);
   }
 
   private failAllTurnStreams(message: string): void {
