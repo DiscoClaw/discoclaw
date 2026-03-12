@@ -78,6 +78,16 @@ describe('normalizeRuntimeFailure', () => {
     expect(failure.retryable).toBe(true);
   });
 
+  it('classifies progress stall runtime strings with preserved user guidance', () => {
+    const failure = normalizeRuntimeFailure('progress stall: no runtime progress for 45000ms');
+
+    expect(failure.source).toBe('runtime');
+    expect(failure.code).toBe('PROGRESS_STALL');
+    expect(failure.userMessage).toContain('45000ms');
+    expect(failure.userMessage).toContain('45 sec');
+    expect(failure.retryable).toBe(true);
+  });
+
   it('distinguishes gemini auth from generic auth', () => {
     const geminiFailure = normalizeRuntimeFailure('gemini: authentication failed');
     const genericFailure = normalizeRuntimeFailure('unauthorized');
@@ -99,6 +109,7 @@ describe('normalizeRuntimeFailure', () => {
       false,
     ],
     ['codex app-server websocket closed', 'CODEX_APP_SERVER_DISCONNECTED', false],
+    ['progress stall: no runtime progress for 45000ms', 'PROGRESS_STALL', true],
     ['configuration error: missing required channel context for #ops', 'CHANNEL_CONTEXT_MISSING', false],
     ['context_length_exceeded', 'CONTEXT_LIMIT_EXCEEDED', false],
     ['tool_use.name must be at most 200 characters', 'MCP_TOOL_NAME_TOO_LONG', false],
@@ -210,6 +221,15 @@ describe('normalizeRuntimeFailure', () => {
     expect(event.message).toBe('stream stall: no output for 120000ms');
     expect(event.failure?.code).toBe('STREAM_STALL');
     expect(event.failure?.userMessage).toContain('2 min');
+  });
+
+  it('creates progress-stall error events with attached runtime failure envelopes', () => {
+    const event = createRuntimeErrorEvent('progress stall: no runtime progress for 45000ms');
+
+    expect(event.type).toBe('error');
+    expect(event.message).toBe('progress stall: no runtime progress for 45000ms');
+    expect(event.failure?.code).toBe('PROGRESS_STALL');
+    expect(event.failure?.userMessage).toContain('45 sec');
   });
 
   it('prefers event.failure over event.message when both are present', () => {

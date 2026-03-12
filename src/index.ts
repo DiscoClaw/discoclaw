@@ -848,6 +848,7 @@ const codexRuntimeRaw = createCodexCliRuntime({
   codexBin: cfg.codexBin,
   defaultModel: cfg.codexModel,
   streamStallTimeoutMs,
+  progressStallTimeoutMs,
   dangerouslyBypassApprovalsAndSandbox: cfg.codexDangerouslyBypassApprovalsAndSandbox,
   disableSessions: cfg.codexDisableSessions,
   verbosePreview: cfg.codexVerbosePreview,

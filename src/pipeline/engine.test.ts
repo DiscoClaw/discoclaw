@@ -557,6 +557,37 @@ describe('runPipeline', () => {
     expect(capturedTimeouts[1]).toBe(5000);
   });
 
+  it('fails prompt steps on timeout when the runtime only exits after signal abort', async () => {
+    vi.useFakeTimers();
+    try {
+      const runtime: RuntimeAdapter = {
+        id: 'other',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(params): AsyncIterable<EngineEvent> {
+          await new Promise<void>((resolve) => {
+            params.signal?.addEventListener('abort', () => resolve(), { once: true });
+          });
+          yield { type: 'error', message: 'aborted' };
+          yield { type: 'done' };
+        },
+      };
+
+      const runPromise = runPipeline(
+        baseParams({
+          steps: [step('hang forever', { timeoutMs: 5000 })],
+          runtime,
+        }),
+      );
+      const rejection = expect(runPromise).rejects.toThrow('Pipeline step 0 failed: runtime timed out after 5000ms');
+
+      await vi.advanceTimersByTimeAsync(5_001);
+
+      await rejection;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('skips all steps when signal is already aborted', async () => {
     const invoked: string[] = [];
     const runtime: RuntimeAdapter = {
