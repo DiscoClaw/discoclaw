@@ -73,6 +73,8 @@ describe('CodexAppServerClient', () => {
       timeoutMs?: number;
       streamStallTimeoutMs?: number;
       progressStallTimeoutMs?: number;
+      verbosePreview?: boolean;
+      itemTypeDebug?: boolean;
     } = 50,
   ): CodexAppServerClient {
     const timeoutMs = typeof timeoutMsOrOpts === 'number'
@@ -86,6 +88,12 @@ describe('CodexAppServerClient', () => {
         : {}),
       ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.progressStallTimeoutMs !== undefined
         ? { progressStallTimeoutMs: timeoutMsOrOpts.progressStallTimeoutMs }
+        : {}),
+      ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.verbosePreview !== undefined
+        ? { verbosePreview: timeoutMsOrOpts.verbosePreview }
+        : {}),
+      ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.itemTypeDebug !== undefined
+        ? { itemTypeDebug: timeoutMsOrOpts.itemTypeDebug }
         : {}),
       wsFactory: () => {
         const socket = new MockWebSocket();
@@ -498,6 +506,143 @@ describe('CodexAppServerClient', () => {
       { type: 'text_final', text: 'hello world' },
       { type: 'done' },
     ]);
+  });
+
+  it('surfaces native preview/debug lifecycle events for reasoning and commands', async () => {
+    const client = makeClient({
+      verbosePreview: true,
+      itemTypeDebug: true,
+    });
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turn: { id: 'turn-1', items: [], status: 'inProgress', error: null } });
+    });
+    socket.open();
+    await startPromise;
+
+    const eventsPromise = collect(client.consumeStream('session-1'));
+    socket.notify('turn/started', {
+      threadId: 'thread-1',
+      turn: { id: 'turn-1', status: 'inProgress' },
+    });
+    socket.notify('item/started', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: {
+        id: 'reason-1',
+        type: 'reasoning',
+        status: 'inProgress',
+      },
+    });
+    socket.notify('item/completed', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: {
+        id: 'reason-1',
+        type: 'reasoning',
+        summary: 'Planning the patch carefully.',
+      },
+    });
+    socket.notify('item/started', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: {
+        id: 'cmd-1',
+        type: 'commandExecution',
+        command: 'rg native',
+        cwd: '/tmp/discoclaw',
+        status: 'inProgress',
+      },
+    });
+    socket.notify('item/completed', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: {
+        id: 'cmd-1',
+        type: 'commandExecution',
+        command: 'rg native',
+        aggregatedOutput: 'src/runtime/codex-app-server.ts',
+        exitCode: 0,
+        status: 'completed',
+      },
+    });
+    socket.notify('item/agentMessage/delta', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'msg-1',
+      delta: 'done',
+    });
+    socket.notify('turn/completed', {
+      threadId: 'thread-1',
+      turn: { id: 'turn-1', items: [], status: 'completed', error: null },
+    });
+
+    const events = await eventsPromise;
+
+    expect(events).toContainEqual({ type: 'log_line', stream: 'stdout', line: 'Native Codex turn started.' });
+    expect(events).toContainEqual({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'started',
+      itemType: 'reasoning',
+      itemId: 'reason-1',
+      status: 'inProgress',
+      label: 'Hypothesis: reasoning in progress.',
+    });
+    expect(events).toContainEqual({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'completed',
+      itemType: 'reasoning',
+      itemId: 'reason-1',
+      label: 'Reasoning: Planning the patch carefully.',
+    });
+    expect(events).toContainEqual({ type: 'log_line', stream: 'stdout', line: 'Reasoning completed: Planning the patch carefully.' });
+    expect(events).toContainEqual({ type: 'thinking_delta', text: 'Planning the patch carefully.' });
+    expect(events).toContainEqual({
+      type: 'tool_start',
+      name: 'command_execution',
+      input: { command: 'rg native', cwd: '/tmp/discoclaw' },
+    });
+    expect(events).toContainEqual({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'started',
+      itemType: 'command_execution',
+      itemId: 'cmd-1',
+      status: 'inProgress',
+    });
+    expect(events).toContainEqual({ type: 'log_line', stream: 'stdout', line: 'Command started: rg native' });
+    expect(events).toContainEqual({
+      type: 'tool_end',
+      name: 'command_execution',
+      ok: true,
+      output: {
+        command: 'rg native',
+        exitCode: 0,
+        output: 'src/runtime/codex-app-server.ts',
+      },
+    });
+    expect(events).toContainEqual({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'completed',
+      itemType: 'command_execution',
+      itemId: 'cmd-1',
+      status: 'completed',
+    });
+    expect(events).toContainEqual({
+      type: 'log_line',
+      stream: 'stdout',
+      line: 'Command output: src/runtime/codex-app-server.ts',
+    });
+    expect(events).toContainEqual({ type: 'text_delta', text: 'done' });
+    expect(events).toContainEqual({ type: 'text_final', text: 'done' });
+    expect(events.at(-1)).toEqual({ type: 'done' });
   });
 
   it('consumeStream treats turn/failed as terminal and preserves nested error + usage details', async () => {

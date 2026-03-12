@@ -1299,6 +1299,24 @@ describe('Codex CLI runtime adapter', () => {
     }));
   });
 
+  it('passes native preview/debug flags through to the app-server client', () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+
+    createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      verbosePreview: true,
+      itemTypeDebug: true,
+    });
+
+    expect(CodexAppServerClientMock).toHaveBeenCalledWith(expect.objectContaining({
+      baseUrl: 'ws://127.0.0.1:4321',
+      verbosePreview: true,
+      itemTypeDebug: true,
+    }));
+  });
+
   it('falls back to codex exec when the native app-server websocket cannot connect', async () => {
     process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
     process.env.CODEX_APP_SERVER_NATIVE = '1';

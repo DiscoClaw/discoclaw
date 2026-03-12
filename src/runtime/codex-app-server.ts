@@ -7,6 +7,8 @@ import type { ImageData, EngineEvent, RuntimeInvokeParams } from './types.js';
 
 type Logger = {
   debug?(...args: unknown[]): void;
+  info?(...args: unknown[]): void;
+  warn?(...args: unknown[]): void;
 };
 
 type JsonRpcRequestId = number;
@@ -52,6 +54,8 @@ export type CodexAppServerClientOpts = {
   timeoutMs?: number;
   streamStallTimeoutMs?: number;
   progressStallTimeoutMs?: number;
+  verbosePreview?: boolean;
+  itemTypeDebug?: boolean;
   dangerouslyBypassApprovalsAndSandbox?: boolean;
   log?: Logger;
   wsFactory?: (url: string) => WebSocketLike;
@@ -395,6 +399,8 @@ export class CodexAppServerClient {
   private readonly timeoutMs: number;
   private readonly streamStallTimeoutMs?: number;
   private readonly progressStallTimeoutMs?: number;
+  private readonly verbosePreview: boolean;
+  private readonly itemTypeDebug: boolean;
   private readonly dangerouslyBypassApprovalsAndSandbox: boolean;
   private readonly log?: Logger;
   private readonly wsFactory: (url: string) => WebSocketLike;
@@ -410,6 +416,8 @@ export class CodexAppServerClient {
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.streamStallTimeoutMs = asPositiveFiniteNumber(opts.streamStallTimeoutMs);
     this.progressStallTimeoutMs = asPositiveFiniteNumber(opts.progressStallTimeoutMs);
+    this.verbosePreview = Boolean(opts.verbosePreview);
+    this.itemTypeDebug = Boolean(opts.itemTypeDebug);
     this.dangerouslyBypassApprovalsAndSandbox = Boolean(opts.dangerouslyBypassApprovalsAndSandbox);
     this.log = opts.log;
     this.wsFactory = opts.wsFactory ?? ((url) => new WebSocket(url));
@@ -802,10 +810,12 @@ export class CodexAppServerClient {
         streamState.turnId = turnId;
         this.setActiveTurn(sessionKey, streamState.threadId, turnId);
       }
-      return;
     }
 
-    const events = mapNotificationToEngineEvents(message, streamState.eventState);
+    const events = mapNotificationToEngineEvents(message, streamState.eventState, {
+      verbosePreview: this.verbosePreview,
+      itemTypeDebug: this.itemTypeDebug,
+    });
     this.noteTurnStreamProgress(sessionKey, streamState, events);
     for (const event of events) {
       this.enqueueTurnStreamEvent(streamState, event);
@@ -1266,13 +1276,120 @@ function getItemType(item: Record<string, unknown> | null): string | undefined {
   return getStringField(item, 'type');
 }
 
+function normalizePreviewItemType(itemType: string | undefined): string {
+  if (!itemType) return 'item';
+  return itemType
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[\s-]+/g, '_')
+    .toLowerCase();
+}
+
+function compactPreviewText(text: string, maxChars = 160): string {
+  const compact = text
+    .replace(/\r\n?/g, '\n')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (compact.length <= maxChars) return compact;
+  return maxChars <= 3 ? compact.slice(0, maxChars) : `${compact.slice(0, maxChars - 3)}...`;
+}
+
+function humanizePreviewItemType(itemType: string): string {
+  return itemType
+    .split(/[_\s-]+/g)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function extractReasoningPreviewText(item: Record<string, unknown> | null): string | undefined {
+  if (!item) return undefined;
+  const preview = getStringField(item, 'summary', 'text');
+  return preview ? compactPreviewText(preview, 180) : undefined;
+}
+
+function buildItemPreviewDebugEvent(
+  phase: 'started' | 'completed',
+  item: Record<string, unknown> | null,
+): Extract<EngineEvent, { type: 'preview_debug' }> | null {
+  if (!item) return null;
+
+  const itemType = normalizePreviewItemType(getItemType(item));
+  if (itemType === 'agent_message' || itemType === 'user_message') return null;
+
+  const itemId = getStringField(item, 'id');
+  const status = getStringField(item, 'status');
+  const reasoningPreview = extractReasoningPreviewText(item);
+  const label = itemType === 'reasoning'
+    ? (phase === 'started'
+      ? 'Hypothesis: reasoning in progress.'
+      : (reasoningPreview ? `Reasoning: ${reasoningPreview}` : undefined))
+    : undefined;
+
+  return {
+    type: 'preview_debug',
+    source: 'codex',
+    phase,
+    itemType,
+    ...(itemId ? { itemId } : {}),
+    ...(status ? { status: compactPreviewText(status, 80) } : {}),
+    ...(label ? { label } : {}),
+  };
+}
+
+function buildItemPreviewLine(
+  phase: 'started' | 'completed',
+  item: Record<string, unknown> | null,
+): string | null {
+  if (!item) return null;
+
+  const itemType = normalizePreviewItemType(getItemType(item));
+  if (itemType === 'agent_message' || itemType === 'user_message') return null;
+
+  const status = getStringField(item, 'status');
+  const suffix = status ? ` (${compactPreviewText(status, 80)})` : '';
+
+  if (itemType === 'reasoning') {
+    const reasoningPreview = extractReasoningPreviewText(item);
+    return reasoningPreview
+      ? `Reasoning ${phase}: ${reasoningPreview}`
+      : `Reasoning ${phase}${suffix}.`;
+  }
+
+  if (itemType === 'command_execution') {
+    const command = getStringField(item, 'command');
+    const exitCode = asFiniteNumber(item.exitCode ?? item.exit_code);
+    if (phase === 'started') {
+      return command
+        ? `Command started: ${compactPreviewText(command, 220)}`
+        : `Command started${suffix}.`;
+    }
+
+    const output = getStringField(item, 'aggregatedOutput', 'aggregated_output');
+    if (output) return `Command output: ${compactPreviewText(output, 220)}`;
+    if (exitCode !== undefined) return `Command completed (exit ${exitCode}).`;
+    return `Command completed${suffix}.`;
+  }
+
+  const note = getStringField(item, 'note');
+  if (note) return `${humanizePreviewItemType(itemType)} ${phase}: ${compactPreviewText(note, 180)}`;
+  return `${humanizePreviewItemType(itemType)} ${phase}${suffix}.`;
+}
+
 function mapNotificationToEngineEvents(
   message: JsonRpcNotification,
   state: TurnStreamEventState,
+  opts: { verbosePreview: boolean; itemTypeDebug: boolean },
 ): EngineEvent[] {
   const params = asRecord(message.params);
 
   switch (message.method) {
+    case 'turn/started':
+      return opts.verbosePreview ? [{
+        type: 'log_line',
+        stream: 'stdout',
+        line: 'Native Codex turn started.',
+      }] : [];
+
     case 'item/agentMessage/delta': {
       const itemId = getStringField(params ?? {}, 'itemId', 'item_id');
       const text = extractTextDelta(params);
@@ -1297,10 +1414,10 @@ function mapNotificationToEngineEvents(
     }
 
     case 'item/started':
-      return mapItemStartedEvent(asRecord(params?.item));
+      return mapItemStartedEvent(asRecord(params?.item), opts);
 
     case 'item/completed':
-      return mapItemCompletedEvent(asRecord(params?.item), state);
+      return mapItemCompletedEvent(asRecord(params?.item), state, opts);
 
     case 'turn/text_delta': {
       const text = extractTextDelta(params);
@@ -1357,19 +1474,54 @@ function mapNotificationToEngineEvents(
   }
 }
 
-function mapItemStartedEvent(item: Record<string, unknown> | null): EngineEvent[] {
+function mapItemStartedEvent(
+  item: Record<string, unknown> | null,
+  opts: { verbosePreview: boolean; itemTypeDebug: boolean },
+): EngineEvent[] {
+  const previewEvents: EngineEvent[] = [];
+  if (opts.itemTypeDebug) {
+    const debugEvent = buildItemPreviewDebugEvent('started', item);
+    if (debugEvent) previewEvents.push(debugEvent);
+  }
+  if (opts.verbosePreview) {
+    const previewLine = buildItemPreviewLine('started', item);
+    if (previewLine) {
+      previewEvents.push({ type: 'log_line', stream: 'stdout', line: previewLine });
+    }
+  }
+
   const toolStart = mapItemToToolStart(item);
-  return toolStart ? [toolStart] : [];
+  return toolStart ? [toolStart, ...previewEvents] : previewEvents;
 }
 
 function mapItemCompletedEvent(
   item: Record<string, unknown> | null,
   state: TurnStreamEventState,
+  opts: { verbosePreview: boolean; itemTypeDebug: boolean },
 ): EngineEvent[] {
   if (!item) return [];
 
-  const itemType = getItemType(item);
-  if (itemType === 'agentMessage' || itemType === 'agent_message') {
+  const previewEvents: EngineEvent[] = [];
+  if (opts.itemTypeDebug) {
+    const debugEvent = buildItemPreviewDebugEvent('completed', item);
+    if (debugEvent) previewEvents.push(debugEvent);
+  }
+  if (opts.verbosePreview) {
+    const previewLine = buildItemPreviewLine('completed', item);
+    if (previewLine) {
+      previewEvents.push({ type: 'log_line', stream: 'stdout', line: previewLine });
+    }
+  }
+
+  const itemType = normalizePreviewItemType(getItemType(item));
+  if (itemType === 'reasoning') {
+    const text = getStringField(item, 'summary', 'text');
+    return text
+      ? [...previewEvents, { type: 'thinking_delta', text }]
+      : previewEvents;
+  }
+
+  if (itemType === 'agent_message') {
     const text = getStringField(item, 'text');
     if (!text) return [];
 
@@ -1377,21 +1529,21 @@ function mapItemCompletedEvent(
     state.latestAgentMessageText = text;
 
     if (!itemId) {
-      return [{ type: 'text_delta', text }];
+      return [...previewEvents, { type: 'text_delta', text }];
     }
 
     const streamedText = state.agentMessageTextByItemId.get(itemId) ?? '';
     state.agentMessageTextByItemId.set(itemId, text);
-    if (text === streamedText) return [];
+    if (text === streamedText) return previewEvents;
 
     return [{
       type: 'text_delta',
       text: text.startsWith(streamedText) ? text.slice(streamedText.length) : text,
-    }];
+    }, ...previewEvents];
   }
 
   const toolEnd = mapItemToToolEnd(item);
-  return toolEnd ? [toolEnd] : [];
+  return toolEnd ? [toolEnd, ...previewEvents] : previewEvents;
 }
 
 function mapItemToToolStart(item: Record<string, unknown> | null): Extract<EngineEvent, { type: 'tool_start' }> | null {
