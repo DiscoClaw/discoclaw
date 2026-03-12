@@ -115,6 +115,8 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     baseUrl: appServerUrl,
     streamStallTimeoutMs: opts.streamStallTimeoutMs,
     progressStallTimeoutMs: opts.progressStallTimeoutMs,
+    verbosePreview: opts.verbosePreview,
+    itemTypeDebug: opts.itemTypeDebug,
     dangerouslyBypassApprovalsAndSandbox: opts.dangerouslyBypassApprovalsAndSandbox,
     log: opts.log,
   });
