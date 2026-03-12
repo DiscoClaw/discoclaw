@@ -26,6 +26,14 @@ describe('MetricsRegistry', () => {
     expect(snap.counters['invoke.message.error_class.stream_stall']).toBe(1);
   });
 
+  it('classifies progress stall errors as progress_stall', () => {
+    const m = new MetricsRegistry();
+    m.recordInvokeResult('message', 45000, false, 'progress stall: no runtime progress for 45000ms');
+
+    const snap = m.snapshot();
+    expect(snap.counters['invoke.message.error_class.progress_stall']).toBe(1);
+  });
+
   it('includes memory stats when a memory sampler is configured', () => {
     const m = new MetricsRegistry();
     m.setMemorySampler({

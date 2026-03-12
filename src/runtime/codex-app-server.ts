@@ -51,6 +51,7 @@ export type CodexAppServerClientOpts = {
   baseUrl: string;
   timeoutMs?: number;
   streamStallTimeoutMs?: number;
+  progressStallTimeoutMs?: number;
   dangerouslyBypassApprovalsAndSandbox?: boolean;
   log?: Logger;
   wsFactory?: (url: string) => WebSocketLike;
@@ -74,6 +75,7 @@ type CodexAppServerStartTurnOpts = Partial<Pick<RuntimeInvokeParams, 'cwd' | 'mo
   hardTimeoutMs?: number;
   deadlineAt?: number;
   streamStallTimeoutMs?: number;
+  progressStallTimeoutMs?: number;
 };
 
 export type CodexAppServerTurnHandle = {
@@ -100,12 +102,18 @@ type TurnStreamState = {
   hardTimeoutTimer?: ReturnType<typeof setTimeout>;
   streamStallTimeoutMs?: number;
   streamStallTimer?: ReturnType<typeof setTimeout>;
+  progressStallTimeoutMs?: number;
+  initialProgressTimeoutMs?: number;
+  progressStallTimer?: ReturnType<typeof setTimeout>;
+  progressObserved: boolean;
 };
 
 const DEFAULT_TIMEOUT_MS = 5_000;
+const DEFAULT_INITIAL_PROGRESS_TIMEOUT_MS = 45_000;
 const APP_SERVER_DISCONNECT_MESSAGE = 'codex app-server websocket closed';
 const EPHEMERAL_SESSION_PREFIX = '__codex_app_server_ephemeral__:';
 const STREAM_STALL_ERROR_CODE = 'codex_app_server_stream_stall';
+const PROGRESS_STALL_ERROR_CODE = 'codex_app_server_progress_stall';
 const HARD_TIMEOUT_ERROR_CODE = 'codex_app_server_timeout';
 const NATIVE_FALLBACK_ERROR_MESSAGES = new Set([
   'codex app-server websocket failed',
@@ -225,6 +233,16 @@ function makeStreamStallError(ms: number): Error {
 function makeRuntimeTimeoutError(ms: number): Error {
   const error = new Error(`codex timed out after ${ms}ms`);
   Object.assign(error, { code: HARD_TIMEOUT_ERROR_CODE });
+  return error;
+}
+
+function makeProgressStallError(ms: number, scope: 'initial' | 'ongoing'): Error {
+  const error = new Error(
+    scope === 'initial'
+      ? `progress stall: no runtime progress for ${ms}ms (native turn produced no text or tool events)`
+      : `progress stall: no runtime progress for ${ms}ms`,
+  );
+  Object.assign(error, { code: PROGRESS_STALL_ERROR_CODE });
   return error;
 }
 
@@ -376,6 +394,7 @@ export class CodexAppServerClient {
   private readonly baseUrl: string;
   private readonly timeoutMs: number;
   private readonly streamStallTimeoutMs?: number;
+  private readonly progressStallTimeoutMs?: number;
   private readonly dangerouslyBypassApprovalsAndSandbox: boolean;
   private readonly log?: Logger;
   private readonly wsFactory: (url: string) => WebSocketLike;
@@ -390,6 +409,7 @@ export class CodexAppServerClient {
     this.baseUrl = opts.baseUrl;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.streamStallTimeoutMs = asPositiveFiniteNumber(opts.streamStallTimeoutMs);
+    this.progressStallTimeoutMs = asPositiveFiniteNumber(opts.progressStallTimeoutMs);
     this.dangerouslyBypassApprovalsAndSandbox = Boolean(opts.dangerouslyBypassApprovalsAndSandbox);
     this.log = opts.log;
     this.wsFactory = opts.wsFactory ?? ((url) => new WebSocket(url));
@@ -590,6 +610,7 @@ export class CodexAppServerClient {
         hardTimeoutMs,
         deadlineAt,
         streamStallTimeoutMs: this.resolveEffectiveStreamStallTimeout(hardTimeoutMs),
+        progressStallTimeoutMs: this.resolveEffectiveProgressStallTimeout(hardTimeoutMs),
       }, params.signal);
 
       for await (const event of handle.stream) {
@@ -748,6 +769,7 @@ export class CodexAppServerClient {
       eventState: {
         agentMessageTextByItemId: new Map(),
       },
+      progressObserved: false,
     };
 
     this.turnStreams.set(sessionKey, streamState);
@@ -784,6 +806,7 @@ export class CodexAppServerClient {
     }
 
     const events = mapNotificationToEngineEvents(message, streamState.eventState);
+    this.noteTurnStreamProgress(sessionKey, streamState, events);
     for (const event of events) {
       this.enqueueTurnStreamEvent(streamState, event);
     }
@@ -877,11 +900,18 @@ export class CodexAppServerClient {
   private configureTurnStreamLiveness(
     sessionKey: string,
     streamState: TurnStreamState,
-    opts: Pick<CodexAppServerStartTurnOpts, 'hardTimeoutMs' | 'deadlineAt' | 'streamStallTimeoutMs'>,
+    opts: Pick<CodexAppServerStartTurnOpts, 'hardTimeoutMs' | 'deadlineAt' | 'streamStallTimeoutMs' | 'progressStallTimeoutMs'>,
   ): void {
     streamState.hardTimeoutMs = asPositiveFiniteNumber(opts.hardTimeoutMs);
     streamState.deadlineAt = asPositiveFiniteNumber(opts.deadlineAt);
     streamState.streamStallTimeoutMs = asPositiveFiniteNumber(opts.streamStallTimeoutMs);
+    streamState.progressStallTimeoutMs = asPositiveFiniteNumber(opts.progressStallTimeoutMs);
+    streamState.initialProgressTimeoutMs = this.resolveInitialProgressTimeout(
+      streamState.progressStallTimeoutMs,
+      streamState.streamStallTimeoutMs,
+      streamState.hardTimeoutMs,
+    );
+    streamState.progressObserved = false;
     this.clearTurnStreamTimers(streamState);
 
     if (streamState.hardTimeoutMs && streamState.deadlineAt) {
@@ -896,6 +926,7 @@ export class CodexAppServerClient {
     }
 
     this.resetTurnStreamStallTimer(sessionKey, streamState);
+    this.resetTurnProgressTimer(sessionKey, streamState);
   }
 
   private resolveEffectiveStreamStallTimeout(hardTimeoutMs?: number): number | undefined {
@@ -903,6 +934,29 @@ export class CodexAppServerClient {
     if (stallTimeoutMs === undefined) return undefined;
     if (hardTimeoutMs === undefined) return stallTimeoutMs;
     return Math.min(stallTimeoutMs, hardTimeoutMs);
+  }
+
+  private resolveEffectiveProgressStallTimeout(hardTimeoutMs?: number): number | undefined {
+    const stallTimeoutMs = this.progressStallTimeoutMs;
+    if (stallTimeoutMs === undefined) return undefined;
+    if (hardTimeoutMs === undefined) return stallTimeoutMs;
+    return Math.min(stallTimeoutMs, hardTimeoutMs);
+  }
+
+  private resolveInitialProgressTimeout(
+    progressStallTimeoutMs?: number,
+    streamStallTimeoutMs?: number,
+    hardTimeoutMs?: number,
+  ): number | undefined {
+    const candidates = [
+      DEFAULT_INITIAL_PROGRESS_TIMEOUT_MS,
+      progressStallTimeoutMs,
+      streamStallTimeoutMs,
+      hardTimeoutMs,
+    ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0);
+
+    if (candidates.length === 0) return undefined;
+    return Math.min(...candidates);
   }
 
   private resetTurnStreamStallTimer(sessionKey: string, streamState: TurnStreamState): void {
@@ -916,6 +970,36 @@ export class CodexAppServerClient {
     }, timeoutMs);
   }
 
+  private resetTurnProgressTimer(sessionKey: string, streamState: TurnStreamState): void {
+    const timeoutMs = streamState.progressObserved
+      ? streamState.progressStallTimeoutMs
+      : streamState.initialProgressTimeoutMs;
+    if (streamState.progressStallTimer) {
+      clearTimeout(streamState.progressStallTimer);
+      streamState.progressStallTimer = undefined;
+    }
+    if (!timeoutMs || streamState.closed) return;
+    streamState.progressStallTimer = setTimeout(() => {
+      this.failTurnStream(
+        sessionKey,
+        streamState,
+        makeProgressStallError(timeoutMs, streamState.progressObserved ? 'ongoing' : 'initial'),
+      );
+    }, timeoutMs);
+  }
+
+  private noteTurnStreamProgress(
+    sessionKey: string,
+    streamState: TurnStreamState,
+    events: EngineEvent[],
+  ): void {
+    if (!events.some((event) => isProgressEvent(event))) {
+      return;
+    }
+    streamState.progressObserved = true;
+    this.resetTurnProgressTimer(sessionKey, streamState);
+  }
+
   private clearTurnStreamTimers(streamState: TurnStreamState): void {
     if (streamState.hardTimeoutTimer) {
       clearTimeout(streamState.hardTimeoutTimer);
@@ -924,6 +1008,10 @@ export class CodexAppServerClient {
     if (streamState.streamStallTimer) {
       clearTimeout(streamState.streamStallTimer);
       streamState.streamStallTimer = undefined;
+    }
+    if (streamState.progressStallTimer) {
+      clearTimeout(streamState.progressStallTimer);
+      streamState.progressStallTimer = undefined;
     }
   }
 
@@ -1462,6 +1550,14 @@ function dedupeUsageEvents(events: EngineEvent[]): EngineEvent[] {
     seenUsage = true;
     return true;
   });
+}
+
+function isProgressEvent(event: EngineEvent): boolean {
+  return event.type === 'text_delta'
+    || event.type === 'text_final'
+    || event.type === 'thinking_delta'
+    || event.type === 'tool_start'
+    || event.type === 'tool_end';
 }
 
 function isToolFailureStatus(status: string | undefined): boolean {

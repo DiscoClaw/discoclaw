@@ -595,6 +595,31 @@ function classifyRawRuntimeFailure(rawMessage: string): RuntimeFailure {
     });
   }
 
+  if (lc.includes('progress stall')) {
+    const msMatch = message.match(/for (\d+)ms/i);
+    const userMessage = msMatch
+      ? (() => {
+          const ms = parseInt(msMatch[1]!, 10);
+          const humanDuration = ms >= 60000
+            ? `${Math.round(ms / 60000)} min`
+            : `${Math.round(ms / 1000)} sec`;
+          return (
+            `The runtime stopped making visible progress for ${ms}ms / ${humanDuration}. ` +
+            'This usually means the model is stuck or the provider stopped streaming tool/text activity. Retry once; if it repeats, inspect the native runtime logs.'
+          );
+        })()
+      : 'The runtime stopped making visible progress. Retry once; if it repeats, inspect the native runtime logs.';
+
+    return createRuntimeFailure({
+      source: 'runtime',
+      code: 'PROGRESS_STALL',
+      message,
+      rawMessage,
+      userMessage,
+      retryable: true,
+    });
+  }
+
   if (lc.includes('configuration error: missing required channel context')) {
     return createRuntimeFailure({
       source: 'runtime',
@@ -755,6 +780,7 @@ export function classifyRuntimeFailureForGlobalSupervisor(
     if (
       failure.code === 'RUNTIME_TIMEOUT'
       || failure.code === 'STREAM_STALL'
+      || failure.code === 'PROGRESS_STALL'
       || SUPERVISOR_TRANSIENT_ERROR_RE.test(message)
     ) {
       return {

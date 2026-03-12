@@ -69,7 +69,11 @@ describe('CodexAppServerClient', () => {
   });
 
   function makeClient(
-    timeoutMsOrOpts: number | { timeoutMs?: number; streamStallTimeoutMs?: number } = 50,
+    timeoutMsOrOpts: number | {
+      timeoutMs?: number;
+      streamStallTimeoutMs?: number;
+      progressStallTimeoutMs?: number;
+    } = 50,
   ): CodexAppServerClient {
     const timeoutMs = typeof timeoutMsOrOpts === 'number'
       ? timeoutMsOrOpts
@@ -79,6 +83,9 @@ describe('CodexAppServerClient', () => {
       timeoutMs,
       ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.streamStallTimeoutMs !== undefined
         ? { streamStallTimeoutMs: timeoutMsOrOpts.streamStallTimeoutMs }
+        : {}),
+      ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.progressStallTimeoutMs !== undefined
+        ? { progressStallTimeoutMs: timeoutMsOrOpts.progressStallTimeoutMs }
         : {}),
       wsFactory: () => {
         const socket = new MockWebSocket();
@@ -704,10 +711,10 @@ describe('CodexAppServerClient', () => {
     expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
   });
 
-  it('invokeViaTurn fails cleanly when a native turn goes idle with no terminal notifications', async () => {
+  it('invokeViaTurn fails cleanly when a native turn produces no progress after start', async () => {
     vi.useFakeTimers();
     try {
-      const client = makeClient({ timeoutMs: 50, streamStallTimeoutMs: 5_000 });
+      const client = makeClient({ timeoutMs: 50 });
 
       const eventsPromise = collect(client.invokeViaTurn({
         prompt: 'answer this',
@@ -729,9 +736,59 @@ describe('CodexAppServerClient', () => {
       });
       socket.open();
 
+      await vi.advanceTimersByTimeAsync(45_001);
+
+      await expect(eventsPromise).resolves.toEqual([
+        expect.objectContaining({
+          type: 'error',
+          message: 'progress stall: no runtime progress for 45000ms (native turn produced no text or tool events)',
+          failure: expect.objectContaining({
+            code: 'PROGRESS_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+      expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invokeViaTurn fails cleanly when a native turn goes idle after initial progress', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient({ timeoutMs: 50, streamStallTimeoutMs: 5_000 });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+        socket.notify('turn/text_delta', {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          text: 'first chunk',
+        });
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+
       await vi.advanceTimersByTimeAsync(5_001);
 
       await expect(eventsPromise).resolves.toEqual([
+        { type: 'text_delta', text: 'first chunk' },
         expect.objectContaining({
           type: 'error',
           message: 'stream stall: no output for 5000ms — increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS to allow longer gaps (current: 5000ms)',

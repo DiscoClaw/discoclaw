@@ -23,6 +23,7 @@ function classifyError(message?: string): string {
   if (msg.includes('missing permissions') || msg.includes('missing access')) return 'discord_permissions';
   if (msg.includes('unauthorized') || msg.includes('auth')) return 'auth';
   if (msg.includes('stream stall')) return 'stream_stall';
+  if (msg.includes('progress stall')) return 'progress_stall';
   return 'other';
 }
 

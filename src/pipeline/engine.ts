@@ -238,6 +238,53 @@ function sanitizeCollectedPromptStepText(text: string): string {
   return text.replace(NON_TERMINAL_PROGRESS_LINE_RE, '');
 }
 
+function createPromptStepTimeoutGuard(
+  signal?: AbortSignal,
+  timeoutMs?: number,
+): {
+  signal?: AbortSignal;
+  clear: () => void;
+  didTimeout: () => boolean;
+} {
+  if (timeoutMs === undefined || !Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    return {
+      signal,
+      clear: () => {},
+      didTimeout: () => false,
+    };
+  }
+
+  const controller = new AbortController();
+  let timedOut = false;
+  let removeParentAbortListener = () => {};
+
+  if (signal) {
+    const onAbort = () => {
+      controller.abort(signal.reason);
+    };
+    if (signal.aborted) {
+      onAbort();
+    } else {
+      signal.addEventListener('abort', onAbort, { once: true });
+      removeParentAbortListener = () => signal.removeEventListener('abort', onAbort);
+    }
+  }
+
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort(new Error(`runtime timed out after ${timeoutMs}ms`));
+  }, timeoutMs);
+
+  return {
+    signal: controller.signal,
+    clear: () => {
+      clearTimeout(timer);
+      removeParentAbortListener();
+    },
+    didTimeout: () => timedOut,
+  };
+}
+
 /**
  * Execute a sequence of steps where each step's text output is made
  * available as context for subsequent steps.
@@ -374,11 +421,12 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
 
     const stepRuntime = step.runtime ?? runtime;
 
+    const timeoutGuard = createPromptStepTimeoutGuard(signal, step.timeoutMs);
     const invokeParams: RuntimeInvokeParams = {
       prompt: resolvedPrompt,
       model: step.model ?? model,
       cwd,
-      signal,
+      signal: timeoutGuard.signal,
       ...(step.tools !== undefined && { tools: step.tools }),
       ...(step.addDirs !== undefined && { addDirs: step.addDirs }),
       ...(step.timeoutMs !== undefined && { timeoutMs: step.timeoutMs }),
@@ -389,16 +437,21 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
 
     let text: string;
     try {
-      text = await collectText(stepRuntime.invoke(invokeParams), signal, loopDetect);
+      text = await collectText(stepRuntime.invoke(invokeParams), timeoutGuard.signal, loopDetect);
     } catch (err) {
       if (step.onError === 'skip') {
         outputs.push('');
         onProgress?.(`step ${stepId}: skipped`);
+        timeoutGuard.clear();
         continue;
       }
-      const message = err instanceof Error ? err.message : String(err);
+      const message = timeoutGuard.didTimeout()
+        ? `runtime timed out after ${step.timeoutMs}ms`
+        : (err instanceof Error ? err.message : String(err));
+      timeoutGuard.clear();
       throw new Error(`Pipeline step ${i} failed: ${message}`);
     }
+    timeoutGuard.clear();
 
     outputs.push(text);
     onProgress?.(`step ${stepId}: done`);

@@ -44,6 +44,13 @@ describe('mapRuntimeErrorToUserMessage', () => {
     expect(msg).not.toContain('ms /');
   });
 
+  it('maps progress stall errors to progress-specific user guidance', () => {
+    const msg = mapRuntimeErrorToUserMessage('progress stall: no runtime progress for 45000ms');
+    expect(msg).toContain('stopped making visible progress');
+    expect(msg).toContain('45000ms');
+    expect(msg).toContain('45 sec');
+  });
+
   it('maps "Prompt is too long" to context overflow user message', () => {
     const msg = mapRuntimeErrorToUserMessage('Prompt is too long');
     expect(msg).toBe('The conversation context exceeded the model\'s limit. Try a shorter message or start a new conversation.');
@@ -107,5 +114,17 @@ describe('normalizeRuntimeError', () => {
     expect(failure.code).toBe('STREAM_STALL');
     expect(failure.retryable).toBe(true);
     expect(failure.userMessage).toContain('2 min');
+  });
+
+  it('normalizes progress stall error events through the shared classifier', () => {
+    const failure = normalizeRuntimeError({
+      type: 'error',
+      message: 'progress stall: no runtime progress for 45000ms',
+    });
+
+    expect(failure.source).toBe('runtime');
+    expect(failure.code).toBe('PROGRESS_STALL');
+    expect(failure.retryable).toBe(true);
+    expect(failure.userMessage).toContain('45 sec');
   });
 });
