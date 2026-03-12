@@ -93,6 +93,7 @@ export type ProjectedPipelineFailure = {
 const SUPERVISOR_TRANSIENT_ERROR_RE = /(timed?\s*out|timeout|rate\s*limit|429|overload|temporar|econnreset|eai_again|503|connection\s+reset|network\s+error|service\s+unavailable)/i;
 const SUPERVISOR_HARD_ERROR_RE = /(invalid\s+api\s+key|unauthoriz|forbidden|permission\s+denied|outside\s+allowed\s+roots|malformed\s+json)/i;
 const SUPERVISOR_ABORTED_RE = /abort(ed)?/i;
+const CODEX_UNSUPPORTED_MODEL_RE = /the ['"`]?([^'"`\s]+)['"`]? model is not supported when using codex with a chatgpt account/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -525,6 +526,21 @@ function classifyRawRuntimeFailure(rawMessage: string): RuntimeFailure {
       message,
       rawMessage,
       userMessage: 'Gemini CLI authentication is missing or expired. Re-authenticate Gemini CLI and retry.',
+      retryable: false,
+    });
+  }
+
+  const unsupportedCodexModelMatch = CODEX_UNSUPPORTED_MODEL_RE.exec(rawMessage) ?? CODEX_UNSUPPORTED_MODEL_RE.exec(message);
+  if (unsupportedCodexModelMatch) {
+    const rejectedModel = unsupportedCodexModelMatch[1]!.trim();
+    return createRuntimeFailure({
+      source: 'runtime',
+      code: 'CODEX_MODEL_UNSUPPORTED',
+      message,
+      rawMessage,
+      userMessage:
+        `Codex rejected model "${rejectedModel}" for ChatGPT-account auth. ` +
+        'Use a Codex-supported model for this runtime (for example a Codex tier like `fast`, `capable`, or the configured adapter default) and retry.',
       retryable: false,
     });
   }

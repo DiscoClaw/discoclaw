@@ -144,6 +144,55 @@ export function resolveModel(tierOrModel: string, runtimeId: RuntimeId): string 
   return runtimeTiers[tierOrModel];
 }
 
+function findExactTierForRuntimeModel(runtimeId: string, normalizedModel: string): ModelTier | undefined {
+  const runtimeTiers = tierMap[runtimeId];
+  if (!runtimeTiers) return undefined;
+  for (const tier of MODEL_TIERS) {
+    if (normalizeModelLookup(runtimeTiers[tier]) === normalizedModel) {
+      return tier;
+    }
+  }
+  return undefined;
+}
+
+export type CrossRuntimeTierModelRemap = {
+  sourceRuntimeId: string;
+  sourceTier: ModelTier;
+  targetRuntimeId: RuntimeId;
+  model: string;
+};
+
+/**
+ * Remap a concrete model that exactly matches another runtime's tier default
+ * onto the equivalent tier for the target runtime.
+ *
+ * This is intentionally narrow and only applies to exact live tier-map
+ * matches, so arbitrary literal models still pass through unchanged.
+ */
+export function remapCrossRuntimeTierModel(
+  model: string,
+  targetRuntimeId: RuntimeId,
+): CrossRuntimeTierModelRemap | null {
+  const normalized = normalizeModelLookup(model);
+  if (!normalized || isModelTier(normalized)) return null;
+
+  const sourceRuntimeId = findExactRuntimeForModel(normalized);
+  if (sourceRuntimeId == null || sourceRuntimeId === targetRuntimeId) return null;
+
+  const sourceTier = findExactTierForRuntimeModel(sourceRuntimeId, normalized);
+  if (!sourceTier) return null;
+
+  const targetModel = tierMap[targetRuntimeId]?.[sourceTier];
+  if (!targetModel || normalizeModelLookup(targetModel) === normalized) return null;
+
+  return {
+    sourceRuntimeId,
+    sourceTier,
+    targetRuntimeId,
+    model: targetModel,
+  };
+}
+
 export function listKnownModelValues(): string[] {
   const values: string[] = [];
   const seen = new Set<string>();

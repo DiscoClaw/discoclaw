@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  classifyRuntimeFailureForGlobalSupervisor,
   createRuntimeErrorEvent,
   GLOBAL_SUPERVISOR_BAIL_PREFIX,
   RUNTIME_FAILURE_PREFIX,
@@ -92,6 +93,11 @@ describe('normalizeRuntimeFailure', () => {
     ['Discord missing permissions for channel send', 'DISCORD_MISSING_PERMISSIONS', false],
     ['spawn claude ENOENT', 'CLAUDE_CLI_NOT_FOUND', false],
     ['spawn gemini ENOENT', 'GEMINI_CLI_NOT_FOUND', false],
+    [
+      'ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-5-mini\' model is not supported when using Codex with a ChatGPT account."}}',
+      'CODEX_MODEL_UNSUPPORTED',
+      false,
+    ],
     ['configuration error: missing required channel context for #ops', 'CHANNEL_CONTEXT_MISSING', false],
     ['context_length_exceeded', 'CONTEXT_LIMIT_EXCEEDED', false],
     ['tool_use.name must be at most 200 characters', 'MCP_TOOL_NAME_TOO_LONG', false],
@@ -101,6 +107,18 @@ describe('normalizeRuntimeFailure', () => {
     expect(failure.source).toBe('runtime');
     expect(failure.code).toBe(code);
     expect(failure.retryable).toBe(retryable);
+  });
+
+  it('treats unsupported Codex models as hard errors for the global supervisor', () => {
+    const classification = classifyRuntimeFailureForGlobalSupervisor(
+      'ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-5-mini\' model is not supported when using Codex with a ChatGPT account."}}',
+      { treatAbortedAsRetryable: false, signalAborted: false },
+    );
+
+    expect(classification).toEqual({
+      kind: 'hard_error',
+      retryable: false,
+    });
   });
 
   it('falls back to unknown runtime failures without dropping the message', () => {

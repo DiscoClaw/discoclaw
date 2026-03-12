@@ -357,6 +357,42 @@ describe('Codex CLI runtime adapter', () => {
     expect(callArgs[modelIdx + 1]).toBe('gpt-5.3-codex');
   });
 
+  it('remaps openai fast-tier literals onto codex-compatible models on CLI fallback paths', async () => {
+    const log = {
+      debug: vi.fn(),
+      warn: vi.fn(),
+    };
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'cli remap ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.4',
+      log,
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Summarize',
+      model: 'gpt-5-mini',
+      cwd: '/tmp/non-default-cwd',
+    }));
+
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    const modelIdx = callArgs.indexOf('-m');
+    expect(callArgs[modelIdx + 1]).toBe('gpt-5.1-codex-mini');
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedModel: 'gpt-5-mini',
+        effectiveModel: 'gpt-5.1-codex-mini',
+        sourceRuntimeId: 'openai',
+        sourceTier: 'fast',
+      }),
+      'codex:model remapped to codex-compatible tier default',
+    );
+  });
+
   it('large prompt uses stdin instead of positional arg', async () => {
     const largePrompt = 'x'.repeat(200_000);
     mockExeca.mockReturnValue(createMockSubprocess({
@@ -1071,6 +1107,45 @@ describe('Codex CLI runtime adapter', () => {
       cwd: process.cwd(),
     }));
     expect(events).toContainEqual({ type: 'text_final', text: 'native path' });
+  });
+
+  it('remaps openai fast-tier literals before invoking the native app-server path', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+    const log = {
+      debug: vi.fn(),
+      warn: vi.fn(),
+    };
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.4',
+      log,
+    });
+    const client = appServerInstances[0]!;
+
+    await collectEvents(rt.invoke({
+      prompt: 'Use native path',
+      model: 'gpt-5-mini',
+      cwd: process.cwd(),
+      sessionKey: 'native-remap-session',
+    }));
+
+    expect(mockExeca).not.toHaveBeenCalled();
+    expect(client.invokeViaTurn).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gpt-5.1-codex-mini',
+      sessionKey: 'native-remap-session',
+      cwd: process.cwd(),
+    }));
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedModel: 'gpt-5-mini',
+        effectiveModel: 'gpt-5.1-codex-mini',
+        sourceRuntimeId: 'openai',
+        sourceTier: 'fast',
+      }),
+      'codex:model remapped to codex-compatible tier default',
+    );
   });
 
   it('keeps image turns on the legacy codex exec path even when native mode is enabled', async () => {

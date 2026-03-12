@@ -1,11 +1,12 @@
 // Codex runtime adapter.
 // Uses the Codex app-server as the primary turn transport when configured,
-// and falls back to the CLI adapter only when no app-server URL is present.
+// and falls back to the CLI adapter when native transport is unavailable.
 
 import path from 'node:path';
 import type { RuntimeAdapter, RuntimeInvokeParams } from './types.js';
 import { createCliRuntime, killAllSubprocesses } from './cli-adapter.js';
 import { CodexAppServerClient } from './codex-app-server.js';
+import { remapCrossRuntimeTierModel, resolveReasoningEffort } from './model-tiers.js';
 import { createCodexStrategy } from './strategies/codex-strategy.js';
 
 /** SIGKILL all tracked Codex subprocesses (e.g. on SIGTERM). */
@@ -21,7 +22,11 @@ export type CodexCliRuntimeOpts = {
   verbosePreview?: boolean;
   itemTypeDebug?: boolean;
   appendSystemPrompt?: string;
-  log?: { debug(...args: unknown[]): void; info?(...args: unknown[]): void };
+  log?: {
+    debug(...args: unknown[]): void;
+    info?(...args: unknown[]): void;
+    warn?(...args: unknown[]): void;
+  };
 };
 
 const NATIVE_APP_SERVER_FALLBACK_NOTICE = 'App-server unavailable, falling back to CLI';
@@ -41,9 +46,28 @@ function normalizeInvokeParams(
   params: RuntimeInvokeParams,
   opts: CodexCliRuntimeOpts,
 ): RuntimeInvokeParams {
+  const requestedModel = params.model || opts.defaultModel;
+  const remappedModel = remapCrossRuntimeTierModel(requestedModel, 'codex');
+  const effectiveModel = remappedModel?.model ?? requestedModel;
+  const effectiveReasoningEffort = params.reasoningEffort
+    ?? (remappedModel ? resolveReasoningEffort(remappedModel.sourceTier, 'codex') : undefined);
+
+  if (remappedModel) {
+    opts.log?.warn?.(
+      {
+        requestedModel,
+        effectiveModel,
+        sourceRuntimeId: remappedModel.sourceRuntimeId,
+        sourceTier: remappedModel.sourceTier,
+      },
+      'codex:model remapped to codex-compatible tier default',
+    );
+  }
+
   return {
     ...params,
-    model: params.model || opts.defaultModel,
+    model: effectiveModel,
+    ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
     systemPrompt: mergeSystemPrompt(params.systemPrompt, opts.appendSystemPrompt),
     ...(opts.disableSessions ? { sessionKey: undefined } : {}),
   };
@@ -76,7 +100,14 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     log: opts.log,
   });
 
-  if (!appServerUrl || !nativeEnabled) return baseAdapter;
+  if (!appServerUrl || !nativeEnabled) {
+    return {
+      ...baseAdapter,
+      invoke(params) {
+        return baseAdapter.invoke(normalizeInvokeParams(params, opts));
+      },
+    };
+  }
 
   const appServerClient = new CodexAppServerClient({
     baseUrl: appServerUrl,
@@ -89,22 +120,24 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     capabilities: new Set([...baseAdapter.capabilities, 'mid_turn_steering']),
     invoke(params) {
       return (async function* () {
-        if (params.images && params.images.length > 0) {
-          for await (const event of baseAdapter.invoke(params)) {
+        const normalizedParams = normalizeInvokeParams(params, opts);
+
+        if (normalizedParams.images && normalizedParams.images.length > 0) {
+          for await (const event of baseAdapter.invoke(normalizedParams)) {
             yield event;
           }
           return;
         }
 
-        if (hasNonDefaultCwd(params.cwd, defaultCwd)) {
-          for await (const event of baseAdapter.invoke(params)) {
+        if (hasNonDefaultCwd(normalizedParams.cwd, defaultCwd)) {
+          for await (const event of baseAdapter.invoke(normalizedParams)) {
             yield event;
           }
           return;
         }
 
         try {
-          for await (const event of appServerClient.invokeViaTurn(normalizeInvokeParams(params, opts))) {
+          for await (const event of appServerClient.invokeViaTurn(normalizedParams)) {
             yield event;
           }
         } catch (err) {
@@ -113,7 +146,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
             type: 'text_delta' as const,
             text: NATIVE_APP_SERVER_FALLBACK_NOTICE,
           };
-          for await (const event of baseAdapter.invoke(params)) {
+          for await (const event of baseAdapter.invoke(normalizedParams)) {
             yield event;
           }
         }

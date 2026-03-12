@@ -4,6 +4,7 @@ import {
   findRuntimeForModel,
   initTierOverrides,
   isModelTier,
+  remapCrossRuntimeTierModel,
   resolveModel,
   resolveReasoningEffort,
 } from './model-tiers.js';
@@ -234,5 +235,37 @@ describe('findRuntimeForModel', () => {
       DISCOCLAW_TIER_OPENROUTER_FAST: 'sonnet',
     });
     expect(findRuntimeForModel('sonnet')).toBeUndefined();
+  });
+});
+
+describe('remapCrossRuntimeTierModel', () => {
+  afterEach(() => {
+    initTierOverrides({});
+  });
+
+  it('maps openai fast-tier defaults onto codex fast-tier defaults', () => {
+    expect(remapCrossRuntimeTierModel('gpt-5-mini', 'codex')).toEqual({
+      sourceRuntimeId: 'openai',
+      sourceTier: 'fast',
+      targetRuntimeId: 'codex',
+      model: 'gpt-5.1-codex-mini',
+    });
+  });
+
+  it('maps openai deep-tier defaults onto codex deep-tier defaults', () => {
+    expect(remapCrossRuntimeTierModel('gpt-5.4-pro', 'codex')).toEqual({
+      sourceRuntimeId: 'openai',
+      sourceTier: 'deep',
+      targetRuntimeId: 'codex',
+      model: 'gpt-5.4',
+    });
+  });
+
+  it('does not remap ambiguous cross-runtime models', () => {
+    expect(remapCrossRuntimeTierModel('gpt-5.4', 'codex')).toBeNull();
+  });
+
+  it('does not remap arbitrary literal models outside the tier map', () => {
+    expect(remapCrossRuntimeTierModel('gpt-4o', 'codex')).toBeNull();
   });
 });
