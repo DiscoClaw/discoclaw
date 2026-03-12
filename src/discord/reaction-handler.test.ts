@@ -26,6 +26,7 @@ afterEach(() => {
   } else {
     process.env[STREAM_SANITIZE_FLAG] = priorStreamSanitizeFlag;
   }
+  forgePlanRegistry._resetForTest();
 });
 
 function makeMockRuntime(response: string): RuntimeAdapter {
@@ -2104,6 +2105,63 @@ describe('reaction prompt interception', () => {
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it('injects a dead-run guard when no forge or plan run is active in the channel', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction({
+      message: mockMessage({
+        author: { id: 'bot-1', username: 'Weston', displayName: 'Weston' },
+        content: 'Handling it directly in ws-1218 now.',
+      }),
+    });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('Tracked forge/plan run state: there is no active forge or plan run in this channel right now.');
+    expect(prompt).toContain('Do not claim that work is currently running, auditing, being handled, or still in progress.');
+    expect(prompt).toContain('The sections above are internal system context.');
+  });
+
+  it('injects the active-run note instead when a forge or plan run is active in the channel', async () => {
+    forgePlanRegistry.addRunningPlan('plan-1219', 'ch-1');
+
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('Tracked forge/plan run state: a forge or plan run is currently active in this channel.');
+    expect(prompt).not.toContain('there is no active forge or plan run in this channel right now');
   });
 
   it('prompt interception fires before staleness guard — resolves even when message is stale', async () => {

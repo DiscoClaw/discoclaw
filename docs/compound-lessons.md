@@ -37,7 +37,7 @@ Use the following source taxonomy when deciding whether raw material qualifies f
 - Postmortems: promote the corrective principle, guardrail, or planning rule derived from incident analysis, not the incident narrative itself.
 - Chat and workflow context: promote only discoveries backed by repeated friction, a resolved confusion, or a codified workflow change that future engineers should inherit.
 
-Before adding an entry, search this file for the same pattern, affected subsystem, and likely tags. If an existing lesson already covers the issue, update that entry with the refined lesson text, source, or applied reference instead of creating a duplicate. Add a new entry only when the new lesson is materially distinct.
+Before adding an entry, search this file for the same pattern, affected subsystem, and likely tags. If an existing lesson already covers the issue, update that entry with the refined lesson text, source, or applied reference instead of creating a duplicate. Add a new entry only when the new lesson is materially distinct. If the search finds no matching entry and the current change still does not yield materially distinct reusable guidance, record an explicit "no promotion needed" decision in the PR or review discussion instead of forcing a lesson entry.
 
 The review gate is mandatory: every PR that introduces or codifies one of the triggers above must be reviewed for lesson promotion before merge. The review must record one explicit decision: update an existing lesson, add a materially distinct new lesson, or record that no promotion is needed. If no new or updated lesson is needed, the PR description or review discussion should make that judgment explicit.
 

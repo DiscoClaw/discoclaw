@@ -29,13 +29,13 @@ import {
   RuntimeSignalBudgetTracker,
   runtimeSupportsNativeThinkingStream,
 } from './runtime-signal-budget.js';
+import { buildRunStateGuidance } from './run-state-guidance.js';
 
 type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
 const STREAM_STALL_PROGRESS_UPDATE_MS = 30_000;
 const STREAMING_EDIT_TIMEOUT_MS = 4_000;
 const STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD = 3;
 const STREAMING_EDIT_TIMEOUT_COOLDOWN_MS = 10_000;
-
 async function waitForEditOrTimeout(editOp: Promise<unknown>, timeoutMs: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const completed = await Promise.race<boolean>([
@@ -519,6 +519,8 @@ function createReactionHandler(
             ].filter((line): line is string => Boolean(line));
             prompt += `\n\n---\n${noteLines.join('\n')}\n`;
           }
+
+          prompt += `\n\n---\n${buildRunStateGuidance(reaction.message.channelId)}\n`;
 
           // Separator and user content — absolute last in prompt.
           prompt +=

@@ -6,14 +6,32 @@ import type { EngineEvent } from './types.js';
 const { appServerInstances, CodexAppServerClientMock, mockExeca } = vi.hoisted(() => {
   const appServerInstances: any[] = [];
   const CodexAppServerClientMock = vi.fn().mockImplementation((opts: { baseUrl: string }) => {
+    const sessionThreads = new Map<string, string>();
+    const turnHistory: string[] = [];
+    let nextThreadId = 1;
     const instance = {
       opts,
+      sessionThreads,
+      turnHistory,
       noteThreadStarted: vi.fn(),
       noteTurnStarted: vi.fn(),
       noteTurnCompleted: vi.fn(),
       getSessionState: vi.fn(),
       steer: vi.fn(async () => true),
       interrupt: vi.fn(async () => true),
+      invokeViaTurn: vi.fn(async function* (params: { sessionKey?: string | null }) {
+        const sessionKey = typeof params.sessionKey === 'string' && params.sessionKey.length > 0
+          ? params.sessionKey
+          : null;
+        let threadId = sessionKey ? sessionThreads.get(sessionKey) : undefined;
+        if (!threadId) {
+          threadId = `native-thread-${nextThreadId++}`;
+          if (sessionKey) sessionThreads.set(sessionKey, threadId);
+        }
+        turnHistory.push(threadId);
+        yield { type: 'text_final', text: `native:${threadId}` };
+        yield { type: 'done' };
+      }),
     };
     appServerInstances.push(instance);
     return instance;
@@ -47,6 +65,13 @@ async function collectEvents(iter: AsyncIterable<EngineEvent>): Promise<EngineEv
 
 function jsonl(lines: string[]): string {
   return `${lines.join('\n')}\n`;
+}
+
+async function* eventStream(events: EngineEvent[], err?: unknown): AsyncIterable<EngineEvent> {
+  if (err) throw err;
+  for (const event of events) {
+    yield event;
+  }
 }
 
 /** Create a mock subprocess that mimics execa's ResultPromise shape. */
@@ -152,6 +177,7 @@ describe('Codex CLI runtime adapter', () => {
   const originalHardening = process.env.DISCOCLAW_CLI_LAUNCHER_STATE_HARDENING;
   const originalStableHome = process.env.DISCOCLAW_CODEX_STABLE_HOME;
   const originalAppServerUrl = process.env.CODEX_APP_SERVER_URL;
+  const originalAppServerNative = process.env.CODEX_APP_SERVER_NATIVE;
 
   beforeEach(() => {
     mockExeca.mockReset();
@@ -160,6 +186,7 @@ describe('Codex CLI runtime adapter', () => {
     delete process.env.DISCOCLAW_CLI_LAUNCHER_STATE_HARDENING;
     delete process.env.DISCOCLAW_CODEX_STABLE_HOME;
     delete process.env.CODEX_APP_SERVER_URL;
+    delete process.env.CODEX_APP_SERVER_NATIVE;
   });
 
   afterEach(() => {
@@ -177,6 +204,11 @@ describe('Codex CLI runtime adapter', () => {
       delete process.env.CODEX_APP_SERVER_URL;
     } else {
       process.env.CODEX_APP_SERVER_URL = originalAppServerUrl;
+    }
+    if (originalAppServerNative === undefined) {
+      delete process.env.CODEX_APP_SERVER_NATIVE;
+    } else {
+      process.env.CODEX_APP_SERVER_NATIVE = originalAppServerNative;
     }
   });
 
@@ -987,15 +1019,10 @@ describe('Codex CLI runtime adapter', () => {
     expect(CodexAppServerClientMock).not.toHaveBeenCalled();
   });
 
-  it('adds mid-turn steering controls and tracks turn lifecycle when CODEX_APP_SERVER_URL is set', async () => {
-    process.env.CODEX_APP_SERVER_URL = 'http://127.0.0.1:4321/api';
-    mockExeca.mockReturnValue(createMockSubprocess({
-      stdout: jsonl([
-        '{"type":"thread.started","thread_id":"thread-1"}',
-        '{"type":"turn.started","turn_id":"turn-1"}',
-        '{"type":"item.completed","item":{"type":"agent_message","text":"hello"}}',
-        '{"type":"turn.completed","turn_id":"turn-1","usage":{}}',
-      ]),
+  it('keeps the legacy CLI path when CODEX_APP_SERVER_URL is set without CODEX_APP_SERVER_NATIVE=1', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    mockExeca.mockImplementation(() => createMockSubprocess({
+      stdout: 'cli only',
       exitCode: 0,
     }));
 
@@ -1004,29 +1031,364 @@ describe('Codex CLI runtime adapter', () => {
       defaultModel: 'gpt-5.3-codex',
     });
 
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: process.cwd(),
+    }));
+
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(CodexAppServerClientMock).not.toHaveBeenCalled();
+    expect(rt.capabilities.has('mid_turn_steering')).toBe(false);
+    expect(events).toContainEqual({ type: 'text_final', text: 'cli only' });
+  });
+
+  it('delegates invoke() to the native app-server path only when CODEX_APP_SERVER_NATIVE=1 and CODEX_APP_SERVER_URL is set', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+    const client = appServerInstances[0]!;
+    client.invokeViaTurn.mockImplementation((params: any) => eventStream([
+      { type: 'text_delta', text: `native:${params.sessionKey}` },
+      { type: 'text_final', text: 'native path' },
+      { type: 'done' },
+    ]));
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: process.cwd(),
+      sessionKey: 'native-session',
+    }));
+
+    expect(mockExeca).not.toHaveBeenCalled();
+    expect(client.invokeViaTurn).toHaveBeenCalledWith(expect.objectContaining({
+      sessionKey: 'native-session',
+      cwd: process.cwd(),
+    }));
+    expect(events).toContainEqual({ type: 'text_final', text: 'native path' });
+  });
+
+  it('keeps image turns on the legacy codex exec path even when native mode is enabled', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+    mockExeca.mockImplementation(() => createMockSubprocess({
+      stdout: 'cli image fallback',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: process.cwd(),
+      images: [{ base64: 'aGVsbG8=', mediaType: 'image/png' }],
+    }));
+
+    expect(appServerInstances[0]?.invokeViaTurn).not.toHaveBeenCalled();
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual({ type: 'text_final', text: 'cli image fallback' });
+  });
+
+  it('keeps non-default cwd turns on the legacy codex exec path even when native mode is enabled', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+    mockExeca.mockImplementation(() => createMockSubprocess({
+      stdout: 'cli cwd fallback',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+    const workspaceCwd = path.resolve(process.cwd(), 'workspace');
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: workspaceCwd,
+    }));
+
+    expect(appServerInstances[0]?.invokeViaTurn).not.toHaveBeenCalled();
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual({ type: 'text_final', text: 'cli cwd fallback' });
+  });
+
+  it('non-default cwd CLI bypass preserves the session so a later native bootstrap fallback can resume it', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+    const workspaceCwd = path.resolve(process.cwd(), 'workspace');
+
+    mockExeca.mockImplementationOnce(() => createMockSubprocess({
+      stdout: jsonl([
+        '{"type":"thread.started","thread_id":"thread-cwd-bypass"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"seeded by cwd bypass"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]),
+      exitCode: 0,
+    }));
+
+    await collectEvents(rt.invoke({
+      prompt: 'Seed CLI session',
+      model: '',
+      cwd: workspaceCwd,
+      sessionKey: 'cwd-bypass-session',
+    }));
+
+    const client = appServerInstances[0]!;
+    client.invokeViaTurn.mockImplementation(() => eventStream([], new Error('codex app-server websocket failed')));
+    mockExeca.mockImplementationOnce(() => createMockSubprocess({
+      stdout: jsonl([
+        '{"type":"thread.started","thread_id":"thread-cwd-bypass"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"resumed after native fallback"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]),
+      exitCode: 0,
+    }));
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Fallback to CLI',
+      model: '',
+      cwd: process.cwd(),
+      sessionKey: 'cwd-bypass-session',
+    }));
+
+    expect(client.invokeViaTurn).toHaveBeenCalledTimes(1);
+    expect(mockExeca).toHaveBeenCalledTimes(2);
+    const resumeArgs = mockExeca.mock.calls[1]![1] as string[];
+    expect(resumeArgs[0]).toBe('exec');
+    expect(resumeArgs[1]).toBe('resume');
+    expect(resumeArgs[2]).toBe('thread-cwd-bypass');
+    expect(events).toContainEqual({ type: 'text_delta', text: 'App-server unavailable, falling back to CLI' });
+    expect(events).toContainEqual({ type: 'text_final', text: 'resumed after native fallback' });
+  });
+
+  it('allows addDirs turns onto the native app-server path when native mode is enabled', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+    const client = appServerInstances[0]!;
+    client.invokeViaTurn.mockImplementation((params: any) => eventStream([
+      { type: 'text_final', text: `native addDirs:${(params.addDirs ?? []).join(',')}` },
+      { type: 'done' },
+    ]));
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: process.cwd(),
+      addDirs: ['/tmp/extra'],
+    }));
+
+    expect(mockExeca).not.toHaveBeenCalled();
+    expect(client.invokeViaTurn).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: process.cwd(),
+      addDirs: ['/tmp/extra'],
+    }));
+    expect(events).toContainEqual({ type: 'text_final', text: 'native addDirs:/tmp/extra' });
+  });
+
+  it('falls back to codex exec when the native app-server websocket cannot connect', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+    mockExeca.mockImplementation(() => createMockSubprocess({
+      stdout: jsonl([
+        '{"type":"thread.started","thread_id":"thread-fallback-ws"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"cli websocket fallback"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]),
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+    const client = appServerInstances[0]!;
+    client.invokeViaTurn.mockImplementation(() => eventStream([], new Error('codex app-server websocket failed')));
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: process.cwd(),
+      sessionKey: 'fallback-session',
+    }));
+
+    expect(client.invokeViaTurn).toHaveBeenCalledTimes(1);
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual({ type: 'text_delta', text: 'App-server unavailable, falling back to CLI' });
+    expect(events).toContainEqual({ type: 'text_final', text: 'cli websocket fallback' });
+  });
+
+  it('falls back to codex exec when native app-server initialize fails', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+    mockExeca.mockImplementation(() => createMockSubprocess({
+      stdout: jsonl([
+        '{"type":"thread.started","thread_id":"thread-fallback-init"}',
+        '{"type":"item.completed","item":{"type":"agent_message","text":"cli initialize fallback"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]),
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+    const client = appServerInstances[0]!;
+
+    client.invokeViaTurn.mockImplementation(() => eventStream([], new Error('codex app-server initialize failed')));
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Use native path',
+      model: '',
+      cwd: process.cwd(),
+      sessionKey: 'native-session',
+    }));
+
+    expect(client.invokeViaTurn).toHaveBeenCalledTimes(1);
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual({ type: 'text_delta', text: 'App-server unavailable, falling back to CLI' });
+    expect(events).toContainEqual({ type: 'text_final', text: 'cli initialize fallback' });
+  });
+
+  it('reuses the stored native thread on a second turn with the same sessionKey', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+    const client = appServerInstances[0]!;
+
+    await collectEvents(rt.invoke({
+      prompt: 'Round 1',
+      model: '',
+      cwd: process.cwd(),
+      sessionKey: 'native-reuse-session',
+    }));
+    await collectEvents(rt.invoke({
+      prompt: 'Round 2',
+      model: '',
+      cwd: process.cwd(),
+      sessionKey: 'native-reuse-session',
+    }));
+
+    expect(mockExeca).not.toHaveBeenCalled();
+    expect(client.invokeViaTurn).toHaveBeenCalledTimes(2);
+    expect(client.sessionThreads.get('native-reuse-session')).toBe('native-thread-1');
+    expect(client.turnHistory).toEqual(['native-thread-1', 'native-thread-1']);
+  });
+
+  it('native mode with disableSessions creates a fresh thread each time and stores no session state', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      disableSessions: true,
+    });
+    const client = appServerInstances[0]!;
+
+    await collectEvents(rt.invoke({
+      prompt: 'Round 1',
+      model: '',
+      cwd: process.cwd(),
+      sessionKey: 'disable-native-session',
+    }));
+    await collectEvents(rt.invoke({
+      prompt: 'Round 2',
+      model: '',
+      cwd: process.cwd(),
+      sessionKey: 'disable-native-session',
+    }));
+
+    expect(mockExeca).not.toHaveBeenCalled();
+    expect(client.invokeViaTurn).toHaveBeenNthCalledWith(1, expect.not.objectContaining({ sessionKey: 'disable-native-session' }));
+    expect(client.invokeViaTurn).toHaveBeenNthCalledWith(2, expect.not.objectContaining({ sessionKey: 'disable-native-session' }));
+    expect(client.turnHistory).toEqual(['native-thread-1', 'native-thread-2']);
+    expect(client.sessionThreads.size).toBe(0);
+  });
+
+  it('with CODEX_APP_SERVER_NATIVE=1 and CODEX_APP_SERVER_URL set, invoke uses the native path and steering controls', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+
     expect(rt.capabilities.has('mid_turn_steering')).toBe(true);
     expect(CodexAppServerClientMock).toHaveBeenCalledWith(expect.objectContaining({
-      baseUrl: 'http://127.0.0.1:4321/api',
+      baseUrl: 'ws://127.0.0.1:4321',
     }));
 
     const events = await collectEvents(rt.invoke({
       prompt: 'Hi',
       model: '',
-      cwd: '/tmp',
+      cwd: process.cwd(),
       sessionKey: 'steer-session',
     }));
 
-    expect((events.find((evt) => evt.type === 'text_final') as { text: string }).text).toBe('hello');
+    expect((events.find((evt) => evt.type === 'text_final') as { text: string }).text).toBe('native:native-thread-1');
 
     const client = appServerInstances[0]!;
-    expect(client.noteThreadStarted).toHaveBeenCalledWith('steer-session', 'thread-1');
-    expect(client.noteTurnStarted).toHaveBeenCalledWith('steer-session', 'thread-1', 'turn-1');
-    expect(client.noteTurnCompleted).toHaveBeenCalledWith('steer-session', 'turn-1');
+    expect(client.invokeViaTurn).toHaveBeenCalledWith(expect.objectContaining({
+      sessionKey: 'steer-session',
+      model: 'gpt-5.3-codex',
+    }));
+    expect(mockExeca).not.toHaveBeenCalled();
 
     await expect(rt.steer?.('steer-session', 'keep going')).resolves.toBe(true);
     await expect(rt.interrupt?.('steer-session')).resolves.toBe(true);
     expect(client.steer).toHaveBeenCalledWith('steer-session', 'keep going');
     expect(client.interrupt).toHaveBeenCalledWith('steer-session');
+  });
+
+  it('forwards AbortSignal to the native app-server invoke path', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+    const client = appServerInstances[0]!;
+    const abortController = new AbortController();
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: process.cwd(),
+      sessionKey: 'abort-session',
+      signal: abortController.signal,
+    }));
+
+    expect(client.invokeViaTurn).toHaveBeenCalledWith(expect.objectContaining({
+      sessionKey: 'abort-session',
+      signal: abortController.signal,
+    }));
   });
 
   // --- Session persistence tests ---

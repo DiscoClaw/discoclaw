@@ -147,7 +147,8 @@ If any check fails consistently, treat the model as unsupported for DiscoClaw ru
 |----------|---------|-------------|
 | `CODEX_BIN` | `codex` | Path to Codex CLI binary |
 | `CODEX_MODEL` | `gpt-5.4` | Codex model ID |
-| `CODEX_APP_SERVER_URL` | — | Optional Codex app-server base URL used only for runtime-level `turn/steer` and `turn/interrupt` side-channel control; `invoke()` still uses `codex exec` |
+| `CODEX_APP_SERVER_URL` | — | Optional Codex app-server websocket URL used by the native app-server invoke path |
+| `CODEX_APP_SERVER_NATIVE` | `false` | When `1` and `CODEX_APP_SERVER_URL` is set, use the app-server WebSocket as the primary invoke transport instead of `codex exec`. Automatically falls back to CLI for image turns, non-default `cwd`, and connection failures. |
 | `CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX` | `false` | Skip Codex safety checks |
 | `CODEX_DISABLE_SESSIONS` | `false` | Disable Codex session persistence |
 | `DISCOCLAW_CODEX_VERBOSE_PREVIEW` | `false` | Emit richer reasoning/command preview lines (also forces `model_reasoning_summary="auto"` for Codex runs) |

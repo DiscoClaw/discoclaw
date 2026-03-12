@@ -93,19 +93,54 @@ describe('detectCodexAppServerStatus', () => {
     expect(findings).toEqual([]);
   });
 
-  it('emits an info finding when CODEX_APP_SERVER_URL is a valid HTTP URL', async () => {
+  it('emits a warn finding when CODEX_APP_SERVER_NATIVE=1 is set without CODEX_APP_SERVER_URL', async () => {
+    const cwd = await makeTempInstall('doctor-codex-app-server-missing-url');
+
+    const ctx = await loadDoctorContext({
+      cwd,
+      env: { CODEX_APP_SERVER_NATIVE: '1' },
+    });
+    const findings = detectCodexAppServerStatus(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.id).toBe('codex-app-server:missing-url');
+    expect(findings[0]?.severity).toBe('warn');
+    expect(findings[0]?.message).toContain('CODEX_APP_SERVER_NATIVE=1');
+    expect(findings[0]?.message).toContain('CODEX_APP_SERVER_URL is missing');
+  });
+
+  it('emits an info finding that stays dormant when CODEX_APP_SERVER_URL is valid but CODEX_APP_SERVER_NATIVE is unset', async () => {
     const cwd = await makeTempInstall('doctor-codex-app-server-valid');
 
     const ctx = await loadDoctorContext({
       cwd,
-      env: { CODEX_APP_SERVER_URL: 'http://127.0.0.1:4321/api' },
+      env: { CODEX_APP_SERVER_URL: 'ws://127.0.0.1:4321' },
+    });
+    const findings = detectCodexAppServerStatus(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.id).toBe('codex-app-server:dormant');
+    expect(findings[0]?.severity).toBe('info');
+    expect(findings[0]?.message).toContain('ws://127.0.0.1:4321/');
+    expect(findings[0]?.message).toContain('CODEX_APP_SERVER_NATIVE=1');
+  });
+
+  it('reports that Codex turns will use the app-server transport when both the URL and native flag are set', async () => {
+    const cwd = await makeTempInstall('doctor-codex-app-server-transport');
+
+    const ctx = await loadDoctorContext({
+      cwd,
+      env: {
+        CODEX_APP_SERVER_URL: 'ws://127.0.0.1:4321',
+        CODEX_APP_SERVER_NATIVE: '1',
+      },
     });
     const findings = detectCodexAppServerStatus(ctx);
 
     expect(findings).toHaveLength(1);
     expect(findings[0]?.id).toBe('codex-app-server:configured');
     expect(findings[0]?.severity).toBe('info');
-    expect(findings[0]?.message).toContain('http://127.0.0.1:4321/api');
+    expect(findings[0]?.message).toContain('Codex turns will use the app-server transport');
   });
 
   it('emits a warn finding when CODEX_APP_SERVER_URL is empty or whitespace', async () => {
@@ -137,12 +172,12 @@ describe('detectCodexAppServerStatus', () => {
     expect(findings[0]?.message).not.toContain('not-a-url');
   });
 
-  it('emits a warn finding when CODEX_APP_SERVER_URL uses a non-http protocol', async () => {
+  it('emits a warn finding when CODEX_APP_SERVER_URL uses a non-websocket protocol', async () => {
     const cwd = await makeTempInstall('doctor-codex-app-server-invalid-protocol');
 
     const ctx = await loadDoctorContext({
       cwd,
-      env: { CODEX_APP_SERVER_URL: 'ftp://127.0.0.1/api' },
+      env: { CODEX_APP_SERVER_URL: 'http://127.0.0.1:4321/api' },
     });
     const findings = detectCodexAppServerStatus(ctx);
 
@@ -155,10 +190,12 @@ describe('detectCodexAppServerStatus', () => {
 describe('getCodexAppServerStatus', () => {
   it.each([
     ['dormant when unset', {}, 'dormant'],
-    ['configured for valid http url', { CODEX_APP_SERVER_URL: 'http://127.0.0.1:4321/api' }, 'configured'],
+    ['invalid when native opt-in is set without a websocket url', { CODEX_APP_SERVER_NATIVE: '1' }, 'invalid'],
+    ['dormant for valid websocket url without native opt-in', { CODEX_APP_SERVER_URL: 'ws://127.0.0.1:4321' }, 'dormant'],
+    ['configured for valid websocket url with native opt-in', { CODEX_APP_SERVER_URL: 'ws://127.0.0.1:4321', CODEX_APP_SERVER_NATIVE: '1' }, 'configured'],
     ['invalid for empty string', { CODEX_APP_SERVER_URL: '   ' }, 'invalid'],
     ['invalid for malformed url', { CODEX_APP_SERVER_URL: 'not-a-url' }, 'invalid'],
-    ['invalid for unsupported protocol', { CODEX_APP_SERVER_URL: 'ftp://127.0.0.1/api' }, 'invalid'],
+    ['invalid for unsupported protocol', { CODEX_APP_SERVER_URL: 'http://127.0.0.1:4321/api' }, 'invalid'],
   ] as const)('returns %s', (_label, env, expected) => {
     expect(getCodexAppServerStatus(env)).toBe(expected);
   });
@@ -166,7 +203,9 @@ describe('getCodexAppServerStatus', () => {
 
 describe('deriveCodexAppServerBootReportState', () => {
   it.each([
-    [{ runtimeHasMidTurnSteering: true, env: { CODEX_APP_SERVER_URL: 'http://127.0.0.1:4321/api' } }, { configured: true }],
+    [{ runtimeHasMidTurnSteering: false, env: { CODEX_APP_SERVER_URL: 'ws://127.0.0.1:4321' } }, { configured: false, state: 'dormant' }],
+    [{ runtimeHasMidTurnSteering: false, env: { CODEX_APP_SERVER_NATIVE: '1' } }, { configured: false, state: 'invalid' }],
+    [{ runtimeHasMidTurnSteering: true, env: { CODEX_APP_SERVER_URL: 'ws://127.0.0.1:4321', CODEX_APP_SERVER_NATIVE: '1' } }, { configured: true }],
     [{ runtimeHasMidTurnSteering: true, env: { CODEX_APP_SERVER_URL: 'not-a-url' } }, { configured: false, state: 'invalid' }],
     [{ runtimeHasMidTurnSteering: false, env: {} }, { configured: false, state: 'dormant' }],
   ] as const)('returns %j for %j', (input, expected) => {
