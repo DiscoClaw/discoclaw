@@ -145,7 +145,13 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
             yield event;
           }
         } catch (err) {
-          opts.log?.debug?.({ err }, 'codex-app-server: bootstrap failed; falling back to CLI');
+          opts.log?.warn?.(
+            {
+              err,
+              appServerUrl,
+            },
+            'codex-app-server: bootstrap failed; falling back to CLI',
+          );
           yield {
             type: 'text_delta' as const,
             text: NATIVE_APP_SERVER_FALLBACK_NOTICE,

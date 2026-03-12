@@ -155,6 +155,70 @@ function isCodexAppServerNativeEnabled(env: EnvMap): boolean {
   return parseBoolean(env.CODEX_APP_SERVER_NATIVE, false);
 }
 
+function isLoopbackHostname(hostname: string): boolean {
+  return (
+    hostname === 'localhost'
+    || hostname === '127.0.0.1'
+    || hostname.startsWith('127.')
+    || hostname === '::1'
+    || hostname === '[::1]'
+  );
+}
+
+function resolveCodexAppServerReadyzUrl(rawValue: string | undefined): string | null {
+  const trimmed = trimValue(rawValue);
+  if (!trimmed) return null;
+
+  try {
+    const parsed = new URL(trimmed);
+    if ((parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') || !isLoopbackHostname(parsed.hostname)) {
+      return null;
+    }
+    parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:';
+    parsed.pathname = '/readyz';
+    parsed.search = '';
+    parsed.hash = '';
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+export async function detectCodexAppServerReachability(
+  ctx: DoctorContext,
+  timeoutMs = 1_500,
+): Promise<DoctorFinding[]> {
+  if (getCodexAppServerStatus(ctx.env) !== 'configured') return [];
+
+  const readyzUrl = resolveCodexAppServerReadyzUrl(ctx.env.CODEX_APP_SERVER_URL);
+  if (!readyzUrl) return [];
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(readyzUrl, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    if (response.ok) return [];
+  } catch {
+    // Fall through to the unreachable finding below.
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const displayUrl = formatCodexAppServerUrl(ctx.env.CODEX_APP_SERVER_URL) ?? '[invalid URL redacted]';
+  return [{
+    id: 'codex-app-server:unreachable',
+    severity: 'warn',
+    message:
+      `CODEX_APP_SERVER_URL points at "${displayUrl}", but the local Codex app-server did not respond to ${readyzUrl}.`,
+    recommendation:
+      `Start or restart the local codex-app-server service, then confirm ${readyzUrl} returns HTTP 200 before relying on native Codex turns.`,
+    autoFixable: false,
+  }];
+}
+
 function resolvePath(cwd: string, maybeRelative: string | undefined, fallback: string): string {
   const trimmed = trimValue(maybeRelative);
   if (!trimmed) return path.join(cwd, fallback);
@@ -760,6 +824,7 @@ export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> 
     ...detectInstallDrift(ctx),
     ...detectDeprecatedEnvVars(ctx),
     ...detectCodexAppServerStatus(ctx),
+    ...await detectCodexAppServerReachability(ctx),
     ...detectConflictingOverrides(ctx),
     ...detectStaleRuntimeAndModelOverrides(ctx),
     ...detectInvalidPersistedModelAssignments(ctx),
