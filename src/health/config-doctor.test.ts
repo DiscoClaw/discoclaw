@@ -1,10 +1,11 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   applyFixes,
   detectConflictingOverrides,
+  detectCodexAppServerReachability,
   detectCodexAppServerStatus,
   detectDeprecatedEnvVars,
   detectInvalidPersistedModelAssignments,
@@ -21,6 +22,7 @@ import {
 const tempDirs: string[] = [];
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(
     tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })),
   );
@@ -184,6 +186,45 @@ describe('detectCodexAppServerStatus', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.id).toBe('codex-app-server:invalid-url');
     expect(findings[0]?.severity).toBe('warn');
+  });
+});
+
+describe('detectCodexAppServerReachability', () => {
+  it('warns when a configured local native Codex app-server does not respond', async () => {
+    const cwd = await makeTempInstall('doctor-codex-app-server-unreachable');
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:4321'));
+
+    const ctx = await loadDoctorContext({
+      cwd,
+      env: {
+        CODEX_APP_SERVER_URL: 'ws://127.0.0.1:4321',
+        CODEX_APP_SERVER_NATIVE: '1',
+      },
+    });
+    const findings = await detectCodexAppServerReachability(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.id).toBe('codex-app-server:unreachable');
+    expect(findings[0]?.severity).toBe('warn');
+    expect(findings[0]?.message).toContain('ws://127.0.0.1:4321/');
+    expect(findings[0]?.message).toContain('http://127.0.0.1:4321/readyz');
+  });
+
+  it('skips probing remote app-server URLs', async () => {
+    const cwd = await makeTempInstall('doctor-codex-app-server-remote');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const ctx = await loadDoctorContext({
+      cwd,
+      env: {
+        CODEX_APP_SERVER_URL: 'wss://codex.example.com/socket',
+        CODEX_APP_SERVER_NATIVE: '1',
+      },
+    });
+    const findings = await detectCodexAppServerReachability(ctx);
+
+    expect(findings).toEqual([]);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -402,6 +443,24 @@ describe('inspect', () => {
 
     expect(report.findings.map((finding) => finding.id)).toEqual([
       'invalid-model-config:models-json',
+    ]);
+  });
+
+  it('includes a local app-server reachability finding when native Codex is configured but down', async () => {
+    const cwd = await makeTempInstall('doctor-inspect-codex-app-server-unreachable');
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('connect ECONNREFUSED 127.0.0.1:4321'));
+
+    const report = await inspect({
+      cwd,
+      env: {
+        CODEX_APP_SERVER_URL: 'ws://127.0.0.1:4321',
+        CODEX_APP_SERVER_NATIVE: '1',
+      },
+    });
+
+    expect(report.findings.map((finding) => finding.id)).toEqual([
+      'codex-app-server:configured',
+      'codex-app-server:unreachable',
     ]);
   });
 });

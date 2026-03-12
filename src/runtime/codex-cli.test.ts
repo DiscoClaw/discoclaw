@@ -1302,6 +1302,7 @@ describe('Codex CLI runtime adapter', () => {
   it('falls back to codex exec when the native app-server websocket cannot connect', async () => {
     process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
     process.env.CODEX_APP_SERVER_NATIVE = '1';
+    const warn = vi.fn();
     mockExeca.mockImplementation(() => createMockSubprocess({
       stdout: jsonl([
         '{"type":"thread.started","thread_id":"thread-fallback-ws"}',
@@ -1314,6 +1315,7 @@ describe('Codex CLI runtime adapter', () => {
     const rt = createCodexCliRuntime({
       codexBin: 'codex',
       defaultModel: 'gpt-5.3-codex',
+      log: { debug: vi.fn(), warn },
     });
     const client = appServerInstances[0]!;
     client.invokeViaTurn.mockImplementation(() => eventStream([], new Error('codex app-server websocket failed')));
@@ -1327,6 +1329,10 @@ describe('Codex CLI runtime adapter', () => {
 
     expect(client.invokeViaTurn).toHaveBeenCalledTimes(1);
     expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ appServerUrl: 'ws://127.0.0.1:4321' }),
+      'codex-app-server: bootstrap failed; falling back to CLI',
+    );
     expect(events).toContainEqual({ type: 'text_delta', text: 'App-server unavailable, falling back to CLI' });
     expect(events).toContainEqual({ type: 'text_final', text: 'cli websocket fallback' });
   });
@@ -1334,6 +1340,7 @@ describe('Codex CLI runtime adapter', () => {
   it('falls back to codex exec when native app-server initialize fails', async () => {
     process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
     process.env.CODEX_APP_SERVER_NATIVE = '1';
+    const warn = vi.fn();
     mockExeca.mockImplementation(() => createMockSubprocess({
       stdout: jsonl([
         '{"type":"thread.started","thread_id":"thread-fallback-init"}',
@@ -1346,6 +1353,7 @@ describe('Codex CLI runtime adapter', () => {
     const rt = createCodexCliRuntime({
       codexBin: 'codex',
       defaultModel: 'gpt-5.3-codex',
+      log: { debug: vi.fn(), warn },
     });
     const client = appServerInstances[0]!;
 
@@ -1359,6 +1367,10 @@ describe('Codex CLI runtime adapter', () => {
 
     expect(client.invokeViaTurn).toHaveBeenCalledTimes(1);
     expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ appServerUrl: 'ws://127.0.0.1:4321' }),
+      'codex-app-server: bootstrap failed; falling back to CLI',
+    );
     expect(events).toContainEqual({ type: 'text_delta', text: 'App-server unavailable, falling back to CLI' });
     expect(events).toContainEqual({ type: 'text_final', text: 'cli initialize fallback' });
   });
