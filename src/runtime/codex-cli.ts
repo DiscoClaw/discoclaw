@@ -23,6 +23,7 @@ export type CodexCliRuntimeOpts = {
   disableSessions?: boolean;
   verbosePreview?: boolean;
   itemTypeDebug?: boolean;
+  traceNotifications?: boolean;
   appendSystemPrompt?: string;
   log?: {
     debug(...args: unknown[]): void;
@@ -117,6 +118,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     progressStallTimeoutMs: opts.progressStallTimeoutMs,
     verbosePreview: opts.verbosePreview,
     itemTypeDebug: opts.itemTypeDebug,
+    traceNotifications: opts.traceNotifications,
     dangerouslyBypassApprovalsAndSandbox: opts.dangerouslyBypassApprovalsAndSandbox,
     log: opts.log,
   });
