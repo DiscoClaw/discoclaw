@@ -1253,6 +1253,126 @@ describe('CodexAppServerClient', () => {
     }
   });
 
+  it('invokeViaTurn prefers per-invocation stream stall timeout overrides', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient({ timeoutMs: 50, streamStallTimeoutMs: 5_000, progressStallTimeoutMs: 30_000 });
+      const anyClient = client as any;
+      let resolveTurnStarted!: () => void;
+      const turnStarted = new Promise<void>((resolve) => {
+        resolveTurnStarted = resolve;
+      });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+        streamStallTimeoutMs: 250,
+        progressStallTimeoutMs: 5_000,
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+        resolveTurnStarted();
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+      await turnStarted;
+      await Promise.resolve();
+      const streamState = anyClient.turnStreams.get('session-1');
+      expect(streamState).toBeDefined();
+      expect(streamState.streamStallTimeoutMs).toBe(250);
+      expect(streamState.progressStallTimeoutMs).toBe(5_000);
+      anyClient.enqueueTurnStreamEvent(streamState, { type: 'text_delta', text: 'hello' });
+      anyClient.noteTurnStreamProgress('session-1', streamState, 'item/agentMessage/delta', [{ type: 'text_delta', text: 'hello' }]);
+
+      await vi.advanceTimersByTimeAsync(251);
+
+      await expect(eventsPromise).resolves.toEqual([
+        { type: 'text_delta', text: 'hello' },
+        expect.objectContaining({
+          type: 'error',
+          message: 'stream stall: no output for 250ms — increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS to allow longer gaps (current: 250ms)',
+          failure: expect.objectContaining({
+            code: 'STREAM_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invokeViaTurn prefers per-invocation progress stall timeout overrides', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient({ timeoutMs: 50, streamStallTimeoutMs: 5_000, progressStallTimeoutMs: 5_000 });
+      const anyClient = client as any;
+      let resolveTurnStarted!: () => void;
+      const turnStarted = new Promise<void>((resolve) => {
+        resolveTurnStarted = resolve;
+      });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+        streamStallTimeoutMs: 5_000,
+        progressStallTimeoutMs: 250,
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+        resolveTurnStarted();
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+      await turnStarted;
+      await Promise.resolve();
+      const streamState = anyClient.turnStreams.get('session-1');
+      expect(streamState).toBeDefined();
+      expect(streamState.streamStallTimeoutMs).toBe(5_000);
+      expect(streamState.progressStallTimeoutMs).toBe(250);
+      anyClient.enqueueTurnStreamEvent(streamState, { type: 'text_delta', text: 'hello' });
+      anyClient.noteTurnStreamProgress('session-1', streamState, 'item/agentMessage/delta', [{ type: 'text_delta', text: 'hello' }]);
+
+      await vi.advanceTimersByTimeAsync(251);
+
+      await expect(eventsPromise).resolves.toEqual([
+        { type: 'text_delta', text: 'hello' },
+        expect.objectContaining({
+          type: 'error',
+          message: 'progress stall: no runtime progress for 250ms',
+          failure: expect.objectContaining({
+            code: 'PROGRESS_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('invokeViaTurn rejects so the caller can fall back when the websocket connection fails', async () => {
     const client = makeClient();
 

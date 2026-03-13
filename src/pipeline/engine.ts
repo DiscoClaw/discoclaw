@@ -1,5 +1,10 @@
 import { execa } from 'execa';
-import type { RuntimeAdapter, RuntimeInvokeParams, EngineEvent } from '../runtime/types.js';
+import type {
+  RuntimeAdapter,
+  RuntimeInvokeParams,
+  EngineEvent,
+  RuntimeSupervisorPolicy,
+} from '../runtime/types.js';
 import { LoopDetector, type LoopDetectorOpts } from '../runtime/loop-detector.js';
 import { cliExecaEnv, stripAnsi } from '../runtime/cli-shared.js';
 
@@ -31,9 +36,12 @@ export type PromptStep = {
   tools?: string[];
   addDirs?: string[];
   timeoutMs?: number;
+  streamStallTimeoutMs?: number;
+  progressStallTimeoutMs?: number;
   sessionId?: string | null;
   sessionKey?: string | null;
   reasoningEffort?: string;
+  supervisor?: RuntimeSupervisorPolicy;
 };
 
 export type ShellStep = {
@@ -430,9 +438,12 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
       ...(step.tools !== undefined && { tools: step.tools }),
       ...(step.addDirs !== undefined && { addDirs: step.addDirs }),
       ...(step.timeoutMs !== undefined && { timeoutMs: step.timeoutMs }),
+      ...(step.streamStallTimeoutMs !== undefined && { streamStallTimeoutMs: step.streamStallTimeoutMs }),
+      ...(step.progressStallTimeoutMs !== undefined && { progressStallTimeoutMs: step.progressStallTimeoutMs }),
       ...(step.sessionId !== undefined && { sessionId: step.sessionId }),
       ...(step.sessionKey !== undefined && { sessionKey: step.sessionKey }),
       ...(step.reasoningEffort !== undefined && { reasoningEffort: step.reasoningEffort }),
+      ...(step.supervisor !== undefined && { supervisor: step.supervisor }),
     };
 
     let text: string;

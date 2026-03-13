@@ -2766,6 +2766,35 @@ function makeCaptureRuntime(responses: string[]): {
 }
 
 describe('Forge session keys', () => {
+  it('applies plan-phase supervisor policy and shorter stall windows to forge prompt steps', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const { runtime, invocations } = makeCaptureRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime, { timeoutMs: 30_000 });
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    await orchestrator.run('Test feature', async () => {});
+
+    expect(invocations).toHaveLength(2);
+    expect(invocations[0]!.streamStallTimeoutMs).toBe(30_000);
+    expect(invocations[0]!.progressStallTimeoutMs).toBe(30_000);
+    expect(invocations[0]!.supervisor).toEqual({
+      profile: 'plan_phase',
+      treatAbortedAsRetryable: true,
+      maxSignatureRepeats: 3,
+      limits: {
+        maxCycles: 6,
+        maxRetries: 5,
+        maxEscalationLevel: 4,
+      },
+    });
+    expect(invocations[1]!.streamStallTimeoutMs).toBe(30_000);
+    expect(invocations[1]!.progressStallTimeoutMs).toBe(30_000);
+    expect(invocations[1]!.supervisor).toEqual(invocations[0]!.supervisor);
+  });
+
   it('passes distinct sessionKey for drafter and auditor calls', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;

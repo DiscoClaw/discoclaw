@@ -531,13 +531,23 @@ describe('runPipeline', () => {
     expect(messages[1]).toContain('step-err');
   });
 
-  it('forwards step-level timeoutMs to runtime invoke params', async () => {
-    const capturedTimeouts: Array<number | undefined> = [];
+  it('forwards step-level runtime invoke overrides to runtime invoke params', async () => {
+    const captures: Array<{
+      timeoutMs?: number;
+      streamStallTimeoutMs?: number;
+      progressStallTimeoutMs?: number;
+      supervisor?: unknown;
+    }> = [];
     const runtime: RuntimeAdapter = {
       id: 'other',
       capabilities: new Set(['streaming_text']),
       async *invoke(params): AsyncIterable<EngineEvent> {
-        capturedTimeouts.push(params.timeoutMs);
+        captures.push({
+          timeoutMs: params.timeoutMs,
+          streamStallTimeoutMs: params.streamStallTimeoutMs,
+          progressStallTimeoutMs: params.progressStallTimeoutMs,
+          supervisor: params.supervisor,
+        });
         yield { type: 'text_final', text: 'done' };
         yield { type: 'done' };
       },
@@ -547,14 +557,29 @@ describe('runPipeline', () => {
       baseParams({
         steps: [
           step('first'),
-          step('second', { timeoutMs: 5000 }),
+          step('second', {
+            timeoutMs: 5000,
+            streamStallTimeoutMs: 1500,
+            progressStallTimeoutMs: 2500,
+            supervisor: { profile: 'plan_phase', treatAbortedAsRetryable: true },
+          }),
         ],
         runtime,
       }),
     );
 
-    expect(capturedTimeouts[0]).toBeUndefined();
-    expect(capturedTimeouts[1]).toBe(5000);
+    expect(captures[0]).toEqual({
+      timeoutMs: undefined,
+      streamStallTimeoutMs: undefined,
+      progressStallTimeoutMs: undefined,
+      supervisor: undefined,
+    });
+    expect(captures[1]).toEqual({
+      timeoutMs: 5000,
+      streamStallTimeoutMs: 1500,
+      progressStallTimeoutMs: 2500,
+      supervisor: { profile: 'plan_phase', treatAbortedAsRetryable: true },
+    });
   });
 
   it('fails prompt steps on timeout when the runtime only exits after signal abort', async () => {

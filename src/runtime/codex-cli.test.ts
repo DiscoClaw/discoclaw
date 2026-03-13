@@ -1299,6 +1299,33 @@ describe('Codex CLI runtime adapter', () => {
     }));
   });
 
+  it('passes per-invocation stall policy overrides through to native turns', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      streamStallTimeoutMs: 4321,
+      progressStallTimeoutMs: 8765,
+    });
+    const client = appServerInstances[0]!;
+
+    await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: process.cwd(),
+      streamStallTimeoutMs: 1234,
+      progressStallTimeoutMs: 2345,
+    }));
+
+    expect(client.invokeViaTurn).toHaveBeenCalledWith(expect.objectContaining({
+      cwd: process.cwd(),
+      streamStallTimeoutMs: 1234,
+      progressStallTimeoutMs: 2345,
+    }));
+  });
+
   it('passes native preview/debug flags through to the app-server client', () => {
     process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
     process.env.CODEX_APP_SERVER_NATIVE = '1';

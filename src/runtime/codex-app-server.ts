@@ -671,8 +671,8 @@ export class CodexAppServerClient {
         localImagePaths,
         hardTimeoutMs,
         deadlineAt,
-        streamStallTimeoutMs: this.resolveEffectiveStreamStallTimeout(hardTimeoutMs),
-        progressStallTimeoutMs: this.resolveEffectiveProgressStallTimeout(hardTimeoutMs),
+        streamStallTimeoutMs: this.resolveEffectiveStreamStallTimeout(params.streamStallTimeoutMs, hardTimeoutMs),
+        progressStallTimeoutMs: this.resolveEffectiveProgressStallTimeout(params.progressStallTimeoutMs, hardTimeoutMs),
       }, params.signal);
 
       for await (const event of handle.stream) {
@@ -1016,15 +1016,21 @@ export class CodexAppServerClient {
     this.resetTurnProgressTimer(sessionKey, streamState);
   }
 
-  private resolveEffectiveStreamStallTimeout(hardTimeoutMs?: number): number | undefined {
-    const stallTimeoutMs = this.streamStallTimeoutMs;
+  private resolveEffectiveStreamStallTimeout(
+    overrideTimeoutMs?: number,
+    hardTimeoutMs?: number,
+  ): number | undefined {
+    const stallTimeoutMs = asPositiveFiniteNumber(overrideTimeoutMs) ?? this.streamStallTimeoutMs;
     if (stallTimeoutMs === undefined) return undefined;
     if (hardTimeoutMs === undefined) return stallTimeoutMs;
     return Math.min(stallTimeoutMs, hardTimeoutMs);
   }
 
-  private resolveEffectiveProgressStallTimeout(hardTimeoutMs?: number): number | undefined {
-    const stallTimeoutMs = this.progressStallTimeoutMs;
+  private resolveEffectiveProgressStallTimeout(
+    overrideTimeoutMs?: number,
+    hardTimeoutMs?: number,
+  ): number | undefined {
+    const stallTimeoutMs = asPositiveFiniteNumber(overrideTimeoutMs) ?? this.progressStallTimeoutMs;
     if (stallTimeoutMs === undefined) return undefined;
     if (hardTimeoutMs === undefined) return stallTimeoutMs;
     return Math.min(stallTimeoutMs, hardTimeoutMs);
