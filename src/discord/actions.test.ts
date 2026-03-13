@@ -650,10 +650,37 @@ describe('executeDiscordActions', () => {
     expect(results[1]).toEqual({ ok: true, summary: 'Created #beta' });
   });
 
-  it('returns imagegen not-configured error when imagegenCtx is absent', async () => {
+  it('returns imagegen setup stub for interactive manual/follow-up calls when imagegenCtx is absent', async () => {
+    const guild = makeMockGuild([]);
     const results = await executeDiscordActions(
       [{ type: 'generateImage', prompt: 'sunset', channel: 'art' } as any],
-      makeCtx(makeMockGuild([])),
+      {
+        ...makeCtx(guild),
+        confirmation: {
+          mode: 'interactive',
+          sessionKey: 'discord:channel:test-channel',
+          userId: 'user-1',
+        },
+      },
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(false);
+    if (results[0].ok) throw new Error('unexpected ok result');
+    expect(results[0].error).toContain('Setup walkthrough');
+    expect(results[0].error).toContain('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1');
+    expect(results[0].error).toContain('!models help');
+  });
+
+  it('keeps the raw imagegen not-configured error for automated callers when imagegenCtx is absent', async () => {
+    const guild = makeMockGuild([]);
+    const results = await executeDiscordActions(
+      [{ type: 'generateImage', prompt: 'sunset', channel: 'art' } as any],
+      {
+        ...makeCtx(guild),
+        confirmation: {
+          mode: 'automated',
+        },
+      },
     );
     expect(results).toHaveLength(1);
     expect(results[0]).toEqual({ ok: false, error: 'Imagegen subsystem not configured' });
@@ -974,6 +1001,29 @@ describe('discordActionsPromptSection', () => {
     expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT');
     expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH');
     expect(prompt).toContain('no conversation history');
+  });
+
+  it('includes imagegen guidance whenever the caller advertises imagegen', () => {
+    const flags: ActionCategoryFlags = {
+      channels: false,
+      messaging: false,
+      guild: false,
+      moderation: false,
+      polls: false,
+      tasks: false,
+      crons: false,
+      botProfile: false,
+      forge: false,
+      plan: false,
+      memory: false,
+      config: false,
+      defer: false,
+      imagegen: true,
+    };
+
+    const prompt = discordActionsPromptSection(flags, 'ClawBot');
+    expect(prompt).toContain('### Image Generation');
+    expect(prompt).toContain('"type":"generateImage"');
   });
 });
 

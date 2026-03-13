@@ -147,6 +147,24 @@ export type SubsystemContexts = {
   spawnCtx?: SpawnContext;
 };
 
+function buildImagegenSetupRequiredStub(): string {
+  return [
+    'Image generation is available in Discord actions, but this bot is not configured to run it yet.',
+    'Setup walkthrough:',
+    '1. Open the instance `.env` file used by this bot.',
+    '2. Set `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1`.',
+    '3. Configure one provider: set `OPENAI_API_KEY` for OpenAI image models, or set `IMAGEGEN_GEMINI_API_KEY` for Gemini/Imagen image models.',
+    '4. Optional: set `IMAGEGEN_DEFAULT_MODEL` if you want a specific default such as `dall-e-3`, `gpt-image-1`, or `imagen-4.0-generate-001`.',
+    '5. Reload the bot with `!restart`, then retry the image request.',
+    'See `!models help` for related model/configuration details.',
+  ].join(' ');
+}
+
+function shouldReturnImagegenSetupStub(ctx: ActionContext): boolean {
+  // Manual user turns and their follow-ups run through the interactive path.
+  return ctx.confirmation?.mode === 'interactive';
+}
+
 // ---------------------------------------------------------------------------
 // Valid types (union of all sub-module type sets)
 // ---------------------------------------------------------------------------
@@ -548,7 +566,9 @@ export async function executeDiscordActions(
         }
       } else if (IMAGEGEN_ACTION_TYPES.has(action.type)) {
         if (!effectiveSubs.imagegenCtx) {
-          result = { ok: false, error: 'Imagegen subsystem not configured' };
+          result = shouldReturnImagegenSetupStub(ctx)
+            ? { ok: false, error: buildImagegenSetupRequiredStub() }
+            : { ok: false, error: 'Imagegen subsystem not configured' };
         } else {
           result = await executeImagegenAction(action as ImagegenActionRequest, ctx, effectiveSubs.imagegenCtx);
         }
