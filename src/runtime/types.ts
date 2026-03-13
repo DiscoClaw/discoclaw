@@ -191,6 +191,8 @@ export type RuntimeInvokeParams = {
   tools?: string[];
   addDirs?: string[];
   timeoutMs?: number;
+  streamStallTimeoutMs?: number;
+  progressStallTimeoutMs?: number;
   maxTokens?: number;
   images?: ImageData[];
   reasoningEffort?: string;

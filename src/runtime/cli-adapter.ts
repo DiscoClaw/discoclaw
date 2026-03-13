@@ -61,6 +61,22 @@ function parseBooleanEnv(raw: string | undefined, defaultValue: boolean): boolea
   return defaultValue;
 }
 
+function asPositiveFiniteNumber(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return undefined;
+  return value;
+}
+
+function resolveEffectiveStallTimeout(
+  baseTimeoutMs: number | undefined,
+  overrideTimeoutMs: number | undefined,
+  hardTimeoutMs: number | undefined,
+): number | undefined {
+  const timeoutMs = asPositiveFiniteNumber(overrideTimeoutMs) ?? asPositiveFiniteNumber(baseTimeoutMs);
+  if (timeoutMs === undefined) return undefined;
+  const hardLimitMs = asPositiveFiniteNumber(hardTimeoutMs);
+  return hardLimitMs === undefined ? timeoutMs : Math.min(timeoutMs, hardLimitMs);
+}
+
 const CODEX_LAUNCHER_STATE_ERROR_PATTERN = /state db (missing|returned stale) rollout path|rollout path missing/i;
 
 /** SIGKILL all tracked CLI subprocesses across all adapters (e.g. on SIGTERM). */
@@ -108,6 +124,16 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
 
   async function* invoke(params: RuntimeInvokeParams): AsyncIterable<EngineEvent> {
     const model = params.model || strategy.defaultModel;
+    const streamStallTimeoutMs = resolveEffectiveStallTimeout(
+      opts.streamStallTimeoutMs,
+      params.streamStallTimeoutMs,
+      params.timeoutMs,
+    );
+    const progressStallTimeoutMs = resolveEffectiveStallTimeout(
+      opts.progressStallTimeoutMs,
+      params.progressStallTimeoutMs,
+      params.timeoutMs,
+    );
 
     // ---------------------------------------------------------------
     // Multi-turn: process pool path (Claude-style)
@@ -411,11 +437,11 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       };
 
       const resetStallTimer = () => {
-        if (!opts.streamStallTimeoutMs) return;
+        if (!streamStallTimeoutMs) return;
         clearStallTimer();
         stallTimer = setTimeout(() => {
           if (attemptSettled || finished) return;
-          const ms = opts.streamStallTimeoutMs!;
+          const ms = streamStallTimeoutMs;
           opts.log?.info?.(`one-shot: stream stall detected after ${ms}ms, killing process`);
           pushRuntimeError(`stream stall: no output for ${ms}ms — increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS to allow longer gaps (current: ${ms}ms)`);
           push({ type: 'done' });
@@ -423,20 +449,20 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           subprocess.kill('SIGTERM');
           wake();
           settleAttempt({ kind: 'complete' }, 'stream_stall');
-        }, opts.streamStallTimeoutMs);
+        }, streamStallTimeoutMs);
       };
 
       let progressResetCount = 0;
       const resetProgressTimer = () => {
-        if (!opts.progressStallTimeoutMs) return;
+        if (!progressStallTimeoutMs) return;
         clearProgressTimer();
         progressResetCount++;
         if (progressResetCount === 1) {
-          opts.log?.debug?.(`progress-timer: armed (${opts.progressStallTimeoutMs}ms)`);
+          opts.log?.debug?.(`progress-timer: armed (${progressStallTimeoutMs}ms)`);
         }
         progressTimer = setTimeout(() => {
           if (attemptSettled || finished) return;
-          const ms = opts.progressStallTimeoutMs!;
+          const ms = progressStallTimeoutMs;
           opts.log?.info?.(`one-shot: progress stall detected (no text_delta for ${ms}ms, resets=${progressResetCount}), killing process`);
           pushRuntimeError(`progress stall: no text output for ${ms}ms (possible thinking spiral)`);
           push({ type: 'done' });
@@ -444,7 +470,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           subprocess.kill('SIGTERM');
           wake();
           settleAttempt({ kind: 'complete' }, 'progress_stall');
-        }, opts.progressStallTimeoutMs);
+        }, progressStallTimeoutMs);
       };
 
       const onAbort = () => {

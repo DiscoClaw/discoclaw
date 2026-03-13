@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createPlan, parsePlanFileHeader, resolvePlanHeaderTaskId } from './plan-commands.js';
 import type { TaskStore } from '../tasks/store.js';
-import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
+import type { RuntimeAdapter, EngineEvent, RuntimeSupervisorPolicy } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { runPipeline } from '../pipeline/engine.js';
 import { auditPlanStructure, deriveVerdict, maxReviewNumber } from './audit-handler.js';
@@ -17,6 +17,18 @@ export { parseAuditVerdict };
 export type { AuditVerdict };
 
 const COMPOUND_LESSONS_PATH = 'docs/compound-lessons.md';
+const FORGE_STREAM_STALL_TIMEOUT_MS = 2 * 60_000;
+const FORGE_PROGRESS_STALL_TIMEOUT_MS = 3 * 60_000;
+const FORGE_PLAN_PHASE_SUPERVISOR_POLICY: RuntimeSupervisorPolicy = {
+  profile: 'plan_phase',
+  treatAbortedAsRetryable: true,
+  maxSignatureRepeats: 3,
+  limits: {
+    maxCycles: 6,
+    maxRetries: 5,
+    maxEscalationLevel: 4,
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Audit criteria — single source of truth, referenced at top/middle/bottom of
@@ -94,6 +106,23 @@ const FORGE_PROGRESS_ICON = {
 
 function withForgeIcon(icon: string, message: string): string {
   return `${icon} ${message}`;
+}
+
+function resolveForgePhaseLiveness(timeoutMs: number | undefined): {
+  streamStallTimeoutMs: number | undefined;
+  progressStallTimeoutMs: number | undefined;
+} {
+  const boundedTimeoutMs = typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0
+    ? timeoutMs
+    : undefined;
+  return {
+    streamStallTimeoutMs: boundedTimeoutMs === undefined
+      ? FORGE_STREAM_STALL_TIMEOUT_MS
+      : Math.min(FORGE_STREAM_STALL_TIMEOUT_MS, boundedTimeoutMs),
+    progressStallTimeoutMs: boundedTimeoutMs === undefined
+      ? FORGE_PROGRESS_STALL_TIMEOUT_MS
+      : Math.min(FORGE_PROGRESS_STALL_TIMEOUT_MS, boundedTimeoutMs),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1059,6 +1088,7 @@ export class ForgeOrchestrator {
         }
 
         round++;
+        const forgePhaseLiveness = resolveForgePhaseLiveness(this.opts.timeoutMs);
 
         // Draft phase (only on first round of a fresh forge, not resume)
         if (round === 1 && startRound === 1 && templateContent && contextSummary) {
@@ -1080,7 +1110,10 @@ export class ForgeOrchestrator {
               tools: readOnlyTools,
               addDirs,
               timeoutMs: this.opts.timeoutMs,
+              streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
+              progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
               sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+              supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
             }],
             runtime: this.opts.runtime,
             cwd: this.opts.cwd,
@@ -1179,7 +1212,10 @@ export class ForgeOrchestrator {
             tools: auditorHasFileTools ? readOnlyTools : [],
             ...(auditorHasFileTools ? { addDirs } : {}),
             timeoutMs: this.opts.timeoutMs,
+            streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
+            progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
             sessionKey: auditorRt.capabilities.has('sessions') ? auditorSessionKey : undefined,
+            supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
           }],
           runtime: this.opts.runtime,
           cwd: this.opts.cwd,
@@ -1293,7 +1329,10 @@ export class ForgeOrchestrator {
             tools: readOnlyTools,
             addDirs,
             timeoutMs: this.opts.timeoutMs,
+            streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
+            progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
             sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+            supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
           }],
           runtime: this.opts.runtime,
           cwd: this.opts.cwd,
