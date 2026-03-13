@@ -542,6 +542,90 @@ describe('createCliRuntime', () => {
     }), 'one-shot: timing summary');
   });
 
+  it('clears resumable session state after a jsonl stream stall so the next call starts fresh', async () => {
+    const first = createControlledSubprocess();
+    const second = createControlledSubprocess();
+    mockExeca
+      .mockReturnValueOnce(first.subprocess)
+      .mockReturnValueOnce(second.subprocess);
+
+    const rt = createCliRuntime(baseStrategy({
+      multiTurnMode: 'session-resume',
+      getOutputMode: (ctx) => (ctx.params.sessionKey ? 'jsonl' : 'text'),
+      buildArgs: (ctx) => {
+        const sessionKey = typeof ctx.params.sessionKey === 'string' ? ctx.params.sessionKey : '';
+        const existingThreadId = sessionKey ? ctx.sessionMap?.get(sessionKey) : undefined;
+        return existingThreadId
+          ? ['exec', 'resume', existingThreadId, '--', String(ctx.params.prompt)]
+          : ['exec', '--json', '--', String(ctx.params.prompt)];
+      },
+      parseLine: (evt, ctx) => {
+        if (!evt || typeof evt !== 'object') return null;
+        const value = evt as {
+          type?: unknown;
+          thread_id?: unknown;
+          item?: { type?: unknown; text?: unknown };
+        };
+        if (value.type === 'thread.started' && typeof value.thread_id === 'string' && ctx.params.sessionKey && ctx.sessionMap) {
+          ctx.sessionMap.set(ctx.params.sessionKey, value.thread_id);
+          return {};
+        }
+        if (
+          value.type === 'item.completed'
+          && value.item?.type === 'agent_message'
+          && typeof value.item.text === 'string'
+        ) {
+          return { text: value.item.text, resultText: value.item.text };
+        }
+        return null;
+      },
+    }), {
+      streamStallTimeoutMs: 10,
+      log: {
+        info: vi.fn(),
+        debug: vi.fn(),
+      } as any,
+    });
+
+    const firstRun = collectEvents(rt.invoke({
+      prompt: 'first',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'session-a',
+    }));
+
+    await Promise.resolve();
+    first.emitStdout('{"type":"thread.started","thread_id":"thread-stalled"}\n');
+    first.emitStdout('{"type":"turn.started"}\n');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const firstEvents = await firstRun;
+    expect(first.subprocess.kill).toHaveBeenCalledWith('SIGTERM');
+    expect(firstEvents).toContainEqual(expect.objectContaining({
+      type: 'error',
+      message: expect.stringContaining('stream stall'),
+    }));
+
+    const secondRun = collectEvents(rt.invoke({
+      prompt: 'second',
+      model: '',
+      cwd: '/tmp',
+      sessionKey: 'session-a',
+    }));
+    await Promise.resolve();
+    second.emitStdout('{"type":"thread.started","thread_id":"thread-fresh"}\n');
+    second.emitStdout('{"type":"item.completed","item":{"type":"agent_message","text":"fresh output"}}\n');
+    second.emitStdout('{"type":"turn.completed","usage":{}}\n');
+    second.resolve();
+    const secondEvents = await secondRun;
+
+    expect(mockExeca).toHaveBeenCalledTimes(2);
+    const secondArgs = mockExeca.mock.calls[1]![1] as string[];
+    expect(secondArgs[0]).toBe('exec');
+    expect(secondArgs[1]).not.toBe('resume');
+    expect(secondEvents).toContainEqual({ type: 'text_final', text: 'fresh output' });
+  }, 10_000);
+
   it('logs a timing summary for stderr-only exits', async () => {
     mockExeca.mockReturnValue(createMockSubprocess({
       stderrChunks: ['fatal startup error\n'],

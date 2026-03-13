@@ -111,6 +111,7 @@ type TurnStreamState = {
   initialProgressTimeoutMs?: number;
   progressStallTimer?: ReturnType<typeof setTimeout>;
   firstNotificationLogged: boolean;
+  preOutputActivityObserved: boolean;
   progressObserved: boolean;
 };
 
@@ -246,7 +247,7 @@ function makeRuntimeTimeoutError(ms: number): Error {
 function makeProgressStallError(ms: number, scope: 'initial' | 'ongoing'): Error {
   const error = new Error(
     scope === 'initial'
-      ? `progress stall: no runtime progress for ${ms}ms (native turn produced no text or tool events)`
+      ? `progress stall: no runtime progress for ${ms}ms (native turn produced no text output)`
       : `progress stall: no runtime progress for ${ms}ms`,
   );
   Object.assign(error, { code: PROGRESS_STALL_ERROR_CODE });
@@ -835,6 +836,7 @@ export class CodexAppServerClient {
         agentMessageTextByItemId: new Map(),
       },
       firstNotificationLogged: false,
+      preOutputActivityObserved: false,
       progressObserved: false,
     };
 
@@ -884,6 +886,7 @@ export class CodexAppServerClient {
       itemTypeDebug: this.itemTypeDebug,
     });
     const progressObservedBefore = streamState.progressObserved;
+    this.noteTurnStreamInitialActivity(sessionKey, streamState, message.method, events);
     this.noteTurnStreamProgress(sessionKey, streamState, message.method, events);
     if (this.traceNotifications) {
       const progressEventTypes = events
@@ -893,6 +896,7 @@ export class CodexAppServerClient {
         ...this.buildTurnLogContext(sessionKey, streamState),
         notificationMethod: message.method,
         eventTypes: events.map((event) => event.type),
+        eventSummaries: events.map((event) => summarizeTraceEvent(event)),
         progressEventTypes,
         progressObservedBefore,
         progressObservedAfter: streamState.progressObserved,
@@ -919,7 +923,11 @@ export class CodexAppServerClient {
         }, 'codex-app-server: turn ended before completion');
       }
       const turnId = extractNotificationTurnId(message.params);
-      this.clearActiveTurn(sessionKey, turnId);
+      if (status === 'completed') {
+        this.clearActiveTurn(sessionKey, turnId);
+      } else {
+        this.sessions.delete(sessionKey);
+      }
       this.finishTurnStream(streamState, { includeDone: !events.some((event) => event.type === 'done') });
     }
   }
@@ -1083,7 +1091,7 @@ export class CodexAppServerClient {
   }
 
   private resetTurnProgressTimer(sessionKey: string, streamState: TurnStreamState): void {
-    const timeoutMs = streamState.progressObserved
+    const timeoutMs = (streamState.progressObserved || streamState.preOutputActivityObserved)
       ? streamState.progressStallTimeoutMs
       : streamState.initialProgressTimeoutMs;
     if (streamState.progressStallTimer) {
@@ -1098,6 +1106,28 @@ export class CodexAppServerClient {
         makeProgressStallError(timeoutMs, streamState.progressObserved ? 'ongoing' : 'initial'),
       );
     }, timeoutMs);
+  }
+
+  private noteTurnStreamInitialActivity(
+    sessionKey: string,
+    streamState: TurnStreamState,
+    notificationMethod: string,
+    events: EngineEvent[],
+  ): void {
+    if (streamState.progressObserved || streamState.preOutputActivityObserved) {
+      return;
+    }
+    if (!events.some((event) => event.type === 'tool_start' || event.type === 'tool_end')) {
+      return;
+    }
+
+    streamState.preOutputActivityObserved = true;
+    this.log?.info?.({
+      ...this.buildTurnLogContext(sessionKey, streamState),
+      notificationMethod,
+      eventTypes: events.map((event) => event.type),
+    }, 'codex-app-server: initial turn activity observed before text output');
+    this.resetTurnProgressTimer(sessionKey, streamState);
   }
 
   private noteTurnStreamProgress(
@@ -1145,7 +1175,7 @@ export class CodexAppServerClient {
       firstNotificationLogged: streamState.firstNotificationLogged,
     }, 'codex-app-server: turn failed before terminal notification');
     void this.interrupt(sessionKey).catch(() => false);
-    this.clearActiveTurn(sessionKey, streamState.turnId);
+    this.sessions.delete(sessionKey);
     this.enqueueTurnStreamEvent(streamState, createRuntimeErrorEvent(error));
     this.finishTurnStream(streamState);
   }
@@ -1832,11 +1862,81 @@ function dedupeUsageEvents(events: EngineEvent[]): EngineEvent[] {
   });
 }
 
+function summarizeTraceEvent(event: EngineEvent): Record<string, unknown> {
+  switch (event.type) {
+    case 'text_delta':
+    case 'text_final':
+    case 'thinking_delta':
+      return {
+        type: event.type,
+        textPreview: event.text.length > 80 ? `${event.text.slice(0, 80)}...` : event.text,
+        textLength: event.text.length,
+        hasNonWhitespace: /\S/.test(event.text),
+      };
+
+    case 'tool_start':
+      return {
+        type: event.type,
+        name: event.name,
+        ...(event.input !== undefined ? { input: event.input } : {}),
+      };
+
+    case 'tool_end':
+      return {
+        type: event.type,
+        name: event.name,
+        ok: event.ok,
+        ...(event.output !== undefined ? { output: event.output } : {}),
+      };
+
+    case 'preview_debug':
+      return {
+        type: event.type,
+        source: event.source,
+        phase: event.phase,
+        itemType: event.itemType,
+        ...(event.label ? { label: event.label } : {}),
+      };
+
+    case 'log_line':
+      return {
+        type: event.type,
+        stream: event.stream,
+        linePreview: event.line.length > 120 ? `${event.line.slice(0, 120)}...` : event.line,
+      };
+
+    case 'usage':
+      return {
+        type: event.type,
+        ...(event.totalTokens !== undefined ? { totalTokens: event.totalTokens } : {}),
+      };
+
+    case 'error':
+      return {
+        type: event.type,
+        message: event.message,
+      };
+
+    case 'runtime_failure':
+      return {
+        type: event.type,
+        code: event.failure.code,
+      };
+
+    case 'image_data':
+      return {
+        type: event.type,
+        mediaType: event.image.mediaType,
+      };
+
+    case 'done':
+      return { type: event.type };
+  }
+}
+
 function isProgressEvent(event: EngineEvent): boolean {
   return event.type === 'text_delta'
-    || event.type === 'text_final'
-    || event.type === 'tool_start'
-    || event.type === 'tool_end';
+    || event.type === 'text_final';
 }
 
 function isToolFailureStatus(status: string | undefined): boolean {

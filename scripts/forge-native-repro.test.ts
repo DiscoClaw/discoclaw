@@ -12,6 +12,7 @@ describe('parseForgeNativeReproArgs', () => {
       '--out-dir',
       '/tmp/out',
       '--trace-notifications',
+      '--trace-cli-stdio',
       '--dry-run',
     ]);
 
@@ -22,6 +23,7 @@ describe('parseForgeNativeReproArgs', () => {
       outDir: '/tmp/out',
       dryRun: true,
       traceNotifications: true,
+      traceCliStdio: true,
       help: false,
     });
   });
@@ -32,6 +34,7 @@ describe('parseForgeNativeReproArgs', () => {
       description: 'Restore forge auditor to Codex',
       dryRun: false,
       traceNotifications: false,
+      traceCliStdio: false,
       help: false,
     });
   });
@@ -42,6 +45,7 @@ describe('parseForgeNativeReproArgs', () => {
       fromPlan: 'plan-502',
       dryRun: false,
       traceNotifications: false,
+      traceCliStdio: false,
       help: false,
     });
   });

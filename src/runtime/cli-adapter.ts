@@ -389,6 +389,11 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       let firstParsedEventSource: 'session_scanner' | 'strategy_parser' | 'default_parser' | null = null;
       let timingSummaryLogged = false;
       const toSpawnDelta = (ts: number | null): number | null => (ts == null ? null : ts - spawnedAtMs);
+      const clearResumableSession = (reason: string): void => {
+        if (!sessionMap || typeof params.sessionKey !== 'string' || params.sessionKey.length === 0) return;
+        sessionMap.delete(params.sessionKey);
+        opts.log?.info?.({ sessionKey: params.sessionKey, reason }, 'one-shot: cleared resumable session');
+      };
       const emitTimingSummary = (completionReason: string): void => {
         if (timingSummaryLogged) return;
         timingSummaryLogged = true;
@@ -443,6 +448,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           if (attemptSettled || finished) return;
           const ms = streamStallTimeoutMs;
           opts.log?.info?.(`one-shot: stream stall detected after ${ms}ms, killing process`);
+          clearResumableSession('stream_stall');
           pushRuntimeError(`stream stall: no output for ${ms}ms — increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS to allow longer gaps (current: ${ms}ms)`);
           push({ type: 'done' });
           finished = true;
@@ -464,6 +470,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           if (attemptSettled || finished) return;
           const ms = progressStallTimeoutMs;
           opts.log?.info?.(`one-shot: progress stall detected (no text_delta for ${ms}ms, resets=${progressResetCount}), killing process`);
+          clearResumableSession('progress_stall');
           pushRuntimeError(`progress stall: no text output for ${ms}ms (possible thinking spiral)`);
           push({ type: 'done' });
           finished = true;

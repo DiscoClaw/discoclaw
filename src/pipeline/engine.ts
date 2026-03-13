@@ -32,12 +32,14 @@ export type PromptStep = {
   onError?: 'fail' | 'skip';
   /** Per-step runtime override. Uses the pipeline-level runtime when absent. */
   runtime?: RuntimeAdapter;
+  systemPrompt?: string;
   model?: string;
   tools?: string[];
   addDirs?: string[];
   timeoutMs?: number;
   streamStallTimeoutMs?: number;
   progressStallTimeoutMs?: number;
+  disableNativeAppServer?: boolean;
   sessionId?: string | null;
   sessionKey?: string | null;
   reasoningEffort?: string;
@@ -432,6 +434,7 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
     const timeoutGuard = createPromptStepTimeoutGuard(signal, step.timeoutMs);
     const invokeParams: RuntimeInvokeParams = {
       prompt: resolvedPrompt,
+      ...(step.systemPrompt !== undefined && { systemPrompt: step.systemPrompt }),
       model: step.model ?? model,
       cwd,
       signal: timeoutGuard.signal,
@@ -440,6 +443,7 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
       ...(step.timeoutMs !== undefined && { timeoutMs: step.timeoutMs }),
       ...(step.streamStallTimeoutMs !== undefined && { streamStallTimeoutMs: step.streamStallTimeoutMs }),
       ...(step.progressStallTimeoutMs !== undefined && { progressStallTimeoutMs: step.progressStallTimeoutMs }),
+      ...(step.disableNativeAppServer !== undefined && { disableNativeAppServer: step.disableNativeAppServer }),
       ...(step.sessionId !== undefined && { sessionId: step.sessionId }),
       ...(step.sessionKey !== undefined && { sessionKey: step.sessionKey }),
       ...(step.reasoningEffort !== undefined && { reasoningEffort: step.reasoningEffort }),

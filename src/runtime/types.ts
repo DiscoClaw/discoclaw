@@ -193,10 +193,12 @@ export type RuntimeInvokeParams = {
   timeoutMs?: number;
   streamStallTimeoutMs?: number;
   progressStallTimeoutMs?: number;
+  disableNativeAppServer?: boolean;
   maxTokens?: number;
   images?: ImageData[];
   reasoningEffort?: string;
   signal?: AbortSignal;
+  rawEventTap?: (evt: EngineEvent) => void;
   onTelemetry?: (evt: RuntimeTelemetryEvent) => void;
   supervisor?: RuntimeSupervisorPolicy;
 };

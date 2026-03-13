@@ -21,6 +21,7 @@ import {
 import type { ForgeOrchestratorOpts } from './forge-commands.js';
 import type { RuntimeAdapter, EngineEvent, RuntimeInvokeParams } from '../runtime/types.js';
 import { TaskStore } from '../tasks/store.js';
+import { wrapRuntimeWithGlobalPolicies } from '../index.runtime.js';
 import { ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE } from './prompt-common.js';
 
 async function makeTmpDir(): Promise<string> {
@@ -463,6 +464,11 @@ describe('isRetryableError', () => {
 
   it('matches drafter echoed the template', () => {
     expect(isRetryableError('drafter echoed the template')).toBe(true);
+  });
+
+  it('matches plan output prefix contract failures', () => {
+    expect(isRetryableError('draft output must start with # Plan:')).toBe(true);
+    expect(isRetryableError('revision output must start with # Plan:')).toBe(true);
   });
 
   it('is case-insensitive', () => {
@@ -2000,6 +2006,359 @@ describe('ForgeOrchestrator', () => {
     expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
   });
 
+  it('filters leading narration before # Plan: and completes draft without retry', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    let callIndex = 0;
+    const steerCalls: Array<{ sessionKey: string; message: string }> = [];
+    const systemPrompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const, 'sessions' as const]),
+      invoke(params: RuntimeInvokeParams) {
+        const idx = callIndex++;
+        systemPrompts.push(params.systemPrompt ?? '');
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          if (idx === 0) {
+            yield { type: 'text_delta', text: 'Inspecting the forge routing first.' };
+            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'done' };
+            return;
+          }
+          if (idx === 1) {
+            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'done' };
+            return;
+          }
+          yield { type: 'text_final', text: auditClean };
+          yield { type: 'done' };
+        })();
+      },
+      async steer(sessionKey: string, message: string) {
+        steerCalls.push({ sessionKey, message });
+        return true;
+      },
+    };
+
+    const opts = await baseOpts(
+      tmpDir,
+      wrapRuntimeWithGlobalPolicies({
+        runtime,
+        maxConcurrentInvocations: 3,
+        globalSupervisorEnabled: true,
+        env: { DISCOCLAW_GLOBAL_SUPERVISOR_ENABLED: '1' } as NodeJS.ProcessEnv,
+      }),
+    );
+    const orchestrator = new ForgeOrchestrator(opts);
+    const progress: string[] = [];
+
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(callIndex).toBe(2);
+    expect(steerCalls).toHaveLength(1);
+    expect(steerCalls[0]?.sessionKey).toContain('forge:plan-');
+    expect(steerCalls[0]?.message).toContain('Restart your answer now.');
+    expect(systemPrompts[0]).toContain('Use tools silently when needed');
+    expect(progress.some((p) => p.includes('retrying'))).toBe(false);
+    expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
+  });
+
+  it('steers silent tool-only draft turns before the native no-text stall window', async () => {
+    vi.useFakeTimers();
+    try {
+      const tmpDir = await makeTmpDir();
+      const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+      const auditClean = '**Verdict:** Ready to approve.';
+
+      let callIndex = 0;
+      let releaseDraft: (() => void) | undefined;
+      let signalDraftInvokeStarted: (() => void) | undefined;
+      const draftInvokeStarted = new Promise<void>((resolve) => {
+        signalDraftInvokeStarted = resolve;
+      });
+      const draftReleased = new Promise<void>((resolve) => {
+        releaseDraft = resolve;
+      });
+      const steerCalls: Array<{ sessionKey: string; message: string }> = [];
+
+      const runtime: RuntimeAdapter = {
+        id: 'codex' as const,
+        capabilities: new Set(['streaming_text' as const, 'sessions' as const]),
+        invoke(_params: RuntimeInvokeParams) {
+          const idx = callIndex++;
+          if (idx === 0) {
+            signalDraftInvokeStarted?.();
+          }
+          return (async function* (): AsyncGenerator<EngineEvent> {
+            if (idx === 0) {
+              yield {
+                type: 'tool_start',
+                name: 'command_execution',
+                input: { command: 'rg -n "forge"' },
+              };
+              await draftReleased;
+              yield { type: 'text_final', text: draftPlan };
+              yield { type: 'done' };
+              return;
+            }
+            yield { type: 'text_final', text: auditClean };
+            yield { type: 'done' };
+          })();
+        },
+        async steer(sessionKey: string, message: string) {
+          steerCalls.push({ sessionKey, message });
+          releaseDraft?.();
+          return true;
+        },
+      };
+
+      const opts = await baseOpts(tmpDir, runtime, { timeoutMs: 120_000 });
+      const orchestrator = new ForgeOrchestrator(opts);
+      const progress: string[] = [];
+
+      const runPromise = orchestrator.run('Test feature', async (msg) => {
+        progress.push(msg);
+      });
+
+      await draftInvokeStarted;
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      const result = await runPromise;
+
+      expect(result.error).toBeUndefined();
+      expect(callIndex).toBe(2);
+      expect(steerCalls).toHaveLength(1);
+      expect(steerCalls[0]?.sessionKey).toContain('forge:plan-');
+      expect(steerCalls[0]?.message).toContain('Stop using tools once you have enough context.');
+      expect(progress.some((p) => p.includes('retrying'))).toBe(false);
+      expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries draft phase with a fresh session when output never reaches # Plan:', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    let callIndex = 0;
+    const prompts: string[] = [];
+    const sessionKeys: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code' as const,
+      capabilities: new Set(['streaming_text' as const, 'sessions' as const]),
+      invoke(params: RuntimeInvokeParams) {
+        const idx = callIndex++;
+        prompts.push(params.prompt);
+        sessionKeys.push(params.sessionKey ?? '');
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          if (idx === 0) {
+            yield { type: 'text_delta', text: 'Inspecting the forge routing first.' };
+            yield { type: 'done' };
+            return;
+          }
+          if (idx === 1) {
+            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'done' };
+            return;
+          }
+          yield { type: 'text_final', text: auditClean };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(
+      tmpDir,
+      wrapRuntimeWithGlobalPolicies({
+        runtime,
+        maxConcurrentInvocations: 3,
+        globalSupervisorEnabled: true,
+        env: { DISCOCLAW_GLOBAL_SUPERVISOR_ENABLED: '1' } as NodeJS.ProcessEnv,
+      }),
+    );
+    const orchestrator = new ForgeOrchestrator(opts);
+    const progress: string[] = [];
+
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(callIndex).toBe(3);
+    expect(prompts[1]).toContain('Your previous attempt started with narration');
+    expect(prompts[1]).toContain('The very first line of your response MUST begin with `# Plan:`.');
+    expect(sessionKeys[0]).not.toBe('');
+    expect(sessionKeys[1]).toBe(`${sessionKeys[0]}:draft-retry`);
+    expect(progress.some((p) => p.includes('retrying'))).toBe(true);
+    expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
+  });
+
+  it('drops tools on plan retry after a native no-text progress stall', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    let callIndex = 0;
+    const prompts: string[] = [];
+    const toolsSeen: Array<string[] | undefined> = [];
+    const addDirsSeen: Array<string[] | undefined> = [];
+    const nativeBypassSeen: Array<boolean | undefined> = [];
+    const systemPrompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const]),
+      invoke(params: RuntimeInvokeParams) {
+        const idx = callIndex++;
+        prompts.push(params.prompt);
+        toolsSeen.push(params.tools);
+        addDirsSeen.push(params.addDirs);
+        nativeBypassSeen.push(params.disableNativeAppServer);
+        systemPrompts.push(params.systemPrompt ?? '');
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          if (idx === 0) {
+            yield {
+              type: 'error',
+              message: 'progress stall: no runtime progress for 180000ms (native turn produced no text output)',
+            };
+            return;
+          }
+          if (idx === 1) {
+            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'done' };
+            return;
+          }
+          yield { type: 'text_final', text: auditClean };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+    const progress: string[] = [];
+
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(callIndex).toBe(3);
+    expect(toolsSeen[0]).toEqual(['Read', 'Glob', 'Grep']);
+    expect(addDirsSeen[0]).toEqual([tmpDir]);
+    expect(toolsSeen[1]).toBeUndefined();
+    expect(addDirsSeen[1]).toBeUndefined();
+    expect(nativeBypassSeen[1]).toBe(true);
+    expect(prompts[1]).toContain('Do NOT use tools on this retry.');
+    expect(prompts[1]).toContain('You are salvaging a stalled plan draft.');
+    expect(prompts[1]).not.toContain('Read the codebase using your tools (Read, Glob, Grep) first');
+    expect(prompts[1]).not.toContain('## Project Context');
+    expect(systemPrompts[1]).toContain('Do not use tools on this retry.');
+    expect(progress.some((p) => p.includes('retrying'))).toBe(true);
+    expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
+  });
+
+  it('uses phase-specific retry session keys so revision salvage does not resume the draft retry thread', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditBlocking = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    let callIndex = 0;
+    const sessionKeys: Array<string | undefined> = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const]),
+      invoke(params: RuntimeInvokeParams) {
+        const idx = callIndex++;
+        sessionKeys.push(params.sessionKey ?? undefined);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          if (idx === 0 || idx === 3) {
+            yield {
+              type: 'error',
+              message: 'progress stall: no runtime progress for 180000ms (native turn produced no text output)',
+            };
+            return;
+          }
+          if (idx === 1 || idx === 4) {
+            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'done' };
+            return;
+          }
+          yield { type: 'text_final', text: idx === 2 ? auditBlocking : auditClean };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(callIndex).toBe(6);
+    expect(sessionKeys[0]).toMatch(/^forge:plan-\d+:test-model:drafter$/);
+    expect(sessionKeys[1]).toBe(`${sessionKeys[0]}:draft-retry`);
+    expect(sessionKeys[2]).toMatch(/^forge:plan-\d+:test-model:auditor$/);
+    expect(sessionKeys[3]).toBe(sessionKeys[0]);
+    expect(sessionKeys[4]).toBe(`${sessionKeys[0]}:revision-round-1-retry`);
+    expect(sessionKeys[1]).not.toBe(sessionKeys[4]);
+    expect(sessionKeys[5]).toBe(sessionKeys[2]);
+  });
+
+  it('emits a diagnostic event before failing the plan prefix contract', async () => {
+    const tmpDir = await makeTmpDir();
+    const invalidLead = 'I checked the repo and here is the plan summary before the artifact starts. '
+      + 'This should trigger the prefix guard once it runs long enough.';
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'sessions' as const]),
+      invoke() {
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_delta', text: invalidLead };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+    const events: EngineEvent[] = [];
+
+    const result = await orchestrator.run(
+      'Test feature',
+      async () => {},
+      undefined,
+      (evt) => {
+        events.push(evt);
+      },
+    );
+
+    expect(result.error).toContain('draft output must start with # Plan:');
+    const diagnostic = events.find((evt) =>
+      evt.type === 'log_line'
+      && evt.stream === 'stderr'
+      && evt.line.includes('"source":"forge_plan_prefix_guard"'),
+    );
+    expect(diagnostic).toBeDefined();
+    expect(diagnostic).toMatchObject({
+      type: 'log_line',
+      stream: 'stderr',
+    });
+    const payload = JSON.parse((diagnostic as Extract<EngineEvent, { type: 'log_line' }>).line) as Record<string, unknown>;
+    expect(payload.source).toBe('forge_plan_prefix_guard');
+    expect(payload.phase).toBe('draft');
+    expect(payload.reason).toBe('invalid_leading_text');
+    expect(payload.preview).toContain('I checked the repo');
+  });
+
   it('retries audit phase on failure and completes if retry succeeds', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
@@ -3184,9 +3543,34 @@ describe('ForgeOrchestrator onEvent threading', () => {
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntimeWithEvents([
-      { text: draftPlan, events: [{ type: 'text_delta', text: 'drafting...' }] },
+      { text: draftPlan, events: [{ type: 'text_delta', text: '# Plan:' }] },
       { text: auditClean },
     ]);
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const received: EngineEvent[] = [];
+    await orchestrator.run('Test feature', async () => {}, undefined, (evt) => received.push(evt));
+
+    expect(received.some((e) => e.type === 'text_delta')).toBe(true);
+    expect(received.some((e) => e.type === 'text_final')).toBe(true);
+  });
+
+  it('onEvent spy receives draft events through the global supervisor wrapper', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = wrapRuntimeWithGlobalPolicies({
+      runtime: makeMockRuntimeWithEvents([
+        { text: draftPlan, events: [{ type: 'text_delta', text: '# Plan:' }] },
+        { text: auditClean },
+      ]),
+      maxConcurrentInvocations: 3,
+      globalSupervisorEnabled: true,
+      env: { DISCOCLAW_GLOBAL_SUPERVISOR_ENABLED: '1' } as NodeJS.ProcessEnv,
+    });
 
     const opts = await baseOpts(tmpDir, runtime);
     const orchestrator = new ForgeOrchestrator(opts);

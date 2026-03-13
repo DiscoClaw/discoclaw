@@ -19,6 +19,7 @@ export type CodexCliRuntimeOpts = {
   defaultModel: string;
   streamStallTimeoutMs?: number;
   progressStallTimeoutMs?: number;
+  echoStdio?: boolean;
   dangerouslyBypassApprovalsAndSandbox?: boolean;
   disableSessions?: boolean;
   verbosePreview?: boolean;
@@ -97,6 +98,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
 
   const baseAdapter = createCliRuntime(strategy, {
     binary: opts.codexBin,
+    echoStdio: opts.echoStdio,
     dangerouslySkipPermissions: opts.dangerouslyBypassApprovalsAndSandbox,
     disableSessions: opts.disableSessions,
     appendSystemPrompt: opts.appendSystemPrompt,
@@ -131,6 +133,13 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
         const normalizedParams = normalizeInvokeParams(params, opts);
 
         if (normalizedParams.images && normalizedParams.images.length > 0) {
+          for await (const event of baseAdapter.invoke(normalizedParams)) {
+            yield event;
+          }
+          return;
+        }
+
+        if (normalizedParams.disableNativeAppServer) {
           for await (const event of baseAdapter.invoke(normalizedParams)) {
             yield event;
           }

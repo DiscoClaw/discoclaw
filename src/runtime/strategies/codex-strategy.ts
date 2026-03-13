@@ -420,8 +420,9 @@ export function createCodexStrategy(
             : { activity: true };
         }
 
-        // Reasoning items: stream as text_delta for the preview, but do not set
-        // resultText so the final reply remains answer-only.
+        // Reasoning items: keep them out of the user-text lane so plan/output
+        // guards only see actual answer text. Surface them as thinking deltas
+        // plus preview/debug events instead.
         if (item.type === 'reasoning') {
           const summary = item.summary;
           const text = item.text;
@@ -430,9 +431,12 @@ export function createCodexStrategy(
             typeof text === 'string' ? text :
             null;
           if (reasoningText) {
-            return previewEvents.length > 0
-              ? { text: reasoningText, extraEvents: previewEvents }
-              : { text: reasoningText };
+            return {
+              extraEvents: [
+                { type: 'thinking_delta', text: reasoningText },
+                ...previewEvents,
+              ],
+            };
           }
           return previewEvents.length > 0 ? { extraEvents: previewEvents } : {};
         }
