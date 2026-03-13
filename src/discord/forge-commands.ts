@@ -229,6 +229,43 @@ const TEMPLATE_ECHO_RETRY_PREFIX = [
   '',
 ].join('\n');
 
+const PLAN_OUTPUT_RETRY_PREFIX = [
+  'IMPORTANT: Your previous attempt started with narration or other text outside the plan.',
+  'Restart cleanly and output only the final plan markdown.',
+  'The very first line of your response MUST begin with `# Plan:`.',
+  'Do NOT describe what you are inspecting, reading, or about to do.',
+  '',
+  '',
+].join('\n');
+const PLAN_OUTPUT_NO_TOOLS_RETRY_PREFIX = [
+  'IMPORTANT: Your previous attempt spent too long using tools without producing plan text.',
+  'Do NOT use tools on this retry.',
+  'Answer from the provided context only and output the final plan markdown immediately.',
+  '',
+  '',
+].join('\n');
+
+const PLAN_MARKDOWN_PREFIX = '# Plan:';
+const PLAN_OUTPUT_STEER_MESSAGE = [
+  'Restart your answer now.',
+  'Stop using tools once you have enough context.',
+  'Do not narrate your process.',
+  'Output only the final plan markdown.',
+  'The first line must begin with `# Plan:`.',
+].join(' ');
+const PLAN_OUTPUT_MAX_LEADING_CHARS = 96;
+const PLAN_OUTPUT_SILENT_STEER_DELAY_MS = 60_000;
+const PLAN_OUTPUT_DIAGNOSTIC_PREVIEW_CHARS = 160;
+const DRAFTER_CODEBASE_TOOLS_INSTRUCTION = '- **Read the codebase using your tools (Read, Glob, Grep) first**, then write the plan. Do not guess — base every section on what you find in the actual code.';
+const DRAFTER_NO_TOOLS_RETRY_INSTRUCTION = '- Do NOT use tools on this retry. Base the plan on the task description, template, and provided context only. Write the best concrete plan you can from that material.';
+const FORGE_PLAN_SYSTEM_PROMPT = [
+  'You are producing a durable plan artifact, not an interactive status update.',
+  'Use tools silently when needed, but do not narrate your investigation, tool usage, or intent.',
+  'Keep tool use minimal. Once you have enough context, stop and emit the final plan immediately.',
+  'Emit only the final plan markdown once you are ready to answer.',
+  'The first line must begin with `# Plan:` and no prose may appear before it.',
+].join('\n');
+
 // ---------------------------------------------------------------------------
 // Degenerate description resolution
 // ---------------------------------------------------------------------------
@@ -334,7 +371,7 @@ export function buildDrafterPrompt(
     '',
     '## Instructions',
     '',
-    '- **Read the codebase using your tools (Read, Glob, Grep) first**, then write the plan. Do not guess — base every section on what you find in the actual code.',
+    DRAFTER_CODEBASE_TOOLS_INSTRUCTION,
     '- **`## Changes` is a required top-level section.** List every file that will be created, modified, or deleted with concrete repo-relative file paths (for example, `src/discord/forge-commands.ts`). Do not place file change information inside a `## Phases` section or any other section — changes belong exclusively in `## Changes`. If you need to describe implementation sequencing, use a separate `## Phases` section.',
     '- In `## Changes`, each file entry must include a backtick-wrapped path and specific planned edits (function names and type signatures when relevant). Do not use placeholder paths like `path/to/file.ts`.',
     '- If you claim a restriction on what the system can do ("read-only", "post-only", "only these actions", etc.), name the exact enforcement mechanism that makes it true in the current codebase or as part of this plan. Do not rely on policy prose alone.',
@@ -359,6 +396,39 @@ export function buildDrafterPrompt(
     '## Project Context',
     '',
     contextSummary,
+  ].join('\n');
+}
+
+function buildCompactDrafterRetryPrompt(
+  description: string,
+  templateContent: string,
+): string {
+  const rawBody = stripTemplateHeader(templateContent);
+  const today = new Date().toISOString().split('T')[0]!;
+  const templateBody = rawBody.replace(/\{\{[A-Z_]+\}\}/g, today);
+
+  return [
+    PHASE_SAFETY_REMINDER,
+    '',
+    'You are salvaging a stalled plan draft.',
+    '',
+    '## Task',
+    '',
+    description,
+    '',
+    '## Instructions',
+    '',
+    DRAFTER_NO_TOOLS_RETRY_INSTRUCTION,
+    '- Start writing the plan immediately. Do not narrate, explain, or reason aloud.',
+    '- Use the task description and template below to produce the best concrete plan you can.',
+    '- If a file path or dependency is uncertain, make the best grounded assumption and state that assumption explicitly in the plan.',
+    '- Start your answer with `# Plan:` and output only the final plan markdown.',
+    '',
+    '## Expected Output Structure',
+    '',
+    '````markdown',
+    templateBody,
+    '````',
   ].join('\n');
 }
 
@@ -702,10 +772,255 @@ function wrapWithEventForwarding(
     id: rt.id,
     capabilities: rt.capabilities,
     invoke(params) {
+      const seen = new WeakSet<object>();
+      const forward = (evt: EngineEvent) => {
+        const ref = evt as object;
+        if (seen.has(ref)) return;
+        seen.add(ref);
+        try { onEvent(evt); } catch { /* UI callback errors must not abort execution */ }
+      };
+
       return (async function* (): AsyncGenerator<EngineEvent> {
-        for await (const evt of rt.invoke(params)) {
-          try { onEvent(evt); } catch { /* UI callback errors must not abort execution */ }
+        for await (const evt of rt.invoke({
+          ...params,
+          rawEventTap(evt) {
+            params.rawEventTap?.(evt);
+            forward(evt);
+          },
+        })) {
+          forward(evt);
           yield evt;
+        }
+      })();
+    },
+  };
+}
+
+function normalizePlanOutputPrefix(text: string): string {
+  return text.replace(/^\s+/, '');
+}
+
+function sanitizePlanOutputPreview(text: string): string {
+  return text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, PLAN_OUTPUT_DIAGNOSTIC_PREVIEW_CHARS);
+}
+
+function isGlobalSupervisorCycleStartEvent(evt: EngineEvent): boolean {
+  if (evt.type !== 'log_line') return false;
+  try {
+    const payload = JSON.parse(evt.line) as Record<string, unknown>;
+    return payload.source === 'global_supervisor'
+      && payload.phase === 'execute'
+      && payload.reason === 'start';
+  } catch {
+    return false;
+  }
+}
+
+function assertPlanMarkdownOutput(output: string, phase: 'draft' | 'revision'): void {
+  if (!normalizePlanOutputPrefix(output).startsWith(PLAN_MARKDOWN_PREFIX)) {
+    throw new Error(`${phase} output must start with # Plan:`);
+  }
+}
+
+function withRetrySessionKey(sessionKey: string | null | undefined, suffix: string): string | undefined {
+  if (!sessionKey) return undefined;
+  return `${sessionKey}:${suffix}`;
+}
+
+function addPlanRetryHints(
+  def: Parameters<typeof runPipeline>[0],
+  opts: {
+    includeTemplateEchoWarning?: boolean;
+    retrySessionSuffix: string;
+    dropToolsOnRetry?: boolean;
+    replacementPrompt?: string;
+  },
+): Parameters<typeof runPipeline>[0] {
+  const promptPrefix = `${opts.includeTemplateEchoWarning ? TEMPLATE_ECHO_RETRY_PREFIX : ''}${opts.dropToolsOnRetry ? PLAN_OUTPUT_NO_TOOLS_RETRY_PREFIX : ''}${PLAN_OUTPUT_RETRY_PREFIX}`;
+
+  return {
+    ...def,
+    steps: def.steps.map((step) =>
+      step.kind === 'prompt'
+        ? (() => {
+          const retrySystemPrompt = opts.dropToolsOnRetry
+            ? [
+              step.systemPrompt,
+              'Do not use tools on this retry. Produce the final plan from the context already provided.',
+            ].filter((value): value is string => Boolean(value && value.trim())).join('\n\n')
+            : step.systemPrompt;
+          const basePrompt = opts.replacementPrompt ?? step.prompt;
+          const prompt =
+            opts.dropToolsOnRetry && typeof basePrompt === 'string'
+              ? basePrompt.replace(DRAFTER_CODEBASE_TOOLS_INSTRUCTION, DRAFTER_NO_TOOLS_RETRY_INSTRUCTION)
+              : basePrompt;
+
+          return {
+            ...step,
+            ...(retrySystemPrompt !== undefined && { systemPrompt: retrySystemPrompt }),
+            ...(opts.dropToolsOnRetry ? { tools: undefined, addDirs: undefined, disableNativeAppServer: true } : {}),
+            prompt: typeof prompt === 'string' ? promptPrefix + prompt : prompt,
+            sessionKey: withRetrySessionKey(step.sessionKey, opts.retrySessionSuffix),
+          };
+        })()
+        : step,
+    ),
+  };
+}
+
+function shouldDropToolsOnPlanRetry(message: string): boolean {
+  return message.toLowerCase().includes('native turn produced no text output');
+}
+
+function wrapWithPlanPrefixGuard(
+  rt: RuntimeAdapter,
+  phase: 'draft' | 'revision',
+): RuntimeAdapter {
+  const errorMessage = `${phase} output must start with # Plan:`;
+
+  return {
+    id: rt.id,
+    capabilities: rt.capabilities,
+    invoke(params) {
+      let prefixSatisfied = false;
+      let leadingText = '';
+      let steerAttempted = false;
+      let silentSteerAttempted = false;
+      let silentSteerTimer: ReturnType<typeof setTimeout> | undefined;
+      const transformedEvents = new WeakMap<object, EngineEvent | null>();
+
+      const clearSilentSteerTimer = () => {
+        if (!silentSteerTimer) return;
+        clearTimeout(silentSteerTimer);
+        silentSteerTimer = undefined;
+      };
+
+      const maybeArmSilentSteerTimer = () => {
+        if (
+          prefixSatisfied
+          || silentSteerAttempted
+          || silentSteerTimer
+          || !params.sessionKey
+          || typeof rt.steer !== 'function'
+        ) {
+          return;
+        }
+
+        silentSteerTimer = setTimeout(() => {
+          silentSteerTimer = undefined;
+          if (prefixSatisfied || silentSteerAttempted) return;
+          silentSteerAttempted = true;
+          void rt.steer?.(params.sessionKey!, PLAN_OUTPUT_STEER_MESSAGE).catch(() => false);
+        }, PLAN_OUTPUT_SILENT_STEER_DELAY_MS);
+      };
+
+      const transformEvent = (evt: EngineEvent): EngineEvent | null => {
+        if (isGlobalSupervisorCycleStartEvent(evt)) {
+          prefixSatisfied = false;
+          leadingText = '';
+          steerAttempted = false;
+          silentSteerAttempted = false;
+          clearSilentSteerTimer();
+          return evt;
+        }
+        if (prefixSatisfied) return evt;
+        if (evt.type !== 'text_delta' && evt.type !== 'text_final') {
+          if (
+            evt.type === 'tool_start'
+            || evt.type === 'tool_end'
+            || evt.type === 'preview_debug'
+            || evt.type === 'log_line'
+          ) {
+            maybeArmSilentSteerTimer();
+          }
+          return evt;
+        }
+
+        clearSilentSteerTimer();
+        leadingText += evt.text;
+        const normalizedLeadingText = normalizePlanOutputPrefix(leadingText);
+        const prefixStart = leadingText.indexOf(PLAN_MARKDOWN_PREFIX);
+        if (prefixStart === -1) {
+          if (
+            !steerAttempted
+            && normalizedLeadingText.length > 0
+            && !PLAN_MARKDOWN_PREFIX.startsWith(normalizedLeadingText)
+          ) {
+            steerAttempted = true;
+            if (params.sessionKey && typeof rt.steer === 'function') {
+              void rt.steer(params.sessionKey, PLAN_OUTPUT_STEER_MESSAGE).catch(() => false);
+            }
+          }
+          if (
+            normalizedLeadingText.length >= PLAN_OUTPUT_MAX_LEADING_CHARS
+            && !PLAN_MARKDOWN_PREFIX.startsWith(normalizedLeadingText)
+          ) {
+            const preview = sanitizePlanOutputPreview(leadingText);
+            params.rawEventTap?.({
+              type: 'log_line',
+              stream: 'stderr',
+              line: JSON.stringify({
+                source: 'forge_plan_prefix_guard',
+                phase,
+                reason: 'invalid_leading_text',
+                leadingChars: leadingText.length,
+                previewChars: preview.length,
+                preview,
+              }),
+            });
+            if (params.sessionKey && typeof rt.interrupt === 'function') {
+              void rt.interrupt(params.sessionKey).catch(() => false);
+            }
+            throw new Error(errorMessage);
+          }
+          return null;
+        }
+
+        const trimmedText = leadingText.slice(prefixStart);
+        if (trimmedText.length === 0) {
+          return null;
+        }
+
+        prefixSatisfied = true;
+        leadingText = '';
+        return {
+          ...evt,
+          text: trimmedText,
+        };
+      };
+
+      const transformOnce = (evt: EngineEvent): EngineEvent | null => {
+        const ref = evt as object;
+        if (transformedEvents.has(ref)) {
+          return transformedEvents.get(ref) ?? null;
+        }
+        const transformed = transformEvent(evt);
+        transformedEvents.set(ref, transformed);
+        return transformed;
+      };
+
+      return (async function* (): AsyncGenerator<EngineEvent> {
+        try {
+          for await (const evt of rt.invoke({
+            ...params,
+            rawEventTap(evt) {
+              const transformed = transformOnce(evt);
+              if (transformed) {
+                params.rawEventTap?.(transformed);
+              }
+            },
+          })) {
+            const transformed = transformOnce(evt);
+            if (!transformed) {
+              continue;
+            }
+            yield transformed;
+          }
+        } finally {
+          clearSilentSteerTimer();
         }
       })();
     },
@@ -740,7 +1055,8 @@ export function isRetryableError(msg: string): boolean {
     lower.includes('stdin write failed') ||
     lower.includes('codex app-server websocket closed') ||
     lower.includes('codex app-server websocket is closed') ||
-    lower.includes('drafter echoed the template')
+    lower.includes('drafter echoed the template') ||
+    lower.includes('output must start with # plan:')
   );
 }
 
@@ -1028,7 +1344,10 @@ export class ForgeOrchestrator {
     const reasoningDrafterRt = drafterReasoningEffort
       ? wrapWithReasoningEffort(drafterRt, drafterReasoningEffort)
       : drafterRt;
-    const effectiveDrafterRt = onEvent ? wrapWithEventForwarding(reasoningDrafterRt, onEvent) : reasoningDrafterRt;
+    const guardedDraftRt = wrapWithPlanPrefixGuard(reasoningDrafterRt, 'draft');
+    const guardedRevisionRt = wrapWithPlanPrefixGuard(reasoningDrafterRt, 'revision');
+    const effectiveDrafterRt = onEvent ? wrapWithEventForwarding(guardedDraftRt, onEvent) : guardedDraftRt;
+    const effectiveRevisionRt = onEvent ? wrapWithEventForwarding(guardedRevisionRt, onEvent) : guardedRevisionRt;
 
     let round = startRound - 1; // will be incremented at top of loop
     let planContent = await fs.readFile(filePath, 'utf-8');
@@ -1100,15 +1419,20 @@ export class ForgeOrchestrator {
             templateContent,
             contextSummary,
           );
+          const compactDrafterRetryPrompt = buildCompactDrafterRetryPrompt(
+            description,
+            templateContent,
+          );
 
           const draftPipelineResult = await this.runWithRetry({
             steps: [{
-              kind: 'prompt',
-              prompt: drafterPrompt,
-              runtime: effectiveDrafterRt,
-              model: drafterModel,
-              tools: readOnlyTools,
-              addDirs,
+            kind: 'prompt',
+            prompt: drafterPrompt,
+            runtime: effectiveDrafterRt,
+            systemPrompt: FORGE_PLAN_SYSTEM_PROMPT,
+            model: drafterModel,
+            tools: readOnlyTools,
+            addDirs,
               timeoutMs: this.opts.timeoutMs,
               streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
               progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
@@ -1121,21 +1445,20 @@ export class ForgeOrchestrator {
             signal: this.abortController.signal,
           }, 'Draft', onProgress, (result) => {
             const output = result.outputs[0] ?? '';
+            assertPlanMarkdownOutput(output, 'draft');
             if (isTemplateEchoed(output)) {
               this.opts.log?.warn({ planId, round, phase: 'draft' }, 'forge:template-echo');
               throw new Error('drafter echoed the template');
             }
-          }, (retryDef) => ({
-            ...retryDef,
-            steps: retryDef.steps.map((step) =>
-              step.kind === 'prompt'
-                ? {
-                  ...step,
-                  prompt: TEMPLATE_ECHO_RETRY_PREFIX + step.prompt,
-                }
-                : step,
-            ),
-          }));
+          }, (retryDef, retryCtx) => {
+            const dropToolsOnRetry = shouldDropToolsOnPlanRetry(retryCtx.firstError);
+            return addPlanRetryHints(retryDef, {
+              includeTemplateEchoWarning: true,
+              retrySessionSuffix: 'draft-retry',
+              dropToolsOnRetry,
+              replacementPrompt: dropToolsOnRetry ? compactDrafterRetryPrompt : undefined,
+            });
+          });
           if (!draftPipelineResult) {
             this.opts.log?.info({ planId, round, phase: 'draft' }, 'forge:cancelled');
             await this.updatePlanStatus(filePath, 'CANCELLED');
@@ -1324,7 +1647,8 @@ export class ForgeOrchestrator {
           steps: [{
             kind: 'prompt',
             prompt: revisionPrompt,
-            runtime: effectiveDrafterRt,
+            runtime: effectiveRevisionRt,
+            systemPrompt: FORGE_PLAN_SYSTEM_PROMPT,
             model: drafterModel,
             tools: readOnlyTools,
             addDirs,
@@ -1338,7 +1662,12 @@ export class ForgeOrchestrator {
           cwd: this.opts.cwd,
           model: this.opts.model,
           signal: this.abortController.signal,
-        }, `Revision after round ${round}`, onProgress);
+        }, `Revision after round ${round}`, onProgress, (result) => {
+          assertPlanMarkdownOutput(result.outputs[0] ?? '', 'revision');
+        }, (retryDef, retryCtx) => addPlanRetryHints(retryDef, {
+          retrySessionSuffix: `revision-round-${round}-retry`,
+          dropToolsOnRetry: shouldDropToolsOnPlanRetry(retryCtx.firstError),
+        }));
         if (!revisionPipelineResult) {
           this.opts.log?.info({ planId, round, phase: 'revision' }, 'forge:cancelled');
           await this.updatePlanStatus(filePath, 'CANCELLED');
@@ -1525,7 +1854,10 @@ export class ForgeOrchestrator {
     phase: string,
     onProgress: ProgressFn,
     validate?: (result: { outputs: string[] }) => void,
-    retryTransform?: (def: Parameters<typeof runPipeline>[0]) => Parameters<typeof runPipeline>[0],
+    retryTransform?: (
+      def: Parameters<typeof runPipeline>[0],
+      ctx: { firstError: string },
+    ) => Parameters<typeof runPipeline>[0],
   ): Promise<{ outputs: string[] } | null> {
     try {
       const result = await this.runCancellable(def);
@@ -1539,7 +1871,7 @@ export class ForgeOrchestrator {
       }
       this.opts.log?.warn({ err: firstErr, phase }, 'forge:retry');
       await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.retry, `Forge ${phase} stalled — retrying...`), { force: true });
-      const retryDef = retryTransform ? retryTransform(def) : def;
+      const retryDef = retryTransform ? retryTransform(def, { firstError: firstMsg }) : def;
       try {
         const result = await this.runCancellable(retryDef);
         if (result && validate) validate(result);

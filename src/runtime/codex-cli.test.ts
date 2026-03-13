@@ -1252,6 +1252,32 @@ describe('Codex CLI runtime adapter', () => {
     expect(events).toContainEqual({ type: 'text_final', text: 'resumed after native fallback' });
   });
 
+  it('allows callers to bypass the native app-server path for a single invocation', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+    mockExeca.mockImplementation(() => createMockSubprocess({
+      stdout: 'cli explicit bypass',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+    });
+    const client = appServerInstances[0]!;
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: process.cwd(),
+      disableNativeAppServer: true,
+    }));
+
+    expect(client.invokeViaTurn).not.toHaveBeenCalled();
+    expect(mockExeca).toHaveBeenCalledTimes(1);
+    expect(events).toContainEqual({ type: 'text_final', text: 'cli explicit bypass' });
+  });
+
   it('allows addDirs turns onto the native app-server path when native mode is enabled', async () => {
     process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
     process.env.CODEX_APP_SERVER_NATIVE = '1';
@@ -1313,6 +1339,39 @@ describe('Codex CLI runtime adapter', () => {
       baseUrl: 'ws://127.0.0.1:4321',
       traceNotifications: true,
     }));
+  });
+
+  it('passes CLI stdio echo through to one-shot Codex retries', async () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+    mockExeca.mockImplementation(() => createMockSubprocess({
+      stdout: jsonl([
+        '{"type":"item.completed","item":{"type":"agent_message","text":"cli visible output"}}',
+        '{"type":"turn.completed","usage":{}}',
+      ]),
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      echoStdio: true,
+    });
+
+    const events = await collectEvents(rt.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: process.cwd(),
+      disableNativeAppServer: true,
+      sessionKey: 'cli-echo-session',
+    }));
+
+    expect(events).toContainEqual({
+      type: 'log_line',
+      stream: 'stdout',
+      line: '{"type":"item.completed","item":{"type":"agent_message","text":"cli visible output"}}',
+    });
+    expect(events).toContainEqual({ type: 'text_final', text: 'cli visible output' });
   });
 
   it('passes per-invocation stall policy overrides through to native turns', async () => {
@@ -1709,7 +1768,7 @@ describe('Codex CLI runtime adapter', () => {
     expect(callArgs).not.toContain('--json');
   });
 
-  it('reasoning items emit text_delta but text_final contains only agent_message', async () => {
+  it('reasoning items emit thinking_delta but text_final contains only agent_message', async () => {
     const jsonlOutput = [
       '{"type":"thread.started","thread_id":"reason-thread-1"}',
       '{"type":"item.completed","item":{"type":"reasoning","summary":"Let me think step by step..."}}',
@@ -1735,12 +1794,14 @@ describe('Codex CLI runtime adapter', () => {
       sessionKey: 'reason-session',
     }));
 
-    // text_delta events should include reasoning text.
+    const thinking = events.filter((e) => e.type === 'thinking_delta');
+    const thinkingTexts = thinking.map((d) => (d as { text: string }).text);
+    expect(thinkingTexts).toContain('Let me think step by step...');
+    expect(thinkingTexts).toContain('Considering the options...');
+
     const deltas = events.filter((e) => e.type === 'text_delta');
     const deltaTexts = deltas.map((d) => (d as { text: string }).text);
-    expect(deltaTexts).toContain('Let me think step by step...');
-    expect(deltaTexts).toContain('Considering the options...');
-    expect(deltaTexts).toContain('The answer is 42.');
+    expect(deltaTexts).toEqual(['The answer is 42.']);
 
     // text_final should contain only the agent_message, not reasoning text.
     const final = events.find((e) => e.type === 'text_final');
@@ -1775,11 +1836,13 @@ describe('Codex CLI runtime adapter', () => {
       sessionKey: 'reason-session-no-agent',
     }));
 
-    const deltaTexts = events
-      .filter((e) => e.type === 'text_delta')
+    const thinkingTexts = events
+      .filter((e) => e.type === 'thinking_delta')
       .map((d) => (d as { text: string }).text);
-    expect(deltaTexts).toContain('Thinking through options...');
-    expect(deltaTexts).toContain('Still reasoning...');
+    expect(thinkingTexts).toContain('Thinking through options...');
+    expect(thinkingTexts).toContain('Still reasoning...');
+
+    expect(events.filter((e) => e.type === 'text_delta')).toHaveLength(0);
 
     const final = events.find((e) => e.type === 'text_final');
     expect(final).toEqual({ type: 'text_final', text: '' });
@@ -1820,6 +1883,7 @@ describe('Codex CLI runtime adapter', () => {
     // Only the agent_message delta should be present.
     const deltaTexts = deltas.map((d) => (d as { text: string }).text);
     expect(deltaTexts).toEqual(['Done.']);
+    expect(events.filter((e) => e.type === 'thinking_delta')).toHaveLength(0);
 
     // Streaming continues to completion.
     expect(events[events.length - 1]!.type).toBe('done');
@@ -1851,10 +1915,11 @@ describe('Codex CLI runtime adapter', () => {
       sessionKey: 'reason-session-3',
     }));
 
-    // Non-string text fields should produce no text_delta.
+    // Non-string text fields should produce no text_delta or thinking_delta.
     const deltas = events.filter((e) => e.type === 'text_delta');
     const deltaTexts = deltas.map((d) => (d as { text: string }).text);
     expect(deltaTexts).toEqual(['Still works.']);
+    expect(events.filter((e) => e.type === 'thinking_delta')).toHaveLength(0);
 
     // No error events — streaming continues without error.
     expect(events.find((e) => e.type === 'error')).toBeUndefined();

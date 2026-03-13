@@ -439,6 +439,15 @@ export function withGlobalSupervisor(runtime: RuntimeAdapter, opts: GlobalSuperv
               break;
             }
 
+            try {
+              currentParams.rawEventTap?.(evt);
+            } catch (err) {
+              threw = true;
+              lastError = err instanceof Error ? err.message : String(err);
+              lastFailure = normalizeRuntimeFailure(lastError);
+              break;
+            }
+
             if (evt.type === 'done') {
               sawDone = true;
               continue;
@@ -457,9 +466,11 @@ export function withGlobalSupervisor(runtime: RuntimeAdapter, opts: GlobalSuperv
             cycleBuffer.push(evt);
           }
         } catch (err) {
-          threw = true;
-          lastError = err instanceof Error ? err.message : String(err);
-          lastFailure = normalizeRuntimeFailure(lastError);
+          if (!threw) {
+            threw = true;
+            lastError = err instanceof Error ? err.message : String(err);
+            lastFailure = normalizeRuntimeFailure(lastError);
+          }
         }
 
         const signalAborted = currentParams.signal?.aborted === true;

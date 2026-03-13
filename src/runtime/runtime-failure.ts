@@ -91,10 +91,11 @@ export type ProjectedPipelineFailure = {
 };
 
 const SUPERVISOR_TRANSIENT_ERROR_RE = /(timed?\s*out|timeout|rate\s*limit|429|overload|temporar|econnreset|eai_again|503|connection\s+reset|network\s+error|service\s+unavailable)/i;
-const SUPERVISOR_HARD_ERROR_RE = /(invalid\s+api\s+key|unauthoriz|forbidden|permission\s+denied|outside\s+allowed\s+roots|malformed\s+json)/i;
+const SUPERVISOR_HARD_ERROR_RE = /(invalid\s+api\s+key|unauthoriz|forbidden|permission\s+denied|outside\s+allowed\s+roots|malformed\s+json|output\s+must\s+start\s+with\s+#\s*plan:)/i;
 const SUPERVISOR_ABORTED_RE = /abort(ed)?/i;
 const CODEX_UNSUPPORTED_MODEL_RE = /the ['"`]?([^'"`\s]+)['"`]? model is not supported when using codex with a chatgpt account/i;
 const CODEX_APP_SERVER_DISCONNECT_RE = /codex app-server (?:websocket closed|websocket is closed)/i;
+const NATIVE_NO_TEXT_PROGRESS_STALL_RE = /native turn produced no text output/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -770,6 +771,13 @@ export function classifyRuntimeFailureForGlobalSupervisor(
   }
 
   if (failure.retryable === false) {
+    return {
+      kind: 'hard_error',
+      retryable: false,
+    };
+  }
+
+  if (NATIVE_NO_TEXT_PROGRESS_STALL_RE.test(message)) {
     return {
       kind: 'hard_error',
       retryable: false,

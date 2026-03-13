@@ -489,7 +489,7 @@ describe('CodexAppServerClient', () => {
       { type: 'error', message: 'tool crashed' },
       { type: 'done' },
     ]);
-    expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+    expect(client.getSessionState('session-1')).toBeUndefined();
   });
 
   it('consumeStream accumulates turn/text_delta into the synthesized final text', async () => {
@@ -705,7 +705,7 @@ describe('CodexAppServerClient', () => {
       { type: 'usage', inputTokens: 7, outputTokens: 5, totalTokens: 12 },
       { type: 'done' },
     ]);
-    expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+    expect(client.getSessionState('session-1')).toBeUndefined();
   });
 
   it.each([
@@ -764,7 +764,7 @@ describe('CodexAppServerClient', () => {
       { type: 'usage', inputTokens: 7, outputTokens: 5, totalTokens: 12 },
       { type: 'done' },
     ]);
-    expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+    expect(client.getSessionState('session-1')).toBeUndefined();
   });
 
   it('consumeStream emits an error and done when the websocket disconnects mid-stream', async () => {
@@ -948,7 +948,7 @@ describe('CodexAppServerClient', () => {
       await expect(eventsPromise).resolves.toEqual([
         expect.objectContaining({
           type: 'error',
-          message: 'progress stall: no runtime progress for 45000ms (native turn produced no text or tool events)',
+          message: 'progress stall: no runtime progress for 45000ms (native turn produced no text output)',
           failure: expect.objectContaining({
             code: 'PROGRESS_STALL',
             retryable: true,
@@ -956,7 +956,85 @@ describe('CodexAppServerClient', () => {
         }),
         { type: 'done' },
       ]);
-      expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+      expect(client.getSessionState('session-1')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invokeViaTurn extends the initial no-text timeout after early tool activity', async () => {
+    vi.useFakeTimers();
+    try {
+      const log = { info: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+      const client = makeClient({ timeoutMs: 50, progressStallTimeoutMs: 60_000, log });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+      let settled = false;
+      void eventsPromise.finally(() => {
+        settled = true;
+      });
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+        socket.notify('item/started', {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          item: {
+            type: 'dynamicToolCall',
+            id: 'tool-1',
+            tool: 'search',
+            arguments: { query: 'discoclaw' },
+            status: 'inProgress',
+            contentItems: null,
+            success: null,
+            durationMs: null,
+          },
+        });
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+
+      await vi.advanceTimersByTimeAsync(45_001);
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      await expect(eventsPromise).resolves.toEqual([
+        { type: 'tool_start', name: 'search', input: { query: 'discoclaw' } },
+        expect.objectContaining({
+          type: 'error',
+          message: 'progress stall: no runtime progress for 60000ms (native turn produced no text output)',
+          failure: expect.objectContaining({
+            code: 'PROGRESS_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+      expect(log.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          notificationMethod: 'item/started',
+          eventTypes: ['tool_start'],
+        }),
+        'codex-app-server: initial turn activity observed before text output',
+      );
+      expect(client.getSessionState('session-1')).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
@@ -1162,6 +1240,12 @@ describe('CodexAppServerClient', () => {
         turnId: 'turn-1',
         notificationMethod: 'turn/text_delta',
         eventTypes: ['text_delta'],
+        eventSummaries: [{
+          type: 'text_delta',
+          textPreview: 'first chunk',
+          textLength: 'first chunk'.length,
+          hasNonWhitespace: true,
+        }],
         progressEventTypes: ['text_delta'],
         progressObservedBefore: false,
         progressObservedAfter: true,
@@ -1177,6 +1261,12 @@ describe('CodexAppServerClient', () => {
         turnId: 'turn-1',
         notificationMethod: 'item/completed',
         eventTypes: ['thinking_delta'],
+        eventSummaries: [{
+          type: 'thinking_delta',
+          textPreview: 'Thinking through the task.',
+          textLength: 'Thinking through the task.'.length,
+          hasNonWhitespace: true,
+        }],
         progressEventTypes: [],
         progressObservedBefore: true,
         progressObservedAfter: true,
@@ -1231,7 +1321,7 @@ describe('CodexAppServerClient', () => {
         }),
         { type: 'done' },
       ]);
-      expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+      expect(client.getSessionState('session-1')).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
@@ -1308,7 +1398,130 @@ describe('CodexAppServerClient', () => {
         }),
         { type: 'done' },
       ]);
-      expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+      expect(client.getSessionState('session-1')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invokeViaTurn fires progress stall when only tool churn continues after initial text', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient({ timeoutMs: 50, streamStallTimeoutMs: 5_000, progressStallTimeoutMs: 250 });
+      let resolveTurnStarted!: () => void;
+      const turnStarted = new Promise<void>((resolve) => {
+        resolveTurnStarted = resolve;
+      });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+        socket.notify('turn/text_delta', {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          text: 'first chunk',
+        });
+        resolveTurnStarted();
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+      await turnStarted;
+
+      socket.notify('item/started', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'commandExecution',
+          id: 'cmd-1',
+          command: 'rg -n FORGE_AUDITOR_RUNTIME .',
+          status: 'inProgress',
+        },
+      });
+      socket.notify('item/completed', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'commandExecution',
+          id: 'cmd-1',
+          command: 'rg -n FORGE_AUDITOR_RUNTIME .',
+          status: 'completed',
+          exitCode: 0,
+          aggregatedOutput: 'src/index.ts:1164:const { drafterRuntime, auditorRuntime } = resolveForgeRuntimes({',
+        },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      socket.notify('item/started', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'commandExecution',
+          id: 'cmd-2',
+          command: 'sed -n 1140,1185p src/index.ts',
+          status: 'inProgress',
+        },
+      });
+      socket.notify('item/completed', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'commandExecution',
+          id: 'cmd-2',
+          command: 'sed -n 1140,1185p src/index.ts',
+          status: 'completed',
+          exitCode: 0,
+          aggregatedOutput: 'const { drafterRuntime, auditorRuntime } = resolveForgeRuntimes({',
+        },
+      });
+      await vi.advanceTimersByTimeAsync(151);
+
+      await expect(eventsPromise).resolves.toEqual([
+        { type: 'text_delta', text: 'first chunk' },
+        { type: 'tool_start', name: 'command_execution', input: { command: 'rg -n FORGE_AUDITOR_RUNTIME .' } },
+        {
+          type: 'tool_end',
+          name: 'command_execution',
+          ok: true,
+          output: {
+            command: 'rg -n FORGE_AUDITOR_RUNTIME .',
+            exitCode: 0,
+            output: 'src/index.ts:1164:const { drafterRuntime, auditorRuntime } = resolveForgeRuntimes({',
+          },
+        },
+        { type: 'tool_start', name: 'command_execution', input: { command: 'sed -n 1140,1185p src/index.ts' } },
+        {
+          type: 'tool_end',
+          name: 'command_execution',
+          ok: true,
+          output: {
+            command: 'sed -n 1140,1185p src/index.ts',
+            exitCode: 0,
+            output: 'const { drafterRuntime, auditorRuntime } = resolveForgeRuntimes({',
+          },
+        },
+        expect.objectContaining({
+          type: 'error',
+          message: 'progress stall: no runtime progress for 250ms',
+          failure: expect.objectContaining({
+            code: 'PROGRESS_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+      expect(client.getSessionState('session-1')).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
@@ -1345,7 +1558,7 @@ describe('CodexAppServerClient', () => {
       await expect(eventsPromise).resolves.toEqual([
         expect.objectContaining({
           type: 'error',
-          message: 'progress stall: no runtime progress for 45000ms (native turn produced no text or tool events)',
+          message: 'progress stall: no runtime progress for 45000ms (native turn produced no text output)',
         }),
         { type: 'done' },
       ]);
@@ -1356,7 +1569,7 @@ describe('CodexAppServerClient', () => {
           threadId: 'thread-1',
           turnId: 'turn-1',
           errorCode: 'codex_app_server_progress_stall',
-          error: 'progress stall: no runtime progress for 45000ms (native turn produced no text or tool events)',
+          error: 'progress stall: no runtime progress for 45000ms (native turn produced no text output)',
           progressObserved: false,
           firstNotificationLogged: false,
         }),
@@ -1406,7 +1619,7 @@ describe('CodexAppServerClient', () => {
         }),
         { type: 'done' },
       ]);
-      expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+      expect(client.getSessionState('session-1')).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
@@ -1649,6 +1862,100 @@ describe('CodexAppServerClient', () => {
         && (entry as { method?: string }).method === 'thread/start';
     });
     expect(createCalls).toHaveLength(1);
+  });
+
+  it('invokeViaTurn starts a fresh thread after a progress stall clears the native session', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient({ timeoutMs: 50, streamStallTimeoutMs: 5_000, progressStallTimeoutMs: 250 });
+
+      const firstEvents = collect(client.invokeViaTurn({
+        prompt: 'first',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      let threadIndex = 0;
+      socket.onMethod('thread/start', (message) => {
+        threadIndex += 1;
+        socket.reply(message.id, { threadId: `thread-${threadIndex}` });
+      });
+      socket.onMethod('turn/start', (message) => {
+        const threadId = (message.params as { threadId?: string }).threadId;
+        if (threadId === 'thread-1') {
+          socket.reply(message.id, { turnId: 'turn-1' });
+          socket.notify('turn/text_delta', {
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            text: 'partial',
+          });
+          return;
+        }
+
+        socket.reply(message.id, { turnId: 'turn-2' });
+        socket.notify('item/completed', {
+          threadId: 'thread-2',
+          turnId: 'turn-2',
+          item: {
+            type: 'agentMessage',
+            id: 'msg-2',
+            text: 'second done',
+            phase: null,
+          },
+        });
+        socket.notify('turn/completed', {
+          threadId: 'thread-2',
+          turn: { id: 'turn-2', items: [], status: 'completed', error: null },
+        });
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+
+      await vi.advanceTimersByTimeAsync(251);
+
+      await expect(firstEvents).resolves.toEqual([
+        { type: 'text_delta', text: 'partial' },
+        expect.objectContaining({
+          type: 'error',
+          message: 'progress stall: no runtime progress for 250ms',
+          failure: expect.objectContaining({
+            code: 'PROGRESS_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+      expect(client.getSessionState('session-1')).toBeUndefined();
+
+      const secondEvents = collect(client.invokeViaTurn({
+        prompt: 'second',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+
+      await expect(secondEvents).resolves.toEqual([
+        { type: 'text_delta', text: 'second done' },
+        { type: 'text_final', text: 'second done' },
+        { type: 'done' },
+      ]);
+      expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-2' });
+
+      const createCalls = socket.sent.filter((entry) => {
+        return typeof entry === 'object'
+          && entry !== null
+          && 'method' in entry
+          && (entry as { method?: string }).method === 'thread/start';
+      });
+      expect(createCalls).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('invokeViaTurn starts a fresh thread after a websocket disconnect resets the active session', async () => {

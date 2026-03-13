@@ -144,6 +144,30 @@ describe('normalizeRuntimeFailure', () => {
       retryable: false,
     });
   });
+
+  it('treats plan-prefix contract violations as hard errors for the global supervisor', () => {
+    const classification = classifyRuntimeFailureForGlobalSupervisor(
+      'draft output must start with # Plan:',
+      { treatAbortedAsRetryable: true, signalAborted: false },
+    );
+
+    expect(classification).toEqual({
+      kind: 'hard_error',
+      retryable: false,
+    });
+  });
+
+  it('treats native no-text progress stalls as hard errors for the global supervisor', () => {
+    const classification = classifyRuntimeFailureForGlobalSupervisor(
+      'progress stall: no runtime progress for 180000ms (native turn produced no text output)',
+      { treatAbortedAsRetryable: true, signalAborted: false },
+    );
+
+    expect(classification).toEqual({
+      kind: 'hard_error',
+      retryable: false,
+    });
+  });
   it('falls back to unknown runtime failures without dropping the message', () => {
     const failure = normalizeRuntimeFailure('some new runtime error');
 

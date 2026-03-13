@@ -30,6 +30,7 @@ export type ForgeNativeReproArgs = {
   outDir?: string;
   dryRun: boolean;
   traceNotifications: boolean;
+  traceCliStdio: boolean;
   help: boolean;
 };
 
@@ -68,6 +69,7 @@ function usage(): string {
     '  --context-file <path>        Append extra context from a file',
     '  --out-dir <dir>              Base directory for trace output',
     '  --trace-notifications        Log every native app-server notification/reset',
+    '  --trace-cli-stdio            Log raw Codex CLI stdout/stderr lines in the trace',
     '  --dry-run                    Resolve inputs/config without running forge',
     '  --help                       Show this help',
   ].join('\n');
@@ -77,6 +79,7 @@ export function parseForgeNativeReproArgs(argv: readonly string[]): ForgeNativeR
   const args: ForgeNativeReproArgs = {
     dryRun: false,
     traceNotifications: false,
+    traceCliStdio: false,
     help: false,
   };
 
@@ -103,6 +106,10 @@ export function parseForgeNativeReproArgs(argv: readonly string[]): ForgeNativeR
     }
     if (arg === '--trace-notifications') {
       args.traceNotifications = true;
+      continue;
+    }
+    if (arg === '--trace-cli-stdio') {
+      args.traceCliStdio = true;
       continue;
     }
 
@@ -426,6 +433,7 @@ async function main(): Promise<void> {
     defaultModel: cfg.codexModel,
     streamStallTimeoutMs: cfg.streamStallTimeoutMs,
     progressStallTimeoutMs: cfg.progressStallTimeoutMs,
+    echoStdio: args.traceCliStdio,
     dangerouslyBypassApprovalsAndSandbox: cfg.codexDangerouslyBypassApprovalsAndSandbox,
     disableSessions: cfg.codexDisableSessions,
     verbosePreview: cfg.codexVerbosePreview,
@@ -486,6 +494,7 @@ async function main(): Promise<void> {
       drafterModel: forgeModels.drafterModel,
       auditorModel: forgeModels.auditorModel,
       traceNotifications: args.traceNotifications,
+      traceCliStdio: args.traceCliStdio,
     },
   };
   await fsp.writeFile(path.join(runDir, 'metadata.json'), stringifyJson(metadata) + '\n', 'utf8');
