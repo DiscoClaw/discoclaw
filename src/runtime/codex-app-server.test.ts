@@ -84,6 +84,7 @@ describe('CodexAppServerClient', () => {
       progressStallTimeoutMs?: number;
       verbosePreview?: boolean;
       itemTypeDebug?: boolean;
+      traceNotifications?: boolean;
       log?: {
         debug?: (...args: unknown[]) => void;
         info?: (...args: unknown[]) => void;
@@ -108,6 +109,9 @@ describe('CodexAppServerClient', () => {
         : {}),
       ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.itemTypeDebug !== undefined
         ? { itemTypeDebug: timeoutMsOrOpts.itemTypeDebug }
+        : {}),
+      ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.traceNotifications !== undefined
+        ? { traceNotifications: timeoutMsOrOpts.traceNotifications }
         : {}),
       ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.log !== undefined
         ? { log: timeoutMsOrOpts.log }
@@ -1103,6 +1107,84 @@ describe('CodexAppServerClient', () => {
       ],
     ]));
     expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('logs notification trace details when per-notification tracing is enabled', async () => {
+    const log = { info: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+    const client = makeClient({ timeoutMs: 50, traceNotifications: true, log });
+
+    const eventsPromise = collect(client.invokeViaTurn({
+      prompt: 'answer this',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('thread/start', (message) => {
+      socket.reply(message.id, { threadId: 'thread-1' });
+    });
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+      socket.notify('turn/text_delta', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        text: 'first chunk',
+      });
+      socket.notify('item/completed', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          id: 'reason-1',
+          type: 'reasoning',
+          summary: 'Thinking through the task.',
+        },
+      });
+      socket.notify('turn/completed', {
+        threadId: 'thread-1',
+        turn: { id: 'turn-1', status: 'completed', error: null },
+      });
+    });
+    socket.open();
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'first chunk' },
+      { type: 'thinking_delta', text: 'Thinking through the task.' },
+      { type: 'text_final', text: 'first chunk' },
+      { type: 'done' },
+    ]);
+
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: 'session-1',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        notificationMethod: 'turn/text_delta',
+        eventTypes: ['text_delta'],
+        progressEventTypes: ['text_delta'],
+        progressObservedBefore: false,
+        progressObservedAfter: true,
+        streamTimerReset: true,
+        progressTimerReset: true,
+      }),
+      'codex-app-server: notification trace',
+    );
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: 'session-1',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        notificationMethod: 'item/completed',
+        eventTypes: ['thinking_delta'],
+        progressEventTypes: [],
+        progressObservedBefore: true,
+        progressObservedAfter: true,
+        streamTimerReset: true,
+        progressTimerReset: false,
+      }),
+      'codex-app-server: notification trace',
+    );
   });
 
   it('invokeViaTurn fails cleanly when a native turn goes idle after initial progress', async () => {

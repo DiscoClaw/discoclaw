@@ -56,6 +56,7 @@ export type CodexAppServerClientOpts = {
   progressStallTimeoutMs?: number;
   verbosePreview?: boolean;
   itemTypeDebug?: boolean;
+  traceNotifications?: boolean;
   dangerouslyBypassApprovalsAndSandbox?: boolean;
   log?: Logger;
   wsFactory?: (url: string) => WebSocketLike;
@@ -427,6 +428,7 @@ export class CodexAppServerClient {
   private readonly progressStallTimeoutMs?: number;
   private readonly verbosePreview: boolean;
   private readonly itemTypeDebug: boolean;
+  private readonly traceNotifications: boolean;
   private readonly dangerouslyBypassApprovalsAndSandbox: boolean;
   private readonly log?: Logger;
   private readonly wsFactory: (url: string) => WebSocketLike;
@@ -444,6 +446,7 @@ export class CodexAppServerClient {
     this.progressStallTimeoutMs = asPositiveFiniteNumber(opts.progressStallTimeoutMs);
     this.verbosePreview = Boolean(opts.verbosePreview);
     this.itemTypeDebug = Boolean(opts.itemTypeDebug);
+    this.traceNotifications = Boolean(opts.traceNotifications);
     this.dangerouslyBypassApprovalsAndSandbox = Boolean(opts.dangerouslyBypassApprovalsAndSandbox);
     this.log = opts.log;
     this.wsFactory = opts.wsFactory ?? ((url) => new WebSocket(url));
@@ -880,7 +883,23 @@ export class CodexAppServerClient {
       verbosePreview: this.verbosePreview,
       itemTypeDebug: this.itemTypeDebug,
     });
+    const progressObservedBefore = streamState.progressObserved;
     this.noteTurnStreamProgress(sessionKey, streamState, message.method, events);
+    if (this.traceNotifications) {
+      const progressEventTypes = events
+        .filter((event) => isProgressEvent(event))
+        .map((event) => event.type);
+      this.log?.info?.({
+        ...this.buildTurnLogContext(sessionKey, streamState),
+        notificationMethod: message.method,
+        eventTypes: events.map((event) => event.type),
+        progressEventTypes,
+        progressObservedBefore,
+        progressObservedAfter: streamState.progressObserved,
+        streamTimerReset: true,
+        progressTimerReset: progressEventTypes.length > 0,
+      }, 'codex-app-server: notification trace');
+    }
     for (const event of events) {
       this.enqueueTurnStreamEvent(streamState, event);
     }

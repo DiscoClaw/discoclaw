@@ -1299,6 +1299,22 @@ describe('Codex CLI runtime adapter', () => {
     }));
   });
 
+  it('passes native notification tracing through to the app-server client', () => {
+    process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
+    process.env.CODEX_APP_SERVER_NATIVE = '1';
+
+    createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.3-codex',
+      traceNotifications: true,
+    });
+
+    expect(CodexAppServerClientMock).toHaveBeenCalledWith(expect.objectContaining({
+      baseUrl: 'ws://127.0.0.1:4321',
+      traceNotifications: true,
+    }));
+  });
+
   it('passes per-invocation stall policy overrides through to native turns', async () => {
     process.env.CODEX_APP_SERVER_URL = 'ws://127.0.0.1:4321';
     process.env.CODEX_APP_SERVER_NATIVE = '1';

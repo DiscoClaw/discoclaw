@@ -44,6 +44,7 @@
     "doctor": "tsx scripts/doctor.ts",
     "doctor:online": "tsx scripts/doctor.ts --check-connection",
     "setup": "tsx scripts/setup.ts",
+    "forge:repro": "tsx scripts/forge-native-repro.ts",
     "test": "vitest run --passWithNoTests",
     "supervisor:measure": "vitest run src/runtime/global-supervisor.test.ts src/index.runtime.test.ts",
     "prepublishOnly": "pnpm build && pnpm test",
