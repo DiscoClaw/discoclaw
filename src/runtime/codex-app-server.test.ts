@@ -529,6 +529,48 @@ describe('CodexAppServerClient', () => {
     ]);
   });
 
+  it('consumeStream emits final text from terminal turn items when no prior text was streamed', async () => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.open();
+    await startPromise;
+
+    const eventsPromise = collect(client.consumeStream('session-1'));
+    socket.notify('turn/completed', {
+      threadId: 'thread-1',
+      turn: {
+        id: 'turn-1',
+        status: 'completed',
+        error: null,
+        items: [
+          {
+            type: 'reasoning',
+            id: 'reason-1',
+            summary: 'Looked around first',
+          },
+          {
+            type: 'agentMessage',
+            id: 'msg-1',
+            text: '# Plan:\nterminal-only answer',
+            phase: null,
+          },
+        ],
+      },
+    });
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_final', text: '# Plan:\nterminal-only answer' },
+      { type: 'done' },
+    ]);
+  });
+
   it('surfaces native preview/debug lifecycle events for reasoning and commands', async () => {
     const client = makeClient({
       verbosePreview: true,

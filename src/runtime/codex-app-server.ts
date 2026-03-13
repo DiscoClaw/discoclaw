@@ -1423,6 +1423,22 @@ function extractTextDelta(params: Record<string, unknown> | null): string | unde
   return getStringField(params, 'text', 'delta');
 }
 
+function extractTerminalAgentMessageText(params: Record<string, unknown> | null): string | undefined {
+  const turn = asRecord(params?.turn);
+  const items = turn?.items;
+  if (!Array.isArray(items)) return undefined;
+
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = asRecord(items[index]);
+    if (!item) continue;
+    if (normalizePreviewItemType(getItemType(item)) !== 'agent_message') continue;
+    const text = getStringField(item, 'text');
+    if (text) return text;
+  }
+
+  return undefined;
+}
+
 function extractToolName(params: Record<string, unknown> | null): string | undefined {
   if (!params) return undefined;
   return getStringField(params, 'name', 'tool', 'toolName')
@@ -1614,10 +1630,16 @@ function mapNotificationToEngineEvents(
       const status = extractTerminalTurnStatus(message.method, params);
       const events: EngineEvent[] = [];
 
+      const terminalText = extractTerminalAgentMessageText(params);
+
       if (status === 'failed' || status === 'interrupted' || status === 'cancelled') {
         events.push({ type: 'error', message: buildTerminalTurnErrorMessage(message.method, params) });
-      } else if (status === 'completed' && state.latestAgentMessageText) {
-        events.push({ type: 'text_final', text: state.latestAgentMessageText });
+      } else if (status === 'completed') {
+        const finalText = terminalText ?? state.latestAgentMessageText;
+        if (finalText) {
+          state.latestAgentMessageText = finalText;
+          events.push({ type: 'text_final', text: finalText });
+        }
       }
 
       const usage = selectTerminalUsage(params, state);

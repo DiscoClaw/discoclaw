@@ -266,6 +266,13 @@ const FORGE_PLAN_SYSTEM_PROMPT = [
   'The first line must begin with `# Plan:` and no prose may appear before it.',
 ].join('\n');
 
+function resolveForgePlanSystemPrompt(rt: RuntimeAdapter): string | undefined {
+  // Native Codex draft/revision turns can suppress answer streaming when the
+  // forge plan system prompt is present. The prompt body already enforces the
+  // plan contract, so omit the extra system prompt for Codex turns.
+  return rt.id === 'codex' ? undefined : FORGE_PLAN_SYSTEM_PROMPT;
+}
+
 // ---------------------------------------------------------------------------
 // Degenerate description resolution
 // ---------------------------------------------------------------------------
@@ -913,6 +920,15 @@ function shouldDropToolsOnPlanRetry(message: string): boolean {
   return message.toLowerCase().includes('native turn produced no text output');
 }
 
+function shouldDropToolsOnCodexPlanRetry(
+  runtime: RuntimeAdapter,
+  message: string,
+): boolean {
+  const lower = message.toLowerCase();
+  return shouldDropToolsOnPlanRetry(message)
+    || (runtime.id === 'codex' && lower.includes('output must start with # plan:'));
+}
+
 function wrapWithPlanPrefixGuard(
   rt: RuntimeAdapter,
   phase: 'draft' | 'revision',
@@ -1467,7 +1483,7 @@ export class ForgeOrchestrator {
             kind: 'prompt',
             prompt: drafterPrompt,
             runtime: effectiveDrafterRt,
-            systemPrompt: FORGE_PLAN_SYSTEM_PROMPT,
+            systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
             model: drafterModel,
             tools: readOnlyTools,
             addDirs,
@@ -1489,7 +1505,7 @@ export class ForgeOrchestrator {
               throw new Error('drafter echoed the template');
             }
           }, (retryDef, retryCtx) => {
-            const dropToolsOnRetry = shouldDropToolsOnPlanRetry(retryCtx.firstError);
+            const dropToolsOnRetry = shouldDropToolsOnCodexPlanRetry(drafterRt, retryCtx.firstError);
             return addPlanRetryHints(retryDef, {
               includeTemplateEchoWarning: true,
               retrySessionSuffix: 'draft-retry',
@@ -1691,7 +1707,7 @@ export class ForgeOrchestrator {
             kind: 'prompt',
             prompt: revisionPrompt,
             runtime: effectiveRevisionRt,
-            systemPrompt: FORGE_PLAN_SYSTEM_PROMPT,
+            systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
             model: drafterModel,
             tools: readOnlyTools,
             addDirs,
@@ -1709,8 +1725,8 @@ export class ForgeOrchestrator {
           assertPlanMarkdownOutput(result.outputs[0] ?? '', 'revision');
         }, (retryDef, retryCtx) => addPlanRetryHints(retryDef, {
           retrySessionSuffix: `revision-round-${round}-retry`,
-          dropToolsOnRetry: shouldDropToolsOnPlanRetry(retryCtx.firstError),
-          replacementPrompt: shouldDropToolsOnPlanRetry(retryCtx.firstError)
+          dropToolsOnRetry: shouldDropToolsOnCodexPlanRetry(drafterRt, retryCtx.firstError),
+          replacementPrompt: shouldDropToolsOnCodexPlanRetry(drafterRt, retryCtx.firstError)
             ? compactRevisionRetryPrompt
             : undefined,
         }));
