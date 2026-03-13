@@ -29,6 +29,15 @@ const FORGE_PLAN_PHASE_SUPERVISOR_POLICY: RuntimeSupervisorPolicy = {
     maxEscalationLevel: 4,
   },
 };
+const FORGE_GROUNDING_PHASE_SUPERVISOR_POLICY: RuntimeSupervisorPolicy = {
+  profile: 'plan_phase',
+  treatAbortedAsRetryable: true,
+  maxSignatureRepeats: 1,
+  limits: {
+    maxCycles: 1,
+    maxRetries: 0,
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Audit criteria — single source of truth, referenced at top/middle/bottom of
@@ -246,6 +255,7 @@ const PLAN_OUTPUT_NO_TOOLS_RETRY_PREFIX = [
 ].join('\n');
 
 const PLAN_MARKDOWN_PREFIX = '# Plan:';
+const GROUNDING_OUTPUT_MAX_LEADING_CHARS = 64;
 const PLAN_OUTPUT_STEER_MESSAGE = [
   'Restart your answer now.',
   'Stop using tools once you have enough context.',
@@ -265,6 +275,31 @@ const FORGE_PLAN_SYSTEM_PROMPT = [
   'Emit only the final plan markdown once you are ready to answer.',
   'The first line must begin with `# Plan:` and no prose may appear before it.',
 ].join('\n');
+
+function materializePlanTemplateBody(templateContent: string): string {
+  const rawBody = stripTemplateHeader(templateContent);
+  const today = new Date().toISOString().split('T')[0]!;
+  return rawBody.replace(/\{\{[A-Z_]+\}\}/g, today);
+}
+
+function formatConcretePlanPaths(paths: readonly string[]): string {
+  if (paths.length === 0) return '- None supplied.';
+  return paths.map((filePath) => `- \`${filePath}\``).join('\n');
+}
+
+function extractConcretePlanPaths(planContent: string): string[] {
+  const planForPrompt = stripAuditLogForPrompt(planContent);
+  const matches = [...planForPrompt.matchAll(/`([^`\n]+)`/g)]
+    .map((match) => match[1]!.trim())
+    .filter((value) => value.includes('/'));
+  return [...new Set(matches)];
+}
+
+function shouldUseTwoStageCodexPlanFlow(runtime: RuntimeAdapter): boolean {
+  return runtime.id === 'codex'
+    && runtime.capabilities.has('sessions')
+    && runtime.capabilities.has('mid_turn_steering');
+}
 
 function resolveForgePlanSystemPrompt(rt: RuntimeAdapter): string | undefined {
   // Native Codex draft/revision turns can suppress answer streaming when the
@@ -361,11 +396,7 @@ export function buildDrafterPrompt(
   templateContent: string,
   contextSummary: string,
 ): string {
-  const rawBody = stripTemplateHeader(templateContent);
-  // Replace remaining mustache tokens with concrete values so the drafter
-  // doesn't echo them verbatim (e.g. {{DATE}} in the Audit Log section).
-  const today = new Date().toISOString().split('T')[0]!;
-  const templateBody = rawBody.replace(/\{\{[A-Z_]+\}\}/g, today);
+  const templateBody = materializePlanTemplateBody(templateContent);
 
   return [
     PHASE_SAFETY_REMINDER,
@@ -410,9 +441,7 @@ function buildCompactDrafterRetryPrompt(
   description: string,
   templateContent: string,
 ): string {
-  const rawBody = stripTemplateHeader(templateContent);
-  const today = new Date().toISOString().split('T')[0]!;
-  const templateBody = rawBody.replace(/\{\{[A-Z_]+\}\}/g, today);
+  const templateBody = materializePlanTemplateBody(templateContent);
 
   return [
     PHASE_SAFETY_REMINDER,
@@ -475,6 +504,158 @@ function buildCompactRevisionRetryPrompt(
     '- The first line of your answer must be `# Plan: <title>` with the current plan title on the same line.',
     '- Output only the complete revised plan markdown.',
   ].join('\n');
+}
+
+function buildCodexDraftGroundingPrompt(description: string): string {
+  return [
+    PHASE_SAFETY_REMINDER,
+    '',
+    'You are gathering only the concrete repo file paths needed for a later plan-writing turn.',
+    '',
+    '## Task',
+    '',
+    description,
+    '',
+    '## Instructions',
+    '',
+    '- Read the codebase using your tools (Read, Glob, Grep) only as needed to identify the most likely change files.',
+    '- Stop as soon as you have enough concrete repo-relative file paths for the later plan-writing turn.',
+    '- Reply with 1-5 lines and nothing else.',
+    '- Each line must be exactly one backtick-wrapped repo-relative file path.',
+    '- Do NOT draft the plan yet.',
+    '- No bullets. No notes. No prose. No `# Plan:` heading.',
+  ].join('\n');
+}
+
+function buildCodexDraftWritePrompt(
+  description: string,
+  templateContent: string,
+  contextSummary: string,
+  groundedInputs: string,
+): string {
+  const templateBody = materializePlanTemplateBody(templateContent);
+  return [
+    PHASE_SAFETY_REMINDER,
+    '',
+    'You are writing the final plan artifact from grounded repo inputs that were already gathered in this thread.',
+    '',
+    '## Task',
+    '',
+    description,
+    '',
+    '## Instructions',
+    '',
+    '- Do NOT inspect the repo further in this turn.',
+    '- Use only the grounded repo inputs and project context below.',
+    '- In `## Changes`, use concrete repo-relative file paths from the grounded repo inputs below.',
+    '- If a detail is still uncertain, make the narrowest explicit assumption in the plan instead of reopening investigation.',
+    '- Start your answer with `# Plan:` and output only the final plan markdown.',
+    '',
+    '## Grounded Repo Inputs',
+    '',
+    groundedInputs,
+    '',
+    '## Expected Output Structure',
+    '',
+    '````markdown',
+    templateBody,
+    '````',
+    '',
+    '## Project Context',
+    '',
+    contextSummary,
+  ].join('\n');
+}
+
+function buildCodexRevisionGroundingPrompt(
+  planContent: string,
+  auditNotes: string,
+): string {
+  const planForPrompt = stripAuditLogForPrompt(planContent);
+  return [
+    PHASE_SAFETY_REMINDER,
+    '',
+    'You are gathering grounded repo inputs for revising an existing technical plan.',
+    '',
+    '## Current Plan',
+    '',
+    '```markdown',
+    planForPrompt,
+    '```',
+    '',
+    '## Latest Audit Feedback',
+    '',
+    auditNotes,
+    '',
+    '## Instructions',
+    '',
+    '- Inspect the repo only as needed to address the latest audit concerns.',
+    '- Prefer reusing the file paths already present in the current plan whenever they are sufficient.',
+    '- Reply with `NONE` exactly if no additional repo-relative file paths are needed.',
+    '- Otherwise reply with 1-5 lines and nothing else.',
+    '- Each line must be exactly one backtick-wrapped repo-relative file path.',
+    '- Do NOT write the revised plan yet.',
+    '- No bullets. No notes. No prose.',
+  ].join('\n');
+}
+
+function buildCodexRevisionWritePrompt(
+  planContent: string,
+  auditNotes: string,
+  description: string,
+  projectContext: string | undefined,
+  groundedInputs: string,
+): string {
+  const planForPrompt = stripAuditLogForPrompt(planContent);
+  const existingPaths = extractConcretePlanPaths(planContent);
+  const sections = [
+    PHASE_SAFETY_REMINDER,
+    '',
+    'You are writing the final revised plan artifact from grounded repo inputs that were already gathered in this thread.',
+    '',
+    '## Original Description',
+    '',
+    description,
+    '',
+  ];
+
+  if (projectContext) {
+    sections.push(
+      '## Project Context',
+      '',
+      projectContext,
+      '',
+    );
+  }
+
+  sections.push(
+    '## Current Plan',
+    '',
+    '```markdown',
+    planForPrompt,
+    '```',
+    '',
+    '## Latest Audit Feedback',
+    '',
+    auditNotes,
+    '',
+    '## Existing Plan File Paths',
+    '',
+    formatConcretePlanPaths(existingPaths),
+    '',
+    '## Additional Grounded Repo Inputs',
+    '',
+    groundedInputs,
+    '',
+    '## Instructions',
+    '',
+    '- Do NOT inspect the repo further in this turn.',
+    '- Address all blocking audit concerns while preserving accepted plan structure and history.',
+    '- Prefer the existing plan file paths above. Add a new concrete repo-relative file path only if it already appears in the grounded repo inputs above.',
+    '- Output the complete revised plan markdown starting with `# Plan:` and nothing else.',
+  );
+
+  return sections.join('\n');
 }
 
 export function buildAuditorPrompt(
@@ -852,6 +1033,49 @@ function sanitizePlanOutputPreview(text: string): string {
     .slice(0, PLAN_OUTPUT_DIAGNOSTIC_PREVIEW_CHARS);
 }
 
+function findGroundingOutputStart(text: string, allowNone: boolean): { start: number; kind: 'path' | 'none' } | null {
+  const firstNonWhitespace = text.search(/\S/);
+  if (firstNonWhitespace === -1) return null;
+  const trimmed = text.slice(firstNonWhitespace);
+  if (trimmed.startsWith('`')) {
+    return { start: firstNonWhitespace, kind: 'path' };
+  }
+  if (allowNone && /^NONE(?:\s|$)/.test(trimmed)) {
+    return { start: firstNonWhitespace, kind: 'none' };
+  }
+  return null;
+}
+
+function hasPotentialGroundingPrefix(text: string, allowNone: boolean): boolean {
+  const firstNonWhitespace = text.search(/\S/);
+  if (firstNonWhitespace === -1) return true;
+  const trimmed = text.slice(firstNonWhitespace);
+  if ('`'.startsWith(trimmed)) return true;
+  if (allowNone && 'NONE'.startsWith(trimmed)) return true;
+  return false;
+}
+
+function isValidGroundingOutput(text: string, allowNone: boolean): boolean {
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return false;
+  if (allowNone && trimmed === 'NONE') return true;
+  const lines = trimmed.split('\n').map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0 || lines.length > 5) return false;
+  return lines.every((line) => /^`(?!\/)[^`\n]+`$/.test(line));
+}
+
+function buildGroundingOutputSteerMessage(allowNone: boolean): string {
+  const lines = [
+    'Restart your answer now.',
+    'Do not narrate, explain, or add notes.',
+    'Output only repo-relative file paths, one backtick-wrapped path per line.',
+  ];
+  if (allowNone) {
+    lines.push('Reply with `NONE` exactly if no additional file paths are needed.');
+  }
+  return lines.join(' ');
+}
+
 function isGlobalSupervisorCycleStartEvent(evt: EngineEvent): boolean {
   if (evt.type !== 'log_line') return false;
   try {
@@ -916,6 +1140,10 @@ function addPlanRetryHints(
   };
 }
 
+function isGroundingOutputError(message: string): boolean {
+  return message.toLowerCase().includes('grounding output must be repo-relative file paths');
+}
+
 function shouldDropToolsOnPlanRetry(message: string): boolean {
   return message.toLowerCase().includes('native turn produced no text output');
 }
@@ -926,6 +1154,7 @@ function shouldDropToolsOnCodexPlanRetry(
 ): boolean {
   const lower = message.toLowerCase();
   return shouldDropToolsOnPlanRetry(message)
+    || isGroundingOutputError(message)
     || (runtime.id === 'codex' && lower.includes('output must start with # plan:'));
 }
 
@@ -1081,6 +1310,133 @@ function wrapWithPlanPrefixGuard(
   };
 }
 
+function wrapWithGroundingOutputGuard(
+  rt: RuntimeAdapter,
+  phase: 'draft' | 'revision',
+  opts?: { allowNone?: boolean },
+): RuntimeAdapter {
+  const allowNone = opts?.allowNone ?? false;
+  const errorMessage = allowNone
+    ? `${phase} grounding output must be repo-relative file paths or NONE`
+    : `${phase} grounding output must be repo-relative file paths only`;
+  const steerMessage = buildGroundingOutputSteerMessage(allowNone);
+
+  return {
+    id: rt.id,
+    capabilities: rt.capabilities,
+    invoke(params) {
+      let prefixSatisfied = false;
+      let leadingText = '';
+      let steerAttempted = false;
+      let groundingText = '';
+      const transformedEvents = new WeakMap<object, EngineEvent | null>();
+
+      const failInvalidGroundingOutput = () => {
+        const preview = sanitizePlanOutputPreview(groundingText || leadingText);
+        params.rawEventTap?.({
+          type: 'log_line',
+          stream: 'stderr',
+          line: JSON.stringify({
+            source: 'forge_grounding_guard',
+            phase,
+            reason: 'invalid_grounding_output',
+            leadingChars: (groundingText || leadingText).length,
+            previewChars: preview.length,
+            preview,
+          }),
+        });
+        if (params.sessionKey && typeof rt.interrupt === 'function') {
+          void rt.interrupt(params.sessionKey).catch(() => false);
+        }
+        throw new Error(errorMessage);
+      };
+
+      const transformEvent = (evt: EngineEvent): EngineEvent | null => {
+        if (isGlobalSupervisorCycleStartEvent(evt)) {
+          prefixSatisfied = false;
+          leadingText = '';
+          groundingText = '';
+          steerAttempted = false;
+          return evt;
+        }
+        if (evt.type !== 'text_delta' && evt.type !== 'text_final') {
+          return evt;
+        }
+
+        if (!prefixSatisfied) {
+          const steerRestartStart = steerAttempted
+            ? findGroundingOutputStart(evt.text, allowNone)
+            : null;
+          if (steerRestartStart) {
+            leadingText = evt.text.slice(steerRestartStart.start);
+          } else {
+            leadingText += evt.text;
+          }
+          const start = findGroundingOutputStart(leadingText, allowNone);
+          if (!start) {
+            const normalizedLeadingText = leadingText.replace(/^\s+/, '');
+            if (
+              !steerAttempted
+              && normalizedLeadingText.length > 0
+              && !hasPotentialGroundingPrefix(leadingText, allowNone)
+            ) {
+              steerAttempted = true;
+              if (params.sessionKey && typeof rt.steer === 'function') {
+                void rt.steer(params.sessionKey, steerMessage).catch(() => false);
+              }
+            }
+            if (
+              normalizedLeadingText.length >= GROUNDING_OUTPUT_MAX_LEADING_CHARS
+              && !hasPotentialGroundingPrefix(leadingText, allowNone)
+            ) {
+              failInvalidGroundingOutput();
+            }
+            return null;
+          }
+
+          prefixSatisfied = true;
+          const trimmedText = leadingText.slice(start.start);
+          leadingText = '';
+          groundingText += trimmedText;
+          return { ...evt, text: trimmedText };
+        }
+
+        groundingText += evt.text;
+        return evt;
+      };
+
+      const transformOnce = (evt: EngineEvent): EngineEvent | null => {
+        const ref = evt as object;
+        if (transformedEvents.has(ref)) {
+          return transformedEvents.get(ref) ?? null;
+        }
+        const transformed = transformEvent(evt);
+        transformedEvents.set(ref, transformed);
+        return transformed;
+      };
+
+      return (async function* (): AsyncGenerator<EngineEvent> {
+        for await (const evt of rt.invoke({
+          ...params,
+          rawEventTap(evt) {
+            const transformed = transformOnce(evt);
+            if (transformed) {
+              params.rawEventTap?.(transformed);
+            }
+          },
+        })) {
+          const transformed = transformOnce(evt);
+          if (!transformed) continue;
+          yield transformed;
+        }
+        if (groundingText.length > 0 && !isValidGroundingOutput(groundingText, allowNone)) {
+          failInvalidGroundingOutput();
+        }
+      })();
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Retry helper
 // ---------------------------------------------------------------------------
@@ -1110,6 +1466,7 @@ export function isRetryableError(msg: string): boolean {
     lower.includes('codex app-server websocket closed') ||
     lower.includes('codex app-server websocket is closed') ||
     lower.includes('drafter echoed the template') ||
+    isGroundingOutputError(lower) ||
     lower.includes('output must start with # plan:')
   );
 }
@@ -1400,8 +1757,13 @@ export class ForgeOrchestrator {
       : drafterRt;
     const guardedDraftRt = wrapWithPlanPrefixGuard(reasoningDrafterRt, 'draft');
     const guardedRevisionRt = wrapWithPlanPrefixGuard(reasoningDrafterRt, 'revision');
+    const guardedDraftResearchRt = wrapWithGroundingOutputGuard(reasoningDrafterRt, 'draft');
+    const guardedRevisionResearchRt = wrapWithGroundingOutputGuard(reasoningDrafterRt, 'revision', { allowNone: true });
+    const effectiveDraftResearchRt = onEvent ? wrapWithEventForwarding(guardedDraftResearchRt, onEvent) : guardedDraftResearchRt;
+    const effectiveRevisionResearchRt = onEvent ? wrapWithEventForwarding(guardedRevisionResearchRt, onEvent) : guardedRevisionResearchRt;
     const effectiveDrafterRt = onEvent ? wrapWithEventForwarding(guardedDraftRt, onEvent) : guardedDraftRt;
     const effectiveRevisionRt = onEvent ? wrapWithEventForwarding(guardedRevisionRt, onEvent) : guardedRevisionRt;
+    const useTwoStageCodexDraftFlow = shouldUseTwoStageCodexPlanFlow(drafterRt);
 
     let round = startRound - 1; // will be incremented at top of loop
     let planContent = await fs.readFile(filePath, 'utf-8');
@@ -1477,16 +1839,77 @@ export class ForgeOrchestrator {
             description,
             templateContent,
           );
-
-          const draftPipelineResult = await this.runWithRetry({
+          const draftPrimaryDef = useTwoStageCodexDraftFlow
+            ? {
+              steps: [
+                {
+                  id: 'draft-grounding',
+                  kind: 'prompt' as const,
+                  prompt: buildCodexDraftGroundingPrompt(description),
+                  runtime: effectiveDraftResearchRt,
+                  model: drafterModel,
+                  tools: readOnlyTools,
+                  addDirs,
+                  timeoutMs: this.opts.timeoutMs,
+                  streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
+                  progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                  sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+                  supervisor: FORGE_GROUNDING_PHASE_SUPERVISOR_POLICY,
+                },
+                {
+                  id: 'draft-write',
+                  kind: 'prompt' as const,
+                  prompt: buildCodexDraftWritePrompt(
+                    description,
+                    templateContent,
+                    contextSummary,
+                    '{{steps.draft-grounding.output}}',
+                  ),
+                  runtime: effectiveDrafterRt,
+                  systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
+                  model: drafterModel,
+                  tools: [],
+                  timeoutMs: this.opts.timeoutMs,
+                  streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
+                  progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                  sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+                  supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
+                },
+              ],
+              runtime: this.opts.runtime,
+              cwd: this.opts.cwd,
+              model: this.opts.model,
+              signal: this.abortController.signal,
+            }
+            : {
+              steps: [{
+                kind: 'prompt' as const,
+                prompt: drafterPrompt,
+                runtime: effectiveDrafterRt,
+                systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
+                model: drafterModel,
+                tools: readOnlyTools,
+                addDirs,
+                timeoutMs: this.opts.timeoutMs,
+                streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
+                progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+                supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
+              }],
+              runtime: this.opts.runtime,
+              cwd: this.opts.cwd,
+              model: this.opts.model,
+              signal: this.abortController.signal,
+            };
+          const draftRetryBaseDef = {
             steps: [{
-            kind: 'prompt',
-            prompt: drafterPrompt,
-            runtime: effectiveDrafterRt,
-            systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
-            model: drafterModel,
-            tools: readOnlyTools,
-            addDirs,
+              kind: 'prompt' as const,
+              prompt: drafterPrompt,
+              runtime: effectiveDrafterRt,
+              systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
+              model: drafterModel,
+              tools: readOnlyTools,
+              addDirs,
               timeoutMs: this.opts.timeoutMs,
               streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
               progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
@@ -1497,8 +1920,10 @@ export class ForgeOrchestrator {
             cwd: this.opts.cwd,
             model: this.opts.model,
             signal: this.abortController.signal,
-          }, 'Draft', onProgress, (result) => {
-            const output = result.outputs[0] ?? '';
+          };
+
+          const draftPipelineResult = await this.runWithRetry(draftPrimaryDef, 'Draft', onProgress, (result) => {
+            const output = result.outputs[result.outputs.length - 1] ?? '';
             assertPlanMarkdownOutput(output, 'draft');
             if (isTemplateEchoed(output)) {
               this.opts.log?.warn({ planId, round, phase: 'draft' }, 'forge:template-echo');
@@ -1506,7 +1931,7 @@ export class ForgeOrchestrator {
             }
           }, (retryDef, retryCtx) => {
             const dropToolsOnRetry = shouldDropToolsOnCodexPlanRetry(drafterRt, retryCtx.firstError);
-            return addPlanRetryHints(retryDef, {
+            return addPlanRetryHints(useTwoStageCodexDraftFlow ? draftRetryBaseDef : retryDef, {
               includeTemplateEchoWarning: true,
               retrySessionSuffix: 'draft-retry',
               dropToolsOnRetry,
@@ -1526,7 +1951,7 @@ export class ForgeOrchestrator {
               reachedMaxRounds: false,
             };
           }
-          const draftOutput = draftPipelineResult.outputs[0] ?? '';
+          const draftOutput = draftPipelineResult.outputs[draftPipelineResult.outputs.length - 1] ?? '';
 
           // Write the draft — preserve the header (planId, taskId) from the created file.
           planContent = this.mergeDraftWithHeader(planContent, draftOutput);
@@ -1701,10 +2126,72 @@ export class ForgeOrchestrator {
           auditOutput,
           description,
         );
-
-        const revisionPipelineResult = await this.runWithRetry({
+        const revisionPrimaryDef = useTwoStageCodexDraftFlow
+          ? {
+            steps: [
+              {
+                id: `revision-round-${round}-grounding`,
+                kind: 'prompt' as const,
+                prompt: buildCodexRevisionGroundingPrompt(planContent, auditOutput),
+                runtime: effectiveRevisionResearchRt,
+                model: drafterModel,
+                tools: readOnlyTools,
+                addDirs,
+                timeoutMs: this.opts.timeoutMs,
+                streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
+                progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+                supervisor: FORGE_GROUNDING_PHASE_SUPERVISOR_POLICY,
+              },
+              {
+                id: `revision-round-${round}-write`,
+                kind: 'prompt' as const,
+                prompt: buildCodexRevisionWritePrompt(
+                  planContent,
+                  auditOutput,
+                  description,
+                  projectContext,
+                  `{{steps.revision-round-${round}-grounding.output}}`,
+                ),
+                runtime: effectiveRevisionRt,
+                systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
+                model: drafterModel,
+                tools: [],
+                timeoutMs: this.opts.timeoutMs,
+                streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
+                progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+                supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
+              },
+            ],
+            runtime: this.opts.runtime,
+            cwd: this.opts.cwd,
+            model: this.opts.model,
+            signal: this.abortController.signal,
+          }
+          : {
+            steps: [{
+              kind: 'prompt' as const,
+              prompt: revisionPrompt,
+              runtime: effectiveRevisionRt,
+              systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
+              model: drafterModel,
+              tools: readOnlyTools,
+              addDirs,
+              timeoutMs: this.opts.timeoutMs,
+              streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
+              progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+              sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+              supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
+            }],
+            runtime: this.opts.runtime,
+            cwd: this.opts.cwd,
+            model: this.opts.model,
+            signal: this.abortController.signal,
+          };
+        const revisionRetryBaseDef = {
           steps: [{
-            kind: 'prompt',
+            kind: 'prompt' as const,
             prompt: revisionPrompt,
             runtime: effectiveRevisionRt,
             systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
@@ -1721,15 +2208,18 @@ export class ForgeOrchestrator {
           cwd: this.opts.cwd,
           model: this.opts.model,
           signal: this.abortController.signal,
-        }, `Revision after round ${round}`, onProgress, (result) => {
-          assertPlanMarkdownOutput(result.outputs[0] ?? '', 'revision');
-        }, (retryDef, retryCtx) => addPlanRetryHints(retryDef, {
-          retrySessionSuffix: `revision-round-${round}-retry`,
-          dropToolsOnRetry: shouldDropToolsOnCodexPlanRetry(drafterRt, retryCtx.firstError),
-          replacementPrompt: shouldDropToolsOnCodexPlanRetry(drafterRt, retryCtx.firstError)
-            ? compactRevisionRetryPrompt
-            : undefined,
-        }));
+        };
+
+        const revisionPipelineResult = await this.runWithRetry(revisionPrimaryDef, `Revision after round ${round}`, onProgress, (result) => {
+          assertPlanMarkdownOutput(result.outputs[result.outputs.length - 1] ?? '', 'revision');
+        }, (retryDef, retryCtx) => {
+          const dropToolsOnRetry = shouldDropToolsOnCodexPlanRetry(drafterRt, retryCtx.firstError);
+          return addPlanRetryHints(useTwoStageCodexDraftFlow ? revisionRetryBaseDef : retryDef, {
+            retrySessionSuffix: `revision-round-${round}-retry`,
+            dropToolsOnRetry,
+            replacementPrompt: dropToolsOnRetry ? compactRevisionRetryPrompt : undefined,
+          });
+        });
         if (!revisionPipelineResult) {
           this.opts.log?.info({ planId, round, phase: 'revision' }, 'forge:cancelled');
           await this.updatePlanStatus(filePath, 'CANCELLED');
@@ -1743,7 +2233,7 @@ export class ForgeOrchestrator {
             reachedMaxRounds: false,
           };
         }
-        const revisionOutput = revisionPipelineResult.outputs[0] ?? '';
+        const revisionOutput = revisionPipelineResult.outputs[revisionPipelineResult.outputs.length - 1] ?? '';
 
         planContent = this.mergeDraftWithHeader(planContent, revisionOutput);
         await this.atomicWrite(filePath, planContent);

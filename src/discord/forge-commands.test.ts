@@ -471,6 +471,11 @@ describe('isRetryableError', () => {
     expect(isRetryableError('revision output must start with # Plan:')).toBe(true);
   });
 
+  it('matches grounding output contract failures', () => {
+    expect(isRetryableError('draft grounding output must be repo-relative file paths only')).toBe(true);
+    expect(isRetryableError('revision grounding output must be repo-relative file paths or NONE')).toBe(true);
+  });
+
   it('is case-insensitive', () => {
     expect(isRetryableError('HANG DETECTED')).toBe(true);
     expect(isRetryableError('Process Exited Unexpectedly')).toBe(true);
@@ -2370,6 +2375,81 @@ describe('ForgeOrchestrator', () => {
     expect(systemPrompts[1]).toContain('Do not use tools on this retry.');
   });
 
+  it('bypasses inner grounding retries and salvages through a fresh outer retry session', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    let callIndex = 0;
+    const prompts: string[] = [];
+    const sessionKeys: Array<string | undefined> = [];
+    const toolsSeen: Array<string[] | undefined> = [];
+    const addDirsSeen: Array<string[] | undefined> = [];
+    const nativeBypassSeen: Array<boolean | undefined> = [];
+    const supervisors: Array<RuntimeInvokeParams['supervisor']> = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const, 'mid_turn_steering' as const]),
+      invoke(params: RuntimeInvokeParams) {
+        const idx = callIndex++;
+        prompts.push(params.prompt);
+        sessionKeys.push(params.sessionKey ?? undefined);
+        toolsSeen.push(params.tools);
+        addDirsSeen.push(params.addDirs);
+        nativeBypassSeen.push(params.disableNativeAppServer);
+        supervisors.push(params.supervisor);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          if (idx === 0) {
+            yield { type: 'text_delta', text: 'I’m locating the forge auditor and Codex app-server wiring, then' };
+            yield { type: 'done' };
+            return;
+          }
+          if (idx === 1) {
+            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'done' };
+            return;
+          }
+          yield { type: 'text_final', text: auditClean };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(
+      tmpDir,
+      wrapRuntimeWithGlobalPolicies({
+        runtime,
+        maxConcurrentInvocations: 3,
+        globalSupervisorEnabled: true,
+        env: { DISCOCLAW_GLOBAL_SUPERVISOR_ENABLED: '1' } as NodeJS.ProcessEnv,
+      }),
+    );
+    const orchestrator = new ForgeOrchestrator(opts);
+    const progress: string[] = [];
+
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(callIndex).toBe(3);
+    expect(supervisors[0]).toEqual(expect.objectContaining({
+      limits: expect.objectContaining({
+        maxCycles: 1,
+        maxRetries: 0,
+      }),
+    }));
+    expect(toolsSeen[0]).toEqual(['Read', 'Glob', 'Grep']);
+    expect(addDirsSeen[0]).toEqual([tmpDir]);
+    expect(sessionKeys[0]).toMatch(/^forge:plan-\d+:test-model:drafter$/);
+    expect(toolsSeen[1]).toBeUndefined();
+    expect(addDirsSeen[1]).toBeUndefined();
+    expect(nativeBypassSeen[1]).toBe(true);
+    expect(sessionKeys[1]).toBe(`${sessionKeys[0]}:draft-retry`);
+    expect(prompts[1]).toContain('You are salvaging a stalled plan draft.');
+    expect(progress.some((p) => p.includes('retrying'))).toBe(true);
+  });
+
   it('uses phase-specific retry session keys so revision salvage does not resume the draft retry thread', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
@@ -3303,6 +3383,165 @@ function makeCaptureRuntime(responses: string[]): {
 }
 
 describe('Forge session keys', () => {
+  it('uses a two-stage native Codex draft flow with shared drafter session state', async () => {
+    const tmpDir = await makeTmpDir();
+    const groundedPaths = [
+      '`src/discord/forge-commands.ts`',
+      '`src/runtime/codex-app-server.ts`',
+    ].join('\n');
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- \`src/discord/forge-commands.ts\` — add two-stage native draft orchestration.\n- \`src/runtime/codex-app-server.ts\` — confirm native turn behavior.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const invocations: RuntimeInvokeParams[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const, 'mid_turn_steering' as const]),
+      invoke(params) {
+        invocations.push(params);
+        const text = invocations.length === 1
+          ? groundedPaths
+          : invocations.length === 2
+            ? draftPlan
+            : auditClean;
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(invocations).toHaveLength(3);
+    expect(invocations[0]!.prompt).toContain('Do NOT draft the plan yet.');
+    expect(invocations[0]!.prompt).toContain('Each line must be exactly one backtick-wrapped repo-relative file path.');
+    expect(invocations[0]!.tools).toEqual(['Read', 'Glob', 'Grep']);
+    expect(invocations[0]!.addDirs).toEqual([tmpDir]);
+    expect(invocations[1]!.prompt).toContain('## Grounded Repo Inputs');
+    expect(invocations[1]!.prompt).toContain('`src/discord/forge-commands.ts`');
+    expect(invocations[1]!.tools).toEqual([]);
+    expect(invocations[1]!.addDirs).toBeUndefined();
+    expect(invocations[1]!.sessionKey).toBe(invocations[0]!.sessionKey);
+    expect(invocations[2]!.sessionKey).toContain(':auditor');
+    expect(invocations[2]!.sessionKey).not.toBe(invocations[0]!.sessionKey);
+    expect(invocations[0]!.systemPrompt).toBeUndefined();
+    expect(invocations[1]!.systemPrompt).toBeUndefined();
+  });
+
+  it('uses a two-stage native Codex revision flow with shared drafter session state', async () => {
+    const tmpDir = await makeTmpDir();
+    const groundedDraftPaths = [
+      '`src/discord/forge-commands.ts`',
+      '`src/runtime/codex-app-server.ts`',
+    ].join('\n');
+    const groundedRevisionPaths = 'NONE';
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- \`src/discord/forge-commands.ts\` — add two-stage native draft orchestration.\n- \`src/runtime/codex-app-server.ts\` — confirm native turn behavior.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditBlocking = '**Concern 1: Missing details**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
+    const revisedPlan = `# Plan: Test feature revised\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing better.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- \`src/discord/forge-commands.ts\` — add two-stage native draft orchestration.\n- \`src/runtime/codex-app-server.ts\` — document native turn behavior assumptions.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const invocations: RuntimeInvokeParams[] = [];
+    const responses = [
+      groundedDraftPaths,
+      draftPlan,
+      auditBlocking,
+      groundedRevisionPaths,
+      revisedPlan,
+      auditClean,
+    ];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const, 'mid_turn_steering' as const]),
+      invoke(params) {
+        invocations.push(params);
+        const text = responses[invocations.length - 1] ?? '(missing response)';
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(invocations).toHaveLength(6);
+    expect(invocations[0]!.sessionKey).toContain(':drafter');
+    expect(invocations[1]!.sessionKey).toBe(invocations[0]!.sessionKey);
+    expect(invocations[2]!.sessionKey).toContain(':auditor');
+    expect(invocations[3]!.sessionKey).toBe(invocations[0]!.sessionKey);
+    expect(invocations[4]!.sessionKey).toBe(invocations[0]!.sessionKey);
+    expect(invocations[5]!.sessionKey).toBe(invocations[2]!.sessionKey);
+    expect(invocations[3]!.prompt).toContain('Do NOT write the revised plan yet.');
+    expect(invocations[3]!.prompt).toContain('Reply with `NONE` exactly if no additional repo-relative file paths are needed.');
+    expect(invocations[4]!.prompt).toContain('## Existing Plan File Paths');
+    expect(invocations[4]!.prompt).toContain('`src/discord/forge-commands.ts`');
+    expect(invocations[4]!.prompt).toContain('NONE');
+    expect(invocations[4]!.tools).toEqual([]);
+    expect(invocations[4]!.addDirs).toBeUndefined();
+    expect(invocations[3]!.systemPrompt).toBeUndefined();
+    expect(invocations[4]!.systemPrompt).toBeUndefined();
+  });
+
+  it('steers native Codex grounding turns back to path-only output when they start narrating', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- \`src/discord/forge-commands.ts\` — add two-stage native draft orchestration.\n- \`src/runtime/codex-app-server.ts\` — confirm native turn behavior.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    let groundingSteered = false;
+    const steerMessages: string[] = [];
+    const invocations: RuntimeInvokeParams[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const, 'mid_turn_steering' as const]),
+      steer(_sessionKey, message) {
+        groundingSteered = true;
+        steerMessages.push(message);
+        return Promise.resolve(true);
+      },
+      invoke(params) {
+        invocations.push(params);
+        if (invocations.length === 1) {
+          return (async function* (): AsyncGenerator<EngineEvent> {
+            yield { type: 'text_delta', text: 'I' };
+            await Promise.resolve();
+            if (groundingSteered) {
+              yield {
+                type: 'text_delta',
+                text: '`src/discord/forge-commands.ts`\n`src/runtime/codex-app-server.ts`',
+              };
+            }
+            yield { type: 'done' };
+          })();
+        }
+
+        const text = invocations.length === 2 ? draftPlan : auditClean;
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(invocations).toHaveLength(3);
+    expect(steerMessages).toHaveLength(1);
+    expect(steerMessages[0]).toContain('repo-relative file paths');
+    expect(steerMessages[0]).toContain('Do not narrate');
+  });
+
   it('applies plan-phase supervisor policy and shorter stall windows to forge prompt steps', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
