@@ -2313,6 +2313,78 @@ describe('ForgeOrchestrator', () => {
     expect(sessionKeys[5]).toBe(sessionKeys[2]);
   });
 
+  it('uses a compact no-tools prompt when revision salvage retries after a native no-text stall', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const revisedPlan = `# Plan: Test feature revised\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something better.\n\n## Scope\n\n## Changes\n\n- \`src/foo.ts\` — refine the implementation.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Add coverage.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditBlocking = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    let callIndex = 0;
+    const prompts: string[] = [];
+    const toolsSeen: Array<string[] | undefined> = [];
+    const addDirsSeen: Array<string[] | undefined> = [];
+    const nativeBypassSeen: Array<boolean | undefined> = [];
+    const systemPrompts: string[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const]),
+      invoke(params: RuntimeInvokeParams) {
+        const idx = callIndex++;
+        prompts.push(params.prompt);
+        toolsSeen.push(params.tools);
+        addDirsSeen.push(params.addDirs);
+        nativeBypassSeen.push(params.disableNativeAppServer);
+        systemPrompts.push(params.systemPrompt ?? '');
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          if (idx === 0) {
+            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'done' };
+            return;
+          }
+          if (idx === 1) {
+            yield { type: 'text_final', text: auditBlocking };
+            yield { type: 'done' };
+            return;
+          }
+          if (idx === 2) {
+            yield {
+              type: 'error',
+              message: 'progress stall: no runtime progress for 180000ms (native turn produced no text output)',
+            };
+            return;
+          }
+          if (idx === 3) {
+            yield { type: 'text_final', text: revisedPlan };
+            yield { type: 'done' };
+            return;
+          }
+          yield { type: 'text_final', text: auditClean };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(callIndex).toBe(5);
+    expect(toolsSeen[2]).toEqual(['Read', 'Glob', 'Grep']);
+    expect(addDirsSeen[2]).toEqual([tmpDir]);
+    expect(toolsSeen[3]).toBeUndefined();
+    expect(addDirsSeen[3]).toBeUndefined();
+    expect(nativeBypassSeen[3]).toBe(true);
+    expect(prompts[3]).toContain('You are salvaging a stalled plan revision.');
+    expect(prompts[3]).toContain('Do NOT use tools on this retry. Revise from the provided plan and audit feedback only.');
+    expect(prompts[3]).toContain('The first line of your answer must be `# Plan: <title>`');
+    expect(prompts[3]).not.toContain('## Project Context');
+    expect(prompts[3]).not.toContain('Read the codebase using your tools if needed to resolve concerns.');
+    expect(systemPrompts[3]).toContain('Do not use tools on this retry.');
+  });
+
   it('emits a diagnostic event before failing the plan prefix contract', async () => {
     const tmpDir = await makeTmpDir();
     const invalidLead = 'I checked the repo and here is the plan summary before the artifact starts. '
@@ -3681,5 +3753,126 @@ describe('post-loop structural check', () => {
     const completeMsg = progress.find((p) => p.includes('Forge complete'));
     expect(completeMsg).toBeDefined();
     expect(completeMsg).not.toContain('Structural warning');
+  });
+});
+
+describe('plan persistence during draft and revision salvage', () => {
+  it('preserves template tail sections when draft output omits them', async () => {
+    const tmpDir = await makeTmpDir();
+    const compactDraft = `# Plan: Test feature
+
+## Objective
+
+Build the thing.
+
+## Scope
+
+In scope: everything.
+
+## Changes
+
+- src/foo.ts — add bar
+
+## Risks
+
+- None.
+
+## Testing
+
+- Unit tests.
+`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([compactDraft, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+    const planContent = await fs.readFile(result.filePath, 'utf-8');
+
+    expect(planContent).toContain('**Project:** discoclaw');
+    expect(planContent).toContain('\n---\n\n## Objective');
+    expect(planContent).toContain('## Audit Log');
+    expect(planContent).toContain('## Implementation Notes');
+  });
+
+  it('preserves existing audit history when revision output omits tail sections', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature
+
+**ID:** plan-test-001
+**Task:** task-test-001
+**Created:** 2026-01-01
+**Status:** DRAFT
+**Project:** discoclaw
+
+---
+
+## Objective
+
+Build the thing.
+
+## Scope
+
+In scope: everything.
+
+## Changes
+
+- src/foo.ts — add bar
+
+## Risks
+
+- None.
+
+## Testing
+
+- Unit tests.
+
+---
+
+## Audit Log
+
+---
+
+## Implementation Notes
+
+_Filled in during/after implementation._
+`;
+    const auditBlocking = '**Concern 1: Missing details**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
+    const compactRevision = `# Plan: Test feature
+
+## Objective
+
+Build the thing better.
+
+## Scope
+
+In scope: everything.
+
+## Changes
+
+- src/foo.ts — add better bar
+
+## Risks
+
+- None.
+
+## Testing
+
+- Unit tests.
+`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditBlocking, compactRevision, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+    const planContent = await fs.readFile(result.filePath, 'utf-8');
+
+    expect(planContent).toContain('## Audit Log');
+    expect(planContent).toContain('## Implementation Notes');
+    expect(planContent).toContain('### Review 1');
+    expect(planContent).toContain('### Review 2');
   });
 });
