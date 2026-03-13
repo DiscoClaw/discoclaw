@@ -432,6 +432,44 @@ function buildCompactDrafterRetryPrompt(
   ].join('\n');
 }
 
+function buildCompactRevisionRetryPrompt(
+  planContent: string,
+  auditNotes: string,
+  description: string,
+): string {
+  const planForPrompt = stripAuditLogForPrompt(planContent);
+
+  return [
+    PHASE_SAFETY_REMINDER,
+    '',
+    'You are salvaging a stalled plan revision.',
+    '',
+    '## Task',
+    '',
+    description,
+    '',
+    '## Current Plan',
+    '',
+    '```markdown',
+    planForPrompt,
+    '```',
+    '',
+    '## Latest Audit Feedback',
+    '',
+    auditNotes,
+    '',
+    '## Instructions',
+    '',
+    '- Do NOT use tools on this retry. Revise from the provided plan and audit feedback only.',
+    '- Start writing the revised plan immediately. Do not narrate, explain, or reason aloud.',
+    '- Address all blocking concerns from the latest audit while preserving already-accepted structure.',
+    '- Preserve the plan header fields and overall section layout.',
+    '- In `## Changes`, keep concrete backtick-wrapped repo-relative file paths.',
+    '- The first line of your answer must be `# Plan: <title>` with the current plan title on the same line.',
+    '- Output only the complete revised plan markdown.',
+  ].join('\n');
+}
+
 export function buildAuditorPrompt(
   planContent: string,
   roundNumber: number,
@@ -1642,6 +1680,11 @@ export class ForgeOrchestrator {
           description,
           projectContext,
         );
+        const compactRevisionRetryPrompt = buildCompactRevisionRetryPrompt(
+          planContent,
+          auditOutput,
+          description,
+        );
 
         const revisionPipelineResult = await this.runWithRetry({
           steps: [{
@@ -1667,6 +1710,9 @@ export class ForgeOrchestrator {
         }, (retryDef, retryCtx) => addPlanRetryHints(retryDef, {
           retrySessionSuffix: `revision-round-${round}-retry`,
           dropToolsOnRetry: shouldDropToolsOnPlanRetry(retryCtx.firstError),
+          replacementPrompt: shouldDropToolsOnPlanRetry(retryCtx.firstError)
+            ? compactRevisionRetryPrompt
+            : undefined,
         }));
         if (!revisionPipelineResult) {
           this.opts.log?.info({ planId, round, phase: 'revision' }, 'forge:cancelled');
@@ -1790,30 +1836,57 @@ export class ForgeOrchestrator {
    * (plan ID, task ID, created date) from the original file.
    */
   private mergeDraftWithHeader(originalContent: string, draftOutput: string): string {
-    // Extract the header from the original file (up to and including the first ---)
-    const headerMatch = originalContent.match(/^([\s\S]*?\*\*Project:\*\*[^\n]*\n)/);
-    if (!headerMatch) return draftOutput;
+    const metadataSeparator = '\n---\n\n';
+    const prefixEnd = originalContent.indexOf(metadataSeparator);
+    if (prefixEnd === -1) return draftOutput;
 
-    const header = headerMatch[1];
+    const originalPrefix = originalContent.slice(0, prefixEnd + metadataSeparator.length);
+    const originalTitle = originalPrefix.match(/^# Plan:[^\n]*\n/)?.[0] ?? '';
+    const draftTitle = draftOutput.match(/^# Plan:[^\n]*\n/)?.[0] ?? '';
+    const preservedPrefix = draftTitle && originalTitle
+      ? originalPrefix.replace(originalTitle, draftTitle)
+      : originalPrefix;
 
-    // Strip any header the drafter may have generated
-    const draftBody = draftOutput.replace(/^[\s\S]*?\*\*Project:\*\*[^\n]*\n/, '');
-
-    // If the drafter didn't include a header, just prepend the original one
-    if (draftBody === draftOutput) {
-      // The drafter output doesn't have the header pattern — prepend the original header
-      const planTitleMatch = draftOutput.match(/^# Plan:[^\n]*\n/);
-      if (planTitleMatch) {
-        // Has a plan title but different header format — replace just the metadata
-        const titleLine = planTitleMatch[0];
-        const afterTitle = draftOutput.slice(titleLine.length);
-        const originalTitle = header.match(/^# Plan:[^\n]*\n/)?.[0] ?? '';
-        return header.replace(originalTitle, titleLine) + afterTitle;
+    const findTailStart = (text: string): number => {
+      for (const marker of [
+        '\n---\n\n## Audit Log',
+        '\n## Audit Log',
+        '\n---\n\n## Implementation Notes',
+        '\n## Implementation Notes',
+      ]) {
+        const idx = text.indexOf(marker);
+        if (idx !== -1) return idx;
       }
-      return header + '\n---\n\n' + draftOutput;
+      return -1;
+    };
+
+    const preservedTailStart = findTailStart(originalContent);
+    const preservedTail = preservedTailStart !== -1 ? originalContent.slice(preservedTailStart) : '';
+
+    let draftBody = draftOutput;
+    const generatedHeaderMatch = draftOutput.match(
+      /^[\s\S]*?\*\*Project:\*\*[^\n]*\n(?:\n?---\n\n)?/,
+    );
+    if (generatedHeaderMatch) {
+      draftBody = draftOutput.slice(generatedHeaderMatch[0].length);
+    } else if (draftTitle) {
+      draftBody = draftOutput.slice(draftTitle.length);
+      draftBody = draftBody.replace(/^\s*---\s*\n+/, '');
     }
 
-    return header + draftBody;
+    const generatedTailStart = findTailStart(draftBody);
+    if (generatedTailStart !== -1) {
+      draftBody = draftBody.slice(0, generatedTailStart);
+    }
+
+    const normalizedBody = draftBody.trim();
+    if (!normalizedBody) {
+      return preservedTail ? preservedPrefix + preservedTail : preservedPrefix.trimEnd();
+    }
+
+    return preservedTail
+      ? preservedPrefix + normalizedBody + preservedTail
+      : preservedPrefix + normalizedBody + '\n';
   }
 
   /**
