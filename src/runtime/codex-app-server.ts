@@ -998,7 +998,7 @@ export class CodexAppServerClient {
       streamState.streamStallTimeoutMs,
       streamState.hardTimeoutMs,
     );
-    streamState.progressObserved = false;
+    // Preserve any early progress observed before the turn/start RPC returned.
     this.clearTurnStreamTimers(streamState);
 
     if (streamState.hardTimeoutMs && streamState.deadlineAt) {
@@ -1816,7 +1816,6 @@ function dedupeUsageEvents(events: EngineEvent[]): EngineEvent[] {
 function isProgressEvent(event: EngineEvent): boolean {
   return event.type === 'text_delta'
     || event.type === 'text_final'
-    || event.type === 'thinking_delta'
     || event.type === 'tool_start'
     || event.type === 'tool_end';
 }
