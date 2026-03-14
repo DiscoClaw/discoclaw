@@ -89,6 +89,25 @@ export type CodexAppServerTurnHandle = {
   stream: AsyncIterable<EngineEvent>;
 };
 
+export type CodexAppServerPromptSafeProfile = {
+  transport: 'codex_app_server';
+  executionMode: 'generic_command_execution';
+  filesystem: {
+    access: 'read_only' | 'danger_full_access' | 'unknown';
+    readableRoots: string[];
+  };
+  network: {
+    access: 'disabled' | 'unknown';
+  };
+  fidelity: 'exact' | 'downgraded';
+};
+
+export type CodexAppServerPromptSafeProfileInput = {
+  dangerouslyBypassApprovalsAndSandbox?: boolean;
+  cwd?: string;
+  addDirs?: string[];
+};
+
 type TurnStreamEventState = {
   latestAgentMessageText?: string;
   latestUsage?: Extract<EngineEvent, { type: 'usage' }>;
@@ -456,6 +475,16 @@ export class CodexAppServerClient {
   getSessionState(sessionKey: string): CodexAppServerSessionState | undefined {
     const state = this.sessions.get(sessionKey);
     return state ? { ...state } : undefined;
+  }
+
+  getPromptSafeProfile(
+    opts: Partial<Pick<RuntimeInvokeParams, 'cwd' | 'addDirs'>> = {},
+  ): CodexAppServerPromptSafeProfile {
+    return resolveCodexAppServerPromptSafeProfile({
+      dangerouslyBypassApprovalsAndSandbox: this.dangerouslyBypassApprovalsAndSandbox,
+      cwd: opts.cwd,
+      addDirs: opts.addDirs,
+    });
   }
 
   setThread(sessionKey: string, threadId: string): void {
@@ -1246,14 +1275,24 @@ function buildSafetyParams(
   cwd?: string,
   addDirs?: string[],
 ): Record<string, unknown> {
-  if (dangerouslyBypassApprovalsAndSandbox) {
+  const profile = resolveCodexAppServerPromptSafeProfile({
+    dangerouslyBypassApprovalsAndSandbox,
+    cwd,
+    addDirs,
+  });
+
+  if (profile.filesystem.access === 'danger_full_access') {
     return {
       approvalPolicy: 'never',
       sandboxPolicy: { type: 'dangerFullAccess' },
     };
   }
 
-  const readableRoots = uniquePaths([cwd, ...(addDirs ?? [])]);
+  if (profile.filesystem.access !== 'read_only' || profile.network.access !== 'disabled') {
+    return {};
+  }
+
+  const readableRoots = profile.filesystem.readableRoots;
   if (readableRoots.length === 0) return {};
 
   return {
@@ -1267,6 +1306,74 @@ function buildSafetyParams(
       networkAccess: false,
     },
   };
+}
+
+export function resolveCodexAppServerPromptSafeProfile(
+  opts: CodexAppServerPromptSafeProfileInput = {},
+): CodexAppServerPromptSafeProfile {
+  const readableRoots = uniquePaths([opts.cwd, ...(opts.addDirs ?? [])]);
+
+  if (opts.dangerouslyBypassApprovalsAndSandbox) {
+    return {
+      transport: 'codex_app_server',
+      executionMode: 'generic_command_execution',
+      filesystem: {
+        access: 'danger_full_access',
+        readableRoots: [],
+      },
+      network: {
+        access: 'unknown',
+      },
+      fidelity: 'downgraded',
+    };
+  }
+
+  if (readableRoots.length > 0) {
+    return {
+      transport: 'codex_app_server',
+      executionMode: 'generic_command_execution',
+      filesystem: {
+        access: 'read_only',
+        readableRoots,
+      },
+      network: {
+        access: 'disabled',
+      },
+      fidelity: 'exact',
+    };
+  }
+
+  return {
+    transport: 'codex_app_server',
+    executionMode: 'generic_command_execution',
+    filesystem: {
+      access: 'unknown',
+      readableRoots: [],
+    },
+    network: {
+      access: 'unknown',
+    },
+    fidelity: 'downgraded',
+  };
+}
+
+export function formatCodexAppServerPromptSafeProfile(
+  profile: CodexAppServerPromptSafeProfile,
+): string {
+  if (profile.filesystem.access === 'read_only') {
+    const scopedRoots = profile.filesystem.readableRoots.length === 1
+      ? profile.filesystem.readableRoots[0]
+      : profile.filesystem.readableRoots.join(', ');
+    return profile.filesystem.readableRoots.length === 1
+      ? `Codex native app-server uses generic command execution inside an enforced read-only filesystem sandbox scoped to ${scopedRoots}. Network access is disabled.`
+      : `Codex native app-server uses generic command execution inside an enforced read-only filesystem sandbox scoped to these roots: ${scopedRoots}. Network access is disabled.`;
+  }
+
+  if (profile.filesystem.access === 'danger_full_access') {
+    return 'Codex native app-server uses generic command execution with unrestricted filesystem access. Network restrictions are not guaranteed for this session.';
+  }
+
+  return 'Codex native app-server uses generic command execution. Filesystem and network restrictions are not guaranteed for this session.';
 }
 
 function uniquePaths(values: Array<string | undefined>): string[] {
