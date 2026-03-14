@@ -78,6 +78,25 @@ describe('autoImplementForgePlan', () => {
     expect(outcome.message).toContain('A plan run is already in progress for this plan.');
   });
 
+  it('falls back to manual review when workspace context is stale', async () => {
+    const result = buildResult();
+    const deps = createDeps({
+      checkWorkspaceContextPristine: vi.fn(async () => ({
+        pristine: false,
+        reason: 'Plan file has changed since phases were generated.',
+      })),
+    });
+
+    const outcome = await autoImplementForgePlan({ planId: result.planId, result }, deps);
+
+    expect(outcome.status).toBe('manual');
+    if (outcome.status !== 'manual') throw new Error('expected manual');
+    expect(outcome.message).toContain('Workspace context is not pristine');
+    expect(outcome.message).toContain('Plan file has changed since phases were generated.');
+    expect(deps.planApprove).not.toHaveBeenCalled();
+    expect(deps.planRun).not.toHaveBeenCalled();
+  });
+
   it('notifies when the audit cap was reached', async () => {
     const result = buildResult({ reachedMaxRounds: true });
     const deps = createDeps();

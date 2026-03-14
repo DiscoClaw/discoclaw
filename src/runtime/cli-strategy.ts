@@ -15,6 +15,8 @@ import type {
   RuntimeId,
   RuntimeInvokeParams,
 } from './types.js';
+import { resolveForgeTurnKind, resolveForgeTurnRoute } from '../forge-phase.js';
+export { resolveForgeTurnKind, resolveForgeTurnRoute } from '../forge-phase.js';
 
 // ---------------------------------------------------------------------------
 // ParsedLineResult — what a strategy's parseLine() returns
@@ -108,6 +110,12 @@ function defaultForgeFallbackRoute(route: ForgeTurnRoute): ForgeTurnRoute | null
   return route === 'hybrid' ? 'cli' : null;
 }
 
+function collectOutOfBoundsForgeCandidatePaths(guardrails: ForgePhaseGuardrails): string[] {
+  if (guardrails.candidateBoundPolicy.candidatePaths.length === 0) return [];
+  const allowlist = new Set(guardrails.candidateBoundPolicy.allowlistPaths);
+  return guardrails.candidateBoundPolicy.candidatePaths.filter((candidatePath) => !allowlist.has(candidatePath));
+}
+
 function buildForgeScopeViolationDecision(
   guardrails: ForgePhaseGuardrails,
   reason: string,
@@ -140,18 +148,6 @@ function buildForgeScopeViolationDecision(
     fallbackRoute: attemptedFallbackRoute,
     reason,
   };
-}
-
-export function resolveForgeTurnKind(phase: ForgeTurnPhase): ForgeTurnKind {
-  return phase === 'draft_research' || phase === 'revision_research'
-    ? 'research'
-    : 'final';
-}
-
-export function resolveForgeTurnRoute(phase: ForgeTurnPhase): ForgeTurnRoute {
-  if (phase === 'draft_research' || phase === 'revision_research') return 'native';
-  if (phase === 'audit') return 'hybrid';
-  return 'cli';
 }
 
 export function resolveForgeCliRoute(
@@ -208,6 +204,18 @@ export function resolveForgeCliRoute(
       requestedRoute,
       fallbackRoute,
     );
+  }
+
+  if (guardrails.turnKind === 'final') {
+    const outOfBoundsPaths = collectOutOfBoundsForgeCandidatePaths(guardrails);
+    if (outOfBoundsPaths.length > 0) {
+      return buildForgeScopeViolationDecision(
+        guardrails,
+        `Final forge phase ${guardrails.phase} has candidate paths outside the bounded allowlist: ${outOfBoundsPaths.join(', ')}`,
+        requestedRoute,
+        fallbackRoute,
+      );
+    }
   }
 
   if (requestedRoute !== phaseRoute && guardrails.fallbackPolicy.noWidening) {

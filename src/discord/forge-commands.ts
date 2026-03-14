@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execa } from 'execa';
 import { createPlan, parsePlanFileHeader, resolvePlanHeaderTaskId } from './plan-commands.js';
 import type { TaskStore } from '../tasks/store.js';
-import type { RuntimeAdapter, EngineEvent, RuntimeSupervisorPolicy } from '../runtime/types.js';
+import type { RuntimeAdapter, EngineEvent, RuntimeSupervisorPolicy, ForgePhaseGuardrails } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { runPipeline } from '../pipeline/engine.js';
 import { auditPlanStructure, deriveVerdict, maxReviewNumber } from './audit-handler.js';
@@ -12,11 +12,17 @@ import { parseAuditVerdict } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { getSection, parsePlan } from './plan-parser.js';
 import { cliExecaEnv, stripAnsi } from '../runtime/cli-shared.js';
+import { resolveForgeTurnKind } from '../runtime/cli-strategy.js';
 import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
 import { buildPromptPreamble } from './prompt-common.js';
 import { createPhaseStatusHeartbeatController, resolvePlanHeaderHeartbeatPolicy } from './phase-status-heartbeat.js';
+import { resolveForgePlanPhaseGate, setForgePlanMetadata } from './forge-plan-registry.js';
+import { resolveForgeReResearchPhase, resolveForgeTurnRoute } from '../forge-phase.js';
+import type { ForgeTurnPhase } from '../forge-phase.js';
 export { parseAuditVerdict };
 export type { AuditVerdict };
+export type { ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
+export { resolveForgeTurnRoute } from '../forge-phase.js';
 
 const COMPOUND_LESSONS_PATH = 'docs/compound-lessons.md';
 const FORGE_STREAM_STALL_TIMEOUT_MS = 2 * 60_000;
@@ -115,15 +121,6 @@ export type ForgeOrchestratorOpts = {
   /** Optional pinned-thread summary to expose to the drafter. */
   pinnedThreadSummary?: string;
 };
-
-export type ForgeTurnPhase =
-  | 'draft_research'
-  | 'draft_artifact'
-  | 'audit'
-  | 'revision_research'
-  | 'revision_artifact';
-
-export type ForgeTurnRoute = 'native' | 'hybrid' | 'cli';
 
 type ProgressFn = (msg: string, opts?: { force?: boolean }) => Promise<void>;
 type EventFn = (evt: EngineEvent) => void;
@@ -459,16 +456,71 @@ function isCodexForgeRuntime(runtime: RuntimeAdapter): boolean {
     );
 }
 
-export function resolveForgeTurnRoute(phase: ForgeTurnPhase): ForgeTurnRoute {
-  if (phase === 'draft_research' || phase === 'revision_research') return 'native';
-  if (phase === 'audit') return 'hybrid';
-  return 'cli';
-}
-
 function routeForgeRuntimeForPhase(runtime: RuntimeAdapter, phase: ForgeTurnPhase): RuntimeAdapter {
   return resolveForgeTurnRoute(phase) === 'cli' && isCodexForgeRuntime(runtime)
     ? wrapWithNativeAppServerDisabled(runtime)
     : runtime;
+}
+
+function resolveForgeFallbackPolicy(phase: ForgeTurnPhase): {
+  onOutOfBounds: ForgePhaseGuardrails['fallbackPolicy']['onOutOfBounds'];
+  reResearchPhase: ForgePhaseGuardrails['fallbackPolicy']['reResearchPhase'];
+} {
+  const reResearchPhase = resolveForgeReResearchPhase(phase);
+  return reResearchPhase
+    ? { onOutOfBounds: 're_research', reResearchPhase }
+    : { onOutOfBounds: 'reject', reResearchPhase: null };
+}
+
+function persistForgePhaseMetadata(
+  planId: string,
+  phase: ForgeTurnPhase,
+  opts: {
+    researchComplete: boolean;
+    candidatePaths: readonly string[];
+    allowlistPaths: readonly string[];
+  },
+): void {
+  const fallbackPolicy = resolveForgeFallbackPolicy(phase);
+  setForgePlanMetadata(planId, {
+    phaseState: {
+      currentPhase: phase,
+      researchComplete: opts.researchComplete,
+    },
+    candidateBounds: {
+      candidatePaths: opts.candidatePaths,
+      allowlistPaths: opts.allowlistPaths,
+    },
+    fallbackPolicy,
+  });
+}
+
+function resolveForgePhaseGuardrailsOrThrow(
+  planId: string,
+  phase: ForgeTurnPhase,
+): ForgePhaseGuardrails {
+  const gate = resolveForgePlanPhaseGate(planId, phase);
+  if (gate.nextPhase !== phase) {
+    throw new Error(gate.reason ?? `Forge phase ${phase} requires fresh research before dispatch.`);
+  }
+
+  return {
+    phase,
+    turnKind: resolveForgeTurnKind(phase),
+    candidateBoundPolicy: {
+      scope: gate.allowlistPaths.length > 0 ? 'allowlist' : 'unbounded',
+      candidatePaths: gate.candidatePaths,
+      allowlistPaths: gate.allowlistPaths,
+    },
+    fallbackPolicy: {
+      onOutOfBounds: gate.fallbackPolicy.onOutOfBounds,
+      reResearchPhase: gate.fallbackPolicy.reResearchPhase,
+      noWidening: true,
+    },
+    phaseState: {
+      researchComplete: gate.researchComplete,
+    },
+  };
 }
 
 function normalizeForgeCandidatePath(candidatePath: string): string | null {
@@ -558,6 +610,19 @@ function wrapWithNativeAppServerDisabled(rt: RuntimeAdapter): RuntimeAdapter {
     ...rt,
     invoke(params) {
       return rt.invoke({ ...params, disableNativeAppServer: true });
+    },
+  };
+}
+
+function wrapWithForgePhaseGuardrails(
+  rt: RuntimeAdapter,
+  forgePhase: ForgePhaseGuardrails | undefined,
+): RuntimeAdapter {
+  if (!forgePhase) return rt;
+  return {
+    ...rt,
+    invoke(params) {
+      return rt.invoke({ ...params, forgePhase });
     },
   };
 }
@@ -999,7 +1064,7 @@ export function buildAuditorPrompt(
   planContent: string,
   roundNumber: number,
   projectContext?: string,
-  opts?: { hasTools?: boolean },
+  opts?: { hasTools?: boolean; allowlistPaths?: readonly string[] },
 ): string {
   const planForPrompt = stripAuditLogForPrompt(planContent);
   const priorAuditSummary = roundNumber > 1 ? summarizePriorAuditHistory(planContent) : undefined;
@@ -1069,6 +1134,7 @@ export function buildAuditorPrompt(
   }
 
   const hasTools = opts?.hasTools ?? true;
+  const boundedAllowlistPaths = opts?.allowlistPaths ?? [];
 
   instructions.push(
     'Review the plan for:',
@@ -1093,6 +1159,14 @@ export function buildAuditorPrompt(
       '- If your concern evaporates after checking the code, do not raise it.',
       '',
     );
+    if (boundedAllowlistPaths.length > 0) {
+      instructions.push(
+        'Audit only within this grounded repo allowlist unless forge explicitly re-enters research:',
+        '',
+        formatCandidatePathChoices(boundedAllowlistPaths),
+        '',
+      );
+    }
   } else {
     instructions.push(
       '## Verification',
@@ -2022,12 +2096,13 @@ export class ForgeOrchestrator {
         throw new Error(`Plan has structural issues: ${missing}. Fix the plan file before re-auditing.`);
       }
 
+      resolveForgePhaseGuardrailsOrThrow(planId, 'audit');
+
       // Load project context
       const projectContext = await this.loadProjectContext();
 
       // Determine start round from existing reviews
       const startRound = maxReviewNumber(planContent) + 1;
-
       return await this.auditLoop({
         planId,
         filePath,
@@ -2138,20 +2213,25 @@ export class ForgeOrchestrator {
 
     const buildDrafterPhaseRuntime = (
       phase: 'draft_research' | 'draft_artifact' | 'revision_research' | 'revision_artifact',
+      forgePhase?: ForgePhaseGuardrails,
     ): RuntimeAdapter => {
       const routed = routeForgeRuntimeForPhase(drafterRuntimeWithReasoning, phase);
+      const bounded = wrapWithForgePhaseGuardrails(routed, forgePhase);
       const guarded = phase === 'draft_research'
-        ? wrapWithGroundingOutputGuard(routed, 'draft')
+        ? wrapWithGroundingOutputGuard(bounded, 'draft')
         : phase === 'revision_research'
-          ? wrapWithGroundingOutputGuard(routed, 'revision', { allowNone: true })
+          ? wrapWithGroundingOutputGuard(bounded, 'revision', { allowNone: true })
           : phase === 'draft_artifact'
-            ? wrapWithPlanPrefixGuard(routed, 'draft')
-            : wrapWithPlanPrefixGuard(routed, 'revision');
+            ? wrapWithPlanPrefixGuard(bounded, 'draft')
+            : wrapWithPlanPrefixGuard(bounded, 'revision');
       return onEvent ? wrapWithEventForwarding(guarded, onEvent) : guarded;
     };
-    const buildAuditorPhaseRuntime = (): RuntimeAdapter => {
+    const buildAuditorPhaseRuntime = (
+      forgePhase?: ForgePhaseGuardrails,
+    ): RuntimeAdapter => {
       const routed = routeForgeRuntimeForPhase(auditorRuntimeWithReasoning, 'audit');
-      return onEvent ? wrapWithEventForwarding(routed, onEvent) : routed;
+      const bounded = wrapWithForgePhaseGuardrails(routed, forgePhase);
+      return onEvent ? wrapWithEventForwarding(bounded, onEvent) : bounded;
     };
     const useTwoStageCodexDraftFlow = shouldUseTwoStageCodexPlanFlow(drafterRuntimeBase);
 
@@ -2235,6 +2315,13 @@ export class ForgeOrchestrator {
               'forge:codex draft grounding candidates resolved',
             );
           }
+          if (useTwoStageCodexDraftFlow) {
+            persistForgePhaseMetadata(planId, 'draft_research', {
+              researchComplete: false,
+              candidatePaths: draftGroundingCandidatePaths,
+              allowlistPaths: useBoundedDraftGrounding ? draftGroundingCandidatePaths : [],
+            });
+          }
           const drafterPrompt = buildDrafterPrompt(
             description,
             templateContent,
@@ -2250,6 +2337,7 @@ export class ForgeOrchestrator {
           let draftOutput = '';
 
           if (useTwoStageCodexDraftFlow) {
+            const draftResearchGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, 'draft_research');
             const draftResearchDef = {
               steps: [{
                 id: 'draft-grounding',
@@ -2257,7 +2345,7 @@ export class ForgeOrchestrator {
                 prompt: useBoundedDraftGrounding
                   ? buildCodexDraftCandidateSelectionPrompt(description, draftGroundingCandidatePaths)
                   : buildCodexDraftGroundingPrompt(description),
-                runtime: buildDrafterPhaseRuntime('draft_research'),
+                runtime: buildDrafterPhaseRuntime('draft_research', draftResearchGuardrails),
                 model: drafterModel,
                 tools: useBoundedDraftGrounding ? [] : readOnlyTools,
                 ...(useBoundedDraftGrounding ? {} : { addDirs }),
@@ -2302,6 +2390,12 @@ export class ForgeOrchestrator {
             if (draftGroundingState.isNone || draftGroundingState.normalizedPaths.length === 0) {
               throw new Error('draft_artifact is missing bounded repo inputs from draft_research.');
             }
+            persistForgePhaseMetadata(planId, draftArtifactPhase, {
+              researchComplete: true,
+              candidatePaths: draftGroundingState.normalizedPaths,
+              allowlistPaths: draftGroundingState.normalizedPaths,
+            });
+            const draftArtifactGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, draftArtifactPhase);
 
             const draftArtifactDef = {
               steps: [{
@@ -2313,7 +2407,7 @@ export class ForgeOrchestrator {
                   codexDraftWriteContext,
                   draftGroundingOutput,
                 ),
-                runtime: buildDrafterPhaseRuntime(draftArtifactPhase),
+                runtime: buildDrafterPhaseRuntime(draftArtifactPhase, draftArtifactGuardrails),
                 systemPrompt: resolveForgePlanSystemPrompt(drafterRuntimeBase),
                 model: drafterModel,
                 tools: [],
@@ -2422,6 +2516,12 @@ export class ForgeOrchestrator {
           // Write the draft — preserve the header (planId, taskId) from the created file.
           planContent = this.mergeDraftWithHeader(planContent, draftOutput);
           await this.atomicWrite(filePath, planContent);
+          const auditBoundedPaths = extractConcretePlanPaths(planContent);
+          persistForgePhaseMetadata(planId, 'audit', {
+            researchComplete: auditBoundedPaths.length > 0,
+            candidatePaths: auditBoundedPaths,
+            allowlistPaths: auditBoundedPaths,
+          });
 
           // Update task title to match the drafter's Plan title (raw user input is often messy).
           const mergedHeader = parsePlanFileHeader(planContent);
@@ -2451,17 +2551,21 @@ export class ForgeOrchestrator {
           ),
         );
 
+        const auditGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, 'audit');
         const auditorPrompt = buildAuditorPrompt(
           planContent,
           round,
           projectContext,
-          { hasTools: auditorHasFileTools },
+          {
+            hasTools: auditorHasFileTools,
+            allowlistPaths: auditGuardrails.candidateBoundPolicy.allowlistPaths,
+          },
         );
         const auditPipelineResult = await this.runWithRetry({
           steps: [{
             kind: 'prompt',
             prompt: auditorPrompt,
-            runtime: buildAuditorPhaseRuntime(),
+            runtime: buildAuditorPhaseRuntime(auditGuardrails),
             model: auditorModel,
             tools: auditorHasFileTools ? readOnlyTools : [],
             ...(auditorHasFileTools ? { addDirs } : {}),
@@ -2595,9 +2699,17 @@ export class ForgeOrchestrator {
             'forge:codex revision grounding candidates resolved',
           );
         }
+        if (useTwoStageCodexDraftFlow) {
+          persistForgePhaseMetadata(planId, 'revision_research', {
+            researchComplete: false,
+            candidatePaths: useBoundedRevisionGrounding ? revisionGroundingCandidatePaths : existingRevisionPaths,
+            allowlistPaths: useBoundedRevisionGrounding ? revisionGroundingCandidatePaths : [],
+          });
+        }
         let revisionOutput = '';
 
         if (useTwoStageCodexDraftFlow) {
+          const revisionResearchGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, 'revision_research');
           const revisionResearchDef = {
             steps: [{
               id: `revision-round-${round}-grounding`,
@@ -2605,7 +2717,7 @@ export class ForgeOrchestrator {
               prompt: useBoundedRevisionGrounding
                 ? buildCodexRevisionCandidateSelectionPrompt(planContent, auditOutput, revisionGroundingCandidatePaths)
                 : buildCodexRevisionGroundingPrompt(planContent, auditOutput),
-              runtime: buildDrafterPhaseRuntime('revision_research'),
+              runtime: buildDrafterPhaseRuntime('revision_research', revisionResearchGuardrails),
               model: drafterModel,
               tools: useBoundedRevisionGrounding ? [] : readOnlyTools,
               ...(useBoundedRevisionGrounding ? {} : { addDirs }),
@@ -2657,6 +2769,12 @@ export class ForgeOrchestrator {
           if (revisionAllowlistPaths.length === 0) {
             throw new Error('revision_artifact is missing bounded repo inputs from revision_research.');
           }
+          persistForgePhaseMetadata(planId, revisionArtifactPhase, {
+            researchComplete: true,
+            candidatePaths: revisionGroundingState.normalizedPaths,
+            allowlistPaths: revisionAllowlistPaths,
+          });
+          const revisionArtifactGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, revisionArtifactPhase);
 
           const revisionArtifactDef = {
             steps: [{
@@ -2669,7 +2787,7 @@ export class ForgeOrchestrator {
                 codexNativeWriteContextSummary ?? projectContext,
                 revisionGroundingOutput,
               ),
-              runtime: buildDrafterPhaseRuntime(revisionArtifactPhase),
+              runtime: buildDrafterPhaseRuntime(revisionArtifactPhase, revisionArtifactGuardrails),
               systemPrompt: resolveForgePlanSystemPrompt(drafterRuntimeBase),
               model: drafterModel,
               tools: [],
@@ -2719,11 +2837,17 @@ export class ForgeOrchestrator {
           }
           revisionOutput = revisionArtifactResult.outputs[revisionArtifactResult.outputs.length - 1] ?? '';
         } else {
+          persistForgePhaseMetadata(planId, revisionArtifactPhase, {
+            researchComplete: existingRevisionPaths.length > 0,
+            candidatePaths: existingRevisionPaths,
+            allowlistPaths: existingRevisionPaths,
+          });
+          const revisionArtifactGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, revisionArtifactPhase);
           const revisionPrimaryDef = {
             steps: [{
               kind: 'prompt' as const,
               prompt: revisionPrompt,
-              runtime: buildDrafterPhaseRuntime(revisionArtifactPhase),
+              runtime: buildDrafterPhaseRuntime(revisionArtifactPhase, revisionArtifactGuardrails),
               systemPrompt: resolveForgePlanSystemPrompt(drafterRuntimeBase),
               model: drafterModel,
               tools: readOnlyTools,
@@ -2777,6 +2901,12 @@ export class ForgeOrchestrator {
 
         planContent = this.mergeDraftWithHeader(planContent, revisionOutput);
         await this.atomicWrite(filePath, planContent);
+        const revisedAuditBoundedPaths = extractConcretePlanPaths(planContent);
+        persistForgePhaseMetadata(planId, 'audit', {
+          researchComplete: revisedAuditBoundedPaths.length > 0,
+          candidatePaths: revisedAuditBoundedPaths,
+          allowlistPaths: revisedAuditBoundedPaths,
+        });
       }
 
       // Cap reached

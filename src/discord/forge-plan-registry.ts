@@ -1,5 +1,14 @@
 import path from 'node:path';
 import type { ForgeOrchestrator } from './forge-commands.js';
+import {
+  isForgeResearchPhase,
+  isForgeTurnPhase,
+  resolveForgeReResearchPhase,
+  resolveForgeTurnRoute,
+} from '../forge-phase.js';
+import type { ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
+export type { ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
+export { isForgeFinalArtifactPhase, isForgeResearchPhase, resolveForgeTurnRoute } from '../forge-phase.js';
 
 // ---------------------------------------------------------------------------
 // Shared forge/plan lifecycle state
@@ -15,15 +24,6 @@ import type { ForgeOrchestrator } from './forge-commands.js';
 // Workspace writer lock — serializes forge creates, plan phase runs, and
 // memory mutations that touch the workspace filesystem.
 // ---------------------------------------------------------------------------
-
-export type ForgeTurnPhase =
-  | 'draft_research'
-  | 'draft_artifact'
-  | 'audit'
-  | 'revision_research'
-  | 'revision_artifact';
-
-export type ForgeTurnRoute = 'native' | 'hybrid' | 'cli';
 
 export type ForgePlanFallbackMode = 're_research' | 'reject';
 
@@ -83,50 +83,12 @@ type StoredForgePlanMetadata = {
   fallbackPolicy?: Partial<ForgePlanFallbackPolicy>;
 };
 
-const FORGE_PHASES = new Set<ForgeTurnPhase>([
-  'draft_research',
-  'draft_artifact',
-  'audit',
-  'revision_research',
-  'revision_artifact',
-]);
-
 const _planMetadata = new Map<string, StoredForgePlanMetadata>();
 
 let writerLockChain: Promise<void> = Promise.resolve();
 
-function isForgeTurnPhase(value: unknown): value is ForgeTurnPhase {
-  return typeof value === 'string' && FORGE_PHASES.has(value as ForgeTurnPhase);
-}
-
 function isForgePlanFallbackMode(value: unknown): value is ForgePlanFallbackMode {
   return value === 're_research' || value === 'reject';
-}
-
-export function isForgeResearchPhase(phase: ForgeTurnPhase): boolean {
-  return phase === 'draft_research' || phase === 'revision_research';
-}
-
-export function isForgeFinalArtifactPhase(phase: ForgeTurnPhase): boolean {
-  return phase === 'draft_artifact' || phase === 'revision_artifact';
-}
-
-export function resolveForgeTurnRoute(phase: ForgeTurnPhase): ForgeTurnRoute {
-  if (phase === 'draft_research' || phase === 'revision_research') return 'native';
-  if (phase === 'audit') return 'hybrid';
-  return 'cli';
-}
-
-function resolveForgeReResearchPhase(phase: ForgeTurnPhase): ForgeTurnPhase | null {
-  switch (phase) {
-    case 'draft_artifact':
-      return 'draft_research';
-    case 'audit':
-    case 'revision_artifact':
-      return 'revision_research';
-    default:
-      return null;
-  }
 }
 
 function resolveCompatibilityResearchPhase(phase: ForgeTurnPhase): ForgeTurnPhase {
@@ -161,6 +123,12 @@ function normalizeForgeCandidatePathList(
     if (next) normalized.add(next);
   }
   return [...normalized];
+}
+
+function hasOutOfBoundsCandidatePaths(bounds: ForgePlanCandidateBounds): boolean {
+  if (bounds.candidatePaths.length === 0) return false;
+  const allowlist = new Set(bounds.allowlistPaths);
+  return bounds.candidatePaths.some((candidatePath) => !allowlist.has(candidatePath));
 }
 
 function mergeStoredSection<T extends object>(
@@ -210,6 +178,7 @@ function normalizeForgePlanMetadata(
     candidatePaths: normalizeForgeCandidatePathList(stored?.candidateBounds?.candidatePaths),
     allowlistPaths: normalizeForgeCandidatePathList(stored?.candidateBounds?.allowlistPaths),
   };
+  const hasOutOfBoundsCandidates = hasOutOfBoundsCandidatePaths(candidateBounds);
   const phaseState = {
     currentPhase: compatibility === 'current' && storedPhase ? storedPhase : compatibilityPhase,
     researchComplete: compatibility === 'current' && stored?.phaseState?.researchComplete === true,
@@ -222,6 +191,7 @@ function normalizeForgePlanMetadata(
       compatibility !== 'current'
       || !phaseState.researchComplete
       || candidateBounds.allowlistPaths.length === 0
+      || hasOutOfBoundsCandidates
     );
 
   return {
@@ -296,7 +266,7 @@ export function resolveForgePlanPhaseGate(planId: string, requestedPhase: ForgeT
     fallbackPolicy: metadata.fallbackPolicy,
     compatibility: metadata.compatibility,
     requiresFreshResearch: true,
-    reason: `Stored forge metadata is legacy, partial, or unbounded. Re-enter ${nextPhase} before ${requestedPhase}.`,
+    reason: `Stored forge metadata is legacy, partial, unbounded, or carries out-of-bounds candidates. Re-enter ${nextPhase} before ${requestedPhase}.`,
   };
 }
 

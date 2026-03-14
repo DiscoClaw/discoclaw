@@ -1,3 +1,5 @@
+import type { ForgeTurnKind, ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
+
 export const RUNTIME_FAILURE_ENVELOPE = 'runtime_failure' as const;
 export const RUNTIME_FAILURE_VERSION = 'v1' as const;
 
@@ -181,16 +183,7 @@ export type RuntimeSupervisorPolicy = {
   limits?: RuntimeSupervisorLimitsOverride;
 };
 
-export type ForgeTurnPhase =
-  | 'draft_research'
-  | 'draft_artifact'
-  | 'audit'
-  | 'revision_research'
-  | 'revision_artifact';
-
-export type ForgeTurnKind = 'research' | 'final';
-
-export type ForgeTurnRoute = 'native' | 'hybrid' | 'cli';
+export type { ForgeTurnKind, ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
 
 export type ForgeCandidateBoundPolicy = {
   /**

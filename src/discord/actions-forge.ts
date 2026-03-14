@@ -5,9 +5,7 @@ import type { ForgeOrchestrator } from './forge-commands.js';
 import { executePlanAction } from './actions-plan.js';
 import type { PlanContext } from './actions-plan.js';
 import type { TaskStore } from '../tasks/store.js';
-import { looksLikePlanId, findPlanFile, listPlanFiles } from './plan-commands.js';
-import type { HandlePlanCommandOpts } from './plan-commands.js';
-import { buildPlanSummary } from './forge-commands.js';
+import { findPlanFile } from './plan-commands.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
@@ -18,7 +16,15 @@ import {
   acquireWriterLock,
   setActiveOrchestrator,
   getRunningPlanIds,
+  resolveForgePlanPhaseGate,
 } from './forge-plan-registry.js';
+import {
+  isForgeFinalArtifactPhase,
+  isForgeResearchPhase,
+  resolveForgeReResearchPhase,
+  resolveForgeTurnRoute,
+} from '../forge-phase.js';
+import type { ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,15 +43,8 @@ const FORGE_TYPE_MAP: Record<ForgeActionRequest['type'], true> = {
   forgeCancel: true,
 };
 export const FORGE_ACTION_TYPES = new Set<string>(Object.keys(FORGE_TYPE_MAP));
-
-export type ForgeTurnPhase =
-  | 'draft_research'
-  | 'draft_artifact'
-  | 'audit'
-  | 'revision_research'
-  | 'revision_artifact';
-
-export type ForgeTurnRoute = 'native' | 'hybrid' | 'cli';
+export type { ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
+export { isForgeFinalArtifactPhase, isForgeResearchPhase, resolveForgeTurnRoute } from '../forge-phase.js';
 
 export type ForgeTurnGateRequest = {
   phase: ForgeTurnPhase;
@@ -116,33 +115,6 @@ function shouldRouteForgeResumeToPlanRun(status: string | undefined): boolean {
   return status === 'APPROVED' || status === 'IMPLEMENTING';
 }
 
-export function isForgeResearchPhase(phase: ForgeTurnPhase): boolean {
-  return phase === 'draft_research' || phase === 'revision_research';
-}
-
-export function isForgeFinalArtifactPhase(phase: ForgeTurnPhase): boolean {
-  return phase === 'draft_artifact' || phase === 'revision_artifact';
-}
-
-export function resolveForgeTurnRoute(phase: ForgeTurnPhase): ForgeTurnRoute {
-  if (phase === 'draft_research' || phase === 'revision_research') return 'native';
-  if (phase === 'audit') return 'hybrid';
-  return 'cli';
-}
-
-function resolveForgeReResearchPhase(phase: ForgeTurnPhase): ForgeTurnPhase | null {
-  switch (phase) {
-    case 'draft_artifact':
-      return 'draft_research';
-    case 'audit':
-      return 'revision_research';
-    case 'revision_artifact':
-      return 'revision_research';
-    default:
-      return null;
-  }
-}
-
 export function normalizeForgeCandidatePath(candidatePath: string): string | null {
   const trimmed = candidatePath.trim();
   if (!trimmed) return null;
@@ -207,6 +179,36 @@ export function evaluateForgeTurnGate(request: ForgeTurnGateRequest): ForgeTurnG
       normalizedAllowlistPaths,
       outOfBoundsPaths: [],
       reason: 'Research must be marked complete before running a final strict-output forge turn.',
+    };
+  }
+
+  if (isForgeFinalArtifactPhase(requestedPhase) && normalizedAllowlistPaths.length === 0) {
+    const reResearchPhase = resolveForgeReResearchPhase(requestedPhase);
+    const reason = `Final forge phase ${requestedPhase} is missing a grounded candidate allowlist.`;
+    if (request.allowResearchReset && reResearchPhase) {
+      return {
+        status: 're_research',
+        requestedPhase,
+        nextPhase: reResearchPhase,
+        route: resolveForgeTurnRoute(reResearchPhase),
+        researchComplete: false,
+        normalizedCandidatePaths,
+        normalizedAllowlistPaths,
+        outOfBoundsPaths: [],
+        reason: `${reason} Re-enter ${reResearchPhase} to refresh grounded inputs before continuing.`,
+      };
+    }
+
+    return {
+      status: 'reject',
+      requestedPhase,
+      nextPhase: requestedPhase,
+      route: resolveForgeTurnRoute(requestedPhase),
+      researchComplete: request.researchComplete,
+      normalizedCandidatePaths,
+      normalizedAllowlistPaths,
+      outOfBoundsPaths: [],
+      reason,
     };
   }
 
@@ -467,10 +469,6 @@ export async function executeForgeAction(
         };
       }
 
-      const planOpts: HandlePlanCommandOpts = {
-        workspaceCwd: forgeCtx.workspaceCwd,
-        taskStore: forgeCtx.taskStore,
-      };
       const found = await findPlanFile(forgeCtx.plansDir, action.planId);
       if (!found) {
         return { ok: false, error: `Plan not found: ${action.planId}` };
@@ -492,6 +490,21 @@ export async function executeForgeAction(
         return runResult.ok
           ? { ok: true, summary: runResult.summary ?? `Plan run started for ${found.header.planId}.` }
           : runResult;
+      }
+
+      const phaseGate = resolveForgePlanPhaseGate(found.header.planId, 'audit');
+      const turnGate = evaluateForgeTurnGate({
+        phase: 'audit',
+        researchComplete: phaseGate.researchComplete,
+        candidatePaths: phaseGate.candidatePaths,
+        allowlistPaths: phaseGate.allowlistPaths,
+        allowResearchReset: phaseGate.fallbackPolicy.onOutOfBounds === 're_research',
+      });
+      if (phaseGate.requiresFreshResearch || turnGate.status !== 'allow') {
+        return {
+          ok: false,
+          error: phaseGate.reason ?? turnGate.reason ?? `Forge resume for ${found.header.planId} requires fresh research before audit.`,
+        };
       }
 
       const progress = await buildProgressCallbacks(

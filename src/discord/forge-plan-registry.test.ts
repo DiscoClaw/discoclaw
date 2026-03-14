@@ -322,6 +322,37 @@ describe('stored forge plan metadata', () => {
     expect(gate.allowlistPaths).toEqual(['src/discord/forge-plan-registry.ts']);
   });
 
+  it('requires fresh research when stored candidates drift outside the allowlist', () => {
+    setForgePlanMetadata('plan-out-of-bounds', {
+      phaseState: {
+        currentPhase: 'revision_artifact',
+        researchComplete: true,
+      },
+      candidateBounds: {
+        candidatePaths: [
+          'src/discord/forge-plan-registry.ts',
+          'src/discord/forge-commands.ts',
+        ],
+        allowlistPaths: ['src/discord/forge-plan-registry.ts'],
+      },
+      fallbackPolicy: {
+        onOutOfBounds: 're_research',
+        reResearchPhase: 'revision_research',
+      },
+    });
+
+    const metadata = getForgePlanMetadata('plan-out-of-bounds', {
+      requestedPhase: 'revision_artifact',
+    });
+    expect(metadata.compatibility).toBe('current');
+    expect(metadata.requiresFreshResearch).toBe(true);
+
+    const gate = resolveForgePlanPhaseGate('plan-out-of-bounds', 'revision_artifact');
+    expect(gate.requiresFreshResearch).toBe(true);
+    expect(gate.nextPhase).toBe('revision_research');
+    expect(gate.reason).toContain('out-of-bounds candidates');
+  });
+
   it('treats missing registry entries as bounded research incomplete for final turns', () => {
     const metadata = getForgePlanMetadata('plan-missing', {
       requestedPhase: 'revision_artifact',
@@ -342,6 +373,15 @@ describe('stored forge plan metadata', () => {
     expect(gate.requiresFreshResearch).toBe(true);
     expect(gate.nextPhase).toBe('revision_research');
     expect(gate.route).toBe('native');
+  });
+
+  it('treats audit as a final bounded phase when metadata is missing', () => {
+    const gate = resolveForgePlanPhaseGate('plan-missing-audit', 'audit');
+
+    expect(gate.requiresFreshResearch).toBe(true);
+    expect(gate.nextPhase).toBe('revision_research');
+    expect(gate.route).toBe('native');
+    expect(gate.reason).toContain('Re-enter revision_research');
   });
 
   it('can clear stored forge plan metadata', () => {

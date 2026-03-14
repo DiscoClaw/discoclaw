@@ -9,8 +9,16 @@ import {
 } from './actions-forge.js';
 import type { ForgeContext } from './actions-forge.js';
 import type { ActionContext } from './actions.js';
-import { _resetForTest, setActiveOrchestrator, addRunningPlan } from './forge-plan-registry.js';
+import { _resetForTest, setActiveOrchestrator, addRunningPlan, setForgePlanMetadata } from './forge-plan-registry.js';
 import { TaskStore } from '../tasks/store.js';
+
+const { readFileMock } = vi.hoisted(() => ({
+  readFileMock: vi.fn(async () => '# Plan: Test Plan\n\n## Changes\n\n- `src/discord/actions-forge.ts` — tighten forge gating.\n'),
+}));
+
+vi.mock('node:fs/promises', () => ({
+  readFile: readFileMock,
+}));
 
 vi.mock('./actions-plan.js', () => ({
   executePlanAction: vi.fn(async (action: { type: string; planId: string }) => ({
@@ -95,6 +103,7 @@ function makeForgeCtx(overrides?: Partial<ForgeContext>): ForgeContext {
 beforeEach(() => {
   _resetForTest();
   vi.clearAllMocks();
+  readFileMock.mockResolvedValue('# Plan: Test Plan\n\n## Changes\n\n- `src/discord/actions-forge.ts` — tighten forge gating.\n');
 });
 
 describe('FORGE_ACTION_TYPES', () => {
@@ -190,6 +199,26 @@ describe('forge turn gate', () => {
     expect(decision.nextPhase).toBe('revision_research');
     expect(decision.route).toBe('native');
     expect(decision.reason).toContain('Re-enter revision_research');
+  });
+
+  it('rejects audit when research is incomplete or the allowlist is empty', () => {
+    const incompleteDecision = evaluateForgeTurnGate({
+      phase: 'audit',
+      researchComplete: false,
+      allowlistPaths: ['src/discord/actions-forge.ts'],
+      candidatePaths: ['src/discord/actions-forge.ts'],
+    });
+    expect(incompleteDecision.status).toBe('reject');
+    expect(incompleteDecision.reason).toContain('Research must be marked complete');
+
+    const ungroundedDecision = evaluateForgeTurnGate({
+      phase: 'audit',
+      researchComplete: true,
+      allowlistPaths: [],
+      candidatePaths: [],
+    });
+    expect(ungroundedDecision.status).toBe('reject');
+    expect(ungroundedDecision.reason).toContain('missing a grounded candidate allowlist');
   });
 
   it('routes forge turns by bounded phase instead of salvage side effects', () => {
@@ -437,6 +466,62 @@ describe('executeForgeAction', () => {
       expect(send).toHaveBeenCalledWith(expect.objectContaining({
         content: 'Resuming forge review for **plan-123** from DRAFT status...',
       }));
+    });
+
+    it('uses stored bounded metadata for root-level resume allowlists without reading the plan body', async () => {
+      readFileMock.mockResolvedValueOnce([
+        '# Plan: Test Plan',
+        '',
+        '## Changes',
+        '',
+        '- `src/discord/forge-commands.ts` — unrelated nested path mention.',
+        '',
+        '## Audit Log',
+        '',
+        '- Mentioned `docs/out-of-bounds.md` in prose.',
+      ].join('\n'));
+      setForgePlanMetadata('plan-042', {
+        phaseState: {
+          currentPhase: 'audit',
+          researchComplete: true,
+        },
+        candidateBounds: {
+          candidatePaths: ['package.json', 'README.md'],
+          allowlistPaths: ['package.json', 'README.md'],
+        },
+        fallbackPolicy: {
+          onOutOfBounds: 're_research',
+          reResearchPhase: 'revision_research',
+        },
+      });
+
+      const forgeCtx = makeForgeCtx();
+      const result = await executeForgeAction(
+        { type: 'forgeResume', planId: 'plan-042' },
+        makeCtx(),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      expect(readFileMock).not.toHaveBeenCalled();
+      expect(forgeCtx.orchestratorFactory).toHaveBeenCalled();
+    });
+
+    it('blocks resume when bounded metadata is missing instead of inferring scope from the plan content', async () => {
+      readFileMock.mockResolvedValueOnce('# Plan: Test Plan\n\n## Changes\n\n- `package.json` — root file.\n- `README.md` — docs.\n');
+
+      const forgeCtx = makeForgeCtx();
+      const result = await executeForgeAction(
+        { type: 'forgeResume', planId: 'plan-042' },
+        makeCtx(),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected resume to be blocked');
+      expect(result.error).toContain('Re-enter revision_research');
+      expect(readFileMock).not.toHaveBeenCalled();
+      expect(forgeCtx.orchestratorFactory).not.toHaveBeenCalled();
     });
 
     it('routes approved plans into planRun instead of re-auditing', async () => {
