@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { CliInvokeContext } from '../cli-strategy.js';
-import { CONSERVATIVE_CODEX_CAPABILITIES, createCodexStrategy } from './codex-strategy.js';
+import {
+  ADVERTISED_CODEX_CAPABILITIES,
+  CODEX_RUNTIME_CAPABILITIES,
+  createAdvertisedCodexCapabilities,
+} from '../tool-capabilities.js';
+import { createCodexStrategy } from './codex-strategy.js';
 
 type InvokeContextOverrides = Omit<Partial<CliInvokeContext>, 'params'> & {
   params?: Partial<CliInvokeContext['params']>;
@@ -28,16 +33,17 @@ function createInvokeContext(overrides: InvokeContextOverrides = {}): CliInvokeC
 }
 
 describe('codex strategy capability contract', () => {
-  it('uses the conservative runtime-facing capability profile', () => {
+  it('keeps raw Codex affordances distinct from the conservative advertised profile', () => {
     const strategy = createCodexStrategy('gpt-5.3-codex');
+    const advertised = createAdvertisedCodexCapabilities(strategy.capabilities);
 
-    expect(CONSERVATIVE_CODEX_CAPABILITIES).toEqual(['streaming_text', 'sessions']);
-    expect(strategy.capabilities).toEqual(CONSERVATIVE_CODEX_CAPABILITIES);
-    expect(strategy.capabilities).not.toContain('tools_fs');
-    expect(strategy.capabilities).not.toContain('tools_exec');
-    expect(strategy.capabilities).not.toContain('tools_web');
-    expect(strategy.capabilities).not.toContain('workspace_instructions');
-    expect(strategy.capabilities).not.toContain('mcp');
+    expect(strategy.capabilities).toEqual(CODEX_RUNTIME_CAPABILITIES);
+    expect(strategy.capabilities).toContain('tools_fs');
+    expect(strategy.capabilities).toContain('tools_exec');
+    expect(strategy.capabilities).toContain('tools_web');
+    expect(strategy.capabilities).toContain('workspace_instructions');
+    expect(strategy.capabilities).toContain('mcp');
+    expect([...advertised].sort()).toEqual([...ADVERTISED_CODEX_CAPABILITIES].sort());
   });
 });
 

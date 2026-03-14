@@ -4,22 +4,14 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { ImageData, RuntimeCapability } from '../types.js';
+import type { ImageData } from '../types.js';
 import type { CliAdapterLogger, CliAdapterStrategy, CliInvokeContext, UniversalCliOpts, ParsedLineResult } from '../cli-strategy.js';
+import { CODEX_RUNTIME_CAPABILITIES } from '../tool-capabilities.js';
 
 /** Max chars for error messages exposed outside the adapter. Prevents prompt/session leaks. */
 const MAX_ERROR_LENGTH = 200;
 const IMAGE_SESSION_RESET_REASON =
   'image attachments require a fresh Codex session because `codex exec resume` does not support `--image`. Starting fresh.';
-
-// Codex can expose richer file/system affordances on some transports, but the
-// guarantees differ across fresh CLI turns, resumed sessions, bypassed sessions,
-// and native app-server fallback. Only advertise the subset that stays honest
-// across every runtime-facing Codex path.
-export const CONSERVATIVE_CODEX_CAPABILITIES = [
-  'streaming_text',
-  'sessions',
-] satisfies readonly RuntimeCapability[];
 
 const CODEX_NOISY_LINE_PATTERNS = [
   /^warning:/i,
@@ -267,7 +259,9 @@ export function createCodexStrategy(
     id: 'codex',
     binaryDefault: 'codex',
     defaultModel,
-    capabilities: CONSERVATIVE_CODEX_CAPABILITIES,
+    // The grounded strategy exposes the full Codex runtime affordances; the
+    // adapter layer trims this to a prompt-safe advertised profile.
+    capabilities: CODEX_RUNTIME_CAPABILITIES,
 
     multiTurnMode: 'session-resume',
 
