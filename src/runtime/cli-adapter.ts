@@ -48,6 +48,18 @@ type CliLogLike = {
   debug?: (...args: unknown[]) => void;
 };
 
+function summarizeCliLine(line: string, max = 200): string {
+  const compact = line.replace(/\s+/g, ' ').trim();
+  if (compact.length <= max) return compact;
+  return compact.slice(0, max - 1) + '\u2026';
+}
+
+function getJsonLineEventType(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object' || !('type' in value)) return undefined;
+  const type = (value as { type?: unknown }).type;
+  return typeof type === 'string' && type.trim().length > 0 ? type : undefined;
+}
+
 function asCliLogLike(log: UniversalCliOpts['log']): CliLogLike | undefined {
   if (!log || typeof log !== 'object') return undefined;
   return log as CliLogLike;
@@ -387,8 +399,26 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       let firstParsedEventAtMs: number | null = null;
       let firstParsedEventType: EngineEvent['type'] | null = null;
       let firstParsedEventSource: 'session_scanner' | 'strategy_parser' | 'default_parser' | null = null;
+      let stdoutLineCount = 0;
+      let parsedJsonLineCount = 0;
+      let unparsableStdoutLineCount = 0;
+      let strategyHandledLineCount = 0;
+      let defaultHandledLineCount = 0;
+      let lastStdoutLinePreview: string | null = null;
+      let lastUnparsableStdoutLinePreview: string | null = null;
+      let lastJsonEventType: string | null = null;
       let timingSummaryLogged = false;
       const toSpawnDelta = (ts: number | null): number | null => (ts == null ? null : ts - spawnedAtMs);
+      const buildStdoutParseDiagnostics = () => ({
+        stdoutLineCount,
+        parsedJsonLineCount,
+        unparsableStdoutLineCount,
+        strategyHandledLineCount,
+        defaultHandledLineCount,
+        lastStdoutLinePreview,
+        lastUnparsableStdoutLinePreview,
+        lastJsonEventType,
+      });
       const clearResumableSession = (reason: string): void => {
         if (!sessionMap || typeof params.sessionKey !== 'string' || params.sessionKey.length === 0) return;
         sessionMap.delete(params.sessionKey);
@@ -411,6 +441,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           spawnToFirstStderrMs: toSpawnDelta(firstStderrByteAtMs),
           spawnToFirstEventMs: toSpawnDelta(firstParsedEventAtMs),
           totalMs: finalizeAtMs - spawnedAtMs,
+          ...buildStdoutParseDiagnostics(),
         }, 'one-shot: timing summary');
       };
       const clearStallTimer = () => { if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; } };
@@ -447,7 +478,11 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         stallTimer = setTimeout(() => {
           if (attemptSettled || finished) return;
           const ms = streamStallTimeoutMs;
-          opts.log?.info?.(`one-shot: stream stall detected after ${ms}ms, killing process`);
+          opts.log?.info?.({
+            ...attemptLogBase,
+            stallTimeoutMs: ms,
+            ...buildStdoutParseDiagnostics(),
+          }, `one-shot: stream stall detected after ${ms}ms, killing process`);
           clearResumableSession('stream_stall');
           pushRuntimeError(`stream stall: no output for ${ms}ms — increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS to allow longer gaps (current: ${ms}ms)`);
           push({ type: 'done' });
@@ -469,7 +504,12 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         progressTimer = setTimeout(() => {
           if (attemptSettled || finished) return;
           const ms = progressStallTimeoutMs;
-          opts.log?.info?.(`one-shot: progress stall detected (no text_delta for ${ms}ms, resets=${progressResetCount}), killing process`);
+          opts.log?.info?.({
+            ...attemptLogBase,
+            stallTimeoutMs: ms,
+            resets: progressResetCount,
+            ...buildStdoutParseDiagnostics(),
+          }, `one-shot: progress stall detected (no text_delta for ${ms}ms, resets=${progressResetCount}), killing process`);
           clearResumableSession('progress_stall');
           pushRuntimeError(`progress stall: no text output for ${ms}ms (possible thinking spiral)`);
           push({ type: 'done' });
@@ -584,17 +624,27 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
+          stdoutLineCount++;
+          lastStdoutLinePreview = summarizeCliLine(trimmed);
 
           if (opts.echoStdio) {
             push({ type: 'log_line', stream: 'stdout', line: trimmed });
           }
 
           const evt = tryParseJsonLine(trimmed);
+          if (evt) {
+            parsedJsonLineCount++;
+            lastJsonEventType = getJsonLineEventType(evt) ?? null;
+          } else {
+            unparsableStdoutLineCount++;
+            lastUnparsableStdoutLinePreview = summarizeCliLine(trimmed);
+          }
 
           // Delegate to strategy parser first.
           if (strategy.parseLine && evt) {
             const parsed = strategy.parseLine(evt, ctx);
             if (parsed) {
+              strategyHandledLineCount++;
               // Emit extra events (e.g. session mapping).
               if (parsed.extraEvents) {
                 for (const e of parsed.extraEvents) pushParsedEvent(e, 'strategy_parser');
@@ -658,6 +708,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           // Default JSONL parsing (Claude-compatible fallback).
           const text = extractTextFromUnknownEvent(evt ?? trimmed);
           if (text) {
+            defaultHandledLineCount++;
             recordFirstParsedRuntimeEvent('default_parser', 'text_delta');
             merged += text;
             const hasToolOpen = text.includes('<tool_use>') || text.includes('<tool_calls>') || text.includes('<tool_call>') || text.includes('<tool_results>') || text.includes('<tool_result>');
@@ -669,14 +720,17 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
             }
             if (hasToolClose) inToolUse = false;
           } else if (evt) {
+            let handledDefaultEvent = false;
             const rt = extractResultText(evt);
             if (rt !== null) {
+              handledDefaultEvent = true;
               recordFirstParsedRuntimeEvent('default_parser', 'text_final');
               resultText = rt;
             }
 
             const blocks = extractResultContentBlocks(evt);
             if (blocks) {
+              handledDefaultEvent = true;
               if (blocks.text) {
                 recordFirstParsedRuntimeEvent('default_parser', 'text_final');
               } else if (blocks.images.length > 0) {
@@ -696,6 +750,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
 
             const img = extractImageFromUnknownEvent(evt);
             if (img && imageCount < MAX_IMAGES_PER_INVOCATION) {
+              handledDefaultEvent = true;
               recordFirstParsedRuntimeEvent('default_parser', 'image_data');
               const key = imageDedupeKey(img);
               if (!seenImages.has(key)) {
@@ -703,6 +758,9 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
                 imageCount++;
                 pushParsedEvent({ type: 'image_data', image: img }, 'default_parser');
               }
+            }
+            if (handledDefaultEvent) {
+              defaultHandledLineCount++;
             }
           }
         }

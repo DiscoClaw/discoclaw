@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { execa } from 'execa';
 import { createPlan, parsePlanFileHeader, resolvePlanHeaderTaskId } from './plan-commands.js';
 import type { TaskStore } from '../tasks/store.js';
 import type { RuntimeAdapter, EngineEvent, RuntimeSupervisorPolicy } from '../runtime/types.js';
@@ -10,6 +11,7 @@ import { resolveModel, resolveReasoningEffort } from '../runtime/model-tiers.js'
 import { parseAuditVerdict } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { getSection, parsePlan } from './plan-parser.js';
+import { cliExecaEnv, stripAnsi } from '../runtime/cli-shared.js';
 import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
 import { buildPromptPreamble } from './prompt-common.js';
 import { createPhaseStatusHeartbeatController, resolvePlanHeaderHeartbeatPolicy } from './phase-status-heartbeat.js';
@@ -19,6 +21,11 @@ export type { AuditVerdict };
 const COMPOUND_LESSONS_PATH = 'docs/compound-lessons.md';
 const FORGE_STREAM_STALL_TIMEOUT_MS = 2 * 60_000;
 const FORGE_PROGRESS_STALL_TIMEOUT_MS = 3 * 60_000;
+const CODEX_GROUNDING_CANDIDATE_LIMIT = 24;
+const CODEX_GROUNDING_SEARCH_TERM_LIMIT = 8;
+const CODEX_GROUNDING_SEARCH_ROOTS = ['src', 'scripts', 'docs', 'test', 'tests'];
+const CODEX_GROUNDING_SEARCH_FILES = ['package.json', 'pnpm-workspace.yaml', '.env.example', 'README.md', 'discoclaw.service'];
+const CODEX_NATIVE_WRITE_CONTEXT_FILES = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'TOOLS.md'] as const;
 const FORGE_PLAN_PHASE_SUPERVISOR_POLICY: RuntimeSupervisorPolicy = {
   profile: 'plan_phase',
   treatAbortedAsRetryable: true,
@@ -295,6 +302,134 @@ function extractConcretePlanPaths(planContent: string): string[] {
   return [...new Set(matches)];
 }
 
+function formatCandidatePathChoices(paths: readonly string[]): string {
+  if (paths.length === 0) return '- No candidate paths were found.';
+  return paths.map((filePath) => `- \`${filePath}\``).join('\n');
+}
+
+function extractCodexGroundingSearchTerms(text: string): string[] {
+  const stopWords = new Set([
+    'after', 'again', 'agent', 'and', 'build', 'change', 'changes', 'chat', 'claw', 'code',
+    'complete', 'create', 'error', 'errors', 'feature', 'file', 'files', 'fix', 'flow',
+    'for', 'from', 'handling', 'hang', 'issue', 'path', 'paths', 'plan', 'prompt',
+    'restore', 'retry', 'round', 'session', 'stalled', 'task', 'tests', 'the', 'this', 'thread',
+    'to', 'turn', 'usage', 'using', 'when', 'with', 'work', 'write',
+  ]);
+  const values = new Set<string>();
+  for (const match of text.toLowerCase().matchAll(/[a-z0-9][a-z0-9._/-]{2,}/g)) {
+    const raw = match[0]!;
+    const parts = raw.split(/[\/._-]+/).filter(Boolean);
+    for (const part of [raw, ...parts]) {
+      if (part.length < 3) continue;
+      if (stopWords.has(part)) continue;
+      values.add(part);
+    }
+  }
+  return [...values].slice(0, CODEX_GROUNDING_SEARCH_TERM_LIMIT);
+}
+
+function scoreCodexGroundingCandidate(
+  filePath: string,
+  searchTerms: readonly string[],
+  contentMatchSet: ReadonlySet<string>,
+  existingPathSet: ReadonlySet<string>,
+): number {
+  const normalizedPath = filePath.toLowerCase();
+  const normalizedBase = path.basename(normalizedPath);
+  let score = 0;
+  if (contentMatchSet.has(filePath)) score += 24;
+  if (existingPathSet.has(filePath)) score += 18;
+  if (normalizedPath.startsWith('src/runtime/')) score += 10;
+  else if (normalizedPath.startsWith('src/discord/')) score += 8;
+  else if (normalizedPath.startsWith('src/')) score += 6;
+  else if (normalizedPath.startsWith('scripts/')) score -= 4;
+  else if (normalizedPath.startsWith('docs/')) score -= 2;
+  if (normalizedPath.endsWith('.test.ts')) score -= 2;
+  for (const term of searchTerms) {
+    if (normalizedPath.includes(`/${term}/`) || normalizedPath.endsWith(`/${term}`)) score += 10;
+    if (normalizedBase === term || normalizedBase.startsWith(`${term}.`)) score += 12;
+    else if (normalizedBase.includes(term)) score += 8;
+    else if (normalizedPath.includes(term)) score += 4;
+  }
+  return score;
+}
+
+async function pathExists(candidatePath: string): Promise<boolean> {
+  try {
+    await fs.access(candidatePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function runRipgrepLines(args: string[], cwd: string): Promise<string[]> {
+  const result = await execa('rg', args, {
+    cwd,
+    env: cliExecaEnv(),
+    reject: false,
+  });
+  if (result.exitCode !== 0 && result.exitCode !== 1) {
+    throw new Error(stripAnsi(result.stderr || result.stdout || `rg exited with code ${result.exitCode ?? 'unknown'}`));
+  }
+  return stripAnsi(result.stdout)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+async function resolveCodexGroundingSearchTargets(cwd: string): Promise<string[]> {
+  const roots: string[] = [];
+  for (const relativePath of [...CODEX_GROUNDING_SEARCH_ROOTS, ...CODEX_GROUNDING_SEARCH_FILES]) {
+    if (await pathExists(path.join(cwd, relativePath))) {
+      roots.push(relativePath);
+    }
+  }
+  return roots;
+}
+
+async function resolveCodexGroundingCandidatePaths(opts: {
+  cwd: string;
+  query: string;
+  existingPaths?: readonly string[];
+  log?: LoggerLike;
+}): Promise<string[]> {
+  const existingPaths = [...new Set((opts.existingPaths ?? []).filter(Boolean))];
+  const searchTargets = await resolveCodexGroundingSearchTargets(opts.cwd);
+  if (searchTargets.length === 0) {
+    return existingPaths.slice(0, CODEX_GROUNDING_CANDIDATE_LIMIT);
+  }
+
+  try {
+    const allFiles = [...new Set(await runRipgrepLines(['--files', '--', ...searchTargets], opts.cwd))];
+    if (allFiles.length === 0) {
+      return existingPaths.slice(0, CODEX_GROUNDING_CANDIDATE_LIMIT);
+    }
+
+    const searchTerms = extractCodexGroundingSearchTerms(opts.query);
+    const contentMatches = searchTerms.length === 0
+      ? []
+      : await runRipgrepLines(
+        ['-l', '-i', '-F', ...searchTerms.flatMap((term) => ['-e', term]), '--', ...searchTargets],
+        opts.cwd,
+      );
+
+    const contentMatchSet = new Set(contentMatches);
+    const existingPathSet = new Set(existingPaths);
+    const rankedFiles = [...allFiles].sort((left, right) => {
+      const scoreDiff = scoreCodexGroundingCandidate(right, searchTerms, contentMatchSet, existingPathSet)
+        - scoreCodexGroundingCandidate(left, searchTerms, contentMatchSet, existingPathSet);
+      if (scoreDiff !== 0) return scoreDiff;
+      return left.localeCompare(right);
+    });
+
+    return [...new Set([...existingPaths, ...rankedFiles])].slice(0, CODEX_GROUNDING_CANDIDATE_LIMIT);
+  } catch (err) {
+    opts.log?.warn({ err }, 'forge:codex grounding candidate prepass failed');
+    return existingPaths.slice(0, CODEX_GROUNDING_CANDIDATE_LIMIT);
+  }
+}
+
 function shouldUseTwoStageCodexPlanFlow(runtime: RuntimeAdapter): boolean {
   return runtime.id === 'codex'
     && runtime.capabilities.has('sessions')
@@ -306,6 +441,10 @@ function resolveForgePlanSystemPrompt(rt: RuntimeAdapter): string | undefined {
   // forge plan system prompt is present. The prompt body already enforces the
   // plan contract, so omit the extra system prompt for Codex turns.
   return rt.id === 'codex' ? undefined : FORGE_PLAN_SYSTEM_PROMPT;
+}
+
+function shouldForceCliCodexForgeTurns(rt: RuntimeAdapter): boolean {
+  return rt.id === 'codex';
 }
 
 // ---------------------------------------------------------------------------
@@ -527,6 +666,34 @@ function buildCodexDraftGroundingPrompt(description: string): string {
   ].join('\n');
 }
 
+function buildCodexDraftCandidateSelectionPrompt(
+  description: string,
+  candidatePaths: readonly string[],
+): string {
+  return [
+    PHASE_SAFETY_REMINDER,
+    '',
+    'You are selecting the concrete repo file paths needed for a later plan-writing turn.',
+    '',
+    '## Task',
+    '',
+    description,
+    '',
+    '## Candidate File Paths',
+    '',
+    formatCandidatePathChoices(candidatePaths),
+    '',
+    '## Instructions',
+    '',
+    '- Do NOT inspect the repo further in this turn.',
+    '- Choose the 1-5 most relevant repo-relative file paths from the candidate list only.',
+    '- Reply with 1-5 lines and nothing else.',
+    '- Each line must be exactly one backtick-wrapped repo-relative file path copied from the candidate list.',
+    '- Do NOT draft the plan yet.',
+    '- No bullets. No notes. No prose. No `# Plan:` heading.',
+  ].join('\n');
+}
+
 function buildCodexDraftWritePrompt(
   description: string,
   templateContent: string,
@@ -534,7 +701,7 @@ function buildCodexDraftWritePrompt(
   groundedInputs: string,
 ): string {
   const templateBody = materializePlanTemplateBody(templateContent);
-  return [
+  const sections = [
     PHASE_SAFETY_REMINDER,
     '',
     'You are writing the final plan artifact from grounded repo inputs that were already gathered in this thread.',
@@ -560,11 +727,18 @@ function buildCodexDraftWritePrompt(
     '````markdown',
     templateBody,
     '````',
-    '',
-    '## Project Context',
-    '',
-    contextSummary,
-  ].join('\n');
+  ];
+
+  if (contextSummary.trim().length > 0) {
+    sections.push(
+      '',
+      '## Project Context',
+      '',
+      contextSummary,
+    );
+  }
+
+  return sections.join('\n');
 }
 
 function buildCodexRevisionGroundingPrompt(
@@ -594,6 +768,47 @@ function buildCodexRevisionGroundingPrompt(
     '- Reply with `NONE` exactly if no additional repo-relative file paths are needed.',
     '- Otherwise reply with 1-5 lines and nothing else.',
     '- Each line must be exactly one backtick-wrapped repo-relative file path.',
+    '- Do NOT write the revised plan yet.',
+    '- No bullets. No notes. No prose.',
+  ].join('\n');
+}
+
+function buildCodexRevisionCandidateSelectionPrompt(
+  planContent: string,
+  auditNotes: string,
+  candidatePaths: readonly string[],
+): string {
+  const planForPrompt = stripAuditLogForPrompt(planContent);
+  const existingPaths = extractConcretePlanPaths(planContent);
+  return [
+    PHASE_SAFETY_REMINDER,
+    '',
+    'You are selecting any additional repo file paths needed for revising an existing technical plan.',
+    '',
+    '## Current Plan',
+    '',
+    '```markdown',
+    planForPrompt,
+    '```',
+    '',
+    '## Latest Audit Feedback',
+    '',
+    auditNotes,
+    '',
+    '## Existing Plan File Paths',
+    '',
+    formatConcretePlanPaths(existingPaths),
+    '',
+    '## Candidate File Paths',
+    '',
+    formatCandidatePathChoices(candidatePaths),
+    '',
+    '## Instructions',
+    '',
+    '- Do NOT inspect the repo further in this turn.',
+    '- Reply with `NONE` exactly if no additional repo-relative file paths are needed.',
+    '- Otherwise choose 1-5 additional repo-relative file paths from the candidate list only.',
+    '- Each non-NONE line must be exactly one backtick-wrapped repo-relative file path copied from the candidate list.',
     '- Do NOT write the revised plan yet.',
     '- No bullets. No notes. No prose.',
   ].join('\n');
@@ -1401,7 +1616,9 @@ function wrapWithGroundingOutputGuard(
           return { ...evt, text: trimmedText };
         }
 
-        groundingText += evt.text;
+        groundingText = evt.type === 'text_final'
+          ? evt.text
+          : groundingText + evt.text;
         return evt;
       };
 
@@ -1566,6 +1783,14 @@ export class ForgeOrchestrator {
         taskDescription: this.opts.taskDescription,
         pinnedThreadSummary: this.opts.pinnedThreadSummary,
       });
+      const codexNativeWriteContextSummary = await this.buildContextSummary(projectContext, {
+        taskDescription: this.opts.taskDescription,
+        pinnedThreadSummary: this.opts.pinnedThreadSummary,
+        compact: true,
+        workspaceFiles: [...CODEX_NATIVE_WRITE_CONTEXT_FILES],
+        includeProjectContext: false,
+        includeCompoundLessons: false,
+      });
 
       return await this.auditLoop({
         planId,
@@ -1578,6 +1803,7 @@ export class ForgeOrchestrator {
         // Draft-phase specifics (only used when startRound === 1)
         templateContent,
         contextSummary,
+        codexNativeWriteContextSummary,
         t0,
       });
     } catch (err) {
@@ -1718,6 +1944,7 @@ export class ForgeOrchestrator {
     // Draft-phase specifics (only present when startRound === 1, i.e. from run())
     templateContent?: string;
     contextSummary?: string;
+    codexNativeWriteContextSummary?: string;
     t0?: number;
   }): Promise<ForgeResult> {
     const {
@@ -1730,6 +1957,7 @@ export class ForgeOrchestrator {
       projectContext,
       templateContent,
       contextSummary,
+      codexNativeWriteContextSummary,
     } = params;
     const t0 = params.t0 ?? Date.now();
 
@@ -1824,12 +2052,27 @@ export class ForgeOrchestrator {
 
         round++;
         const forgePhaseLiveness = resolveForgePhaseLiveness(this.opts.timeoutMs);
+        const forceDrafterCli = shouldForceCliCodexForgeTurns(drafterRt);
 
         // Draft phase (only on first round of a fresh forge, not resume)
         if (round === 1 && startRound === 1 && templateContent && contextSummary) {
           await setHeartbeatPhase(`Draft round ${round}/${maxRound}`);
           await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.draft, `Forging ${planId}... Drafting (reading codebase)`));
 
+          const draftGroundingCandidatePaths = useTwoStageCodexDraftFlow
+            ? await resolveCodexGroundingCandidatePaths({
+              cwd: this.opts.cwd,
+              query: description,
+              log: this.opts.log,
+            })
+            : [];
+          const useBoundedDraftGrounding = draftGroundingCandidatePaths.length > 0;
+          if (useTwoStageCodexDraftFlow) {
+            this.opts.log?.info(
+              { planId, round, phase: 'draft', candidateCount: draftGroundingCandidatePaths.length, bounded: useBoundedDraftGrounding },
+              'forge:codex draft grounding candidates resolved',
+            );
+          }
           const drafterPrompt = buildDrafterPrompt(
             description,
             templateContent,
@@ -1839,20 +2082,26 @@ export class ForgeOrchestrator {
             description,
             templateContent,
           );
+          const codexDraftWriteContext = useTwoStageCodexDraftFlow
+            ? (codexNativeWriteContextSummary ?? '')
+            : contextSummary;
           const draftPrimaryDef = useTwoStageCodexDraftFlow
             ? {
               steps: [
                 {
                   id: 'draft-grounding',
                   kind: 'prompt' as const,
-                  prompt: buildCodexDraftGroundingPrompt(description),
+                  prompt: useBoundedDraftGrounding
+                    ? buildCodexDraftCandidateSelectionPrompt(description, draftGroundingCandidatePaths)
+                    : buildCodexDraftGroundingPrompt(description),
                   runtime: effectiveDraftResearchRt,
                   model: drafterModel,
-                  tools: readOnlyTools,
-                  addDirs,
+                  tools: useBoundedDraftGrounding ? [] : readOnlyTools,
+                  ...(useBoundedDraftGrounding ? {} : { addDirs }),
                   timeoutMs: this.opts.timeoutMs,
                   streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
                   progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                  ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
                   sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
                   supervisor: FORGE_GROUNDING_PHASE_SUPERVISOR_POLICY,
                 },
@@ -1862,7 +2111,7 @@ export class ForgeOrchestrator {
                   prompt: buildCodexDraftWritePrompt(
                     description,
                     templateContent,
-                    contextSummary,
+                    codexDraftWriteContext,
                     '{{steps.draft-grounding.output}}',
                   ),
                   runtime: effectiveDrafterRt,
@@ -1872,6 +2121,7 @@ export class ForgeOrchestrator {
                   timeoutMs: this.opts.timeoutMs,
                   streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
                   progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                  ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
                   sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
                   supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
                 },
@@ -1893,6 +2143,7 @@ export class ForgeOrchestrator {
                 timeoutMs: this.opts.timeoutMs,
                 streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
                 progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
                 sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
                 supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
               }],
@@ -1913,6 +2164,7 @@ export class ForgeOrchestrator {
               timeoutMs: this.opts.timeoutMs,
               streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
               progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+              ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
               sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
               supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
             }],
@@ -1997,6 +2249,7 @@ export class ForgeOrchestrator {
         const reasoningAuditorRt = auditorReasoningEffort
           ? wrapWithReasoningEffort(auditorRt, auditorReasoningEffort)
           : auditorRt;
+        const forceAuditorCli = shouldForceCliCodexForgeTurns(auditorRt);
 
         const auditorPrompt = buildAuditorPrompt(
           planContent,
@@ -2016,6 +2269,7 @@ export class ForgeOrchestrator {
             timeoutMs: this.opts.timeoutMs,
             streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
             progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+            ...(forceAuditorCli ? { disableNativeAppServer: true } : {}),
             sessionKey: auditorRt.capabilities.has('sessions') ? auditorSessionKey : undefined,
             supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
           }],
@@ -2126,20 +2380,38 @@ export class ForgeOrchestrator {
           auditOutput,
           description,
         );
+        const revisionGroundingCandidatePaths = useTwoStageCodexDraftFlow
+          ? await resolveCodexGroundingCandidatePaths({
+            cwd: this.opts.cwd,
+            query: [description, auditOutput, ...extractConcretePlanPaths(planContent)].join('\n'),
+            existingPaths: extractConcretePlanPaths(planContent),
+            log: this.opts.log,
+          })
+          : [];
+        const useBoundedRevisionGrounding = revisionGroundingCandidatePaths.length > 0;
+        if (useTwoStageCodexDraftFlow) {
+          this.opts.log?.info(
+            { planId, round, phase: 'revision', candidateCount: revisionGroundingCandidatePaths.length, bounded: useBoundedRevisionGrounding },
+            'forge:codex revision grounding candidates resolved',
+          );
+        }
         const revisionPrimaryDef = useTwoStageCodexDraftFlow
           ? {
             steps: [
               {
                 id: `revision-round-${round}-grounding`,
                 kind: 'prompt' as const,
-                prompt: buildCodexRevisionGroundingPrompt(planContent, auditOutput),
+                prompt: useBoundedRevisionGrounding
+                  ? buildCodexRevisionCandidateSelectionPrompt(planContent, auditOutput, revisionGroundingCandidatePaths)
+                  : buildCodexRevisionGroundingPrompt(planContent, auditOutput),
                 runtime: effectiveRevisionResearchRt,
                 model: drafterModel,
-                tools: readOnlyTools,
-                addDirs,
+                tools: useBoundedRevisionGrounding ? [] : readOnlyTools,
+                ...(useBoundedRevisionGrounding ? {} : { addDirs }),
                 timeoutMs: this.opts.timeoutMs,
                 streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
                 progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
                 sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
                 supervisor: FORGE_GROUNDING_PHASE_SUPERVISOR_POLICY,
               },
@@ -2150,7 +2422,7 @@ export class ForgeOrchestrator {
                   planContent,
                   auditOutput,
                   description,
-                  projectContext,
+                  useTwoStageCodexDraftFlow ? codexNativeWriteContextSummary : projectContext,
                   `{{steps.revision-round-${round}-grounding.output}}`,
                 ),
                 runtime: effectiveRevisionRt,
@@ -2160,6 +2432,7 @@ export class ForgeOrchestrator {
                 timeoutMs: this.opts.timeoutMs,
                 streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
                 progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
                 sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
                 supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
               },
@@ -2181,6 +2454,7 @@ export class ForgeOrchestrator {
               timeoutMs: this.opts.timeoutMs,
               streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
               progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+              ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
               sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
               supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
             }],
@@ -2201,6 +2475,7 @@ export class ForgeOrchestrator {
             timeoutMs: this.opts.timeoutMs,
             streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
             progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+            ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
             sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
             supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
           }],
@@ -2285,9 +2560,13 @@ export class ForgeOrchestrator {
     opts?: {
       taskDescription?: string;
       pinnedThreadSummary?: string;
+      compact?: boolean;
+      workspaceFiles?: string[];
+      includeProjectContext?: boolean;
+      includeCompoundLessons?: boolean;
     },
   ): Promise<string> {
-    const contextFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'AGENTS.md', 'TOOLS.md'];
+    const contextFiles = opts?.workspaceFiles ?? ['SOUL.md', 'IDENTITY.md', 'USER.md', 'AGENTS.md', 'TOOLS.md'];
     const sections: string[] = [];
     for (const name of contextFiles) {
       const p = path.join(this.opts.workspaceCwd, name);
@@ -2300,7 +2579,7 @@ export class ForgeOrchestrator {
     }
 
     // Append project context if already loaded
-    if (projectContext) {
+    if (projectContext && opts?.includeProjectContext !== false) {
       sections.push(`--- project.md (repo) ---\n${projectContext.trimEnd()}`);
     }
 
@@ -2314,17 +2593,20 @@ export class ForgeOrchestrator {
     }
 
     const compoundLessonsPath = path.join(this.opts.cwd, COMPOUND_LESSONS_PATH);
-    try {
-      const compoundLessons = await fs.readFile(compoundLessonsPath, 'utf-8');
-      const lessonsSection = extractCompoundLessonsForPrompt(compoundLessons);
-      if (lessonsSection) {
-        sections.push(`--- compound-lessons.md (repo) ---\n${lessonsSection}`);
+    if (opts?.includeCompoundLessons !== false) {
+      try {
+        const compoundLessons = await fs.readFile(compoundLessonsPath, 'utf-8');
+        const lessonsSection = extractCompoundLessonsForPrompt(compoundLessons);
+        if (lessonsSection) {
+          sections.push(`--- compound-lessons.md (repo) ---\n${lessonsSection}`);
+        }
+      } catch {
+        // skip missing or unreadable files
       }
-    } catch {
-      // skip missing or unreadable files
     }
 
-    return buildPromptPreamble(sections.join('\n\n'));
+    const inlinedContext = sections.join('\n\n');
+    return opts?.compact ? inlinedContext : buildPromptPreamble(inlinedContext);
   }
 
   private async loadProjectContext(): Promise<string | undefined> {

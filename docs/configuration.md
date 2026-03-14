@@ -150,7 +150,7 @@ If any check fails consistently, treat the model as unsupported for DiscoClaw ru
 | `CODEX_BIN` | `codex` | Path to Codex CLI binary |
 | `CODEX_MODEL` | `gpt-5.4` | Codex model ID |
 | `CODEX_APP_SERVER_URL` | — | Optional Codex app-server websocket URL used by the native app-server invoke path |
-| `CODEX_APP_SERVER_NATIVE` | `false` | When `1` and `CODEX_APP_SERVER_URL` is set, use the app-server WebSocket as the primary invoke transport instead of `codex exec`. Automatically falls back to CLI for image turns, non-default `cwd`, and connection failures. |
+| `CODEX_APP_SERVER_NATIVE` | `false` | When `1` and `CODEX_APP_SERVER_URL` is set, use the app-server WebSocket as the primary invoke transport instead of `codex exec`. Automatically falls back to CLI for image turns, non-default `cwd`, connection failures, and any higher-level runtime/forge salvage policy that chooses CLI after a native phase stalls or fails. |
 | `CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX` | `false` | Skip Codex safety checks |
 | `CODEX_DISABLE_SESSIONS` | `false` | Disable Codex session persistence |
 | `DISCOCLAW_CODEX_VERBOSE_PREVIEW` | `false` | Emit richer reasoning/command preview lines (also forces `model_reasoning_summary="auto"` for Codex runs) |
@@ -214,8 +214,8 @@ See [docs/plan-and-forge.md](plan-and-forge.md) for usage details.
 | `FORGE_MAX_AUDIT_ROUNDS` | `5` | Max audit rounds in forge |
 | `FORGE_DRAFTER_MODEL` | — | Model override for forge drafter |
 | `FORGE_AUDITOR_MODEL` | — | Model override for forge auditor |
-| `FORGE_DRAFTER_RUNTIME` | — | Runtime override for forge drafter |
-| `FORGE_AUDITOR_RUNTIME` | — | Runtime override for forge auditor |
+| `FORGE_DRAFTER_RUNTIME` | — | Runtime override for forge drafter. When set to `codex`, forge currently forces Codex phases onto the CLI route by default rather than the native app-server path. |
+| `FORGE_AUDITOR_RUNTIME` | — | Runtime override for forge auditor. When set to `codex`, forge currently forces Codex phases onto the CLI route by default rather than the native app-server path. |
 | `FORGE_TIMEOUT_MS` | `1800000` (30 min) | Timeout for forge operations |
 | `FORGE_PROGRESS_THROTTLE_MS` | `3000` | Throttle interval for forge progress messages |
 | `FORGE_AUTO_IMPLEMENT` | `true` | Auto-run plan phases after forge approval |
