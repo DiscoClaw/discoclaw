@@ -13,7 +13,7 @@ import { NO_MENTIONS } from './allowed-mentions.js';
 import { DiscordTransportClient } from './transport-client.js';
 import { resolveDiscordChannelContext } from './channel-context.js';
 import type { DiscordChannelContext } from './channel-context.js';
-import { appendParseFailureNotice, appendUnavailableActionTypesNotice } from './output-common.js';
+import { appendParseFailureNotice, buildUnavailableActionTypesNotice } from './output-common.js';
 import {
   buildContextFiles,
   buildOpenTasksSection,
@@ -38,6 +38,8 @@ import type { LoggerLike } from '../logging/logger-like.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 import type { StatusPoster } from './status-channel.js';
+import { IMAGEGEN_ACTION_TYPES } from './actions-imagegen.js';
+import { appendOutsideFence } from './output-utils.js';
 
 export type LoopCreateActionRequest = {
   type: 'loopCreate';
@@ -247,6 +249,41 @@ function buildLoopActionsReferenceSection(
 ): string {
   if (selection.includedCategories.includes('loop')) return selection.prompt;
   return `${selection.prompt}\n\n${loopActionsPromptSection()}`;
+}
+
+function buildLoopUnavailableActionTypesNotice(strippedTypes: string[]): string {
+  const passthroughTypes: string[] = [];
+  const loopUnsupportedTypes: string[] = [];
+
+  for (const rawType of strippedTypes) {
+    const type = rawType.trim();
+    if (!type) continue;
+    if (IMAGEGEN_ACTION_TYPES.has(type)) {
+      loopUnsupportedTypes.push(type);
+    } else {
+      passthroughTypes.push(type);
+    }
+  }
+
+  const parts: string[] = [];
+  const passthroughNotice = buildUnavailableActionTypesNotice(passthroughTypes);
+  if (passthroughNotice) parts.push(passthroughNotice);
+
+  const uniqueLoopUnsupportedTypes = Array.from(new Set(loopUnsupportedTypes));
+  if (uniqueLoopUnsupportedTypes.length > 0) {
+    const rendered = uniqueLoopUnsupportedTypes.map((type) => `\`${type}\``).join(', ');
+    const noun = uniqueLoopUnsupportedTypes.length === 1 ? 'type' : 'types';
+    parts.push(
+      `Ignored unavailable action ${noun}: ${rendered} (image generation is not available during loop ticks).`,
+    );
+  }
+
+  return parts.join('\n');
+}
+
+function appendLoopUnavailableActionTypesNotice(text: string, strippedTypes: string[]): string {
+  const notice = buildLoopUnavailableActionTypesNotice(strippedTypes);
+  return appendOutsideFence(String(text ?? '').trimEnd(), notice);
 }
 
 function getThreadParentId(candidate: unknown): string | null {
@@ -520,7 +557,7 @@ async function handleLoopTick(
   }
 
   let outgoingText = opts.actionsApi.appendActionResults(parsed.cleanText.trim(), parsed.actions, actionResults);
-  outgoingText = appendUnavailableActionTypesNotice(outgoingText, parsed.strippedUnrecognizedTypes).trim();
+  outgoingText = appendLoopUnavailableActionTypesNotice(outgoingText, parsed.strippedUnrecognizedTypes).trim();
   outgoingText = appendParseFailureNotice(outgoingText, parsed.parseFailures).trim();
   if (!outgoingText && runtimeError) {
     outgoingText = runtimeError;

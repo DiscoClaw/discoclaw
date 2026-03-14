@@ -313,6 +313,32 @@ describe('loop tick policy', () => {
     );
   });
 
+  it('treats stripped imagegen actions as unsupported loop output instead of the manual setup stub', async () => {
+    const { executeDiscordActions, channel } = configureForTick({
+      runtimeText: '<discord-action>{"type":"generateImage","prompt":"A neon skyline"}</discord-action>',
+    });
+
+    const create = await executeLoopAction({
+      type: 'loopCreate',
+      channel: 'general',
+      intervalSeconds: 5,
+      prompt: 'Generate an image if supported',
+      label: 'imagegen-loop',
+    }, makeContext());
+    expect(create.ok).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(executeDiscordActions).not.toHaveBeenCalled();
+    expect(channel.send).toHaveBeenCalledTimes(1);
+    const sentCall = channel.send.mock.calls[0] as unknown as [{ content: string }];
+    const sent = sentCall[0].content;
+    expect(sent).toContain('`generateImage`');
+    expect(sent).toContain('image generation is not available during loop ticks');
+    expect(sent).not.toContain('Image generation is available in Discord actions');
+    expect(sent).not.toContain('Setup walkthrough:');
+  });
+
   it('applies parent-aware allowlist and thread context for thread targets', async () => {
     const threadChannel = makeChannel({
       id: 'thread-1',
