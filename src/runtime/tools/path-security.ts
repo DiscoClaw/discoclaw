@@ -1,20 +1,50 @@
 /**
- * Path security utilities for filesystem tool handlers.
+ * Shared filesystem/path containment gate for runtime tool handlers.
  *
- * Ensures all file operations stay within allowed root directories,
- * resolving symlinks to prevent escape attacks.
+ * Retained guarantee:
+ * - `resolveAndCheck()` and `assertPathAllowed()` reject canonical targets
+ *   outside the configured allowed roots, including symlink escapes and
+ *   non-existent write targets whose nearest existing ancestor escapes.
+ *
+ * Explicit non-guarantees:
+ * - This module does not enforce tool allowlists, file existence, permissions,
+ *   size limits, or glob-pattern safety.
+ * - Callers only get the containment guarantee when they route the candidate
+ *   path through this module before performing filesystem I/O.
  */
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+export const PATH_SECURITY_GATE = 'resolveAndCheck -> assertPathAllowed';
+export const NO_ALLOWED_ROOTS_ERROR = 'No allowed roots configured';
+
+function configuredAllowedRoots(roots: readonly string[]): [string, ...string[]] {
+  const configured = roots.filter((root): root is string => root.trim().length > 0);
+  if (configured.length === 0) {
+    throw new Error(NO_ALLOWED_ROOTS_ERROR);
+  }
+  return configured as [string, ...string[]];
+}
+
+function isPathWithinRoot(canonicalPath: string, canonicalRoot: string): boolean {
+  const relative = path.relative(canonicalRoot, canonicalPath);
+  return relative === ''
+    || (
+      relative !== '..'
+      && !relative.startsWith(`..${path.sep}`)
+      && !path.isAbsolute(relative)
+    );
+}
+
 /**
- * Canonicalize allowed roots once (resolves symlinks in the roots themselves).
- * Falls back to path.resolve if the root dir doesn't exist yet.
+ * Canonicalize the configured allowed roots for containment comparison.
+ * Falls back to path.resolve if a root does not exist yet.
  */
-export async function canonicalizeRoots(roots: string[]): Promise<string[]> {
+export async function canonicalizeRoots(roots: readonly string[]): Promise<string[]> {
+  const configured = configuredAllowedRoots(roots);
   const canonical: string[] = [];
-  for (const root of roots) {
+  for (const root of configured) {
     try {
       canonical.push(await fs.realpath(root));
     } catch {
@@ -25,14 +55,13 @@ export async function canonicalizeRoots(roots: string[]): Promise<string[]> {
 }
 
 /**
- * Verify that `targetPath` falls under at least one allowed root.
- * Uses fs.realpath to resolve symlinks, preventing symlink escapes.
- * When the target (or its parent) doesn't exist, walks up the directory tree
- * to find an existing ancestor and validates that.
+ * Concrete containment gate named by `PATH_SECURITY_GATE`.
+ * Canonicalizes the target (or nearest existing ancestor when needed) and
+ * rejects paths whose canonical location is outside the configured roots.
  */
 export async function assertPathAllowed(
   targetPath: string,
-  allowedRoots: string[],
+  allowedRoots: readonly string[],
   checkParent = false,
 ): Promise<void> {
   const canonicalRoots = await canonicalizeRoots(allowedRoots);
@@ -64,37 +93,34 @@ export async function assertPathAllowed(
     canonical = path.join(canonical, suffix);
   }
 
-  const allowed = canonicalRoots.some(
-    (root) => canonical === root || canonical!.startsWith(root + path.sep),
-  );
+  const allowed = isPathUnderRoots(canonical, canonicalRoots);
   if (!allowed) {
     throw new Error(`Path outside allowed roots: ${targetPath}`);
   }
 }
 
 /**
- * Pure (no I/O) check: does `canonicalPath` fall under at least one root?
+ * Pure containment predicate used after canonicalization.
  * Both the path and roots should already be resolved (e.g. via fs.realpath).
  */
 export function isPathUnderRoots(
   canonicalPath: string,
-  roots: string[],
+  roots: readonly string[],
 ): boolean {
-  return roots.some(
-    (root) => canonicalPath === root || canonicalPath.startsWith(root + path.sep),
-  );
+  return roots.some((root) => root.length > 0 && isPathWithinRoot(canonicalPath, root));
 }
 
 /**
- * Resolve a file_path argument against the first allowed root,
- * then validate it falls within allowed roots.
+ * Resolve a user-supplied file path against the first configured allowed root,
+ * then enforce containment via `PATH_SECURITY_GATE`.
  */
 export async function resolveAndCheck(
   filePath: string,
-  allowedRoots: string[],
+  allowedRoots: readonly string[],
   checkParent = false,
 ): Promise<string> {
-  const resolved = path.resolve(allowedRoots[0], filePath);
-  await assertPathAllowed(resolved, allowedRoots, checkParent);
+  const configured = configuredAllowedRoots(allowedRoots);
+  const resolved = path.resolve(configured[0], filePath);
+  await assertPathAllowed(resolved, configured, checkParent);
   return resolved;
 }
