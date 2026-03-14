@@ -2,9 +2,19 @@
 // Each CLI-based model provides a thin strategy object (~40-80 lines)
 // that plugs into the shared infrastructure via createCliRuntime().
 //
-// Types only — no runtime code.
+// Mostly types, plus small forge phase-routing helpers used by adapters.
 
-import type { EngineEvent, ImageData, RuntimeCapability, RuntimeId, RuntimeInvokeParams } from './types.js';
+import type {
+  EngineEvent,
+  ForgePhaseGuardrails,
+  ForgeTurnKind,
+  ForgeTurnPhase,
+  ForgeTurnRoute,
+  ImageData,
+  RuntimeCapability,
+  RuntimeId,
+  RuntimeInvokeParams,
+} from './types.js';
 
 // ---------------------------------------------------------------------------
 // ParsedLineResult — what a strategy's parseLine() returns
@@ -80,6 +90,156 @@ export type UniversalCliOpts = {
   appendSystemPrompt?: string;
   outputFormat?: 'text' | 'stream-json';
 };
+
+// ---------------------------------------------------------------------------
+// Forge phase routing — phase-first routing with bounded fallback guards
+// ---------------------------------------------------------------------------
+export type ForgeCliRouteDecision = {
+  status: 'allow' | 're_research' | 'reject';
+  requestedPhase: ForgeTurnPhase;
+  nextPhase: ForgeTurnPhase;
+  turnKind: ForgeTurnKind;
+  route: ForgeTurnRoute;
+  fallbackRoute: ForgeTurnRoute | null;
+  reason?: string;
+};
+
+function defaultForgeFallbackRoute(route: ForgeTurnRoute): ForgeTurnRoute | null {
+  return route === 'hybrid' ? 'cli' : null;
+}
+
+function buildForgeScopeViolationDecision(
+  guardrails: ForgePhaseGuardrails,
+  reason: string,
+  attemptedRoute: ForgeTurnRoute,
+  attemptedFallbackRoute: ForgeTurnRoute | null,
+): ForgeCliRouteDecision {
+  const reResearchPhase = guardrails.fallbackPolicy.onOutOfBounds === 're_research'
+    ? guardrails.fallbackPolicy.reResearchPhase
+    : null;
+
+  if (reResearchPhase) {
+    const nextRoute = resolveForgeTurnRoute(reResearchPhase);
+    return {
+      status: 're_research',
+      requestedPhase: guardrails.phase,
+      nextPhase: reResearchPhase,
+      turnKind: resolveForgeTurnKind(reResearchPhase),
+      route: nextRoute,
+      fallbackRoute: defaultForgeFallbackRoute(nextRoute),
+      reason: `${reason} Re-enter ${reResearchPhase} before continuing.`,
+    };
+  }
+
+  return {
+    status: 'reject',
+    requestedPhase: guardrails.phase,
+    nextPhase: guardrails.phase,
+    turnKind: guardrails.turnKind,
+    route: attemptedRoute,
+    fallbackRoute: attemptedFallbackRoute,
+    reason,
+  };
+}
+
+export function resolveForgeTurnKind(phase: ForgeTurnPhase): ForgeTurnKind {
+  return phase === 'draft_research' || phase === 'revision_research'
+    ? 'research'
+    : 'final';
+}
+
+export function resolveForgeTurnRoute(phase: ForgeTurnPhase): ForgeTurnRoute {
+  if (phase === 'draft_research' || phase === 'revision_research') return 'native';
+  if (phase === 'audit') return 'hybrid';
+  return 'cli';
+}
+
+export function resolveForgeCliRoute(
+  guardrails: ForgePhaseGuardrails,
+  opts: {
+    requestedRoute?: ForgeTurnRoute;
+    fallbackRoute?: ForgeTurnRoute | null;
+  } = {},
+): ForgeCliRouteDecision {
+  const expectedTurnKind = resolveForgeTurnKind(guardrails.phase);
+  const phaseRoute = resolveForgeTurnRoute(guardrails.phase);
+  const requestedRoute = opts.requestedRoute ?? phaseRoute;
+  const fallbackRoute = opts.fallbackRoute === undefined
+    ? defaultForgeFallbackRoute(requestedRoute)
+    : opts.fallbackRoute;
+
+  if (guardrails.turnKind !== expectedTurnKind) {
+    return buildForgeScopeViolationDecision(
+      guardrails,
+      `Forge phase ${guardrails.phase} declared turn kind ${guardrails.turnKind}, expected ${expectedTurnKind}.`,
+      requestedRoute,
+      fallbackRoute,
+    );
+  }
+
+  if (guardrails.turnKind === 'final' && !guardrails.phaseState.researchComplete) {
+    return {
+      status: 'reject',
+      requestedPhase: guardrails.phase,
+      nextPhase: guardrails.phase,
+      turnKind: guardrails.turnKind,
+      route: phaseRoute,
+      fallbackRoute: defaultForgeFallbackRoute(phaseRoute),
+      reason: 'Research/discovery must complete before dispatching a bounded final forge turn.',
+    };
+  }
+
+  if (guardrails.turnKind === 'final' && guardrails.candidateBoundPolicy.scope !== 'allowlist') {
+    return buildForgeScopeViolationDecision(
+      guardrails,
+      `Final forge phase ${guardrails.phase} requires allowlist-bounded candidate access.`,
+      requestedRoute,
+      fallbackRoute,
+    );
+  }
+
+  if (
+    guardrails.turnKind === 'final'
+    && guardrails.candidateBoundPolicy.allowlistPaths.length === 0
+  ) {
+    return buildForgeScopeViolationDecision(
+      guardrails,
+      `Final forge phase ${guardrails.phase} is missing a grounded candidate allowlist.`,
+      requestedRoute,
+      fallbackRoute,
+    );
+  }
+
+  if (requestedRoute !== phaseRoute && guardrails.fallbackPolicy.noWidening) {
+    return buildForgeScopeViolationDecision(
+      guardrails,
+      `Route override ${requestedRoute} widens forge phase ${guardrails.phase} beyond its bounded phase contract.`,
+      requestedRoute,
+      fallbackRoute,
+    );
+  }
+
+  const expectedFallbackRoute = defaultForgeFallbackRoute(requestedRoute);
+  if (fallbackRoute !== expectedFallbackRoute && guardrails.fallbackPolicy.noWidening) {
+    return buildForgeScopeViolationDecision(
+      guardrails,
+      expectedFallbackRoute
+        ? `Forge phase ${guardrails.phase} requires ${requestedRoute} routing with ${expectedFallbackRoute} fallback.`
+        : `Forge phase ${guardrails.phase} does not allow fallback routing from ${requestedRoute}.`,
+      requestedRoute,
+      fallbackRoute,
+    );
+  }
+
+  return {
+    status: 'allow',
+    requestedPhase: guardrails.phase,
+    nextPhase: guardrails.phase,
+    turnKind: guardrails.turnKind,
+    route: requestedRoute,
+    fallbackRoute,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // CliAdapterStrategy — model-specific logic

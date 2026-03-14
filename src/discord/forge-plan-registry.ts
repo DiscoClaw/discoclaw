@@ -76,7 +76,10 @@ export type ForgePlanPhaseGate = {
 
 type StoredForgePlanMetadata = {
   phaseState?: Partial<ForgePlanPhaseState>;
-  candidateBounds?: Partial<ForgePlanCandidateBounds>;
+  candidateBounds?: Partial<{
+    candidatePaths: readonly string[] | null;
+    allowlistPaths: readonly string[] | null;
+  }>;
   fallbackPolicy?: Partial<ForgePlanFallbackPolicy>;
 };
 
@@ -198,7 +201,8 @@ function normalizeForgePlanMetadata(
   const hasCompletePhaseState = !!storedPhase && typeof stored?.phaseState?.researchComplete === 'boolean';
   const hasCompleteBounds = Array.isArray(stored?.candidateBounds?.candidatePaths)
     && Array.isArray(stored?.candidateBounds?.allowlistPaths);
-  const hasFallbackPolicy = hasCompleteFallbackPolicy(stored?.fallbackPolicy);
+  const storedFallbackPolicy = stored?.fallbackPolicy;
+  const hasFallbackPolicy = hasCompleteFallbackPolicy(storedFallbackPolicy);
   const compatibility: ForgePlanMetadataCompatibility = hasCompletePhaseState && hasCompleteBounds && hasFallbackPolicy
     ? 'current'
     : 'legacy_incomplete';
@@ -211,7 +215,7 @@ function normalizeForgePlanMetadata(
     researchComplete: compatibility === 'current' && stored?.phaseState?.researchComplete === true,
   };
   const fallbackPolicy = compatibility === 'current' && hasFallbackPolicy
-    ? stored.fallbackPolicy
+    ? storedFallbackPolicy
     : resolveDefaultFallbackPolicy(phaseState.currentPhase);
   const requiresFreshResearch = !isForgeResearchPhase(phaseForGate)
     && (

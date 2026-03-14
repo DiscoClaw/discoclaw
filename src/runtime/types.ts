@@ -181,6 +181,53 @@ export type RuntimeSupervisorPolicy = {
   limits?: RuntimeSupervisorLimitsOverride;
 };
 
+export type ForgeTurnPhase =
+  | 'draft_research'
+  | 'draft_artifact'
+  | 'audit'
+  | 'revision_research'
+  | 'revision_artifact';
+
+export type ForgeTurnKind = 'research' | 'final';
+
+export type ForgeTurnRoute = 'native' | 'hybrid' | 'cli';
+
+export type ForgeCandidateBoundPolicy = {
+  /**
+   * Final/bounded turns should use `allowlist`.
+   * `unbounded` is reserved for deliberate research/discovery re-entry.
+   */
+  scope: 'allowlist' | 'unbounded';
+  candidatePaths: readonly string[];
+  allowlistPaths: readonly string[];
+};
+
+export type ForgeFallbackMode = 're_research' | 'reject';
+
+export type ForgeFallbackPolicy = {
+  /**
+   * Applied when a fallback would leave the current bounded scope, including
+   * route widening away from the phase-selected transport contract.
+   */
+  onOutOfBounds: ForgeFallbackMode;
+  reResearchPhase: ForgeTurnPhase | null;
+  /** Final/bounded phases should keep this true so salvage cannot widen scope. */
+  noWidening: boolean;
+};
+
+export type ForgePhaseStateFlag = {
+  /** Final/bounded turns must not dispatch until research is explicitly complete. */
+  researchComplete: boolean;
+};
+
+export type ForgePhaseGuardrails = {
+  phase: ForgeTurnPhase;
+  turnKind: ForgeTurnKind;
+  candidateBoundPolicy: ForgeCandidateBoundPolicy;
+  fallbackPolicy: ForgeFallbackPolicy;
+  phaseState: ForgePhaseStateFlag;
+};
+
 export type RuntimeInvokeParams = {
   prompt: string;
   systemPrompt?: string;
@@ -201,6 +248,8 @@ export type RuntimeInvokeParams = {
   rawEventTap?: (evt: EngineEvent) => void;
   onTelemetry?: (evt: RuntimeTelemetryEvent) => void;
   supervisor?: RuntimeSupervisorPolicy;
+  /** Optional forge phase contract for bounded draft/audit/revision dispatch. */
+  forgePhase?: ForgePhaseGuardrails;
 };
 
 export interface RuntimeAdapter {
