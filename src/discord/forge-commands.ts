@@ -443,6 +443,10 @@ function resolveForgePlanSystemPrompt(rt: RuntimeAdapter): string | undefined {
   return rt.id === 'codex' ? undefined : FORGE_PLAN_SYSTEM_PROMPT;
 }
 
+function shouldForceCliCodexForgeTurns(rt: RuntimeAdapter): boolean {
+  return rt.id === 'codex';
+}
+
 // ---------------------------------------------------------------------------
 // Degenerate description resolution
 // ---------------------------------------------------------------------------
@@ -2048,6 +2052,7 @@ export class ForgeOrchestrator {
 
         round++;
         const forgePhaseLiveness = resolveForgePhaseLiveness(this.opts.timeoutMs);
+        const forceDrafterCli = shouldForceCliCodexForgeTurns(drafterRt);
 
         // Draft phase (only on first round of a fresh forge, not resume)
         if (round === 1 && startRound === 1 && templateContent && contextSummary) {
@@ -2096,6 +2101,7 @@ export class ForgeOrchestrator {
                   timeoutMs: this.opts.timeoutMs,
                   streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
                   progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                  ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
                   sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
                   supervisor: FORGE_GROUNDING_PHASE_SUPERVISOR_POLICY,
                 },
@@ -2115,6 +2121,7 @@ export class ForgeOrchestrator {
                   timeoutMs: this.opts.timeoutMs,
                   streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
                   progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                  ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
                   sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
                   supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
                 },
@@ -2136,6 +2143,7 @@ export class ForgeOrchestrator {
                 timeoutMs: this.opts.timeoutMs,
                 streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
                 progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
                 sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
                 supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
               }],
@@ -2156,6 +2164,7 @@ export class ForgeOrchestrator {
               timeoutMs: this.opts.timeoutMs,
               streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
               progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+              ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
               sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
               supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
             }],
@@ -2240,6 +2249,7 @@ export class ForgeOrchestrator {
         const reasoningAuditorRt = auditorReasoningEffort
           ? wrapWithReasoningEffort(auditorRt, auditorReasoningEffort)
           : auditorRt;
+        const forceAuditorCli = shouldForceCliCodexForgeTurns(auditorRt);
 
         const auditorPrompt = buildAuditorPrompt(
           planContent,
@@ -2259,6 +2269,7 @@ export class ForgeOrchestrator {
             timeoutMs: this.opts.timeoutMs,
             streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
             progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+            ...(forceAuditorCli ? { disableNativeAppServer: true } : {}),
             sessionKey: auditorRt.capabilities.has('sessions') ? auditorSessionKey : undefined,
             supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
           }],
@@ -2400,6 +2411,7 @@ export class ForgeOrchestrator {
                 timeoutMs: this.opts.timeoutMs,
                 streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
                 progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
                 sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
                 supervisor: FORGE_GROUNDING_PHASE_SUPERVISOR_POLICY,
               },
@@ -2420,6 +2432,7 @@ export class ForgeOrchestrator {
                 timeoutMs: this.opts.timeoutMs,
                 streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
                 progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
                 sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
                 supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
               },
@@ -2441,6 +2454,7 @@ export class ForgeOrchestrator {
               timeoutMs: this.opts.timeoutMs,
               streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
               progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+              ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
               sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
               supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
             }],
@@ -2461,6 +2475,7 @@ export class ForgeOrchestrator {
             timeoutMs: this.opts.timeoutMs,
             streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
             progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+            ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
             sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
             supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
           }],

@@ -542,6 +542,43 @@ describe('createCliRuntime', () => {
     }), 'one-shot: timing summary');
   });
 
+  it('includes stdout parse diagnostics in the timing summary for unparsable jsonl output', async () => {
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdoutChunks: ['not json\nstill not json\n'],
+      exitCode: 0,
+    }));
+
+    const info = vi.fn();
+    const rt = createCliRuntime(baseStrategy({
+      getOutputMode: () => 'jsonl',
+    }), {
+      log: {
+        info,
+        debug: vi.fn(),
+      } as any,
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      strategyId: 'other',
+      attempt: 1,
+      completionReason: 'success',
+      stdoutLineCount: 2,
+      parsedJsonLineCount: 0,
+      unparsableStdoutLineCount: 2,
+      strategyHandledLineCount: 0,
+      defaultHandledLineCount: 0,
+      lastStdoutLinePreview: 'still not json',
+      lastUnparsableStdoutLinePreview: 'still not json',
+      lastJsonEventType: null,
+    }), 'one-shot: timing summary');
+  });
+
   it('clears resumable session state after a jsonl stream stall so the next call starts fresh', async () => {
     const first = createControlledSubprocess();
     const second = createControlledSubprocess();
@@ -624,6 +661,52 @@ describe('createCliRuntime', () => {
     expect(secondArgs[0]).toBe('exec');
     expect(secondArgs[1]).not.toBe('resume');
     expect(secondEvents).toContainEqual({ type: 'text_final', text: 'fresh output' });
+  }, 10_000);
+
+  it('logs stdout parse diagnostics when a jsonl stream stalls before any runtime event is parsed', async () => {
+    const controlled = createControlledSubprocess();
+    mockExeca.mockReturnValue(controlled.subprocess);
+
+    const info = vi.fn();
+    const rt = createCliRuntime(baseStrategy({
+      getOutputMode: () => 'jsonl',
+    }), {
+      streamStallTimeoutMs: 10,
+      log: {
+        info,
+        debug: vi.fn(),
+      } as any,
+    });
+
+    const pending = collectEvents(rt.invoke({
+      prompt: 'hello',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    await Promise.resolve();
+    controlled.emitStdout('{"type":"thread.started","thread_id":"thread-stalled"}\n');
+    controlled.emitStdout('not json\n');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const events = await pending;
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'error',
+      message: expect.stringContaining('stream stall'),
+    }));
+    expect(info).toHaveBeenCalledWith(expect.objectContaining({
+      strategyId: 'other',
+      attempt: 1,
+      stallTimeoutMs: 10,
+      stdoutLineCount: 2,
+      parsedJsonLineCount: 1,
+      unparsableStdoutLineCount: 1,
+      strategyHandledLineCount: 0,
+      defaultHandledLineCount: 0,
+      lastStdoutLinePreview: 'not json',
+      lastUnparsableStdoutLinePreview: 'not json',
+      lastJsonEventType: 'thread.started',
+    }), 'one-shot: stream stall detected after 10ms, killing process');
   }, 10_000);
 
   it('logs a timing summary for stderr-only exits', async () => {

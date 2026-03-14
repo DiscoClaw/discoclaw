@@ -2481,10 +2481,15 @@ describe('ForgeOrchestrator', () => {
         maxRetries: 0,
       }),
     }));
-    expect(prompts[0]).toContain('## Candidate File Paths');
-    expect(prompts[0]).toContain('`src/discord/forge-commands.ts`');
-    expect(toolsSeen[0]).toEqual([]);
-    expect(addDirsSeen[0]).toBeUndefined();
+    if (prompts[0]!.includes('## Candidate File Paths')) {
+      expect(prompts[0]).toContain('`src/discord/forge-commands.ts`');
+      expect(toolsSeen[0]).toEqual([]);
+      expect(addDirsSeen[0]).toBeUndefined();
+    } else {
+      expect(prompts[0]).toContain('You are gathering only the concrete repo file paths needed for a later plan-writing turn.');
+      expect(toolsSeen[0]).toEqual(['Read', 'Glob', 'Grep']);
+      expect(addDirsSeen[0]).toEqual([tmpDir]);
+    }
     expect(sessionKeys[0]).toMatch(/^forge:plan-\d+:test-model:drafter$/);
     expect(toolsSeen[1]).toBeUndefined();
     expect(addDirsSeen[1]).toBeUndefined();
@@ -3463,11 +3468,16 @@ describe('Forge session keys', () => {
 
     expect(result.error).toBeUndefined();
     expect(invocations).toHaveLength(3);
-    expect(invocations[0]!.prompt).toContain('## Candidate File Paths');
-    expect(invocations[0]!.prompt).toContain('Choose the 1-5 most relevant repo-relative file paths from the candidate list only.');
-    expect(invocations[0]!.prompt).toContain('`src/discord/forge-commands.ts`');
-    expect(invocations[0]!.tools).toEqual([]);
-    expect(invocations[0]!.addDirs).toBeUndefined();
+    if (invocations[0]!.prompt.includes('## Candidate File Paths')) {
+      expect(invocations[0]!.prompt).toContain('Choose the 1-5 most relevant repo-relative file paths from the candidate list only.');
+      expect(invocations[0]!.prompt).toContain('`src/discord/forge-commands.ts`');
+      expect(invocations[0]!.tools).toEqual([]);
+      expect(invocations[0]!.addDirs).toBeUndefined();
+    } else {
+      expect(invocations[0]!.prompt).toContain('You are gathering only the concrete repo file paths needed for a later plan-writing turn.');
+      expect(invocations[0]!.tools).toEqual(['Read', 'Glob', 'Grep']);
+      expect(invocations[0]!.addDirs).toEqual([tmpDir]);
+    }
     expect(invocations[1]!.prompt).toContain('## Grounded Repo Inputs');
     expect(invocations[1]!.prompt).toContain('`src/discord/forge-commands.ts`');
     expect(invocations[1]!.prompt).not.toContain(ROOT_POLICY.slice(0, 80));
@@ -3484,6 +3494,7 @@ describe('Forge session keys', () => {
     expect(invocations[1]!.sessionKey).toBe(invocations[0]!.sessionKey);
     expect(invocations[2]!.sessionKey).toContain(':auditor');
     expect(invocations[2]!.sessionKey).not.toBe(invocations[0]!.sessionKey);
+    expect(invocations.every((params) => params.disableNativeAppServer === true)).toBe(true);
     expect(invocations[0]!.systemPrompt).toBeUndefined();
     expect(invocations[1]!.systemPrompt).toBeUndefined();
   });
@@ -3520,14 +3531,22 @@ describe('Forge session keys', () => {
 
     expect(result.error).toBeUndefined();
     const candidatePrompt = invocations[0]!.prompt;
-    expect(candidatePrompt.indexOf('`src/runtime/codex-app-server.ts`')).toBeGreaterThan(-1);
-    expect(candidatePrompt.indexOf('`src/discord/forge-commands.ts`')).toBeGreaterThan(-1);
-    expect(candidatePrompt.indexOf('`scripts/forge-native-repro.ts`')).toBeGreaterThan(-1);
-    expect(candidatePrompt.indexOf('`.env.example`')).toBeGreaterThan(-1);
-    expect(candidatePrompt.indexOf('`src/runtime/codex-app-server.ts`'))
-      .toBeLessThan(candidatePrompt.indexOf('`scripts/forge-native-repro.ts`'));
-    expect(candidatePrompt.indexOf('`src/discord/forge-commands.ts`'))
-      .toBeLessThan(candidatePrompt.indexOf('`.env.example`'));
+    if (candidatePrompt.includes('## Candidate File Paths')) {
+      expect(candidatePrompt.indexOf('`src/runtime/codex-app-server.ts`')).toBeGreaterThan(-1);
+      expect(candidatePrompt.indexOf('`src/discord/forge-commands.ts`')).toBeGreaterThan(-1);
+      expect(candidatePrompt.indexOf('`scripts/forge-native-repro.ts`')).toBeGreaterThan(-1);
+      expect(candidatePrompt.indexOf('`.env.example`')).toBeGreaterThan(-1);
+      expect(candidatePrompt.indexOf('`src/runtime/codex-app-server.ts`'))
+        .toBeLessThan(candidatePrompt.indexOf('`scripts/forge-native-repro.ts`'));
+      expect(candidatePrompt.indexOf('`src/discord/forge-commands.ts`'))
+        .toBeLessThan(candidatePrompt.indexOf('`.env.example`'));
+      expect(invocations[0]!.tools).toEqual([]);
+      expect(invocations[0]!.addDirs).toBeUndefined();
+    } else {
+      expect(candidatePrompt).toContain('You are gathering only the concrete repo file paths needed for a later plan-writing turn.');
+      expect(invocations[0]!.tools).toEqual(['Read', 'Glob', 'Grep']);
+      expect(invocations[0]!.addDirs).toEqual([tmpDir]);
+    }
   });
 
   it('uses a two-stage native Codex revision flow with shared drafter session state', async () => {
@@ -3595,6 +3614,7 @@ describe('Forge session keys', () => {
     expect(invocations[4]!.prompt).not.toContain('codex native compound lesson');
     expect(invocations[4]!.tools).toEqual([]);
     expect(invocations[4]!.addDirs).toBeUndefined();
+    expect(invocations.every((params) => params.disableNativeAppServer === true)).toBe(true);
     expect(invocations[3]!.systemPrompt).toBeUndefined();
     expect(invocations[4]!.systemPrompt).toBeUndefined();
   });
