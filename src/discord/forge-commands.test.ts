@@ -1559,7 +1559,14 @@ describe('ForgeOrchestrator', () => {
     expect(cancelledCalls.length).toBeGreaterThanOrEqual(1);
     const lastCancelled = cancelledCalls[cancelledCalls.length - 1]!;
     expect(lastCancelled[0]).toHaveProperty('phase');
-    expect(['loop-entry', 'draft', 'audit', 'revision']).toContain(lastCancelled[0].phase);
+    expect([
+      'loop-entry',
+      'draft_research',
+      'draft_artifact',
+      'audit',
+      'revision_research',
+      'revision_artifact',
+    ]).toContain(lastCancelled[0].phase);
   });
 
   it('requestCancel(reason) logs the reason', async () => {
@@ -1589,7 +1596,7 @@ describe('ForgeOrchestrator', () => {
     expect(cancelRequestedCalls[0]![0]).toMatchObject({ reason: 'user-initiated' });
   });
 
-  it('cancel during draft phase logs phase:draft', async () => {
+  it('cancel during draft phase logs a draft_* phase', async () => {
     const tmpDir = await makeTmpDir();
 
     let orchestrator!: ForgeOrchestrator;
@@ -1619,7 +1626,7 @@ describe('ForgeOrchestrator', () => {
       (c: unknown[]) => c[1] === 'forge:cancelled',
     );
     expect(cancelledCalls.length).toBeGreaterThanOrEqual(1);
-    expect(cancelledCalls[0]![0]).toMatchObject({ phase: 'draft' });
+    expect(cancelledCalls[0]![0].phase).toMatch(/^draft/);
   });
 
   it('concurrent forge throws error', async () => {
@@ -2519,9 +2526,13 @@ _Filled in during/after implementation._
     expect(systemPrompts[1]).toContain('Do not use tools on this retry.');
   });
 
-  it('bypasses inner grounding retries and salvages through a fresh outer retry session', async () => {
+  it('retries draft research in a fresh bounded session before the artifact turn', async () => {
     const tmpDir = await makeTmpDir();
     await seedCodexCandidateFiles(tmpDir);
+    const groundedPaths = [
+      '`src/discord/forge-commands.ts`',
+      '`src/runtime/codex-app-server.ts`',
+    ].join('\n');
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
@@ -2550,6 +2561,11 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 1) {
+            yield { type: 'text_final', text: groundedPaths };
+            yield { type: 'done' };
+            return;
+          }
+          if (idx === 2) {
             yield { type: 'text_final', text: draftPlan };
             yield { type: 'done' };
             return;
@@ -2577,7 +2593,7 @@ _Filled in during/after implementation._
     });
 
     expect(result.error).toBeUndefined();
-    expect(callIndex).toBe(3);
+    expect(callIndex).toBe(4);
     expect(supervisors[0]).toEqual(expect.objectContaining({
       limits: expect.objectContaining({
         maxCycles: 1,
@@ -2594,14 +2610,20 @@ _Filled in during/after implementation._
       expect(addDirsSeen[0]).toEqual([tmpDir]);
     }
     expect(sessionKeys[0]).toMatch(/^forge:plan-\d+:test-model:drafter$/);
-    expect(toolsSeen[1]).toBeUndefined();
-    expect(addDirsSeen[1]).toBeUndefined();
-    expect(nativeBypassSeen[1]).toBe(true);
-    expect(sessionKeys[1]).toBeUndefined();
+    expect(sessionKeys[1]).toBe(`${sessionKeys[0]}:draft-research-retry`);
     expect(supervisors[1]).toEqual(expect.objectContaining({
-      limits: expect.objectContaining({ maxCycles: 2, maxRetries: 1 }),
+      limits: expect.objectContaining({ maxCycles: 1, maxRetries: 0 }),
     }));
-    expect(prompts[1]).toContain('You are salvaging a stalled plan draft.');
+    expect(nativeBypassSeen[0]).toBeUndefined();
+    expect(nativeBypassSeen[1]).toBeUndefined();
+    expect(prompts[1]).toContain('repo-relative file paths');
+    expect(prompts[2]).toContain('## Grounded Repo Inputs');
+    expect(toolsSeen[2]).toEqual([]);
+    expect(addDirsSeen[2]).toBeUndefined();
+    expect(nativeBypassSeen[2]).toBe(true);
+    expect(sessionKeys[2]).toBe(sessionKeys[0]);
+    expect(sessionKeys[3]).toMatch(/^forge:plan-\d+:test-model:auditor$/);
+    expect(nativeBypassSeen[3]).toBeUndefined();
     expect(progress.some((p) => p.includes('retrying'))).toBe(true);
   });
 
@@ -3608,12 +3630,14 @@ describe('Forge session keys', () => {
     expect(invocations[1]!.sessionKey).toBe(invocations[0]!.sessionKey);
     expect(invocations[2]!.sessionKey).toContain(':auditor');
     expect(invocations[2]!.sessionKey).not.toBe(invocations[0]!.sessionKey);
-    expect(invocations.every((params) => params.disableNativeAppServer === true)).toBe(true);
+    expect(invocations[0]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[1]!.disableNativeAppServer).toBe(true);
+    expect(invocations[2]!.disableNativeAppServer).toBeUndefined();
     expect(invocations[0]!.systemPrompt).toBeUndefined();
     expect(invocations[1]!.systemPrompt).toBeUndefined();
   });
 
-  it('treats codex-like wrapped runtimes as CLI-first forge runtimes', async () => {
+  it('routes codex-like wrapped runtimes by forge phase', async () => {
     const tmpDir = await makeTmpDir();
     await seedCodexCandidateFiles(tmpDir);
     await seedCodexNativeWriteContextFiles(tmpDir);
@@ -3670,9 +3694,76 @@ describe('Forge session keys', () => {
     }
     expect(invocations[1]!.prompt).toContain('## Grounded Repo Inputs');
     expect(invocations[2]!.sessionKey).toContain(':auditor');
-    expect(invocations.every((params) => params.disableNativeAppServer === true)).toBe(true);
+    expect(invocations[0]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[1]!.disableNativeAppServer).toBe(true);
+    expect(invocations[2]!.disableNativeAppServer).toBeUndefined();
     expect(invocations[0]!.systemPrompt).toBeUndefined();
     expect(invocations[1]!.systemPrompt).toBeUndefined();
+  });
+
+  it('fails closed when bounded draft research returns paths outside the candidate allowlist', async () => {
+    const tmpDir = await makeTmpDir();
+    await seedCodexCandidateFiles(tmpDir);
+
+    const invocations: RuntimeInvokeParams[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const, 'mid_turn_steering' as const]),
+      invoke(params) {
+        invocations.push(params);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text: '`src/not-in-candidates.ts`' };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toContain('outside the bounded candidate allowlist');
+    expect(invocations).toHaveLength(1);
+  });
+
+  it('keeps audit retries on the audit phase route instead of escalating to CLI salvage', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+    const invocations: RuntimeInvokeParams[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const]),
+      invoke(params) {
+        invocations.push(params);
+        const idx = invocations.length - 1;
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          if (idx === 0) {
+            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'done' };
+            return;
+          }
+          if (idx === 1) {
+            yield { type: 'error', message: 'timed out waiting for audit response' };
+            return;
+          }
+          yield { type: 'text_final', text: auditClean };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(invocations).toHaveLength(3);
+    expect(invocations[0]!.disableNativeAppServer).toBe(true);
+    expect(invocations[1]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[2]!.disableNativeAppServer).toBeUndefined();
   });
 
   it('prioritizes src candidates ahead of noisy script and env files for Codex draft grounding', async () => {
@@ -3790,7 +3881,12 @@ describe('Forge session keys', () => {
     expect(invocations[4]!.prompt).not.toContain('codex native compound lesson');
     expect(invocations[4]!.tools).toEqual([]);
     expect(invocations[4]!.addDirs).toBeUndefined();
-    expect(invocations.every((params) => params.disableNativeAppServer === true)).toBe(true);
+    expect(invocations[0]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[1]!.disableNativeAppServer).toBe(true);
+    expect(invocations[2]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[3]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[4]!.disableNativeAppServer).toBe(true);
+    expect(invocations[5]!.disableNativeAppServer).toBeUndefined();
     expect(invocations[3]!.systemPrompt).toBeUndefined();
     expect(invocations[4]!.systemPrompt).toBeUndefined();
   });
