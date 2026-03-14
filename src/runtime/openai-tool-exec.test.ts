@@ -1,7 +1,33 @@
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const PROMISIFY_CUSTOM = Symbol.for('nodejs.util.promisify.custom');
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  const mockedExecFile = vi.fn(actual.execFile) as typeof actual.execFile;
+  Object.defineProperty(mockedExecFile, PROMISIFY_CUSTOM, {
+    value: (...args: any[]) =>
+      new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        mockedExecFile(...args, (err: Error | null, stdout: string, stderr: string) => {
+          if (err) {
+            reject(Object.assign(err, { stdout, stderr }));
+            return;
+          }
+          resolve({ stdout, stderr });
+        });
+      }),
+  });
+
+  return {
+    ...actual,
+    execFile: mockedExecFile,
+  };
+});
+
 import {
   OPENAI_TOOL_EXEC_CONTRACT,
   createAdvertisedOpenAIToolExecContracts,
@@ -10,6 +36,7 @@ import {
   type OpenAIToolExecContractId,
 } from './openai-tool-exec.js';
 import { buildToolSchemas } from './openai-tool-schemas.js';
+import { PATH_SECURITY_GATE } from './tools/path-security.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -54,6 +81,37 @@ async function buildToolArgs(toolName: string): Promise<Record<string, unknown>>
     default:
       return {};
   }
+}
+
+function mockExecFileOnce(
+  impl: (
+    file: string,
+    args: string[],
+    options: Record<string, unknown>,
+    callback: (error: Error | null, stdout: string, stderr: string) => void,
+  ) => void,
+): void {
+  vi.mocked(execFile).mockImplementationOnce(((...inputArgs: any[]) => {
+    const [file, args, options, callback] = inputArgs;
+    const resolvedArgs = Array.isArray(args) ? args : [];
+    const resolvedOptions = typeof options === 'function' || options == null
+      ? {}
+      : options as Record<string, unknown>;
+    const resolvedCallback = (
+      typeof args === 'function'
+        ? args
+        : typeof options === 'function'
+          ? options
+          : callback
+    ) as ((error: Error | null, stdout: string, stderr: string) => void) | undefined;
+
+    if (!resolvedCallback) {
+      throw new Error('execFile callback missing in test mock');
+    }
+
+    impl(file, resolvedArgs, resolvedOptions, resolvedCallback);
+    return {} as any;
+  }) as any);
 }
 
 const COVERED_TOOL_RUNTIME_CONFIGS = [
@@ -146,6 +204,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
+  vi.mocked(execFile).mockClear();
 });
 
 // ── read_file ────────────────────────────────────────────────────────
@@ -184,6 +243,15 @@ describe('read_file', () => {
     const r = await executeToolCall('read_file', {}, [tmpDir]);
     expect(r.ok).toBe(false);
     expect(r.result).toContain('file_path');
+  });
+
+  it('resolves relative paths against the first nonblank allowed root', async () => {
+    const filePath = path.join(tmpDir, 'root-filtered.txt');
+    await fs.writeFile(filePath, 'shared gate\n');
+
+    const r = await executeToolCall('read_file', { file_path: 'root-filtered.txt' }, ['', '   ', tmpDir]);
+    expect(r.ok).toBe(true);
+    expect(r.result).toBe('shared gate\n');
   });
 
   it('rejects reads outside the allowed roots', async () => {
@@ -425,6 +493,14 @@ describe('list_files', () => {
     expect(r.ok).toBe(true);
     expect(r.result).toContain('No files matched');
   });
+
+  it('uses the first nonblank allowed root when path is omitted', async () => {
+    await fs.writeFile(path.join(tmpDir, 'default-root.ts'), '');
+
+    const r = await executeToolCall('list_files', { pattern: '*.ts' }, ['', '   ', tmpDir]);
+    expect(r.ok).toBe(true);
+    expect(r.result).toContain('default-root.ts');
+  });
 });
 
 // ── search_content ───────────────────────────────────────────────────
@@ -476,6 +552,19 @@ describe('bash', () => {
     expect(r.result).toContain('hello');
   });
 
+  it('uses the 30s default timeout when the caller does not provide one', async () => {
+    mockExecFileOnce((file, args, options, callback) => {
+      expect(file).toBe('/bin/bash');
+      expect(args).toEqual(['-c', 'echo default-timeout']);
+      expect(options.timeout).toBe(30_000);
+      callback(null, 'default-timeout\n', '');
+    });
+
+    const r = await executeToolCall('bash', { command: 'echo default-timeout' }, [tmpDir]);
+    expect(r.ok).toBe(true);
+    expect(r.result).toContain('default-timeout');
+  });
+
   it('strips ANSI sequences from bash stdout and stderr', async () => {
     const r = await executeToolCall(
       'bash',
@@ -525,6 +614,38 @@ describe('bash', () => {
     );
     expect(r.ok).toBe(false);
     expect(r.result).toContain('50ms limit');
+  });
+
+  it('rejects invalid timeout values before invoking bash', async () => {
+    const r = await executeToolCall(
+      'bash',
+      { command: 'echo nope', timeout: 0 },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('positive number of milliseconds');
+    expect(vi.mocked(execFile)).not.toHaveBeenCalled();
+  });
+
+  it('caps caller-provided timeouts at 600000ms', async () => {
+    mockExecFileOnce((file, args, options, callback) => {
+      expect(file).toBe('/bin/bash');
+      expect(args).toEqual(['-c', 'sleep 999999']);
+      expect(options.timeout).toBe(600_000);
+      const err = Object.assign(new Error('timed out'), {
+        killed: true,
+        signal: 'SIGTERM',
+      });
+      callback(err, '', '');
+    });
+
+    const r = await executeToolCall(
+      'bash',
+      { command: 'sleep 999999', timeout: 999_999 },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('600000ms limit');
   });
 });
 
@@ -616,6 +737,10 @@ describe('web_search', () => {
 // ── tool contract parity ────────────────────────────────────────────
 
 describe('tool contract parity', () => {
+  it('ties file root containment wording to the shared path-security gate name', () => {
+    expect(OPENAI_TOOL_EXEC_CONTRACT.file_root_containment.enforcementGate).toBe(PATH_SECURITY_GATE);
+  });
+
   it.each(COVERED_TOOL_RUNTIME_CONFIGS)(
     'matches the enforcement-backed contract for $name',
     async ({

@@ -37,6 +37,7 @@ export type CronExecutorContext = {
   cronExecModel?: string;
   cwd: string;
   tools: string[];
+  enableHybridPipeline?: boolean;
   timeoutMs: number;
   status: StatusPoster | null;
   log?: LoggerLike;
@@ -283,7 +284,12 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       : withoutRequesterGatedActionFlags(ctx.actionFlags);
 
     let prompt =
-      buildPromptPreamble(inlinedContext) +
+      buildPromptPreamble(inlinedContext, {
+        runtimeId: ctx.runtime.id,
+        runtimeCapabilities: ctx.runtime.capabilities,
+        runtimeTools: ctx.tools,
+        enableHybridPipeline: ctx.enableHybridPipeline,
+      }) +
       '\n\n' +
       buildCronPromptBody({
         jobName: job.name,

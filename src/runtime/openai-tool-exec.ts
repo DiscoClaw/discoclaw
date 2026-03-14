@@ -17,6 +17,11 @@ import {
   projectPipelineFailure,
   type PipelineFailureCode,
 } from './runtime-failure.js';
+import {
+  PATH_SECURITY_GATE,
+  assertPathAllowed,
+  resolveAndCheck,
+} from './tools/path-security.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -105,7 +110,7 @@ export const OPENAI_TOOL_EXEC_CONTRACT: Readonly<
     availability: 'base',
     runtimeWording:
       'File and search tools resolve requested paths within allowed roots and reject escapes, including symlink escapes.',
-    enforcementGate: 'resolveAndCheck -> assertPathAllowed',
+    enforcementGate: PATH_SECURITY_GATE,
     toolNames: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_content'],
   },
   list_files_pattern_scope: {
@@ -206,88 +211,6 @@ export type ExecuteToolCallOpts = {
    */
   pipelineStepMode?: boolean;
 };
-
-// ── Path security ────────────────────────────────────────────────────
-
-/**
- * Canonicalize allowed roots once (resolves symlinks in the roots themselves).
- * Falls back to path.resolve if the root dir doesn't exist yet.
- */
-async function canonicalizeRoots(roots: string[]): Promise<string[]> {
-  const canonical: string[] = [];
-  for (const root of roots) {
-    try {
-      canonical.push(await fs.realpath(root));
-    } catch {
-      canonical.push(path.resolve(root));
-    }
-  }
-  return canonical;
-}
-
-/**
- * Verify that `targetPath` falls under at least one allowed root.
- * Uses fs.realpath to resolve symlinks, preventing symlink escapes.
- * When the target (or its parent) doesn't exist, walks up the directory tree
- * to find an existing ancestor and validates that.
- */
-async function assertPathAllowed(
-  targetPath: string,
-  allowedRoots: string[],
-  checkParent = false,
-): Promise<void> {
-  const canonicalRoots = await canonicalizeRoots(allowedRoots);
-  let toCheck = checkParent ? path.dirname(targetPath) : targetPath;
-
-  // Walk up to the nearest existing ancestor for realpath resolution
-  let canonical: string | undefined;
-  let current = toCheck;
-  for (;;) {
-    try {
-      canonical = await fs.realpath(current);
-      break;
-    } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        const parent = path.dirname(current);
-        if (parent === current) {
-          // Reached filesystem root without finding an existing dir
-          throw new Error(`Path not accessible: ${toCheck}`);
-        }
-        current = parent;
-        continue;
-      }
-      throw new Error(`Path not accessible: ${toCheck}`);
-    }
-  }
-
-  // Reconstruct the full canonical path by appending the non-existing suffix
-  const suffix = path.relative(current, toCheck);
-  if (suffix && suffix !== '.') {
-    canonical = path.join(canonical, suffix);
-  }
-
-  const allowed = canonicalRoots.some(
-    (root) => canonical === root || canonical!.startsWith(root + path.sep),
-  );
-  if (!allowed) {
-    throw new Error(`Path outside allowed roots: ${targetPath}`);
-  }
-}
-
-/**
- * Resolve a file_path argument against the first allowed root,
- * then validate it falls within allowed roots.
- */
-async function resolveAndCheck(
-  filePath: string,
-  allowedRoots: string[],
-  checkParent = false,
-): Promise<string> {
-  // Resolve relative paths against the first root
-  const resolved = path.resolve(allowedRoots[0], filePath);
-  await assertPathAllowed(resolved, allowedRoots, checkParent);
-  return resolved;
-}
 
 // ── Individual handlers ──────────────────────────────────────────────
 
@@ -473,7 +396,7 @@ async function handleListFiles(
 
   const baseDir = searchPath
     ? await resolveAndCheck(searchPath, allowedRoots)
-    : allowedRoots[0];
+    : await resolveAndCheck('.', allowedRoots);
 
   // Use recursive readdir + minimatch-style matching via fs.glob (Node 22+)
   // Fall back to recursive readdir if fs.glob is not available
@@ -583,7 +506,7 @@ async function handleSearchContent(
 
   const baseDir = searchPath
     ? await resolveAndCheck(searchPath, allowedRoots)
-    : allowedRoots[0];
+    : await resolveAndCheck('.', allowedRoots);
 
   // Try rg first, fall back to grep if rg isn't installed
   const rgArgs = ['--no-heading', '--line-number', '--color', 'never'];

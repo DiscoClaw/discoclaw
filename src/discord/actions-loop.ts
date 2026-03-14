@@ -149,6 +149,7 @@ type LoopActionsApi = {
 export type LoopRunnerState = {
   allowChannelIds?: Set<string>;
   runtimeModel: string;
+  enableHybridPipeline?: boolean;
   taskCtx?: TaskContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
@@ -455,6 +456,10 @@ async function buildLoopPrompt(
     openTasksSection,
     actionsReferenceSection,
     noteLines,
+    runtimeId: opts.runtime.id,
+    runtimeCapabilities: opts.runtime.capabilities,
+    runtimeTools: opts.runtimeTools,
+    enableHybridPipeline: opts.state.enableHybridPipeline,
     invocationNotice:
       `Repeating loop tick for <#${channel.id}>.\n` +
       'Loop prompts are isolated: there is no conversation history.',

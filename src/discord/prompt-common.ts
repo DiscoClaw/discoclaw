@@ -2,7 +2,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { buildPromptPreamble as buildRootPolicyPreamble } from '../root-policy.js';
 import { getTrackedDefaultsPreamble } from '../instructions/system-defaults.js';
-import { getTrackedToolsPreamble } from '../instructions/tracked-tools.js';
+import {
+  getTrackedToolsPreamble,
+  type TrackedToolsRuntimeContext,
+} from '../instructions/tracked-tools.js';
 import type { DiscordChannelContext } from './channel-context.js';
 import {
   compactActiveItems,
@@ -24,6 +27,7 @@ import type { TaskContext } from '../tasks/task-context.js';
 import type { TaskStore } from '../tasks/store.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import type { RuntimeCapability } from '../runtime/types.js';
+import { collectPromptSafeCodexOrchestrationWording } from '../runtime/cli-shared.js';
 import { filterToolsByCapabilities } from '../runtime/tool-capabilities.js';
 import { inferModelTier, filterToolsByTier } from '../runtime/tool-tiers.js';
 
@@ -40,18 +44,46 @@ export const TRACKED_DEFAULTS_PREAMBLE = getTrackedDefaultsPreamble();
 /** Tracked tools instructions injected after tracked defaults and before workspace context. */
 export const TRACKED_TOOLS_PREAMBLE = getTrackedToolsPreamble();
 
+type PromptPreambleOpts = {
+  skipTrackedTools?: boolean;
+} & Pick<
+  TrackedToolsRuntimeContext,
+  'runtimeId' | 'runtimeCapabilities' | 'runtimeTools' | 'enableHybridPipeline'
+>;
+
+function buildCodexRuntimeGuaranteesSection(
+  opts?: Pick<PromptPreambleOpts, 'runtimeId' | 'runtimeCapabilities'>,
+): string {
+  if (opts?.runtimeId !== 'codex' || !opts.runtimeCapabilities) return '';
+
+  const guarantees = collectPromptSafeCodexOrchestrationWording(opts.runtimeCapabilities);
+  if (guarantees.length === 0) return '';
+
+  return [
+    '--- Codex Runtime Guarantees ---',
+    'Only these Codex runtime guarantees are retained because each maps to a named enforcement gate in code:',
+    ...guarantees.map((line) => `- ${line}`),
+  ].join('\n');
+}
+
 /**
  * Deterministic preamble precedence:
  * 1) immutable ROOT_POLICY
  * 2) tracked defaults (runtime-injected from repository)
  * 3) tracked tools (runtime-injected from repository)
- * 4) user/workspace inlined context (e.g. AGENTS.md, memory, channel context)
+ * 4) runtime-specific audited guarantees (when present)
+ * 5) user/workspace inlined context (e.g. AGENTS.md, memory, channel context)
  */
 export function buildPromptPreamble(
   inlinedContext: string,
-  opts?: { skipTrackedTools?: boolean },
+  opts?: PromptPreambleOpts,
 ): string {
-  return [ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE, opts?.skipTrackedTools ? '' : TRACKED_TOOLS_PREAMBLE, inlinedContext]
+  const trackedToolsPreamble = opts?.skipTrackedTools
+    ? ''
+    : getTrackedToolsPreamble(opts);
+  const codexRuntimeGuarantees = buildCodexRuntimeGuaranteesSection(opts);
+
+  return [ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE, trackedToolsPreamble, codexRuntimeGuarantees, inlinedContext]
     .filter((section) => section.length > 0)
     .join('\n\n');
 }
@@ -63,9 +95,13 @@ export function buildScheduledSelfInvocationPrompt(input: {
   noteLines?: string[];
   invocationNotice: string;
   userMessage: string;
+  runtimeId?: PromptPreambleOpts['runtimeId'];
+  runtimeCapabilities?: PromptPreambleOpts['runtimeCapabilities'];
+  runtimeTools?: PromptPreambleOpts['runtimeTools'];
+  enableHybridPipeline?: PromptPreambleOpts['enableHybridPipeline'];
 }): string {
   let prompt =
-    buildPromptPreamble(input.inlinedContext) + '\n\n' +
+    buildPromptPreamble(input.inlinedContext, input) + '\n\n' +
     (input.openTasksSection
       ? `---\n${input.openTasksSection}\n\n`
       : '');

@@ -215,6 +215,7 @@ export type BotParams = {
   runtimeModel: string;
   planRunModel?: string;
   runtimeTools: string[];
+  enableHybridPipeline?: boolean;
   runtimeTimeoutMs: number;
   fastRuntime?: RuntimeAdapter;
   discordActionsEnabled: boolean;
@@ -2955,7 +2956,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           // Actions reference, permission notes, separator, and user message are appended
           // after this block — actions/notes land in the recency zone before the user message.
           let prompt =
-            buildPromptPreamble(inlinedContext.text) + '\n\n' +
+            buildPromptPreamble(inlinedContext.text, {
+              runtimeId: params.runtime.id,
+              runtimeCapabilities: params.runtime.capabilities,
+              runtimeTools: params.runtimeTools,
+              enableHybridPipeline: params.enableHybridPipeline,
+            }) + '\n\n' +
             (taskSection
               ? `---\n${taskSection}\n\n`
               : '') +
