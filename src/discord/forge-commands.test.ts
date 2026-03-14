@@ -2303,20 +2303,24 @@ describe('ForgeOrchestrator', () => {
 
     let callIndex = 0;
     const prompts: string[] = [];
+    const sessionKeys: Array<string | undefined> = [];
     const toolsSeen: Array<string[] | undefined> = [];
     const addDirsSeen: Array<string[] | undefined> = [];
     const nativeBypassSeen: Array<boolean | undefined> = [];
     const systemPrompts: string[] = [];
+    const supervisors: Array<RuntimeInvokeParams['supervisor']> = [];
     const runtime: RuntimeAdapter = {
       id: 'codex' as const,
       capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const]),
       invoke(params: RuntimeInvokeParams) {
         const idx = callIndex++;
         prompts.push(params.prompt);
+        sessionKeys.push(params.sessionKey ?? undefined);
         toolsSeen.push(params.tools);
         addDirsSeen.push(params.addDirs);
         nativeBypassSeen.push(params.disableNativeAppServer);
         systemPrompts.push(params.systemPrompt ?? '');
+        supervisors.push(params.supervisor);
         return (async function* (): AsyncGenerator<EngineEvent> {
           if (idx === 0) {
             yield {
@@ -2351,6 +2355,10 @@ describe('ForgeOrchestrator', () => {
     expect(toolsSeen[1]).toBeUndefined();
     expect(addDirsSeen[1]).toBeUndefined();
     expect(nativeBypassSeen[1]).toBe(true);
+    expect(sessionKeys[1]).toBeUndefined();
+    expect(supervisors[1]).toEqual(expect.objectContaining({
+      limits: expect.objectContaining({ maxCycles: 2, maxRetries: 1 }),
+    }));
     expect(prompts[1]).toContain('Do NOT use tools on this retry.');
     expect(prompts[1]).toContain('You are salvaging a stalled plan draft.');
     expect(prompts[1]).not.toContain('Read the codebase using your tools (Read, Glob, Grep) first');
@@ -2367,6 +2375,7 @@ describe('ForgeOrchestrator', () => {
 
     let callIndex = 0;
     const prompts: string[] = [];
+    const sessionKeys: Array<string | undefined> = [];
     const toolsSeen: Array<string[] | undefined> = [];
     const addDirsSeen: Array<string[] | undefined> = [];
     const nativeBypassSeen: Array<boolean | undefined> = [];
@@ -2377,6 +2386,7 @@ describe('ForgeOrchestrator', () => {
       invoke(params: RuntimeInvokeParams) {
         const idx = callIndex++;
         prompts.push(params.prompt);
+        sessionKeys.push(params.sessionKey ?? undefined);
         toolsSeen.push(params.tools);
         addDirsSeen.push(params.addDirs);
         nativeBypassSeen.push(params.disableNativeAppServer);
@@ -2411,6 +2421,7 @@ describe('ForgeOrchestrator', () => {
     expect(toolsSeen[1]).toBeUndefined();
     expect(addDirsSeen[1]).toBeUndefined();
     expect(nativeBypassSeen[1]).toBe(true);
+    expect(sessionKeys[1]).toBeUndefined();
     expect(prompts[1]).toContain('Do NOT use tools on this retry.');
     expect(prompts[1]).toContain('You are salvaging a stalled plan draft.');
     expect(systemPrompts[1]).toContain('Do not use tools on this retry.');
@@ -2494,12 +2505,15 @@ describe('ForgeOrchestrator', () => {
     expect(toolsSeen[1]).toBeUndefined();
     expect(addDirsSeen[1]).toBeUndefined();
     expect(nativeBypassSeen[1]).toBe(true);
-    expect(sessionKeys[1]).toBe(`${sessionKeys[0]}:draft-retry`);
+    expect(sessionKeys[1]).toBeUndefined();
+    expect(supervisors[1]).toEqual(expect.objectContaining({
+      limits: expect.objectContaining({ maxCycles: 2, maxRetries: 1 }),
+    }));
     expect(prompts[1]).toContain('You are salvaging a stalled plan draft.');
     expect(progress.some((p) => p.includes('retrying'))).toBe(true);
   });
 
-  it('uses phase-specific retry session keys so revision salvage does not resume the draft retry thread', async () => {
+  it('uses fresh sessionless salvage retries so revision fallback does not resume the draft retry thread', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditBlocking = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
@@ -2540,11 +2554,11 @@ describe('ForgeOrchestrator', () => {
     expect(result.error).toBeUndefined();
     expect(callIndex).toBe(6);
     expect(sessionKeys[0]).toMatch(/^forge:plan-\d+:test-model:drafter$/);
-    expect(sessionKeys[1]).toBe(`${sessionKeys[0]}:draft-retry`);
+    expect(sessionKeys[1]).toBeUndefined();
     expect(sessionKeys[2]).toMatch(/^forge:plan-\d+:test-model:auditor$/);
     expect(sessionKeys[3]).toBe(sessionKeys[0]);
-    expect(sessionKeys[4]).toBe(`${sessionKeys[0]}:revision-round-1-retry`);
-    expect(sessionKeys[1]).not.toBe(sessionKeys[4]);
+    expect(sessionKeys[4]).toBeUndefined();
+    expect(sessionKeys[1]).toBe(sessionKeys[4]);
     expect(sessionKeys[5]).toBe(sessionKeys[2]);
   });
 
@@ -2557,20 +2571,24 @@ describe('ForgeOrchestrator', () => {
 
     let callIndex = 0;
     const prompts: string[] = [];
+    const sessionKeys: Array<string | undefined> = [];
     const toolsSeen: Array<string[] | undefined> = [];
     const addDirsSeen: Array<string[] | undefined> = [];
     const nativeBypassSeen: Array<boolean | undefined> = [];
     const systemPrompts: string[] = [];
+    const supervisors: Array<RuntimeInvokeParams['supervisor']> = [];
     const runtime: RuntimeAdapter = {
       id: 'codex' as const,
       capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const]),
       invoke(params: RuntimeInvokeParams) {
         const idx = callIndex++;
         prompts.push(params.prompt);
+        sessionKeys.push(params.sessionKey ?? undefined);
         toolsSeen.push(params.tools);
         addDirsSeen.push(params.addDirs);
         nativeBypassSeen.push(params.disableNativeAppServer);
         systemPrompts.push(params.systemPrompt ?? '');
+        supervisors.push(params.supervisor);
         return (async function* (): AsyncGenerator<EngineEvent> {
           if (idx === 0) {
             yield { type: 'text_final', text: draftPlan };
@@ -2612,6 +2630,10 @@ describe('ForgeOrchestrator', () => {
     expect(toolsSeen[3]).toBeUndefined();
     expect(addDirsSeen[3]).toBeUndefined();
     expect(nativeBypassSeen[3]).toBe(true);
+    expect(sessionKeys[3]).toBeUndefined();
+    expect(supervisors[3]).toEqual(expect.objectContaining({
+      limits: expect.objectContaining({ maxCycles: 2, maxRetries: 1 }),
+    }));
     expect(prompts[3]).toContain('You are salvaging a stalled plan revision.');
     expect(prompts[3]).toContain('Do NOT use tools on this retry. Revise from the provided plan and audit feedback only.');
     expect(prompts[3]).toContain('The first line of your answer must be `# Plan: <title>`');
@@ -3494,6 +3516,60 @@ describe('Forge session keys', () => {
     expect(invocations[1]!.sessionKey).toBe(invocations[0]!.sessionKey);
     expect(invocations[2]!.sessionKey).toContain(':auditor');
     expect(invocations[2]!.sessionKey).not.toBe(invocations[0]!.sessionKey);
+    expect(invocations.every((params) => params.disableNativeAppServer === true)).toBe(true);
+    expect(invocations[0]!.systemPrompt).toBeUndefined();
+    expect(invocations[1]!.systemPrompt).toBeUndefined();
+  });
+
+  it('treats codex-like wrapped runtimes as CLI-first forge runtimes', async () => {
+    const tmpDir = await makeTmpDir();
+    await seedCodexCandidateFiles(tmpDir);
+    await seedCodexNativeWriteContextFiles(tmpDir);
+    const groundedPaths = [
+      '`src/discord/forge-commands.ts`',
+      '`src/runtime/codex-app-server.ts`',
+    ].join('\n');
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- \`src/discord/forge-commands.ts\` — add two-stage native draft orchestration.\n- \`src/runtime/codex-app-server.ts\` — confirm native turn behavior.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const invocations: RuntimeInvokeParams[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'other' as const,
+      capabilities: new Set([
+        'streaming_text' as const,
+        'tools_fs' as const,
+        'tools_exec' as const,
+        'tools_web' as const,
+        'sessions' as const,
+        'workspace_instructions' as const,
+        'mcp' as const,
+        'mid_turn_steering' as const,
+      ]),
+      invoke(params) {
+        invocations.push(params);
+        const text = invocations.length === 1
+          ? groundedPaths
+          : invocations.length === 2
+            ? draftPlan
+            : auditClean;
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(invocations).toHaveLength(3);
+    expect(invocations[0]!.prompt).toContain('## Candidate File Paths');
+    expect(invocations[0]!.tools).toEqual([]);
+    expect(invocations[1]!.prompt).toContain('## Grounded Repo Inputs');
+    expect(invocations[2]!.sessionKey).toContain(':auditor');
     expect(invocations.every((params) => params.disableNativeAppServer === true)).toBe(true);
     expect(invocations[0]!.systemPrompt).toBeUndefined();
     expect(invocations[1]!.systemPrompt).toBeUndefined();
