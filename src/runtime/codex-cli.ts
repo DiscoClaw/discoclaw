@@ -8,6 +8,7 @@ import { createCliRuntime, killAllSubprocesses } from './cli-adapter.js';
 import { CodexAppServerClient } from './codex-app-server.js';
 import { remapCrossRuntimeTierModel, resolveReasoningEffort } from './model-tiers.js';
 import { createCodexStrategy } from './strategies/codex-strategy.js';
+import { createAdvertisedCodexCapabilities } from './tool-capabilities.js';
 
 /** SIGKILL all tracked Codex subprocesses (e.g. on SIGTERM). */
 export function killActiveCodexSubprocesses(): void {
@@ -104,10 +105,12 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     appendSystemPrompt: opts.appendSystemPrompt,
     log: opts.log,
   });
+  const advertisedCapabilities = createAdvertisedCodexCapabilities(baseAdapter.capabilities);
 
   if (!appServerUrl || !nativeEnabled) {
     return {
       ...baseAdapter,
+      capabilities: advertisedCapabilities,
       invoke(params) {
         return baseAdapter.invoke(normalizeInvokeParams(params, opts));
       },
@@ -124,10 +127,14 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     dangerouslyBypassApprovalsAndSandbox: opts.dangerouslyBypassApprovalsAndSandbox,
     log: opts.log,
   });
+  const nativeCapabilities = new Set(baseAdapter.capabilities);
+  if (!opts.disableSessions) {
+    nativeCapabilities.add('mid_turn_steering');
+  }
 
   return {
     ...baseAdapter,
-    capabilities: new Set([...baseAdapter.capabilities, 'mid_turn_steering']),
+    capabilities: createAdvertisedCodexCapabilities(nativeCapabilities),
     invoke(params) {
       return (async function* () {
         const normalizedParams = normalizeInvokeParams(params, opts);

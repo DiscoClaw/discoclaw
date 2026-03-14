@@ -1,7 +1,10 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { EngineEvent } from './types.js';
-import { CodexAppServerClient } from './codex-app-server.js';
+import {
+  CodexAppServerClient,
+  formatCodexAppServerPromptSafeProfile,
+} from './codex-app-server.js';
 
 class MockWebSocket extends EventEmitter {
   static readonly CONNECTING = 0;
@@ -72,6 +75,12 @@ describe('CodexAppServerClient', () => {
       networkAccess: false,
     },
   };
+  const dangerFullAccessSandbox = {
+    approvalPolicy: 'never',
+    sandboxPolicy: {
+      type: 'dangerFullAccess',
+    },
+  };
 
   afterEach(() => {
     sockets.length = 0;
@@ -85,6 +94,7 @@ describe('CodexAppServerClient', () => {
       verbosePreview?: boolean;
       itemTypeDebug?: boolean;
       traceNotifications?: boolean;
+      dangerouslyBypassApprovalsAndSandbox?: boolean;
       log?: {
         debug?: (...args: unknown[]) => void;
         info?: (...args: unknown[]) => void;
@@ -113,6 +123,9 @@ describe('CodexAppServerClient', () => {
       ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.traceNotifications !== undefined
         ? { traceNotifications: timeoutMsOrOpts.traceNotifications }
         : {}),
+      ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.dangerouslyBypassApprovalsAndSandbox !== undefined
+        ? { dangerouslyBypassApprovalsAndSandbox: timeoutMsOrOpts.dangerouslyBypassApprovalsAndSandbox }
+        : {}),
       ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.log !== undefined
         ? { log: timeoutMsOrOpts.log }
         : {}),
@@ -137,6 +150,92 @@ describe('CodexAppServerClient', () => {
     }
     return events;
   }
+
+  function expectNoClaudeStyleToolClaims(text: string): void {
+    expect(text).not.toMatch(/\b(Read|Write|Edit|Glob|Grep|Bash)\b/);
+  }
+
+  it('formats a prompt-safe read-only native profile without Claude-style tool claims', () => {
+    const client = makeClient();
+    const profile = client.getPromptSafeProfile({
+      cwd: '/tmp/discoclaw',
+      addDirs: ['/tmp/discoclaw', '/tmp/other'],
+    });
+
+    expect(profile).toEqual({
+      transport: 'codex_app_server',
+      executionMode: 'generic_command_execution',
+      filesystem: {
+        access: 'read_only',
+        readableRoots: ['/tmp/discoclaw', '/tmp/other'],
+      },
+      network: {
+        access: 'disabled',
+      },
+      fidelity: 'downgraded',
+    });
+
+    const description = formatCodexAppServerPromptSafeProfile(profile);
+    expect(description).toContain('generic command execution');
+    expect(description).toContain('read-only filesystem sandbox');
+    expect(description).toContain('/tmp/discoclaw');
+    expect(description).toContain('/tmp/other');
+    expect(description).toContain('Additional platform-default readable roots may also be available.');
+    expect(description).toContain('Network access is disabled.');
+    expect(description).not.toContain('scoped to these roots');
+    expectNoClaudeStyleToolClaims(description);
+  });
+
+  it('downshifts prompt-safe dangerFullAccess output to generic access claims', () => {
+    const client = makeClient({ dangerouslyBypassApprovalsAndSandbox: true });
+    const profile = client.getPromptSafeProfile({ cwd: '/tmp/discoclaw' });
+
+    expect(profile).toEqual({
+      transport: 'codex_app_server',
+      executionMode: 'generic_command_execution',
+      filesystem: {
+        access: 'danger_full_access',
+        readableRoots: [],
+      },
+      network: {
+        access: 'unknown',
+      },
+      fidelity: 'downgraded',
+    });
+
+    const description = formatCodexAppServerPromptSafeProfile(profile);
+    expect(description).toContain('generic command execution');
+    expect(description).toContain('unrestricted filesystem access');
+    expect(description).toContain('Network restrictions are not guaranteed');
+    expect(description).not.toContain('read-only');
+    expect(description).not.toContain('Network access is disabled');
+    expectNoClaudeStyleToolClaims(description);
+  });
+
+  it('downshifts prompt-safe profile output when readable roots are unknown', () => {
+    const client = makeClient();
+    const profile = client.getPromptSafeProfile();
+
+    expect(profile).toEqual({
+      transport: 'codex_app_server',
+      executionMode: 'generic_command_execution',
+      filesystem: {
+        access: 'unknown',
+        readableRoots: [],
+      },
+      network: {
+        access: 'unknown',
+      },
+      fidelity: 'downgraded',
+    });
+
+    const description = formatCodexAppServerPromptSafeProfile(profile);
+    expect(description).toContain('generic command execution');
+    expect(description).toContain('Filesystem and network restrictions are not guaranteed');
+    expect(description).not.toContain('read-only');
+    expect(description).not.toContain('/tmp/discoclaw');
+    expectNoClaudeStyleToolClaims(description);
+  });
 
   it('starts a thread and stores the returned threadId', async () => {
     const client = makeClient();
@@ -229,6 +328,29 @@ describe('CodexAppServerClient', () => {
     socket.open();
 
     await expect(createPromise).rejects.toThrow('cannot create thread');
+  });
+
+  it('uses dangerFullAccess sandbox params when dangerous bypass is enabled', async () => {
+    const client = makeClient({ dangerouslyBypassApprovalsAndSandbox: true });
+
+    const createPromise = client.createThread('session-1', { cwd: '/tmp/discoclaw', model: 'gpt-5.4' });
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('thread/start', (message) => {
+      socket.reply(message.id, { threadId: 'thread-danger-1' });
+    });
+    socket.open();
+
+    await expect(createPromise).resolves.toBe('thread-danger-1');
+    expect(socket.sent[2]).toEqual({
+      id: 2,
+      method: 'thread/start',
+      params: {
+        cwd: '/tmp/discoclaw',
+        model: 'gpt-5.4',
+        ...dangerFullAccessSandbox,
+      },
+    });
   });
 
   it('starts a turn, tracks the returned turnId, and returns a stream handle', async () => {

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EngineEvent } from './types.js';
+import type { EngineEvent, RuntimeCapability } from './types.js';
 
 const { appServerInstances, CodexAppServerClientMock, mockExeca } = vi.hoisted(() => {
   const appServerInstances: any[] = [];
@@ -65,6 +65,25 @@ async function collectEvents(iter: AsyncIterable<EngineEvent>): Promise<EngineEv
 
 function jsonl(lines: string[]): string {
   return `${lines.join('\n')}\n`;
+}
+
+function expectAdvertisedCodexCapabilities(
+  capabilities: ReadonlySet<RuntimeCapability>,
+  opts?: {
+    sessions?: boolean;
+    midTurnSteering?: boolean;
+  },
+): void {
+  const expected: RuntimeCapability[] = ['streaming_text'];
+  if (opts?.sessions !== false) expected.push('sessions');
+  if (opts?.midTurnSteering) expected.push('mid_turn_steering');
+
+  expect([...capabilities].sort()).toEqual([...expected].sort());
+  expect(capabilities.has('tools_fs')).toBe(false);
+  expect(capabilities.has('tools_exec')).toBe(false);
+  expect(capabilities.has('tools_web')).toBe(false);
+  expect(capabilities.has('workspace_instructions')).toBe(false);
+  expect(capabilities.has('mcp')).toBe(false);
 }
 
 async function* eventStream(events: EngineEvent[], err?: unknown): AsyncIterable<EngineEvent> {
@@ -458,20 +477,14 @@ describe('Codex CLI runtime adapter', () => {
     expect(sub.kill).toHaveBeenCalledWith('SIGKILL');
   });
 
-  it('runtime has correct id and capabilities', () => {
+  it('runtime advertises the conservative Codex capability profile', () => {
     const rt = createCodexCliRuntime({
       codexBin: 'codex',
       defaultModel: 'gpt-5.3-codex',
     });
 
     expect(rt.id).toBe('codex');
-    expect(rt.capabilities.has('streaming_text')).toBe(true);
-    expect(rt.capabilities.has('tools_fs')).toBe(true);
-    expect(rt.capabilities.has('tools_exec')).toBe(true);
-    expect(rt.capabilities.has('tools_web')).toBe(true);
-    expect(rt.capabilities.has('sessions')).toBe(true);
-    expect(rt.capabilities.has('workspace_instructions')).toBe(true);
-    expect(rt.capabilities.has('mcp')).toBe(true);
+    expectAdvertisedCodexCapabilities(rt.capabilities);
   });
 
   it('disableSessions removes sessions capability and forces ephemeral mode', async () => {
@@ -486,7 +499,7 @@ describe('Codex CLI runtime adapter', () => {
       disableSessions: true,
     });
 
-    expect(rt.capabilities.has('sessions')).toBe(false);
+    expectAdvertisedCodexCapabilities(rt.capabilities, { sessions: false });
 
     await collectEvents(rt.invoke({
       prompt: 'Hi',
@@ -838,6 +851,8 @@ describe('Codex CLI runtime adapter', () => {
       dangerouslyBypassApprovalsAndSandbox: true,
     });
 
+    expectAdvertisedCodexCapabilities(rt.capabilities);
+
     await collectEvents(rt.invoke({
       prompt: 'Hi',
       model: '',
@@ -1049,7 +1064,7 @@ describe('Codex CLI runtime adapter', () => {
       defaultModel: 'gpt-5.3-codex',
     });
 
-    expect(rt.capabilities.has('mid_turn_steering')).toBe(false);
+    expectAdvertisedCodexCapabilities(rt.capabilities);
     expect(rt.steer).toBeUndefined();
     expect(rt.interrupt).toBeUndefined();
     expect(CodexAppServerClientMock).not.toHaveBeenCalled();
@@ -1067,6 +1082,8 @@ describe('Codex CLI runtime adapter', () => {
       defaultModel: 'gpt-5.3-codex',
     });
 
+    expectAdvertisedCodexCapabilities(rt.capabilities);
+
     const events = await collectEvents(rt.invoke({
       prompt: 'Hi',
       model: '',
@@ -1075,7 +1092,7 @@ describe('Codex CLI runtime adapter', () => {
 
     expect(mockExeca).toHaveBeenCalledTimes(1);
     expect(CodexAppServerClientMock).not.toHaveBeenCalled();
-    expect(rt.capabilities.has('mid_turn_steering')).toBe(false);
+    expectAdvertisedCodexCapabilities(rt.capabilities);
     expect(events).toContainEqual({ type: 'text_final', text: 'cli only' });
   });
 
@@ -1206,6 +1223,7 @@ describe('Codex CLI runtime adapter', () => {
       codexBin: 'codex',
       defaultModel: 'gpt-5.3-codex',
     });
+    expectAdvertisedCodexCapabilities(rt.capabilities, { midTurnSteering: true });
     const workspaceCwd = path.resolve(process.cwd(), 'workspace');
 
     mockExeca.mockImplementationOnce(() => createMockSubprocess({
@@ -1248,6 +1266,7 @@ describe('Codex CLI runtime adapter', () => {
     expect(resumeArgs[0]).toBe('exec');
     expect(resumeArgs[1]).toBe('resume');
     expect(resumeArgs[2]).toBe('thread-cwd-bypass');
+    expectAdvertisedCodexCapabilities(rt.capabilities, { midTurnSteering: true });
     expect(events).toContainEqual({ type: 'text_delta', text: 'App-server unavailable, falling back to CLI' });
     expect(events).toContainEqual({ type: 'text_final', text: 'resumed after native fallback' });
   });
@@ -1533,6 +1552,7 @@ describe('Codex CLI runtime adapter', () => {
       defaultModel: 'gpt-5.3-codex',
       disableSessions: true,
     });
+    expectAdvertisedCodexCapabilities(rt.capabilities, { sessions: false });
     const client = appServerInstances[0]!;
 
     await collectEvents(rt.invoke({
@@ -1564,7 +1584,7 @@ describe('Codex CLI runtime adapter', () => {
       defaultModel: 'gpt-5.3-codex',
     });
 
-    expect(rt.capabilities.has('mid_turn_steering')).toBe(true);
+    expectAdvertisedCodexCapabilities(rt.capabilities, { midTurnSteering: true });
     expect(CodexAppServerClientMock).toHaveBeenCalledWith(expect.objectContaining({
       baseUrl: 'ws://127.0.0.1:4321',
     }));
@@ -1674,6 +1694,7 @@ describe('Codex CLI runtime adapter', () => {
       codexBin: 'codex',
       defaultModel: 'gpt-5.3-codex',
     });
+    expectAdvertisedCodexCapabilities(rt.capabilities);
 
     // First call — establishes the session.
     mockExeca.mockReturnValue(createMockSubprocess({ stdout: jsonlOutput1, exitCode: 0 }));
@@ -1699,6 +1720,7 @@ describe('Codex CLI runtime adapter', () => {
     expect(callArgs2[0]).toBe('exec');
     expect(callArgs2[1]).toBe('resume');
     expect(callArgs2[2]).toBe('thread-uuid-456');
+    expectAdvertisedCodexCapabilities(rt.capabilities);
 
     const final2 = events2.find((e) => e.type === 'text_final');
     expect((final2 as { text: string }).text).toBe('second response');
@@ -1721,6 +1743,7 @@ describe('Codex CLI runtime adapter', () => {
       defaultModel: 'gpt-5.3-codex',
       dangerouslyBypassApprovalsAndSandbox: true,
     });
+    expectAdvertisedCodexCapabilities(rt.capabilities);
 
     mockExeca.mockReturnValue(createMockSubprocess({ stdout: jsonlOutput1, exitCode: 0 }));
     await collectEvents(rt.invoke({
@@ -1743,6 +1766,7 @@ describe('Codex CLI runtime adapter', () => {
     expect(callArgs2[1]).toBe('resume');
     expect(callArgs2).toContain('--dangerously-bypass-approvals-and-sandbox');
     expect(callArgs2).not.toContain('-s');
+    expectAdvertisedCodexCapabilities(rt.capabilities);
   });
 
   it('without sessionKey still uses --ephemeral (backward compat)', async () => {

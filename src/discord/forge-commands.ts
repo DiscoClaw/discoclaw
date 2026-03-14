@@ -45,6 +45,16 @@ const FORGE_GROUNDING_PHASE_SUPERVISOR_POLICY: RuntimeSupervisorPolicy = {
     maxRetries: 0,
   },
 };
+const FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY: RuntimeSupervisorPolicy = {
+  profile: 'plan_phase',
+  treatAbortedAsRetryable: true,
+  maxSignatureRepeats: 1,
+  limits: {
+    maxCycles: 2,
+    maxRetries: 1,
+    maxEscalationLevel: 1,
+  },
+};
 
 // ---------------------------------------------------------------------------
 // Audit criteria — single source of truth, referenced at top/middle/bottom of
@@ -430,8 +440,18 @@ async function resolveCodexGroundingCandidatePaths(opts: {
   }
 }
 
-function shouldUseTwoStageCodexPlanFlow(runtime: RuntimeAdapter): boolean {
+function isCodexForgeRuntime(runtime: RuntimeAdapter): boolean {
   return runtime.id === 'codex'
+    || (
+      runtime.capabilities.has('sessions')
+      && runtime.capabilities.has('tools_exec')
+      && runtime.capabilities.has('workspace_instructions')
+      && runtime.capabilities.has('mcp')
+    );
+}
+
+function shouldUseTwoStageCodexPlanFlow(runtime: RuntimeAdapter): boolean {
+  return isCodexForgeRuntime(runtime)
     && runtime.capabilities.has('sessions')
     && runtime.capabilities.has('mid_turn_steering');
 }
@@ -440,11 +460,27 @@ function resolveForgePlanSystemPrompt(rt: RuntimeAdapter): string | undefined {
   // Native Codex draft/revision turns can suppress answer streaming when the
   // forge plan system prompt is present. The prompt body already enforces the
   // plan contract, so omit the extra system prompt for Codex turns.
-  return rt.id === 'codex' ? undefined : FORGE_PLAN_SYSTEM_PROMPT;
+  return isCodexForgeRuntime(rt) ? undefined : FORGE_PLAN_SYSTEM_PROMPT;
 }
 
 function shouldForceCliCodexForgeTurns(rt: RuntimeAdapter): boolean {
-  return rt.id === 'codex';
+  return isCodexForgeRuntime(rt);
+}
+
+function wrapWithNativeAppServerDisabled(rt: RuntimeAdapter): RuntimeAdapter {
+  return {
+    ...rt,
+    invoke(params) {
+      return rt.invoke({ ...params, disableNativeAppServer: true });
+    },
+  };
+}
+
+function extractForgeTaskTitleFromPlan(content: string): string | null {
+  const title = parsePlan(content).title.trim();
+  if (!title) return null;
+  if (/^#+\s/.test(title)) return null;
+  return title;
 }
 
 // ---------------------------------------------------------------------------
@@ -1320,7 +1356,9 @@ function addPlanRetryHints(
     includeTemplateEchoWarning?: boolean;
     retrySessionSuffix: string;
     dropToolsOnRetry?: boolean;
+    dropSessionOnRetry?: boolean;
     replacementPrompt?: string;
+    supervisorOverride?: RuntimeSupervisorPolicy;
   },
 ): Parameters<typeof runPipeline>[0] {
   const promptPrefix = `${opts.includeTemplateEchoWarning ? TEMPLATE_ECHO_RETRY_PREFIX : ''}${opts.dropToolsOnRetry ? PLAN_OUTPUT_NO_TOOLS_RETRY_PREFIX : ''}${PLAN_OUTPUT_RETRY_PREFIX}`;
@@ -1341,13 +1379,17 @@ function addPlanRetryHints(
             opts.dropToolsOnRetry && typeof basePrompt === 'string'
               ? basePrompt.replace(DRAFTER_CODEBASE_TOOLS_INSTRUCTION, DRAFTER_NO_TOOLS_RETRY_INSTRUCTION)
               : basePrompt;
+          const nextSessionKey = opts.dropSessionOnRetry
+            ? undefined
+            : withRetrySessionKey(step.sessionKey, opts.retrySessionSuffix);
 
           return {
             ...step,
             ...(retrySystemPrompt !== undefined && { systemPrompt: retrySystemPrompt }),
             ...(opts.dropToolsOnRetry ? { tools: undefined, addDirs: undefined, disableNativeAppServer: true } : {}),
+            ...(opts.supervisorOverride ? { supervisor: opts.supervisorOverride } : {}),
             prompt: typeof prompt === 'string' ? promptPrefix + prompt : prompt,
-            sessionKey: withRetrySessionKey(step.sessionKey, opts.retrySessionSuffix),
+            ...((step.sessionKey !== undefined || opts.dropSessionOnRetry) ? { sessionKey: nextSessionKey } : {}),
           };
         })()
         : step,
@@ -1963,13 +2005,17 @@ export class ForgeOrchestrator {
 
     const rawDrafterModel = this.opts.drafterModel ?? this.opts.model;
     const rawAuditorModel = this.opts.auditorModel ?? this.opts.model;
-    const drafterRt = this.opts.drafterRuntime ?? this.opts.runtime;
-    const isClaudeDrafter = drafterRt.id === 'claude_code';
+    const drafterRuntimeBase = this.opts.drafterRuntime ?? this.opts.runtime;
+    const forceDrafterCli = shouldForceCliCodexForgeTurns(drafterRuntimeBase);
+    const drafterRt = forceDrafterCli
+      ? wrapWithNativeAppServerDisabled(drafterRuntimeBase)
+      : drafterRuntimeBase;
+    const isClaudeDrafter = drafterRuntimeBase.id === 'claude_code';
     const hasExplicitDrafterModel = Boolean(this.opts.drafterModel);
     const drafterModel = isClaudeDrafter
-      ? resolveModel(rawDrafterModel, drafterRt.id)
-      : (hasExplicitDrafterModel ? resolveModel(rawDrafterModel, drafterRt.id) : '');
-    const drafterReasoningEffort = resolveReasoningEffort(rawDrafterModel, drafterRt.id);
+      ? resolveModel(rawDrafterModel, drafterRuntimeBase.id)
+      : (hasExplicitDrafterModel ? resolveModel(rawDrafterModel, drafterRuntimeBase.id) : '');
+    const drafterReasoningEffort = resolveReasoningEffort(rawDrafterModel, drafterRuntimeBase.id);
     const readOnlyTools = ['Read', 'Glob', 'Grep'];
     const addDirs = [this.opts.cwd];
 
@@ -1991,7 +2037,7 @@ export class ForgeOrchestrator {
     const effectiveRevisionResearchRt = onEvent ? wrapWithEventForwarding(guardedRevisionResearchRt, onEvent) : guardedRevisionResearchRt;
     const effectiveDrafterRt = onEvent ? wrapWithEventForwarding(guardedDraftRt, onEvent) : guardedDraftRt;
     const effectiveRevisionRt = onEvent ? wrapWithEventForwarding(guardedRevisionRt, onEvent) : guardedRevisionRt;
-    const useTwoStageCodexDraftFlow = shouldUseTwoStageCodexPlanFlow(drafterRt);
+    const useTwoStageCodexDraftFlow = shouldUseTwoStageCodexPlanFlow(drafterRuntimeBase);
 
     let round = startRound - 1; // will be incremented at top of loop
     let planContent = await fs.readFile(filePath, 'utf-8');
@@ -2052,7 +2098,6 @@ export class ForgeOrchestrator {
 
         round++;
         const forgePhaseLiveness = resolveForgePhaseLiveness(this.opts.timeoutMs);
-        const forceDrafterCli = shouldForceCliCodexForgeTurns(drafterRt);
 
         // Draft phase (only on first round of a fresh forge, not resume)
         if (round === 1 && startRound === 1 && templateContent && contextSummary) {
@@ -2187,7 +2232,11 @@ export class ForgeOrchestrator {
               includeTemplateEchoWarning: true,
               retrySessionSuffix: 'draft-retry',
               dropToolsOnRetry,
+              dropSessionOnRetry: dropToolsOnRetry && forceDrafterCli,
               replacementPrompt: dropToolsOnRetry ? compactDrafterRetryPrompt : undefined,
+              supervisorOverride: dropToolsOnRetry && forceDrafterCli
+                ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY
+                : undefined,
             });
           });
           if (!draftPipelineResult) {
@@ -2210,9 +2259,8 @@ export class ForgeOrchestrator {
           await this.atomicWrite(filePath, planContent);
 
           // Update task title to match the drafter's Plan title (raw user input is often messy).
-          const drafterTitleMatch = draftOutput.match(/^# Plan:\s*(.+)$/m);
           const mergedHeader = parsePlanFileHeader(planContent);
-          const drafterTitle = drafterTitleMatch?.[1]?.trim();
+          const drafterTitle = extractForgeTaskTitleFromPlan(planContent);
           const taskId = mergedHeader ? resolvePlanHeaderTaskId(mergedHeader) : '';
           if (taskId && drafterTitle && drafterTitle !== description) {
             try {
@@ -2239,6 +2287,10 @@ export class ForgeOrchestrator {
         );
 
         const auditorRt = this.opts.auditorRuntime ?? this.opts.runtime;
+        const forceAuditorCli = shouldForceCliCodexForgeTurns(auditorRt);
+        const auditorRuntimeBase = forceAuditorCli
+          ? wrapWithNativeAppServerDisabled(auditorRt)
+          : auditorRt;
         const isClaudeAuditor = auditorRt.id === 'claude_code';
         const auditorHasFileTools = auditorRt.capabilities.has('tools_fs');
         const hasExplicitAuditorModel = Boolean(this.opts.auditorModel);
@@ -2247,9 +2299,8 @@ export class ForgeOrchestrator {
           : (hasExplicitAuditorModel ? resolveModel(rawAuditorModel, auditorRt.id) : '');
         const auditorReasoningEffort = resolveReasoningEffort(rawAuditorModel, auditorRt.id);
         const reasoningAuditorRt = auditorReasoningEffort
-          ? wrapWithReasoningEffort(auditorRt, auditorReasoningEffort)
-          : auditorRt;
-        const forceAuditorCli = shouldForceCliCodexForgeTurns(auditorRt);
+          ? wrapWithReasoningEffort(auditorRuntimeBase, auditorReasoningEffort)
+          : auditorRuntimeBase;
 
         const auditorPrompt = buildAuditorPrompt(
           planContent,
@@ -2492,7 +2543,11 @@ export class ForgeOrchestrator {
           return addPlanRetryHints(useTwoStageCodexDraftFlow ? revisionRetryBaseDef : retryDef, {
             retrySessionSuffix: `revision-round-${round}-retry`,
             dropToolsOnRetry,
+            dropSessionOnRetry: dropToolsOnRetry && forceDrafterCli,
             replacementPrompt: dropToolsOnRetry ? compactRevisionRetryPrompt : undefined,
+            supervisorOverride: dropToolsOnRetry && forceDrafterCli
+              ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY
+              : undefined,
           });
         });
         if (!revisionPipelineResult) {

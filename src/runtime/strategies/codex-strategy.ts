@@ -4,11 +4,14 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { ImageData, RuntimeCapability } from '../types.js';
+import type { ImageData } from '../types.js';
 import type { CliAdapterLogger, CliAdapterStrategy, CliInvokeContext, UniversalCliOpts, ParsedLineResult } from '../cli-strategy.js';
+import { CODEX_RUNTIME_CAPABILITIES } from '../tool-capabilities.js';
 
 /** Max chars for error messages exposed outside the adapter. Prevents prompt/session leaks. */
 const MAX_ERROR_LENGTH = 200;
+const IMAGE_SESSION_RESET_REASON =
+  'image attachments require a fresh Codex session because `codex exec resume` does not support `--image`. Starting fresh.';
 
 const CODEX_NOISY_LINE_PATTERNS = [
   /^warning:/i,
@@ -107,6 +110,41 @@ type CodexStrategyOptions = {
   itemTypeDebug?: boolean;
   onLifecycleEvent?: (event: CodexLifecycleEvent) => void;
 };
+
+type CodexSessionState = {
+  wantSession: boolean;
+  existingThreadId?: string;
+  inheritsSandboxSelection: boolean;
+  inheritsWorkspaceScope: boolean;
+};
+
+function wantsTrackedCodexSession(ctx: CliInvokeContext): boolean {
+  return ctx.sessionMap != null && Boolean(ctx.params.sessionKey);
+}
+
+function hasPreparedImageAttachments(ctx: CliInvokeContext): boolean {
+  return Boolean(ctx.tempImagePaths && ctx.tempImagePaths.length > 0);
+}
+
+function resolveCodexSessionState(ctx: CliInvokeContext): CodexSessionState {
+  const wantSession = wantsTrackedCodexSession(ctx);
+  let existingThreadId = wantSession && ctx.params.sessionKey
+    ? ctx.sessionMap?.get(ctx.params.sessionKey)
+    : undefined;
+
+  if (existingThreadId && hasPreparedImageAttachments(ctx)) {
+    existingThreadId = undefined;
+    ctx.sessionResetReason = IMAGE_SESSION_RESET_REASON;
+  }
+
+  const inheritsSessionRestrictions = Boolean(existingThreadId);
+  return {
+    wantSession,
+    existingThreadId,
+    inheritsSandboxSelection: inheritsSessionRestrictions,
+    inheritsWorkspaceScope: inheritsSessionRestrictions,
+  };
+}
 
 export function createCodexStrategy(
   defaultModel: string,
@@ -221,43 +259,32 @@ export function createCodexStrategy(
     id: 'codex',
     binaryDefault: 'codex',
     defaultModel,
-    capabilities: [
-      'streaming_text',
-      'tools_fs',
-      'tools_exec',
-      'tools_web',
-      'sessions',
-      'workspace_instructions',
-      'mcp',
-    ] satisfies readonly RuntimeCapability[],
+    // The grounded strategy exposes the full Codex runtime affordances; the
+    // adapter layer trims this to a prompt-safe advertised profile.
+    capabilities: CODEX_RUNTIME_CAPABILITIES,
 
     multiTurnMode: 'session-resume',
 
     getOutputMode(ctx: CliInvokeContext, _opts: UniversalCliOpts): 'text' | 'jsonl' {
-      const wantSession = ctx.sessionMap != null && Boolean(ctx.params.sessionKey);
+      const wantSession = wantsTrackedCodexSession(ctx);
       return wantSession ? 'jsonl' : 'text';
     },
 
     buildArgs(ctx: CliInvokeContext, opts: UniversalCliOpts): string[] {
       const { params, useStdin } = ctx;
-      const wantSession = ctx.sessionMap != null && Boolean(params.sessionKey);
-      let existingThreadId = params.sessionKey ? ctx.sessionMap?.get(params.sessionKey) : undefined;
-      if (existingThreadId && ctx.tempImagePaths && ctx.tempImagePaths.length > 0) {
-        existingThreadId = undefined;
-        ctx.sessionResetReason = 'image attachments require a fresh Codex session because `codex exec resume` does not support `--image`. Starting fresh.';
-      }
+      const sessionState = resolveCodexSessionState(ctx);
       const dangerousBypass = Boolean(opts.dangerouslySkipPermissions);
 
       // When resuming, use `codex exec resume <thread_id>`.
       // The resume subcommand does NOT support -s/--sandbox (inherits from original session).
       // When starting a new session (or ephemeral), use `codex exec`.
-      const args: string[] = existingThreadId
-        ? ['exec', 'resume', existingThreadId, '-m', params.model, '--skip-git-repo-check']
-        : ['exec', '-m', params.model, '--skip-git-repo-check', ...(wantSession ? [] : ['--ephemeral'])];
+      const args: string[] = sessionState.existingThreadId
+        ? ['exec', 'resume', sessionState.existingThreadId, '-m', params.model, '--skip-git-repo-check']
+        : ['exec', '-m', params.model, '--skip-git-repo-check', ...(sessionState.wantSession ? [] : ['--ephemeral'])];
 
       if (dangerousBypass) {
         args.push('--dangerously-bypass-approvals-and-sandbox');
-      } else if (!existingThreadId) {
+      } else if (!sessionState.inheritsSandboxSelection) {
         args.push('-s', 'read-only');
       }
 
@@ -281,20 +308,20 @@ export function createCodexStrategy(
 
       // When session tracking is active, use --json so we can capture the thread_id
       // from the `thread.started` event.
-      if (wantSession) {
+      if (sessionState.wantSession) {
         args.push('--json');
       }
 
       // Pass --add-dir flags for additional directories.
       // The resume subcommand does NOT support --add-dir (inherits from original session).
-      if (!existingThreadId && params.addDirs && params.addDirs.length > 0) {
+      if (!sessionState.inheritsWorkspaceScope && params.addDirs && params.addDirs.length > 0) {
         for (const dir of params.addDirs) {
           args.push('--add-dir', dir);
         }
       }
 
       // Add --image flags for temp image files (not supported on resume).
-      if (!existingThreadId && ctx.tempImagePaths && ctx.tempImagePaths.length > 0) {
+      if (!sessionState.existingThreadId && ctx.tempImagePaths && ctx.tempImagePaths.length > 0) {
         for (const imgPath of ctx.tempImagePaths) {
           args.push('--image', imgPath);
         }
