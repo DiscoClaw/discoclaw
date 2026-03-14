@@ -1,11 +1,36 @@
 import { describe, expect, it } from 'vitest';
+import type { RuntimeCapability } from './types.js';
 import {
   ADVERTISED_CODEX_CAPABILITIES,
+  CODEX_CAPABILITY_CONTRACT,
   CODEX_RUNTIME_CAPABILITIES,
   createAdvertisedCodexCapabilities,
   filterToolsByCapabilities,
+  getCodexCapabilityContract,
   requiredCapabilityForTool,
 } from './tool-capabilities.js';
+
+const COVERED_RUNTIME_CONFIGS = [
+  {
+    name: 'grounded cli',
+    runtimeCapabilities: new Set(CODEX_RUNTIME_CAPABILITIES),
+    expectedAdvertised: ['streaming_text', 'sessions'],
+  },
+  {
+    name: 'native app-server',
+    runtimeCapabilities: new Set([...CODEX_RUNTIME_CAPABILITIES, 'mid_turn_steering']),
+    expectedAdvertised: ['streaming_text', 'sessions', 'mid_turn_steering'],
+  },
+  {
+    name: 'sessions disabled',
+    runtimeCapabilities: new Set(CODEX_RUNTIME_CAPABILITIES.filter((capability) => capability !== 'sessions')),
+    expectedAdvertised: ['streaming_text'],
+  },
+] satisfies Array<{
+  name: string;
+  runtimeCapabilities: ReadonlySet<RuntimeCapability>;
+  expectedAdvertised: RuntimeCapability[];
+}>;
 
 describe('createAdvertisedCodexCapabilities', () => {
   it('keeps the Codex advertised profile conservative when raw runtime state is richer', () => {
@@ -19,14 +44,44 @@ describe('createAdvertisedCodexCapabilities', () => {
     expect([...advertised].sort()).toEqual([...ADVERTISED_CODEX_CAPABILITIES].sort());
   });
 
-  it('preserves mid-turn steering only when the raw runtime state includes it', () => {
-    const advertised = createAdvertisedCodexCapabilities(
-      new Set([...CODEX_RUNTIME_CAPABILITIES, 'mid_turn_steering']),
-    );
+  it.each(COVERED_RUNTIME_CONFIGS)(
+    'matches the enforcement-backed contract for $name',
+    ({ runtimeCapabilities, expectedAdvertised }) => {
+      const advertised = createAdvertisedCodexCapabilities(runtimeCapabilities);
 
-    expect([...advertised].sort()).toEqual(
-      [...ADVERTISED_CODEX_CAPABILITIES, 'mid_turn_steering'].sort(),
-    );
+      expect([...advertised].sort()).toEqual([...expectedAdvertised].sort());
+      for (const capability of advertised) {
+        const contract = getCodexCapabilityContract(capability);
+        expect(contract?.exposure).toBe('advertised');
+        expect(contract && 'enforcementGate' in contract && contract.enforcementGate.length > 0).toBe(true);
+      }
+    },
+  );
+
+  it('keeps advertised capabilities aligned with the named contract entries', () => {
+    const expected = Object.entries(CODEX_CAPABILITY_CONTRACT)
+      .filter(([, contract]) => contract.availability === 'base' && contract.exposure === 'advertised')
+      .map(([capability]) => capability as RuntimeCapability);
+
+    expect([...ADVERTISED_CODEX_CAPABILITIES].sort()).toEqual(expected.sort());
+  });
+
+  it('downgrades unsupported grounded surfaces to non-guaranteed runtime wording', () => {
+    const advertised = createAdvertisedCodexCapabilities(new Set(CODEX_RUNTIME_CAPABILITIES));
+
+    for (const capability of [
+      'workspace_instructions',
+      'tools_exec',
+      'tools_fs',
+      'tools_web',
+      'mcp',
+    ] as const) {
+      const contract = getCodexCapabilityContract(capability);
+      expect(contract?.exposure).toBe('transport_only');
+      expect(contract?.runtimeWording).toMatch(/\bmay\b/i);
+      expect(contract?.runtimeWording).toMatch(/not guaranteed/i);
+      expect(advertised.has(capability)).toBe(false);
+    }
   });
 });
 
