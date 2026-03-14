@@ -1881,6 +1881,98 @@ describe('ForgeOrchestrator', () => {
     expect(updateSpy).not.toHaveBeenCalled();
   });
 
+  it('does not update bead title when the plan title line is empty and the next heading is ## Objective', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan:
+
+**ID:** plan-test-001
+**Task:** task-test-001
+**Created:** 2026-01-01
+**Status:** DRAFT
+**Project:** discoclaw
+
+---
+
+## Objective
+
+Build it.
+
+## Scope
+
+## Changes
+
+## Risks
+
+## Testing
+
+---
+
+## Audit Log
+
+---
+
+## Implementation Notes
+
+_Filled in during/after implementation._
+`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const updateSpy = vi.spyOn(opts.taskStore, 'update');
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    await orchestrator.run('Test feature', async () => {});
+
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not update bead title when the plan title itself is a markdown heading', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: ## Objective
+
+**ID:** plan-test-001
+**Task:** task-test-001
+**Created:** 2026-01-01
+**Status:** DRAFT
+**Project:** discoclaw
+
+---
+
+## Objective
+
+Build it.
+
+## Scope
+
+## Changes
+
+## Risks
+
+## Testing
+
+---
+
+## Audit Log
+
+---
+
+## Implementation Notes
+
+_Filled in during/after implementation._
+`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const runtime = makeMockRuntime([draftPlan, auditClean]);
+    const opts = await baseOpts(tmpDir, runtime);
+    const updateSpy = vi.spyOn(opts.taskStore, 'update');
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    await orchestrator.run('Test feature', async () => {});
+
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
   it('reuses existing open bead with matching title instead of creating duplicate', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;

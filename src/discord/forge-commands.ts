@@ -476,6 +476,13 @@ function wrapWithNativeAppServerDisabled(rt: RuntimeAdapter): RuntimeAdapter {
   };
 }
 
+function extractForgeTaskTitleFromPlan(content: string): string | null {
+  const title = parsePlan(content).title.trim();
+  if (!title) return null;
+  if (/^#+\s/.test(title)) return null;
+  return title;
+}
+
 // ---------------------------------------------------------------------------
 // Degenerate description resolution
 // ---------------------------------------------------------------------------
@@ -2252,9 +2259,8 @@ export class ForgeOrchestrator {
           await this.atomicWrite(filePath, planContent);
 
           // Update task title to match the drafter's Plan title (raw user input is often messy).
-          const drafterTitleMatch = draftOutput.match(/^# Plan:\s*(.+)$/m);
           const mergedHeader = parsePlanFileHeader(planContent);
-          const drafterTitle = drafterTitleMatch?.[1]?.trim();
+          const drafterTitle = extractForgeTaskTitleFromPlan(planContent);
           const taskId = mergedHeader ? resolvePlanHeaderTaskId(mergedHeader) : '';
           if (taskId && drafterTitle && drafterTitle !== description) {
             try {
