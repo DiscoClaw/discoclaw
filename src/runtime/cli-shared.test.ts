@@ -1,13 +1,52 @@
 import { describe, expect, it } from 'vitest';
+import type { RuntimeCapability } from './types.js';
+import {
+  ADVERTISED_CODEX_CAPABILITIES,
+  CODEX_RUNTIME_CAPABILITIES,
+  createAdvertisedCodexCapabilities,
+} from './tool-capabilities.js';
 import {
   STDIN_THRESHOLD,
   tryParseJsonLine,
   createEventQueue,
   SubprocessTracker,
   cliExecaEnv,
+  collectPromptSafeCodexOrchestrationWording,
+  formatPromptSafeCodexOrchestrationWording,
   stripAnsi,
   LineBuffer,
 } from './cli-shared.js';
+
+const COVERED_RUNTIME_CONFIGS = [
+  {
+    name: 'grounded cli',
+    runtimeCapabilities: new Set(CODEX_RUNTIME_CAPABILITIES),
+    expectedLines: [
+      'Streams reply text through the RuntimeAdapter event channel.',
+      'Supports retained Codex sessions when the runtime advertises sessions.',
+    ],
+  },
+  {
+    name: 'native app-server',
+    runtimeCapabilities: new Set([...CODEX_RUNTIME_CAPABILITIES, 'mid_turn_steering']),
+    expectedLines: [
+      'Streams reply text through the RuntimeAdapter event channel.',
+      'Supports retained Codex sessions when the runtime advertises sessions.',
+      'Supports mid-turn steer and interrupt when the native app-server path is active.',
+    ],
+  },
+  {
+    name: 'sessions disabled',
+    runtimeCapabilities: new Set(CODEX_RUNTIME_CAPABILITIES.filter((capability) => capability !== 'sessions')),
+    expectedLines: [
+      'Streams reply text through the RuntimeAdapter event channel.',
+    ],
+  },
+] satisfies Array<{
+  name: string;
+  runtimeCapabilities: ReadonlySet<RuntimeCapability>;
+  expectedLines: string[];
+}>;
 
 describe('STDIN_THRESHOLD', () => {
   it('is 100KB', () => {
@@ -144,5 +183,63 @@ describe('LineBuffer', () => {
     const lb = new LineBuffer();
     lb.feed('complete\n');
     expect(lb.flush()).toBe('');
+  });
+});
+
+describe('collectPromptSafeCodexOrchestrationWording', () => {
+  it.each(COVERED_RUNTIME_CONFIGS)(
+    'renders the audited runtime-facing wording for $name',
+    ({ runtimeCapabilities, expectedLines }) => {
+      expect(collectPromptSafeCodexOrchestrationWording(runtimeCapabilities)).toEqual(expectedLines);
+    },
+  );
+
+  it('ignores transport-only capabilities even when raw runtime state includes them', () => {
+    const wording = formatPromptSafeCodexOrchestrationWording(new Set(CODEX_RUNTIME_CAPABILITIES));
+
+    expect(wording).not.toContain('command execution tools');
+    expect(wording).not.toContain('file-system tools');
+    expect(wording).not.toContain('web tools');
+    expect(wording).not.toContain('workspace instructions');
+    expect(wording).not.toContain('MCP tools');
+    expect(wording).not.toMatch(/\bmay\b/i);
+    expect(wording).not.toMatch(/not guaranteed/i);
+  });
+
+  it('matches the same wording whether input is raw runtime state or the advertised capability set', () => {
+    const rawRuntimeCapabilities = new Set([...CODEX_RUNTIME_CAPABILITIES, 'mid_turn_steering'] as const);
+    const rawWording = collectPromptSafeCodexOrchestrationWording(rawRuntimeCapabilities);
+    const advertisedWording = collectPromptSafeCodexOrchestrationWording(
+      createAdvertisedCodexCapabilities(rawRuntimeCapabilities),
+    );
+
+    expect(rawWording).toEqual(advertisedWording);
+  });
+
+  it('keeps runtime-facing ordering tied to the audited capability order instead of input set order', () => {
+    const wording = collectPromptSafeCodexOrchestrationWording(
+      new Set<RuntimeCapability>(['mid_turn_steering', 'sessions', 'streaming_text']),
+    );
+
+    expect(wording).toEqual([
+      'Streams reply text through the RuntimeAdapter event channel.',
+      'Supports retained Codex sessions when the runtime advertises sessions.',
+      'Supports mid-turn steer and interrupt when the native app-server path is active.',
+    ]);
+  });
+
+  it('does not advertise conditional capabilities that are absent from the audited set', () => {
+    const wording = collectPromptSafeCodexOrchestrationWording(new Set(ADVERTISED_CODEX_CAPABILITIES));
+
+    expect(wording).toEqual([
+      'Streams reply text through the RuntimeAdapter event channel.',
+      'Supports retained Codex sessions when the runtime advertises sessions.',
+    ]);
+    expect(formatPromptSafeCodexOrchestrationWording(new Set(['streaming_text']))).not.toContain(
+      'retained Codex sessions',
+    );
+    expect(formatPromptSafeCodexOrchestrationWording(new Set(['streaming_text', 'sessions']))).not.toContain(
+      'mid-turn steer and interrupt',
+    );
   });
 });
