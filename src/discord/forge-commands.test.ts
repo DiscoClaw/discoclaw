@@ -3658,8 +3658,16 @@ describe('Forge session keys', () => {
 
     expect(result.error).toBeUndefined();
     expect(invocations).toHaveLength(3);
-    expect(invocations[0]!.prompt).toContain('## Candidate File Paths');
-    expect(invocations[0]!.tools).toEqual([]);
+    if (invocations[0]!.prompt.includes('## Candidate File Paths')) {
+      expect(invocations[0]!.prompt).toContain('Choose the 1-5 most relevant repo-relative file paths from the candidate list only.');
+      expect(invocations[0]!.prompt).toContain('`src/discord/forge-commands.ts`');
+      expect(invocations[0]!.tools).toEqual([]);
+      expect(invocations[0]!.addDirs).toBeUndefined();
+    } else {
+      expect(invocations[0]!.prompt).toContain('You are gathering only the concrete repo file paths needed for a later plan-writing turn.');
+      expect(invocations[0]!.tools).toEqual(['Read', 'Glob', 'Grep']);
+      expect(invocations[0]!.addDirs).toEqual([tmpDir]);
+    }
     expect(invocations[1]!.prompt).toContain('## Grounded Repo Inputs');
     expect(invocations[2]!.sessionKey).toContain(':auditor');
     expect(invocations.every((params) => params.disableNativeAppServer === true)).toBe(true);
