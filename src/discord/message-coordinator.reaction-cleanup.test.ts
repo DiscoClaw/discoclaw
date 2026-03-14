@@ -14,7 +14,7 @@ vi.mock('../workspace-bootstrap.js', () => ({
 function makeRuntime(events: EngineEvent[], runtimeId = 'test') {
   return {
     id: runtimeId,
-    capabilities: {},
+    capabilities: new Set<string>(['streaming_text']),
     async *invoke(): AsyncIterable<EngineEvent> {
       for (const evt of events) yield evt;
     },

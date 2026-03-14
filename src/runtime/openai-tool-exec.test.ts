@@ -4,15 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const PROMISIFY_CUSTOM = Symbol.for('nodejs.util.promisify.custom');
-
 vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
-  const mockedExecFile = vi.fn(actual.execFile) as typeof actual.execFile;
-  Object.defineProperty(mockedExecFile, PROMISIFY_CUSTOM, {
+  const mockedExecFile = vi.fn(actual.execFile) as unknown as typeof actual.execFile;
+  const invokeMockedExecFile = mockedExecFile as unknown as (
+    ...inputArgs: any[]
+  ) => unknown;
+  Object.defineProperty(mockedExecFile, Symbol.for('nodejs.util.promisify.custom'), {
     value: (...args: any[]) =>
       new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-        mockedExecFile(...args, (err: Error | null, stdout: string, stderr: string) => {
+        invokeMockedExecFile(...args, (err: Error | null, stdout: string, stderr: string) => {
           if (err) {
             reject(Object.assign(err, { stdout, stderr }));
             return;
