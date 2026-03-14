@@ -46,6 +46,7 @@ export type SpawnContext = {
   runtime: RuntimeAdapter;
   model: string;
   runtimeTools: string[];
+  enableHybridPipeline?: boolean;
   workspaceCwd: string;
   discordChannelContext?: DiscordChannelContext;
   useGroupDirCwd: boolean;
@@ -180,10 +181,20 @@ export async function executeSpawnAction(
             required: new Set(spawnCtx.discordChannelContext?.paContextFiles ?? []),
           });
         }
-        preamble = buildPromptPreamble(inlinedContext);
+        preamble = buildPromptPreamble(inlinedContext, {
+          runtimeId: spawnCtx.runtime.id,
+          runtimeCapabilities: spawnCtx.runtime.capabilities,
+          runtimeTools: spawnCtx.runtimeTools,
+          enableHybridPipeline: spawnCtx.enableHybridPipeline,
+        });
       } catch (err) {
         spawnCtx.log?.warn({ flow: 'spawn', label, err }, 'spawn:preamble construction failed');
-        preamble = buildPromptPreamble('');
+        preamble = buildPromptPreamble('', {
+          runtimeId: spawnCtx.runtime.id,
+          runtimeCapabilities: spawnCtx.runtime.capabilities,
+          runtimeTools: spawnCtx.runtimeTools,
+          enableHybridPipeline: spawnCtx.enableHybridPipeline,
+        });
       }
 
       const fullPrompt = preamble + '\n\n' + action.prompt;

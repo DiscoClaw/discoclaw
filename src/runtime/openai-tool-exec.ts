@@ -17,6 +17,11 @@ import {
   projectPipelineFailure,
   type PipelineFailureCode,
 } from './runtime-failure.js';
+import {
+  PATH_SECURITY_GATE,
+  assertPathAllowed,
+  resolveAndCheck,
+} from './tools/path-security.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -24,6 +29,7 @@ const execFileAsync = promisify(execFile);
 
 const MAX_READ_BYTES = 1 * 1024 * 1024; // 1 MB
 const BASH_TIMEOUT_MS = 30_000;
+const BASH_TIMEOUT_MAX_MS = 600_000;
 const BASH_MAX_OUTPUT = 100 * 1024; // 100 KB per stream
 const FETCH_TIMEOUT_MS = 15_000;
 const FETCH_MAX_BYTES = 512 * 1024; // 512 KB
@@ -48,6 +54,135 @@ const LOCALHOST_HOSTNAMES = new Set(['localhost', '[::1]']);
 export type ToolResult = { result: string; ok: boolean };
 
 type LogFn = (msg: string) => void;
+
+const OPENAI_TOOL_EXEC_CONTRACT_ORDER = [
+  'invocation_allowlist',
+  'file_root_containment',
+  'list_files_pattern_scope',
+  'search_content_glob_scope',
+  'bash_timeout_bound',
+  'hybrid_pipeline_availability',
+] as const;
+
+export type OpenAIToolExecContractId = (typeof OPENAI_TOOL_EXEC_CONTRACT_ORDER)[number];
+
+export type OpenAIToolExecContractEntry = {
+  exposure: 'advertised';
+  availability: 'base' | 'hybrid_pipeline';
+  runtimeWording: string;
+  enforcementGate: string;
+  toolNames?: readonly string[];
+};
+
+const ALL_OPENAI_TOOL_NAMES = [
+  'read_file',
+  'write_file',
+  'edit_file',
+  'list_files',
+  'search_content',
+  'bash',
+  'web_fetch',
+  'web_search',
+  'pipeline.start',
+  'pipeline.status',
+  'pipeline.resume',
+  'pipeline.cancel',
+  'step.run',
+  'step.assert',
+  'step.retry',
+  'step.wait',
+] as const;
+
+export const OPENAI_TOOL_EXEC_CONTRACT: Readonly<
+  Record<OpenAIToolExecContractId, OpenAIToolExecContractEntry>
+> = {
+  invocation_allowlist: {
+    exposure: 'advertised',
+    availability: 'base',
+    runtimeWording:
+      'An invocation can execute only tool names present in its advertised schema allowlist.',
+    enforcementGate:
+      'executeToolCall: opts.allowedToolNames rejects non-advertised tool names',
+    toolNames: ALL_OPENAI_TOOL_NAMES,
+  },
+  file_root_containment: {
+    exposure: 'advertised',
+    availability: 'base',
+    runtimeWording:
+      'File and search tools resolve requested paths within allowed roots and reject escapes, including symlink escapes.',
+    enforcementGate: PATH_SECURITY_GATE,
+    toolNames: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_content'],
+  },
+  list_files_pattern_scope: {
+    exposure: 'advertised',
+    availability: 'base',
+    runtimeWording:
+      'list_files accepts only relative glob patterns without parent directory traversal.',
+    enforcementGate: 'validateListFilesPattern(pattern)',
+    toolNames: ['list_files'],
+  },
+  search_content_glob_scope: {
+    exposure: 'advertised',
+    availability: 'base',
+    runtimeWording:
+      'search_content accepts only relative glob filters without parent directory traversal.',
+    enforcementGate: 'validateListFilesPattern(glob)',
+    toolNames: ['search_content'],
+  },
+  bash_timeout_bound: {
+    exposure: 'advertised',
+    availability: 'base',
+    runtimeWording:
+      'bash enforces a 30s default timeout and caps caller-provided timeout values at 600000ms.',
+    enforcementGate: 'parseBashTimeoutMs(args.timeout)',
+    toolNames: ['bash'],
+  },
+  hybrid_pipeline_availability: {
+    exposure: 'advertised',
+    availability: 'hybrid_pipeline',
+    runtimeWording:
+      'pipeline.* and step.* tools are available only when hybrid pipeline is enabled for the runtime.',
+    enforcementGate:
+      'executeToolCall: opts.enableHybridPipeline === false rejects pipeline.* and step.*',
+    toolNames: [
+      'pipeline.start',
+      'pipeline.status',
+      'pipeline.resume',
+      'pipeline.cancel',
+      'step.run',
+      'step.assert',
+      'step.retry',
+      'step.wait',
+    ],
+  },
+};
+
+export function createAdvertisedOpenAIToolExecContracts(
+  toolNames: Iterable<string>,
+  opts?: Pick<ExecuteToolCallOpts, 'enableHybridPipeline'>,
+): ReadonlySet<OpenAIToolExecContractId> {
+  const advertisedToolNames = toolNames instanceof Set ? toolNames : new Set(toolNames);
+  const advertised = new Set<OpenAIToolExecContractId>();
+
+  for (const contractId of OPENAI_TOOL_EXEC_CONTRACT_ORDER) {
+    const contract = OPENAI_TOOL_EXEC_CONTRACT[contractId];
+    if (
+      contract.availability === 'hybrid_pipeline'
+      && opts?.enableHybridPipeline === false
+    ) {
+      continue;
+    }
+    if (
+      contract.toolNames
+      && !contract.toolNames.some((toolName) => advertisedToolNames.has(toolName))
+    ) {
+      continue;
+    }
+    advertised.add(contractId);
+  }
+
+  return advertised;
+}
 
 export type ExecuteToolCallOpts = {
   /**
@@ -76,88 +211,6 @@ export type ExecuteToolCallOpts = {
    */
   pipelineStepMode?: boolean;
 };
-
-// ── Path security ────────────────────────────────────────────────────
-
-/**
- * Canonicalize allowed roots once (resolves symlinks in the roots themselves).
- * Falls back to path.resolve if the root dir doesn't exist yet.
- */
-async function canonicalizeRoots(roots: string[]): Promise<string[]> {
-  const canonical: string[] = [];
-  for (const root of roots) {
-    try {
-      canonical.push(await fs.realpath(root));
-    } catch {
-      canonical.push(path.resolve(root));
-    }
-  }
-  return canonical;
-}
-
-/**
- * Verify that `targetPath` falls under at least one allowed root.
- * Uses fs.realpath to resolve symlinks, preventing symlink escapes.
- * When the target (or its parent) doesn't exist, walks up the directory tree
- * to find an existing ancestor and validates that.
- */
-async function assertPathAllowed(
-  targetPath: string,
-  allowedRoots: string[],
-  checkParent = false,
-): Promise<void> {
-  const canonicalRoots = await canonicalizeRoots(allowedRoots);
-  let toCheck = checkParent ? path.dirname(targetPath) : targetPath;
-
-  // Walk up to the nearest existing ancestor for realpath resolution
-  let canonical: string | undefined;
-  let current = toCheck;
-  for (;;) {
-    try {
-      canonical = await fs.realpath(current);
-      break;
-    } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-        const parent = path.dirname(current);
-        if (parent === current) {
-          // Reached filesystem root without finding an existing dir
-          throw new Error(`Path not accessible: ${toCheck}`);
-        }
-        current = parent;
-        continue;
-      }
-      throw new Error(`Path not accessible: ${toCheck}`);
-    }
-  }
-
-  // Reconstruct the full canonical path by appending the non-existing suffix
-  const suffix = path.relative(current, toCheck);
-  if (suffix && suffix !== '.') {
-    canonical = path.join(canonical, suffix);
-  }
-
-  const allowed = canonicalRoots.some(
-    (root) => canonical === root || canonical!.startsWith(root + path.sep),
-  );
-  if (!allowed) {
-    throw new Error(`Path outside allowed roots: ${targetPath}`);
-  }
-}
-
-/**
- * Resolve a file_path argument against the first allowed root,
- * then validate it falls within allowed roots.
- */
-async function resolveAndCheck(
-  filePath: string,
-  allowedRoots: string[],
-  checkParent = false,
-): Promise<string> {
-  // Resolve relative paths against the first root
-  const resolved = path.resolve(allowedRoots[0], filePath);
-  await assertPathAllowed(resolved, allowedRoots, checkParent);
-  return resolved;
-}
 
 // ── Individual handlers ──────────────────────────────────────────────
 
@@ -297,6 +350,17 @@ function validateListFilesPattern(pattern: string): string | null {
   return null;
 }
 
+function parseBashTimeoutMs(args: Record<string, unknown>): { timeoutMs?: number; error?: string } {
+  const timeout = args.timeout;
+  if (timeout === undefined) return { timeoutMs: BASH_TIMEOUT_MS };
+  if (typeof timeout !== 'number' || !Number.isFinite(timeout) || timeout <= 0) {
+    return { error: 'timeout must be a positive number of milliseconds' };
+  }
+  return {
+    timeoutMs: Math.min(BASH_TIMEOUT_MAX_MS, Math.floor(timeout)),
+  };
+}
+
 async function normalizeContainedGlobMatch(
   entry: string,
   baseDir: string,
@@ -332,7 +396,7 @@ async function handleListFiles(
 
   const baseDir = searchPath
     ? await resolveAndCheck(searchPath, allowedRoots)
-    : allowedRoots[0];
+    : await resolveAndCheck('.', allowedRoots);
 
   // Use recursive readdir + minimatch-style matching via fs.glob (Node 22+)
   // Fall back to recursive readdir if fs.glob is not available
@@ -433,9 +497,16 @@ async function handleSearchContent(
 
   if (!pattern) return { result: 'pattern is required', ok: false };
 
+  if (glob !== undefined) {
+    const validationError = validateListFilesPattern(glob);
+    if (validationError) {
+      return { result: `Invalid glob filter: ${validationError}`, ok: false };
+    }
+  }
+
   const baseDir = searchPath
     ? await resolveAndCheck(searchPath, allowedRoots)
-    : allowedRoots[0];
+    : await resolveAndCheck('.', allowedRoots);
 
   // Try rg first, fall back to grep if rg isn't installed
   const rgArgs = ['--no-heading', '--line-number', '--color', 'never'];
@@ -498,12 +569,15 @@ async function handleBash(
 ): Promise<ToolResult> {
   const command = args.command as string;
   if (!command) return { result: 'command is required', ok: false };
+  const timeout = parseBashTimeoutMs(args);
+  if (timeout.error) return { result: timeout.error, ok: false };
+  const timeoutMs = timeout.timeoutMs ?? BASH_TIMEOUT_MS;
 
   try {
     const { stdout, stderr } = await execFileAsync('/bin/bash', ['-c', command], {
       cwd: allowedRoots[0],
       env: cliExecaEnv(),
-      timeout: BASH_TIMEOUT_MS,
+      timeout: timeoutMs,
       maxBuffer: BASH_MAX_OUTPUT,
     });
 
@@ -514,9 +588,15 @@ async function handleBash(
     if (cleanStderr) parts.push(`[stderr]\n${cleanStderr}`);
     return { result: parts.join('\n') || '(no output)', ok: true };
   } catch (err: unknown) {
-    const e = err as { stdout?: string; stderr?: string; killed?: boolean; message?: string };
-    if (e.killed) {
-      return { result: 'Command timed out (30s limit)', ok: false };
+    const e = err as {
+      stdout?: string;
+      stderr?: string;
+      killed?: boolean;
+      signal?: NodeJS.Signals;
+      message?: string;
+    };
+    if (e.killed || e.signal === 'SIGTERM' || e.message?.includes('timed out')) {
+      return { result: `Command timed out (${timeoutMs}ms limit)`, ok: false };
     }
     const cleanStdout = stripAnsi(e.stdout ?? '');
     const cleanStderr = stripAnsi(e.stderr ?? '');

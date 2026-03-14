@@ -47,6 +47,7 @@ const REQUESTER_DENY_ALL = { __requesterDenyAll: true } as const;
 type DeferredRunnerState = {
   allowChannelIds?: Set<string>;
   runtimeModel: string;
+  enableHybridPipeline?: boolean;
   discordActionsEnabled: boolean;
   discordActionsChannels: boolean;
   discordActionsMessaging: boolean;
@@ -298,6 +299,10 @@ export function configureDeferredScheduler(
       openTasksSection,
       actionsReferenceSection,
       noteLines,
+      runtimeId: opts.runtime.id,
+      runtimeCapabilities: opts.runtime.capabilities,
+      runtimeTools: opts.runtimeTools,
+      enableHybridPipeline: opts.state.enableHybridPipeline,
       invocationNotice: `Deferred follow-up scheduled for <#${channel.id}> (runs at ${fmtTime(run.runsAt)}).`,
       userMessage: action.prompt,
     });

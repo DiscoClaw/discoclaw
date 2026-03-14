@@ -4,7 +4,12 @@
 import process from 'node:process';
 import { stripVTControlCharacters } from 'node:util';
 import type { ResultPromise } from 'execa';
+import {
+  CODEX_CAPABILITY_CONTRACT,
+  createAdvertisedCodexCapabilities,
+} from './tool-capabilities.js';
 import type { EngineEvent } from './types.js';
+import type { RuntimeCapability } from './types.js';
 
 // ---------------------------------------------------------------------------
 // STDIN_THRESHOLD — byte limit above which prompts are piped via stdin
@@ -50,6 +55,41 @@ export function createEventQueue(): EventQueue {
   const wait = () => new Promise<void>((r) => { notify = r; });
 
   return { q, push, wait, wake };
+}
+
+type CodexCapabilityContractEntry = (typeof CODEX_CAPABILITY_CONTRACT)[keyof typeof CODEX_CAPABILITY_CONTRACT];
+type CodexContractCapability = keyof typeof CODEX_CAPABILITY_CONTRACT;
+
+const ORDERED_ADVERTISED_CODEX_CAPABILITIES = (
+  Object.entries(CODEX_CAPABILITY_CONTRACT) as Array<[CodexContractCapability, CodexCapabilityContractEntry]>
+)
+  .filter(([, contract]) => contract.exposure === 'advertised')
+  .map(([capability]) => capability);
+
+/**
+ * Resolve prompt-safe Codex orchestration wording from the audited capability profile.
+ * This intentionally emits only enforcement-backed guarantees and drops richer
+ * transport-only affordances that are not safe to advertise as runtime contracts.
+ */
+export function collectPromptSafeCodexOrchestrationWording(
+  runtimeCapabilities: Iterable<RuntimeCapability>,
+): string[] {
+  const advertised = createAdvertisedCodexCapabilities(runtimeCapabilities);
+  const wording: string[] = [];
+
+  for (const capability of ORDERED_ADVERTISED_CODEX_CAPABILITIES) {
+    if (!advertised.has(capability)) continue;
+    wording.push(CODEX_CAPABILITY_CONTRACT[capability].runtimeWording);
+  }
+
+  return wording;
+}
+
+/** Join prompt-safe Codex orchestration wording into a single runtime-facing string. */
+export function formatPromptSafeCodexOrchestrationWording(
+  runtimeCapabilities: Iterable<RuntimeCapability>,
+): string {
+  return collectPromptSafeCodexOrchestrationWording(runtimeCapabilities).join(' ');
 }
 
 // ---------------------------------------------------------------------------

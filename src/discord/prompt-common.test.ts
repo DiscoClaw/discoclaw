@@ -3,6 +3,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TaskData } from '../tasks/types.js';
+import { OPENAI_TOOL_EXEC_CONTRACT } from '../runtime/openai-tool-exec.js';
+import { CODEX_RUNTIME_CAPABILITIES } from '../runtime/tool-capabilities.js';
 
 import {
   ROOT_POLICY,
@@ -15,6 +17,7 @@ import {
   buildDurableMemorySection,
   buildOpenTasksSection,
   buildPromptPreamble,
+  buildScheduledSelfInvocationPrompt,
   buildPromptSectionEstimates,
   buildTaskContextSection,
   buildTaskThreadSection,
@@ -126,6 +129,52 @@ describe('buildPromptPreamble', () => {
     const ctx = '--- SOUL.md ---\nYou are a helpful assistant.';
     const result = buildPromptPreamble(ctx);
     expect(result).toContain(ctx);
+  });
+
+  it('renders runtime-specific audited OpenAI guarantees into the live prompt preamble', () => {
+    const result = buildPromptPreamble('workspace context', {
+      runtimeId: 'openai',
+      runtimeCapabilities: new Set(['streaming_text', 'tools_fs', 'tools_exec'] as const),
+      runtimeTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
+    });
+
+    expect(result).toContain('## Audited Runtime Tool Guarantees');
+    expect(result).toContain(OPENAI_TOOL_EXEC_CONTRACT.bash_timeout_bound.runtimeWording);
+    expect(result.indexOf(TRACKED_DEFAULTS_PREAMBLE)).toBeLessThan(
+      result.indexOf(OPENAI_TOOL_EXEC_CONTRACT.bash_timeout_bound.runtimeWording),
+    );
+    expect(result.indexOf(OPENAI_TOOL_EXEC_CONTRACT.bash_timeout_bound.runtimeWording)).toBeLessThan(
+      result.indexOf('workspace context'),
+    );
+  });
+
+  it('renders audited Codex orchestration wording into the live prompt preamble', () => {
+    const result = buildPromptPreamble('workspace context', {
+      runtimeId: 'codex',
+      runtimeCapabilities: new Set([...CODEX_RUNTIME_CAPABILITIES, 'mid_turn_steering'] as const),
+    });
+
+    expect(result).toContain('--- Codex Runtime Guarantees ---');
+    expect(result).toContain('Streams reply text through the RuntimeAdapter event channel.');
+    expect(result).toContain('Supports retained Codex sessions when the runtime advertises sessions.');
+    expect(result).toContain('Supports mid-turn steer and interrupt when the native app-server path is active.');
+  });
+});
+
+describe('buildScheduledSelfInvocationPrompt', () => {
+  it('threads runtime-aware tracked-tools wording through scheduled prompt assembly', () => {
+    const prompt = buildScheduledSelfInvocationPrompt({
+      inlinedContext: 'workspace context',
+      invocationNotice: 'Scheduled run',
+      userMessage: 'Do the thing',
+      runtimeId: 'openai',
+      runtimeCapabilities: new Set(['streaming_text', 'tools_fs', 'tools_exec'] as const),
+      runtimeTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
+    });
+
+    expect(prompt).toContain('## Audited Runtime Tool Guarantees');
+    expect(prompt).toContain(OPENAI_TOOL_EXEC_CONTRACT.file_root_containment.runtimeWording);
+    expect(prompt).toContain('User message:\nDo the thing');
   });
 });
 

@@ -364,7 +364,12 @@ function createReactionHandler(
           // Recency zone: recent conversation, actions reference, permission notes.
           // User content (reaction event) lands at the absolute end.
           let prompt =
-            buildPromptPreamble(inlinedContext.text) + '\n\n' +
+            buildPromptPreamble(inlinedContext.text, {
+              runtimeId: params.runtime.id,
+              runtimeCapabilities: params.runtime.capabilities,
+              runtimeTools: params.runtimeTools,
+              enableHybridPipeline: params.enableHybridPipeline,
+            }) + '\n\n' +
             (taskSection
               ? `---\n${taskSection}\n\n`
               : '') +

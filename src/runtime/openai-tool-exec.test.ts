@@ -1,8 +1,43 @@
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { executeToolCall } from './openai-tool-exec.js';
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  const mockedExecFile = vi.fn(actual.execFile) as unknown as typeof actual.execFile;
+  const invokeMockedExecFile = mockedExecFile as unknown as (
+    ...inputArgs: any[]
+  ) => unknown;
+  Object.defineProperty(mockedExecFile, Symbol.for('nodejs.util.promisify.custom'), {
+    value: (...args: any[]) =>
+      new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+        invokeMockedExecFile(...args, (err: Error | null, stdout: string, stderr: string) => {
+          if (err) {
+            reject(Object.assign(err, { stdout, stderr }));
+            return;
+          }
+          resolve({ stdout, stderr });
+        });
+      }),
+  });
+
+  return {
+    ...actual,
+    execFile: mockedExecFile,
+  };
+});
+
+import {
+  OPENAI_TOOL_EXEC_CONTRACT,
+  createAdvertisedOpenAIToolExecContracts,
+  executeToolCall,
+  type ExecuteToolCallOpts,
+  type OpenAIToolExecContractId,
+} from './openai-tool-exec.js';
+import { buildToolSchemas } from './openai-tool-schemas.js';
+import { PATH_SECURITY_GATE } from './tools/path-security.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -12,12 +47,165 @@ function parseJsonResult(result: string): Record<string, unknown> {
   return JSON.parse(result) as Record<string, unknown>;
 }
 
+function buildAdvertisedSchemaNames(
+  enabledTools: string[],
+  opts?: Pick<ExecuteToolCallOpts, 'enableHybridPipeline'>,
+): string[] {
+  const toolEligible = opts?.enableHybridPipeline === false
+    ? enabledTools.filter((tool) =>
+      tool !== 'Pipeline'
+      && tool !== 'Step'
+      && !tool.startsWith('pipeline.')
+      && !tool.startsWith('step.'))
+    : enabledTools;
+
+  return buildToolSchemas(toolEligible)
+    .map((schema) => schema.function.name);
+}
+
+async function buildToolArgs(toolName: string): Promise<Record<string, unknown>> {
+  switch (toolName) {
+    case 'read_file': {
+      const filePath = path.join(tmpDir, 'advertised-read.txt');
+      await fs.writeFile(filePath, 'advertised read\n');
+      return { file_path: filePath };
+    }
+    case 'write_file':
+      return { file_path: path.join(tmpDir, 'blocked-write.txt'), content: 'blocked' };
+    case 'bash':
+      return { command: 'echo parity' };
+    case 'pipeline.start':
+      return {
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'pipeline.txt', content: 'ok' } }],
+      };
+    default:
+      return {};
+  }
+}
+
+function mockExecFileOnce(
+  impl: (
+    file: string,
+    args: string[],
+    options: Record<string, unknown>,
+    callback: (error: Error | null, stdout: string, stderr: string) => void,
+  ) => void,
+): void {
+  vi.mocked(execFile).mockImplementationOnce(((...inputArgs: any[]) => {
+    const [file, args, options, callback] = inputArgs;
+    const resolvedArgs = Array.isArray(args) ? args : [];
+    const resolvedOptions = typeof options === 'function' || options == null
+      ? {}
+      : options as Record<string, unknown>;
+    const resolvedCallback = (
+      typeof args === 'function'
+        ? args
+        : typeof options === 'function'
+          ? options
+          : callback
+    ) as ((error: Error | null, stdout: string, stderr: string) => void) | undefined;
+
+    if (!resolvedCallback) {
+      throw new Error('execFile callback missing in test mock');
+    }
+
+    impl(file, resolvedArgs, resolvedOptions, resolvedCallback);
+    return {} as any;
+  }) as any);
+}
+
+const COVERED_TOOL_RUNTIME_CONFIGS = [
+  {
+    name: 'read-only invocation',
+    enabledTools: ['Read'],
+    execOpts: {},
+    expectedAdvertised: ['read_file'],
+    expectedContracts: ['invocation_allowlist', 'file_root_containment'],
+    probeTool: 'read_file',
+    blockedTool: 'write_file',
+    blockedMessage: /not allowlisted/i,
+  },
+  {
+    name: 'core fs+exec runtime',
+    enabledTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
+    execOpts: {},
+    expectedAdvertised: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_content', 'bash'],
+    expectedContracts: [
+      'invocation_allowlist',
+      'file_root_containment',
+      'list_files_pattern_scope',
+      'search_content_glob_scope',
+      'bash_timeout_bound',
+    ],
+    probeTool: 'bash',
+    blockedTool: 'pipeline.start',
+    blockedMessage: /not allowlisted/i,
+  },
+  {
+    name: 'hybrid pipeline enabled',
+    enabledTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'Pipeline', 'Step'],
+    execOpts: { enableHybridPipeline: true },
+    expectedAdvertised: [
+      'read_file',
+      'write_file',
+      'edit_file',
+      'list_files',
+      'search_content',
+      'bash',
+      'pipeline.start',
+      'pipeline.status',
+      'pipeline.resume',
+      'pipeline.cancel',
+      'step.run',
+      'step.assert',
+      'step.retry',
+      'step.wait',
+    ],
+    expectedContracts: [
+      'invocation_allowlist',
+      'file_root_containment',
+      'list_files_pattern_scope',
+      'search_content_glob_scope',
+      'bash_timeout_bound',
+      'hybrid_pipeline_availability',
+    ],
+    probeTool: 'pipeline.start',
+  },
+  {
+    name: 'hybrid pipeline disabled',
+    enabledTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'Pipeline', 'Step'],
+    execOpts: { enableHybridPipeline: false },
+    expectedAdvertised: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_content', 'bash'],
+    expectedContracts: [
+      'invocation_allowlist',
+      'file_root_containment',
+      'list_files_pattern_scope',
+      'search_content_glob_scope',
+      'bash_timeout_bound',
+    ],
+    probeTool: 'bash',
+    blockedTool: 'pipeline.start',
+    blockedMessage: /Hybrid pipeline tools are disabled/i,
+  },
+] satisfies Array<{
+  name: string;
+  enabledTools: string[];
+  execOpts: Pick<ExecuteToolCallOpts, 'enableHybridPipeline'>;
+  expectedAdvertised: string[];
+  expectedContracts: OpenAIToolExecContractId[];
+  probeTool: string;
+  blockedTool?: string;
+  blockedMessage?: RegExp;
+}>;
+
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-tool-exec-'));
 });
 
 afterEach(async () => {
   await fs.rm(tmpDir, { recursive: true, force: true });
+  vi.mocked(execFile).mockClear();
 });
 
 // ── read_file ────────────────────────────────────────────────────────
@@ -56,6 +244,29 @@ describe('read_file', () => {
     const r = await executeToolCall('read_file', {}, [tmpDir]);
     expect(r.ok).toBe(false);
     expect(r.result).toContain('file_path');
+  });
+
+  it('resolves relative paths against the first nonblank allowed root', async () => {
+    const filePath = path.join(tmpDir, 'root-filtered.txt');
+    await fs.writeFile(filePath, 'shared gate\n');
+
+    const r = await executeToolCall('read_file', { file_path: 'root-filtered.txt' }, ['', '   ', tmpDir]);
+    expect(r.ok).toBe(true);
+    expect(r.result).toBe('shared gate\n');
+  });
+
+  it('rejects reads outside the allowed roots', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-tool-exec-outside-'));
+    const outsideFile = path.join(outsideDir, 'outside.txt');
+    await fs.writeFile(outsideFile, 'blocked\n');
+
+    try {
+      const r = await executeToolCall('read_file', { file_path: outsideFile }, [tmpDir]);
+      expect(r.ok).toBe(false);
+      expect(r.result).toContain('outside allowed roots');
+    } finally {
+      await fs.rm(outsideDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -283,6 +494,14 @@ describe('list_files', () => {
     expect(r.ok).toBe(true);
     expect(r.result).toContain('No files matched');
   });
+
+  it('uses the first nonblank allowed root when path is omitted', async () => {
+    await fs.writeFile(path.join(tmpDir, 'default-root.ts'), '');
+
+    const r = await executeToolCall('list_files', { pattern: '*.ts' }, ['', '   ', tmpDir]);
+    expect(r.ok).toBe(true);
+    expect(r.result).toContain('default-root.ts');
+  });
 });
 
 // ── search_content ───────────────────────────────────────────────────
@@ -311,6 +530,18 @@ describe('search_content', () => {
     expect(r.ok).toBe(true);
     expect(r.result).toContain('No matches');
   });
+
+  it('rejects absolute glob filters', async () => {
+    await fs.writeFile(path.join(tmpDir, 'file.txt'), 'hello\n');
+
+    const r = await executeToolCall(
+      'search_content',
+      { pattern: 'hello', path: tmpDir, glob: '/etc/*' },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob filter');
+  });
 });
 
 // ── bash ─────────────────────────────────────────────────────────────
@@ -320,6 +551,19 @@ describe('bash', () => {
     const r = await executeToolCall('bash', { command: 'echo hello' }, [tmpDir]);
     expect(r.ok).toBe(true);
     expect(r.result).toContain('hello');
+  });
+
+  it('uses the 30s default timeout when the caller does not provide one', async () => {
+    mockExecFileOnce((file, args, options, callback) => {
+      expect(file).toBe('/bin/bash');
+      expect(args).toEqual(['-c', 'echo default-timeout']);
+      expect(options.timeout).toBe(30_000);
+      callback(null, 'default-timeout\n', '');
+    });
+
+    const r = await executeToolCall('bash', { command: 'echo default-timeout' }, [tmpDir]);
+    expect(r.ok).toBe(true);
+    expect(r.result).toContain('default-timeout');
   });
 
   it('strips ANSI sequences from bash stdout and stderr', async () => {
@@ -364,13 +608,45 @@ describe('bash', () => {
   });
 
   it('times out on long-running commands', async () => {
-    // Use a very short timeout via the handler's internal timeout — we test
-    // the mechanism by running a command that hangs, but we can't easily
-    // override the 30s const. Instead test that a fast-exit command works
-    // and trust the execFile timeout mechanism. A full timeout test would
-    // need 30+ seconds which is too slow for unit tests.
-    const r = await executeToolCall('bash', { command: 'echo fast' }, [tmpDir]);
-    expect(r.ok).toBe(true);
+    const r = await executeToolCall(
+      'bash',
+      { command: 'sleep 1', timeout: 50 },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('50ms limit');
+  });
+
+  it('rejects invalid timeout values before invoking bash', async () => {
+    const r = await executeToolCall(
+      'bash',
+      { command: 'echo nope', timeout: 0 },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('positive number of milliseconds');
+    expect(vi.mocked(execFile)).not.toHaveBeenCalled();
+  });
+
+  it('caps caller-provided timeouts at 600000ms', async () => {
+    mockExecFileOnce((file, args, options, callback) => {
+      expect(file).toBe('/bin/bash');
+      expect(args).toEqual(['-c', 'sleep 999999']);
+      expect(options.timeout).toBe(600_000);
+      const err = Object.assign(new Error('timed out'), {
+        killed: true,
+        signal: 'SIGTERM',
+      });
+      callback(err, '', '');
+    });
+
+    const r = await executeToolCall(
+      'bash',
+      { command: 'sleep 999999', timeout: 999_999 },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('600000ms limit');
   });
 });
 
@@ -457,6 +733,71 @@ describe('web_search', () => {
     expect(r.ok).toBe(false);
     expect(r.result).toContain('web_search not available');
   });
+});
+
+// ── tool contract parity ────────────────────────────────────────────
+
+describe('tool contract parity', () => {
+  it('ties file root containment wording to the shared path-security gate name', () => {
+    expect(OPENAI_TOOL_EXEC_CONTRACT.file_root_containment.enforcementGate).toBe(PATH_SECURITY_GATE);
+  });
+
+  it.each(COVERED_TOOL_RUNTIME_CONFIGS)(
+    'matches the enforcement-backed contract for $name',
+    async ({
+      enabledTools,
+      execOpts,
+      expectedAdvertised,
+      expectedContracts,
+      probeTool,
+      blockedTool,
+      blockedMessage,
+    }) => {
+      const advertised = buildAdvertisedSchemaNames(enabledTools, execOpts);
+      expect([...advertised].sort()).toEqual([...expectedAdvertised].sort());
+
+      const advertisedContracts = createAdvertisedOpenAIToolExecContracts(
+        new Set(advertised),
+        execOpts,
+      );
+      expect([...advertisedContracts].sort()).toEqual([...expectedContracts].sort());
+
+      for (const contractId of advertisedContracts) {
+        const contract = OPENAI_TOOL_EXEC_CONTRACT[contractId];
+        expect(contract.exposure).toBe('advertised');
+        expect(contract.runtimeWording.length).toBeGreaterThan(0);
+        expect(contract.enforcementGate.length).toBeGreaterThan(0);
+      }
+
+      const allowedToolNames = new Set(advertised);
+      const probeResult = await executeToolCall(
+        probeTool,
+        await buildToolArgs(probeTool),
+        [tmpDir],
+        undefined,
+        { ...execOpts, allowedToolNames },
+      );
+
+      if (probeTool === 'pipeline.start') {
+        expect(probeResult.ok).toBe(true);
+        expect(parseJsonResult(probeResult.result)['status']).toBe('queued');
+      } else {
+        expect(probeResult.ok).toBe(true);
+      }
+
+      if (!blockedTool || !blockedMessage) return;
+
+      const blockedResult = await executeToolCall(
+        blockedTool,
+        await buildToolArgs(blockedTool),
+        [tmpDir],
+        undefined,
+        { ...execOpts, allowedToolNames },
+      );
+      expect(blockedResult.ok).toBe(false);
+      expect(blockedResult.result).toMatch(blockedMessage);
+    },
+  );
 });
 
 // ── pipeline lifecycle ───────────────────────────────────────────────
