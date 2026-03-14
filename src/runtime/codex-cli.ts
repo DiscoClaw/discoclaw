@@ -3,7 +3,7 @@
 // and falls back to the CLI adapter when native transport is unavailable.
 
 import path from 'node:path';
-import type { RuntimeAdapter, RuntimeInvokeParams } from './types.js';
+import type { RuntimeAdapter, RuntimeCapability, RuntimeInvokeParams } from './types.js';
 import { createCliRuntime, killAllSubprocesses } from './cli-adapter.js';
 import { CodexAppServerClient } from './codex-app-server.js';
 import { remapCrossRuntimeTierModel, resolveReasoningEffort } from './model-tiers.js';
@@ -34,6 +34,10 @@ export type CodexCliRuntimeOpts = {
 };
 
 const NATIVE_APP_SERVER_FALLBACK_NOTICE = 'App-server unavailable, falling back to CLI';
+const CONSERVATIVE_CODEX_CAPABILITIES = [
+  'streaming_text',
+  'sessions',
+] satisfies readonly RuntimeCapability[];
 
 function mergeSystemPrompt(
   systemPrompt: string | undefined,
@@ -87,6 +91,21 @@ function hasNonDefaultCwd(cwd: string, defaultCwd: string): boolean {
   return path.resolve(cwd) !== defaultCwd;
 }
 
+function createAdvertisedCodexCapabilities(
+  baseCapabilities: ReadonlySet<RuntimeCapability>,
+  opts?: { includeMidTurnSteering?: boolean },
+): ReadonlySet<RuntimeCapability> {
+  // Codex session restrictions vary by transport and inherited session state, so
+  // only advertise the guarantees that hold across fresh, resumed, and bypassed turns.
+  const capabilities = new Set<RuntimeCapability>(
+    CONSERVATIVE_CODEX_CAPABILITIES.filter((capability) => baseCapabilities.has(capability)),
+  );
+  if (opts?.includeMidTurnSteering) {
+    capabilities.add('mid_turn_steering');
+  }
+  return capabilities;
+}
+
 export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter {
   const appServerUrl = process.env.CODEX_APP_SERVER_URL?.trim();
   const nativeEnabled = isTruthyEnv(process.env.CODEX_APP_SERVER_NATIVE);
@@ -104,10 +123,12 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     appendSystemPrompt: opts.appendSystemPrompt,
     log: opts.log,
   });
+  const advertisedCapabilities = createAdvertisedCodexCapabilities(baseAdapter.capabilities);
 
   if (!appServerUrl || !nativeEnabled) {
     return {
       ...baseAdapter,
+      capabilities: advertisedCapabilities,
       invoke(params) {
         return baseAdapter.invoke(normalizeInvokeParams(params, opts));
       },
@@ -127,7 +148,9 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
 
   return {
     ...baseAdapter,
-    capabilities: new Set([...baseAdapter.capabilities, 'mid_turn_steering']),
+    capabilities: createAdvertisedCodexCapabilities(baseAdapter.capabilities, {
+      includeMidTurnSteering: true,
+    }),
     invoke(params) {
       return (async function* () {
         const normalizedParams = normalizeInvokeParams(params, opts);
