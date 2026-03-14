@@ -2,7 +2,14 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { executeToolCall } from './openai-tool-exec.js';
+import {
+  OPENAI_TOOL_EXEC_CONTRACT,
+  createAdvertisedOpenAIToolExecContracts,
+  executeToolCall,
+  type ExecuteToolCallOpts,
+  type OpenAIToolExecContractId,
+} from './openai-tool-exec.js';
+import { buildToolSchemas } from './openai-tool-schemas.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -11,6 +18,127 @@ let tmpDir: string;
 function parseJsonResult(result: string): Record<string, unknown> {
   return JSON.parse(result) as Record<string, unknown>;
 }
+
+function buildAdvertisedSchemaNames(
+  enabledTools: string[],
+  opts?: Pick<ExecuteToolCallOpts, 'enableHybridPipeline'>,
+): string[] {
+  const toolEligible = opts?.enableHybridPipeline === false
+    ? enabledTools.filter((tool) =>
+      tool !== 'Pipeline'
+      && tool !== 'Step'
+      && !tool.startsWith('pipeline.')
+      && !tool.startsWith('step.'))
+    : enabledTools;
+
+  return buildToolSchemas(toolEligible)
+    .map((schema) => schema.function.name);
+}
+
+async function buildToolArgs(toolName: string): Promise<Record<string, unknown>> {
+  switch (toolName) {
+    case 'read_file': {
+      const filePath = path.join(tmpDir, 'advertised-read.txt');
+      await fs.writeFile(filePath, 'advertised read\n');
+      return { file_path: filePath };
+    }
+    case 'write_file':
+      return { file_path: path.join(tmpDir, 'blocked-write.txt'), content: 'blocked' };
+    case 'bash':
+      return { command: 'echo parity' };
+    case 'pipeline.start':
+      return {
+        auto_run: false,
+        steps: [{ tool: 'write_file', arguments: { file_path: 'pipeline.txt', content: 'ok' } }],
+      };
+    default:
+      return {};
+  }
+}
+
+const COVERED_TOOL_RUNTIME_CONFIGS = [
+  {
+    name: 'read-only invocation',
+    enabledTools: ['Read'],
+    execOpts: {},
+    expectedAdvertised: ['read_file'],
+    expectedContracts: ['invocation_allowlist', 'file_root_containment'],
+    probeTool: 'read_file',
+    blockedTool: 'write_file',
+    blockedMessage: /not allowlisted/i,
+  },
+  {
+    name: 'core fs+exec runtime',
+    enabledTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash'],
+    execOpts: {},
+    expectedAdvertised: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_content', 'bash'],
+    expectedContracts: [
+      'invocation_allowlist',
+      'file_root_containment',
+      'list_files_pattern_scope',
+      'search_content_glob_scope',
+      'bash_timeout_bound',
+    ],
+    probeTool: 'bash',
+    blockedTool: 'pipeline.start',
+    blockedMessage: /not allowlisted/i,
+  },
+  {
+    name: 'hybrid pipeline enabled',
+    enabledTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'Pipeline', 'Step'],
+    execOpts: { enableHybridPipeline: true },
+    expectedAdvertised: [
+      'read_file',
+      'write_file',
+      'edit_file',
+      'list_files',
+      'search_content',
+      'bash',
+      'pipeline.start',
+      'pipeline.status',
+      'pipeline.resume',
+      'pipeline.cancel',
+      'step.run',
+      'step.assert',
+      'step.retry',
+      'step.wait',
+    ],
+    expectedContracts: [
+      'invocation_allowlist',
+      'file_root_containment',
+      'list_files_pattern_scope',
+      'search_content_glob_scope',
+      'bash_timeout_bound',
+      'hybrid_pipeline_availability',
+    ],
+    probeTool: 'pipeline.start',
+  },
+  {
+    name: 'hybrid pipeline disabled',
+    enabledTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash', 'Pipeline', 'Step'],
+    execOpts: { enableHybridPipeline: false },
+    expectedAdvertised: ['read_file', 'write_file', 'edit_file', 'list_files', 'search_content', 'bash'],
+    expectedContracts: [
+      'invocation_allowlist',
+      'file_root_containment',
+      'list_files_pattern_scope',
+      'search_content_glob_scope',
+      'bash_timeout_bound',
+    ],
+    probeTool: 'bash',
+    blockedTool: 'pipeline.start',
+    blockedMessage: /Hybrid pipeline tools are disabled/i,
+  },
+] satisfies Array<{
+  name: string;
+  enabledTools: string[];
+  execOpts: Pick<ExecuteToolCallOpts, 'enableHybridPipeline'>;
+  expectedAdvertised: string[];
+  expectedContracts: OpenAIToolExecContractId[];
+  probeTool: string;
+  blockedTool?: string;
+  blockedMessage?: RegExp;
+}>;
 
 beforeEach(async () => {
   tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-tool-exec-'));
@@ -56,6 +184,20 @@ describe('read_file', () => {
     const r = await executeToolCall('read_file', {}, [tmpDir]);
     expect(r.ok).toBe(false);
     expect(r.result).toContain('file_path');
+  });
+
+  it('rejects reads outside the allowed roots', async () => {
+    const outsideDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-tool-exec-outside-'));
+    const outsideFile = path.join(outsideDir, 'outside.txt');
+    await fs.writeFile(outsideFile, 'blocked\n');
+
+    try {
+      const r = await executeToolCall('read_file', { file_path: outsideFile }, [tmpDir]);
+      expect(r.ok).toBe(false);
+      expect(r.result).toContain('outside allowed roots');
+    } finally {
+      await fs.rm(outsideDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -311,6 +453,18 @@ describe('search_content', () => {
     expect(r.ok).toBe(true);
     expect(r.result).toContain('No matches');
   });
+
+  it('rejects absolute glob filters', async () => {
+    await fs.writeFile(path.join(tmpDir, 'file.txt'), 'hello\n');
+
+    const r = await executeToolCall(
+      'search_content',
+      { pattern: 'hello', path: tmpDir, glob: '/etc/*' },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('Invalid glob filter');
+  });
 });
 
 // ── bash ─────────────────────────────────────────────────────────────
@@ -364,13 +518,13 @@ describe('bash', () => {
   });
 
   it('times out on long-running commands', async () => {
-    // Use a very short timeout via the handler's internal timeout — we test
-    // the mechanism by running a command that hangs, but we can't easily
-    // override the 30s const. Instead test that a fast-exit command works
-    // and trust the execFile timeout mechanism. A full timeout test would
-    // need 30+ seconds which is too slow for unit tests.
-    const r = await executeToolCall('bash', { command: 'echo fast' }, [tmpDir]);
-    expect(r.ok).toBe(true);
+    const r = await executeToolCall(
+      'bash',
+      { command: 'sleep 1', timeout: 50 },
+      [tmpDir],
+    );
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('50ms limit');
   });
 });
 
@@ -457,6 +611,67 @@ describe('web_search', () => {
     expect(r.ok).toBe(false);
     expect(r.result).toContain('web_search not available');
   });
+});
+
+// ── tool contract parity ────────────────────────────────────────────
+
+describe('tool contract parity', () => {
+  it.each(COVERED_TOOL_RUNTIME_CONFIGS)(
+    'matches the enforcement-backed contract for $name',
+    async ({
+      enabledTools,
+      execOpts,
+      expectedAdvertised,
+      expectedContracts,
+      probeTool,
+      blockedTool,
+      blockedMessage,
+    }) => {
+      const advertised = buildAdvertisedSchemaNames(enabledTools, execOpts);
+      expect([...advertised].sort()).toEqual([...expectedAdvertised].sort());
+
+      const advertisedContracts = createAdvertisedOpenAIToolExecContracts(
+        new Set(advertised),
+        execOpts,
+      );
+      expect([...advertisedContracts].sort()).toEqual([...expectedContracts].sort());
+
+      for (const contractId of advertisedContracts) {
+        const contract = OPENAI_TOOL_EXEC_CONTRACT[contractId];
+        expect(contract.exposure).toBe('advertised');
+        expect(contract.runtimeWording.length).toBeGreaterThan(0);
+        expect(contract.enforcementGate.length).toBeGreaterThan(0);
+      }
+
+      const allowedToolNames = new Set(advertised);
+      const probeResult = await executeToolCall(
+        probeTool,
+        await buildToolArgs(probeTool),
+        [tmpDir],
+        undefined,
+        { ...execOpts, allowedToolNames },
+      );
+
+      if (probeTool === 'pipeline.start') {
+        expect(probeResult.ok).toBe(true);
+        expect(parseJsonResult(probeResult.result)['status']).toBe('queued');
+      } else {
+        expect(probeResult.ok).toBe(true);
+      }
+
+      if (!blockedTool || !blockedMessage) return;
+
+      const blockedResult = await executeToolCall(
+        blockedTool,
+        await buildToolArgs(blockedTool),
+        [tmpDir],
+        undefined,
+        { ...execOpts, allowedToolNames },
+      );
+      expect(blockedResult.ok).toBe(false);
+      expect(blockedResult.result).toMatch(blockedMessage);
+    },
+  );
 });
 
 // ── pipeline lifecycle ───────────────────────────────────────────────
