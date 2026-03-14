@@ -91,6 +91,47 @@ async function baseOpts(
   };
 }
 
+async function seedCodexCandidateFiles(tmpDir: string): Promise<void> {
+  const files = [
+    ['src/discord/forge-commands.ts', 'export const forgeMarker = "forge codex auditor";\n'],
+    ['src/runtime/codex-app-server.ts', 'export const appServerMarker = "codex app server";\n'],
+    ['src/runtime/codex-cli.ts', 'export const cliMarker = "codex cli";\n'],
+  ] as const;
+
+  for (const [relativePath, content] of files) {
+    const absolutePath = path.join(tmpDir, relativePath);
+    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+    await fs.writeFile(absolutePath, content, 'utf8');
+  }
+}
+
+async function seedCodexNativeWriteContextFiles(tmpDir: string): Promise<void> {
+  const workspaceFiles = [
+    ['SOUL.md', '# SOUL.md\ncodex native soul context\n'],
+    ['IDENTITY.md', '# IDENTITY.md\ncodex native identity context\n'],
+    ['USER.md', '# USER.md\ncodex native user context\n'],
+    ['AGENTS.md', '# AGENTS.md\ncodex native agents context\n'],
+    ['TOOLS.md', '# TOOLS.md\ncodex native tools context\n'],
+  ] as const;
+
+  for (const [relativePath, content] of workspaceFiles) {
+    await fs.writeFile(path.join(tmpDir, relativePath), content, 'utf8');
+  }
+
+  await fs.mkdir(path.join(tmpDir, '.context'), { recursive: true });
+  await fs.writeFile(
+    path.join(tmpDir, '.context', 'project.md'),
+    '# Project Context\ncodex native project context\n',
+    'utf8',
+  );
+  await fs.mkdir(path.join(tmpDir, 'docs'), { recursive: true });
+  await fs.writeFile(
+    path.join(tmpDir, 'docs', 'compound-lessons.md'),
+    '# Compound Lessons\n\n## Lessons\n\n- codex native compound lesson\n',
+    'utf8',
+  );
+}
+
 /**
  * Returns a runtime where each call index maps to either an error event or a
  * text response. `'error'` entries emit a runtime error; strings emit text.
@@ -469,6 +510,11 @@ describe('isRetryableError', () => {
   it('matches plan output prefix contract failures', () => {
     expect(isRetryableError('draft output must start with # Plan:')).toBe(true);
     expect(isRetryableError('revision output must start with # Plan:')).toBe(true);
+  });
+
+  it('matches grounding output contract failures', () => {
+    expect(isRetryableError('draft grounding output must be repo-relative file paths only')).toBe(true);
+    expect(isRetryableError('revision grounding output must be repo-relative file paths or NONE')).toBe(true);
   });
 
   it('is case-insensitive', () => {
@@ -2370,6 +2416,89 @@ describe('ForgeOrchestrator', () => {
     expect(systemPrompts[1]).toContain('Do not use tools on this retry.');
   });
 
+  it('bypasses inner grounding retries and salvages through a fresh outer retry session', async () => {
+    const tmpDir = await makeTmpDir();
+    await seedCodexCandidateFiles(tmpDir);
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    let callIndex = 0;
+    const prompts: string[] = [];
+    const sessionKeys: Array<string | undefined> = [];
+    const toolsSeen: Array<string[] | undefined> = [];
+    const addDirsSeen: Array<string[] | undefined> = [];
+    const nativeBypassSeen: Array<boolean | undefined> = [];
+    const supervisors: Array<RuntimeInvokeParams['supervisor']> = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const, 'mid_turn_steering' as const]),
+      invoke(params: RuntimeInvokeParams) {
+        const idx = callIndex++;
+        prompts.push(params.prompt);
+        sessionKeys.push(params.sessionKey ?? undefined);
+        toolsSeen.push(params.tools);
+        addDirsSeen.push(params.addDirs);
+        nativeBypassSeen.push(params.disableNativeAppServer);
+        supervisors.push(params.supervisor);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          if (idx === 0) {
+            yield { type: 'text_delta', text: 'I’m locating the forge auditor and Codex app-server wiring, then' };
+            yield { type: 'done' };
+            return;
+          }
+          if (idx === 1) {
+            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'done' };
+            return;
+          }
+          yield { type: 'text_final', text: auditClean };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(
+      tmpDir,
+      wrapRuntimeWithGlobalPolicies({
+        runtime,
+        maxConcurrentInvocations: 3,
+        globalSupervisorEnabled: true,
+        env: { DISCOCLAW_GLOBAL_SUPERVISOR_ENABLED: '1' } as NodeJS.ProcessEnv,
+      }),
+    );
+    const orchestrator = new ForgeOrchestrator(opts);
+    const progress: string[] = [];
+
+    const result = await orchestrator.run('Test feature', async (msg) => {
+      progress.push(msg);
+    });
+
+    expect(result.error).toBeUndefined();
+    expect(callIndex).toBe(3);
+    expect(supervisors[0]).toEqual(expect.objectContaining({
+      limits: expect.objectContaining({
+        maxCycles: 1,
+        maxRetries: 0,
+      }),
+    }));
+    if (prompts[0]!.includes('## Candidate File Paths')) {
+      expect(prompts[0]).toContain('`src/discord/forge-commands.ts`');
+      expect(toolsSeen[0]).toEqual([]);
+      expect(addDirsSeen[0]).toBeUndefined();
+    } else {
+      expect(prompts[0]).toContain('You are gathering only the concrete repo file paths needed for a later plan-writing turn.');
+      expect(toolsSeen[0]).toEqual(['Read', 'Glob', 'Grep']);
+      expect(addDirsSeen[0]).toEqual([tmpDir]);
+    }
+    expect(sessionKeys[0]).toMatch(/^forge:plan-\d+:test-model:drafter$/);
+    expect(toolsSeen[1]).toBeUndefined();
+    expect(addDirsSeen[1]).toBeUndefined();
+    expect(nativeBypassSeen[1]).toBe(true);
+    expect(sessionKeys[1]).toBe(`${sessionKeys[0]}:draft-retry`);
+    expect(prompts[1]).toContain('You are salvaging a stalled plan draft.');
+    expect(progress.some((p) => p.includes('retrying'))).toBe(true);
+  });
+
   it('uses phase-specific retry session keys so revision salvage does not resume the draft retry thread', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
@@ -3303,6 +3432,287 @@ function makeCaptureRuntime(responses: string[]): {
 }
 
 describe('Forge session keys', () => {
+  it('uses a two-stage native Codex draft flow with shared drafter session state', async () => {
+    const tmpDir = await makeTmpDir();
+    await seedCodexCandidateFiles(tmpDir);
+    await seedCodexNativeWriteContextFiles(tmpDir);
+    const groundedPaths = [
+      '`src/discord/forge-commands.ts`',
+      '`src/runtime/codex-app-server.ts`',
+    ].join('\n');
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- \`src/discord/forge-commands.ts\` — add two-stage native draft orchestration.\n- \`src/runtime/codex-app-server.ts\` — confirm native turn behavior.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const invocations: RuntimeInvokeParams[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const, 'mid_turn_steering' as const]),
+      invoke(params) {
+        invocations.push(params);
+        const text = invocations.length === 1
+          ? groundedPaths
+          : invocations.length === 2
+            ? draftPlan
+            : auditClean;
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(invocations).toHaveLength(3);
+    if (invocations[0]!.prompt.includes('## Candidate File Paths')) {
+      expect(invocations[0]!.prompt).toContain('Choose the 1-5 most relevant repo-relative file paths from the candidate list only.');
+      expect(invocations[0]!.prompt).toContain('`src/discord/forge-commands.ts`');
+      expect(invocations[0]!.tools).toEqual([]);
+      expect(invocations[0]!.addDirs).toBeUndefined();
+    } else {
+      expect(invocations[0]!.prompt).toContain('You are gathering only the concrete repo file paths needed for a later plan-writing turn.');
+      expect(invocations[0]!.tools).toEqual(['Read', 'Glob', 'Grep']);
+      expect(invocations[0]!.addDirs).toEqual([tmpDir]);
+    }
+    expect(invocations[1]!.prompt).toContain('## Grounded Repo Inputs');
+    expect(invocations[1]!.prompt).toContain('`src/discord/forge-commands.ts`');
+    expect(invocations[1]!.prompt).not.toContain(ROOT_POLICY.slice(0, 80));
+    expect(invocations[1]!.prompt).not.toContain(TRACKED_DEFAULTS_PREAMBLE.slice(0, 80));
+    expect(invocations[1]!.prompt).toContain('codex native soul context');
+    expect(invocations[1]!.prompt).toContain('codex native identity context');
+    expect(invocations[1]!.prompt).toContain('codex native user context');
+    expect(invocations[1]!.prompt).toContain('codex native tools context');
+    expect(invocations[1]!.prompt).not.toContain('codex native agents context');
+    expect(invocations[1]!.prompt).not.toContain('codex native project context');
+    expect(invocations[1]!.prompt).not.toContain('codex native compound lesson');
+    expect(invocations[1]!.tools).toEqual([]);
+    expect(invocations[1]!.addDirs).toBeUndefined();
+    expect(invocations[1]!.sessionKey).toBe(invocations[0]!.sessionKey);
+    expect(invocations[2]!.sessionKey).toContain(':auditor');
+    expect(invocations[2]!.sessionKey).not.toBe(invocations[0]!.sessionKey);
+    expect(invocations.every((params) => params.disableNativeAppServer === true)).toBe(true);
+    expect(invocations[0]!.systemPrompt).toBeUndefined();
+    expect(invocations[1]!.systemPrompt).toBeUndefined();
+  });
+
+  it('prioritizes src candidates ahead of noisy script and env files for Codex draft grounding', async () => {
+    const tmpDir = await makeTmpDir();
+    await seedCodexCandidateFiles(tmpDir);
+    await fs.mkdir(path.join(tmpDir, 'scripts'), { recursive: true });
+    await fs.writeFile(path.join(tmpDir, 'scripts', 'forge-native-repro.ts'), 'console.log("forge native repro");\n', 'utf8');
+    await fs.writeFile(path.join(tmpDir, '.env.example'), 'CODEX_APP_SERVER_URL=ws://127.0.0.1:4321\n', 'utf8');
+
+    const invocations: RuntimeInvokeParams[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const, 'mid_turn_steering' as const]),
+      invoke(params) {
+        invocations.push(params);
+        const text = invocations.length === 1
+          ? '`src/runtime/codex-app-server.ts`\n`src/discord/forge-commands.ts`'
+          : invocations.length === 2
+            ? `# Plan: Restore forge auditor to Codex after ws-1222\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nRestore the forge auditor.\n\n## Scope\n\n## Changes\n\n- \`src/runtime/codex-app-server.ts\` — adjust native handling.\n- \`src/discord/forge-commands.ts\` — refine forge routing.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`
+            : '**Verdict:** Ready to approve.';
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Restore forge auditor to Codex after ws-1222', async () => {});
+
+    expect(result.error).toBeUndefined();
+    const candidatePrompt = invocations[0]!.prompt;
+    if (candidatePrompt.includes('## Candidate File Paths')) {
+      expect(candidatePrompt.indexOf('`src/runtime/codex-app-server.ts`')).toBeGreaterThan(-1);
+      expect(candidatePrompt.indexOf('`src/discord/forge-commands.ts`')).toBeGreaterThan(-1);
+      expect(candidatePrompt.indexOf('`scripts/forge-native-repro.ts`')).toBeGreaterThan(-1);
+      expect(candidatePrompt.indexOf('`.env.example`')).toBeGreaterThan(-1);
+      expect(candidatePrompt.indexOf('`src/runtime/codex-app-server.ts`'))
+        .toBeLessThan(candidatePrompt.indexOf('`scripts/forge-native-repro.ts`'));
+      expect(candidatePrompt.indexOf('`src/discord/forge-commands.ts`'))
+        .toBeLessThan(candidatePrompt.indexOf('`.env.example`'));
+      expect(invocations[0]!.tools).toEqual([]);
+      expect(invocations[0]!.addDirs).toBeUndefined();
+    } else {
+      expect(candidatePrompt).toContain('You are gathering only the concrete repo file paths needed for a later plan-writing turn.');
+      expect(invocations[0]!.tools).toEqual(['Read', 'Glob', 'Grep']);
+      expect(invocations[0]!.addDirs).toEqual([tmpDir]);
+    }
+  });
+
+  it('uses a two-stage native Codex revision flow with shared drafter session state', async () => {
+    const tmpDir = await makeTmpDir();
+    await seedCodexCandidateFiles(tmpDir);
+    await seedCodexNativeWriteContextFiles(tmpDir);
+    const groundedDraftPaths = [
+      '`src/discord/forge-commands.ts`',
+      '`src/runtime/codex-app-server.ts`',
+    ].join('\n');
+    const groundedRevisionPaths = 'NONE';
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- \`src/discord/forge-commands.ts\` — add two-stage native draft orchestration.\n- \`src/runtime/codex-app-server.ts\` — confirm native turn behavior.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditBlocking = '**Concern 1: Missing details**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
+    const revisedPlan = `# Plan: Test feature revised\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing better.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- \`src/discord/forge-commands.ts\` — add two-stage native draft orchestration.\n- \`src/runtime/codex-app-server.ts\` — document native turn behavior assumptions.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    const invocations: RuntimeInvokeParams[] = [];
+    const responses = [
+      groundedDraftPaths,
+      draftPlan,
+      auditBlocking,
+      groundedRevisionPaths,
+      revisedPlan,
+      auditClean,
+    ];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const, 'mid_turn_steering' as const]),
+      invoke(params) {
+        invocations.push(params);
+        const text = responses[invocations.length - 1] ?? '(missing response)';
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(invocations).toHaveLength(6);
+    expect(invocations[0]!.sessionKey).toContain(':drafter');
+    expect(invocations[1]!.sessionKey).toBe(invocations[0]!.sessionKey);
+    expect(invocations[2]!.sessionKey).toContain(':auditor');
+    expect(invocations[3]!.sessionKey).toBe(invocations[0]!.sessionKey);
+    expect(invocations[4]!.sessionKey).toBe(invocations[0]!.sessionKey);
+    expect(invocations[5]!.sessionKey).toBe(invocations[2]!.sessionKey);
+    expect(invocations[3]!.prompt).toContain('## Candidate File Paths');
+    expect(invocations[3]!.prompt).toContain('Reply with `NONE` exactly if no additional repo-relative file paths are needed.');
+    expect(invocations[3]!.tools).toEqual([]);
+    expect(invocations[3]!.addDirs).toBeUndefined();
+    expect(invocations[4]!.prompt).toContain('## Existing Plan File Paths');
+    expect(invocations[4]!.prompt).toContain('`src/discord/forge-commands.ts`');
+    expect(invocations[4]!.prompt).toContain('NONE');
+    expect(invocations[4]!.prompt).toContain('codex native soul context');
+    expect(invocations[4]!.prompt).toContain('codex native identity context');
+    expect(invocations[4]!.prompt).toContain('codex native user context');
+    expect(invocations[4]!.prompt).toContain('codex native tools context');
+    expect(invocations[4]!.prompt).not.toContain('codex native agents context');
+    expect(invocations[4]!.prompt).not.toContain('codex native project context');
+    expect(invocations[4]!.prompt).not.toContain('codex native compound lesson');
+    expect(invocations[4]!.tools).toEqual([]);
+    expect(invocations[4]!.addDirs).toBeUndefined();
+    expect(invocations.every((params) => params.disableNativeAppServer === true)).toBe(true);
+    expect(invocations[3]!.systemPrompt).toBeUndefined();
+    expect(invocations[4]!.systemPrompt).toBeUndefined();
+  });
+
+  it('steers native Codex grounding turns back to path-only output when they start narrating', async () => {
+    const tmpDir = await makeTmpDir();
+    await seedCodexCandidateFiles(tmpDir);
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- \`src/discord/forge-commands.ts\` — add two-stage native draft orchestration.\n- \`src/runtime/codex-app-server.ts\` — confirm native turn behavior.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    let groundingSteered = false;
+    const steerMessages: string[] = [];
+    const invocations: RuntimeInvokeParams[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const, 'mid_turn_steering' as const]),
+      steer(_sessionKey, message) {
+        groundingSteered = true;
+        steerMessages.push(message);
+        return Promise.resolve(true);
+      },
+      invoke(params) {
+        invocations.push(params);
+        if (invocations.length === 1) {
+          return (async function* (): AsyncGenerator<EngineEvent> {
+            yield { type: 'text_delta', text: 'I' };
+            await Promise.resolve();
+            if (groundingSteered) {
+              yield {
+                type: 'text_delta',
+                text: '`src/discord/forge-commands.ts`\n`src/runtime/codex-app-server.ts`',
+              };
+            }
+            yield { type: 'done' };
+          })();
+        }
+
+        const text = invocations.length === 2 ? draftPlan : auditClean;
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(invocations).toHaveLength(3);
+    expect(steerMessages).toHaveLength(1);
+    expect(steerMessages[0]).toContain('repo-relative file paths');
+    expect(steerMessages[0]).toContain('Do not narrate');
+  });
+
+  it('accepts native Codex grounding output when deltas are followed by a full text_final payload', async () => {
+    const tmpDir = await makeTmpDir();
+    await seedCodexCandidateFiles(tmpDir);
+    const groundedPaths = [
+      '`src/discord/forge-commands.ts`',
+      '`src/runtime/codex-app-server.ts`',
+    ].join('\n');
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- \`src/discord/forge-commands.ts\` — add two-stage native draft orchestration.\n- \`src/runtime/codex-app-server.ts\` — confirm native turn behavior.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+
+    let callIndex = 0;
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const, 'mid_turn_steering' as const]),
+      invoke() {
+        const idx = callIndex++;
+        if (idx === 0) {
+          return (async function* (): AsyncGenerator<EngineEvent> {
+            yield { type: 'text_delta', text: '`src/discord/forge-commands.ts`\n' };
+            yield { type: 'text_final', text: groundedPaths };
+            yield { type: 'done' };
+          })();
+        }
+
+        const text = idx === 1 ? draftPlan : auditClean;
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(callIndex).toBe(3);
+  });
+
   it('applies plan-phase supervisor policy and shorter stall windows to forge prompt steps', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;

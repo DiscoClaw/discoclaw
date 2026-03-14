@@ -696,9 +696,10 @@ describe('auto-follow-up for query actions', () => {
     expect(runtime.invoke).toHaveBeenCalledTimes(1);
   });
 
-  it('triggers follow-up when a non-query action fails (generateImage not configured)', async () => {
-    // generateImage is a non-query action. When it fails, the bot should receive a
-    // follow-up invocation so it can explain the error in plain language (d8c7753 fix).
+  it('triggers follow-up with the imagegen setup-required stub when generateImage is unconfigured', async () => {
+    // generateImage is a non-query action. When it fails on the interactive/manual
+    // path, the failure shape should be the setup-required stub rather than the old
+    // raw subsystem-not-configured error, and that still triggers a follow-up.
     let callCount = 0;
     const runtime = {
       invoke: vi.fn(async function* () {
@@ -713,8 +714,9 @@ describe('auto-follow-up for query actions', () => {
     } as any;
 
     const handler = createMessageCreateHandler(
-      // discordActionsImagegen enables the action type; no imagegenCtx -> fails with
-      // "Imagegen subsystem not configured" (non-query failure -> follow-up triggered).
+      // discordActionsImagegen enables the action type; no imagegenCtx -> the
+      // interactive/manual path returns the setup-required stub (non-query failure ->
+      // follow-up triggered).
       baseParams(runtime, { discordActionsImagegen: true }),
       makeQueue(),
     );
@@ -724,9 +726,13 @@ describe('auto-follow-up for query actions', () => {
     const secondPrompt = runtime.invoke.mock.calls[1][0].prompt;
     expect(secondPrompt).toContain('[Auto-follow-up]');
     expect(secondPrompt).toContain('Failed:');
+    expect(secondPrompt).toContain('Image generation is available in Discord actions');
+    expect(secondPrompt).toContain('Setup walkthrough');
+    expect(secondPrompt).toContain('!models help');
+    expect(secondPrompt).not.toContain('Imagegen subsystem not configured');
   });
 
-  it('failure follow-up placeholder contains action type and error (not generic)', async () => {
+  it('failure follow-up placeholder uses the setup-required retry stub (not generic)', async () => {
     let callCount = 0;
     const runtime = {
       invoke: vi.fn(async function* () {
@@ -751,9 +757,13 @@ describe('auto-follow-up for query actions', () => {
     const sendArg = (msg.channel.send.mock.calls as any[][])[0]?.[0];
     expect(sendArg).toBeDefined();
     const content = typeof sendArg === 'string' ? sendArg : sendArg?.content ?? '';
-    // Should name the failing action type and not fall back to the generic placeholder.
+    // Should name the failing action type, carry the setup-required stub copy, and not
+    // fall back to the generic placeholder.
     expect(content).toContain('generateImage');
+    expect(content).toContain('Image generation is available in Discord actions');
+    expect(content).toContain('Retrying...');
     expect(content).not.toContain('(following up...)');
+    expect(content).not.toContain('Imagegen subsystem not configured');
   });
 
   it('query-success follow-up placeholder is generic (following up...)', async () => {
@@ -803,6 +813,7 @@ describe('auto-follow-up for query actions', () => {
     expect(runtime.invoke).toHaveBeenCalledTimes(2);
     const secondPrompt = runtime.invoke.mock.calls[1][0].prompt;
     expect(secondPrompt).toContain('[Auto-follow-up]');
+    expect(secondPrompt).toContain('Setup walkthrough');
     expect(secondPrompt).toContain('One or more actions failed');
     expect(secondPrompt).toContain('explicitly tell the user what failed');
   });

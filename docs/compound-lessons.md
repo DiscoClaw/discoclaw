@@ -72,6 +72,20 @@ Format notes:
 
 ## Lessons
 
+### 2026-03-14 - Separate research from final artifact turns
+Tags: #forge #workflow #prompting
+Lesson: For plan- and artifact-producing flows, separate open-ended research from the final strict-output turn whenever possible. Bounded inputs and fixed candidate sets are more reliable than asking one turn to both discover context and emit the final durable artifact, and this guidance should be treated as cross-runtime default shaping unless an adapter proves it can handle the combined turn robustly.
+Source: multi-day `ws-1223` forge/native audit, where both native and CLI Codex behaved better once discovery and final artifact emission were split into separate stages
+Applied: docs/audit/codex-native-forge-route-audit.md
+Status: active
+
+### 2026-03-14 - Do not treat Codex native turns as a drop-in file-tool agent
+Tags: #runtime #codex #forge #workflow
+Lesson: When routing forge or planning work to Codex, do not assume prompt-time tool labels like `Read`, `Glob`, and `Grep` are a real enforced Codex-side contract. Codex native/app-server turns behave more like a lower-level transport over generic shell-style actions, and long strict artifact-revision turns can be nondeterministic even when chat and audit turns are healthy. Separate discovery from final artifact writing, prefer bounded inputs over open-ended research, and design Codex flows expecting hybrid/native-to-CLI recovery rather than pure-native determinism.
+Source: multi-day `ws-1223` native forge audit and harness repros, including repeated native revision-grounding/revision-write stalls with the app-server path while CLI salvage remained healthy
+Applied: docs/audit/codex-native-forge-route-audit.md
+Status: active
+
 ### 2026-03-12 - Preserve Discord.js instance context in narrowed thread wrappers
 Tags: #discord #cron #task
 Lesson: When narrowing Discord.js channel or thread objects into custom interfaces, either keep the original object and call its methods directly or bind any copied prototype mutators before invoking them. Methods like `edit()` and `setName()` depend on the live Discord.js instance context (`this.client.rest`), so unbound wrappers can throw before any REST request is attempted.

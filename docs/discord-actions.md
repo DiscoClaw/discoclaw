@@ -133,7 +133,7 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1; also requires durable memory enabled)
   - `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` default 1800, `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` default 5)
   - `DISCOCLAW_DISCORD_ACTIONS_LOOP` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` default 60, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` default 86400, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT` default 5)
-  - `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0; requires at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`)
+  - `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0; controls actual image generation readiness. Normal manual/help surfaces still advertise `imagegen` by default, but execution still requires this flag plus at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`)
   - `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` default 8)
   - `config` (`modelSet`/`modelShow`) — no separate env flag; always enabled when master switch is on
   - `reactionPrompt` — no separate env flag; gated under `DISCOCLAW_DISCORD_ACTIONS_MESSAGING`
@@ -143,6 +143,10 @@ Those env vars get translated into an `ActionCategoryFlags` object (see `src/dis
 Important behavioral notes:
 - Even if a category is implemented, it is not usable unless its flag is enabled.
 - Actions are not advertised to the model in DMs: `src/discord.ts` only appends the actions prompt section for non-DM messages, and execution requires `msg.guild`.
+- `imagegen` has an intentional discoverability/readiness split on the normal manual Discord path: ordinary user turns, their auto-follow-ups, and help/model surfaces such as `!models` / `!models help` can expose `imagegen` before setup is complete.
+- If an interactive/manual invocation emits `generateImage` without configured imagegen context, `executeDiscordActions(...)` returns a setup walkthrough instead of generating an image. That walkthrough points the operator at `.env`, `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN`, provider keys, restart, and `!models help`.
+- The setup walkthrough is tied to the shared interactive action-confirmation mode used by manual user turns and their follow-ups. Automated callers keep the raw `Imagegen subsystem not configured` error.
+- Reaction and deferred surfaces remain separately flag-driven. This document does not treat them as already non-advertised; they continue to follow their current flow-specific contracts.
 
 ## Tiered Schema Injection (Prompt Guidance)
 
@@ -414,6 +418,11 @@ No separate env flag — config actions are always enabled when the master switc
 
 Allow the model to generate images via OpenAI or Gemini and post them to a Discord channel.
 
+Discoverability vs. readiness:
+- `imagegen` is intentionally visible by default in the normal user-facing Discord help/onboarding path and the normal manual message/follow-up tool path, even before image generation is configured.
+- `!models` shows an `imagegen` row (`setup-required` when unconfigured), and `!models help` explicitly says setup is still required and must be done with environment variables rather than `!models set`.
+- Actual generation still follows the existing enablement/config path described below.
+
 | Action | Description | Mutating? |
 |--------|-------------|-----------|
 | `generateImage` | Generate an image and post it to a channel | Yes |
@@ -431,9 +440,12 @@ Valid sizes:
 - OpenAI gpt-image-1: same as above, plus `auto`
 - Gemini: `1:1` (default), `3:4`, `4:3`, `9:16`, `16:9`
 
-Env: `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0). Requires at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY` to be set; the action will fail at runtime if neither is present.
+Env: `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0). Actual generation still requires this flag plus at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`; the action cannot run until that existing config is present.
 Context: Requires `ImagegenContext` with `apiKey` (OpenAI), `geminiApiKey`, `baseUrl`, and `defaultModel`.
 Available in cron flows when `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` is set — follows the env flag rather than being hardcoded off.
+Unconfigured normal manual/follow-up invocations return a setup walkthrough instead of the raw not-configured error. That stub is only used on the shared interactive/manual confirmation path; automated callers still receive `Imagegen subsystem not configured`.
+Loop ticks do not use the manual setup-stub path. If a loop emits `generateImage` while image generation is unavailable there, the output is treated as unsupported for loop execution rather than receiving the interactive setup walkthrough.
+Reaction and deferred execution stay on their own current flag-driven contracts; this section does not imply those surfaces already advertise or suppress `imagegen` the same way as the normal manual/help path.
 
 **Example action blocks:**
 

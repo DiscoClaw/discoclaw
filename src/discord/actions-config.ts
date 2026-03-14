@@ -456,6 +456,8 @@ export function executeConfigAction(
         const igModel = resolveDefaultModel(bp.imagegenCtx);
         const igProvider = resolveProvider(igModel);
         rows.push(['imagegen', igModel, `Image generation (${igProvider})`, '']);
+      } else {
+        rows.push(['imagegen', 'setup-required', 'Image generation (setup required)', '']);
       }
 
       const adapterDefault = configCtx.runtime.defaultModel;

@@ -27,6 +27,8 @@ Legacy env vars `RUNTIME_MODEL`, `DISCOCLAW_PLAN_RUN_MODEL`, and `DISCOCLAW_FAST
 
 For the operator workflow that explains startup defaults vs. overrides, install-mode detection, `!models reset` semantics, live main-runtime swaps, and safe adapter/model switching, see [docs/runtime-switching.md](runtime-switching.md). If you want OpenRouter to participate in tier-based switching, define the specific `DISCOCLAW_TIER_OPENROUTER_<TIER>` vars you need there as well.
 
+`!models` and `!models help` also expose image generation as a discoverable capability before setup is complete: `!models` shows `imagegen` as `setup-required` when unconfigured, and `!models help` notes that imagegen setup is still required and must be done through environment variables rather than `!models set`.
+
 ## Runtime
 
 | Variable | Default | Description |
@@ -148,7 +150,7 @@ If any check fails consistently, treat the model as unsupported for DiscoClaw ru
 | `CODEX_BIN` | `codex` | Path to Codex CLI binary |
 | `CODEX_MODEL` | `gpt-5.4` | Codex model ID |
 | `CODEX_APP_SERVER_URL` | — | Optional Codex app-server websocket URL used by the native app-server invoke path |
-| `CODEX_APP_SERVER_NATIVE` | `false` | When `1` and `CODEX_APP_SERVER_URL` is set, use the app-server WebSocket as the primary invoke transport instead of `codex exec`. Automatically falls back to CLI for image turns, non-default `cwd`, and connection failures. |
+| `CODEX_APP_SERVER_NATIVE` | `false` | When `1` and `CODEX_APP_SERVER_URL` is set, use the app-server WebSocket as the primary invoke transport instead of `codex exec`. Automatically falls back to CLI for image turns, non-default `cwd`, connection failures, and any higher-level runtime/forge salvage policy that chooses CLI after a native phase stalls or fails. |
 | `CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX` | `false` | Skip Codex safety checks |
 | `CODEX_DISABLE_SESSIONS` | `false` | Disable Codex session persistence |
 | `DISCOCLAW_CODEX_VERBOSE_PREVIEW` | `false` | Emit richer reasoning/command preview lines (also forces `model_reasoning_summary="auto"` for Codex runs) |
@@ -212,8 +214,8 @@ See [docs/plan-and-forge.md](plan-and-forge.md) for usage details.
 | `FORGE_MAX_AUDIT_ROUNDS` | `5` | Max audit rounds in forge |
 | `FORGE_DRAFTER_MODEL` | — | Model override for forge drafter |
 | `FORGE_AUDITOR_MODEL` | — | Model override for forge auditor |
-| `FORGE_DRAFTER_RUNTIME` | — | Runtime override for forge drafter |
-| `FORGE_AUDITOR_RUNTIME` | — | Runtime override for forge auditor |
+| `FORGE_DRAFTER_RUNTIME` | — | Runtime override for forge drafter. When set to `codex`, forge currently forces Codex phases onto the CLI route by default rather than the native app-server path. |
+| `FORGE_AUDITOR_RUNTIME` | — | Runtime override for forge auditor. When set to `codex`, forge currently forces Codex phases onto the CLI route by default rather than the native app-server path. |
 | `FORGE_TIMEOUT_MS` | `1800000` (30 min) | Timeout for forge operations |
 | `FORGE_PROGRESS_THROTTLE_MS` | `3000` | Throttle interval for forge progress messages |
 | `FORGE_AUTO_IMPLEMENT` | `true` | Auto-run plan phases after forge approval |
@@ -316,7 +318,7 @@ Master switch and per-category flags for Discord actions. See [docs/discord-acti
 | `DISCOCLAW_DISCORD_ACTIONS_MEMORY` | `true` | Memory actions |
 | `DISCOCLAW_DISCORD_ACTIONS_DEFER` | `true` | Deferred (scheduled) actions |
 | `DISCOCLAW_DISCORD_ACTIONS_LOOP` | `true` | Loop actions (repeating scheduled self-invocations) |
-| `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` | `false` | Image generation actions |
+| `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` | `false` | Enables actual image generation execution; normal manual/help surfaces can still advertise `imagegen` before setup |
 | `DISCOCLAW_DISCORD_ACTIONS_VOICE` | `false` | Voice actions |
 | `DISCOCLAW_DISCORD_ACTIONS_SPAWN` | `true` | Spawn parallel sub-agent invocations |
 | `DISCOCLAW_SENDFILE_ALLOWED_DIRS` | `/tmp` | Comma-separated absolute directory paths allowed for the `sendFile` action. `DISCOCLAW_DATA_DIR` and `WORKSPACE_CWD` are auto-included when set. Symlinks are resolved via `fs.realpath()` before checking. |
@@ -330,6 +332,8 @@ Master switch and per-category flags for Discord actions. See [docs/discord-acti
 | `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` | `3` | Max follow-up depth for action chains |
 
 ## Image Generation
+
+Users can discover `imagegen` before setup on the normal manual/help surfaces (`!models`, `!models help`, and the normal manual message/follow-up action path). That is discoverability only. Actual generation still requires the existing enablement/config path: set `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` and configure a provider key. Until then, normal manual/follow-up invocations return a setup walkthrough instead of generating an image. Reaction/deferred flows remain on their own current flag-driven contracts.
 
 | Variable | Default | Description |
 |----------|---------|-------------|

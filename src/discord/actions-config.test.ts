@@ -261,12 +261,14 @@ describe('modelShow imagegen row', () => {
     expect(result.summary).toContain('openai');
   });
 
-  it('omits imagegen row when imagegenCtx is absent', () => {
+  it('shows imagegen row as setup-required when imagegenCtx is absent', () => {
     const ctx = makeCtx({ imagegenCtx: undefined });
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.summary).not.toContain('imagegen');
+    expect(result.summary).toContain('imagegen');
+    expect(result.summary).toContain('setup-required');
+    expect(result.summary).toContain('Image generation (setup required)');
   });
 
   it('defaults to dall-e-3/openai when both apiKey and geminiApiKey are set', () => {

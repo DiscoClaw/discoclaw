@@ -823,6 +823,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       if (params.statusCommandContext) params.statusCommandContext.lastMessageAt.current = Date.now();
 
       const isDm = msg.guildId == null;
+      // Manual user turns should always advertise imagegen; execution still
+      // gates on imagegenCtx and returns the interactive setup stub when absent.
       const actionFlags: ActionCategoryFlags = {
         channels: params.discordActionsChannels,
         messaging: params.discordActionsMessaging,
@@ -838,7 +840,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         config: params.discordActionsConfig ?? false,
         defer: !isDm && (params.discordActionsDefer ?? false),
         loop: !isDm && (params.discordActionsLoop ?? false),
-        imagegen: params.discordActionsImagegen ?? false,
+        imagegen: !isBotMessage || (params.discordActionsImagegen ?? false),
         voice: params.discordActionsVoice ?? false,
         spawn: params.discordActionsSpawn ?? false,
       };
