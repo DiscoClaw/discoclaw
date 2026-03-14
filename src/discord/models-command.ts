@@ -93,7 +93,7 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '- `!models reset` — clear all overrides and revert to startup defaults',
       '- `!models reset chat` — revert only the chat model to its startup default',
       '',
-      '**Note:** Image generation (imagegen) configuration is shown automatically in `!models` when enabled, but is not switchable via `!models set` — configure it via environment variables instead.',
+      '**Note:** Image generation (`imagegen`) is shown by default in `!models`, even when setup is still required. It is not switchable via `!models set` — configure it via environment variables instead.',
       '',
       '**TTS voice:** Use `!voice set <name>` to switch the Deepgram TTS voice at runtime (e.g. `!voice set aura-2-luna-en`). See `!voice help` for details.',
     ].join('\n');

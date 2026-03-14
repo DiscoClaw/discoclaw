@@ -184,6 +184,8 @@ describe('handleModelsCommand', () => {
   it('help mentions imagegen configuration', () => {
     const result = handleModelsCommand({ action: 'help' }, enabled);
     expect(result).toContain('imagegen');
+    expect(result).toContain('shown by default');
+    expect(result).toContain('setup is still required');
     expect(result).toContain('environment variables');
   });
 });
