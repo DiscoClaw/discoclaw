@@ -312,10 +312,21 @@ function formatConcretePlanPaths(paths: readonly string[]): string {
 
 function extractConcretePlanPaths(planContent: string): string[] {
   const planForPrompt = stripAuditLogForPrompt(planContent);
-  const matches = [...planForPrompt.matchAll(/`([^`\n]+)`/g)]
-    .map((match) => match[1]!.trim())
-    .filter((value) => value.includes('/'));
-  return [...new Set(matches)];
+  const matches = new Set<string>();
+  const addCandidate = (rawValue: string) => {
+    const normalized = normalizeForgeCandidatePath(rawValue.replace(/[),.:;]+$/g, ''));
+    if (!normalized || !normalized.includes('/')) return;
+    matches.add(normalized);
+  };
+
+  for (const match of planForPrompt.matchAll(/`([^`\n]+)`/g)) {
+    addCandidate(match[1]!.trim());
+  }
+  for (const match of planForPrompt.matchAll(/\b(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+\b/g)) {
+    addCandidate(match[0]!.trim());
+  }
+
+  return [...matches];
 }
 
 function formatCandidatePathChoices(paths: readonly string[]): string {
@@ -2239,6 +2250,8 @@ export class ForgeOrchestrator {
     let planContent = await fs.readFile(filePath, 'utf-8');
     let lastAuditNotes = '';
     let lastVerdict: AuditVerdict = { maxSeverity: 'none', shouldLoop: false };
+    let draftAuditFallbackPaths: string[] = [];
+    let revisionAuditFallbackPaths: string[] = [];
     const heartbeatPolicy = resolvePlanHeaderHeartbeatPolicy(
       planContent,
       this.opts.planForgeHeartbeatIntervalMs,
@@ -2395,6 +2408,7 @@ export class ForgeOrchestrator {
               candidatePaths: draftGroundingState.normalizedPaths,
               allowlistPaths: draftGroundingState.normalizedPaths,
             });
+            draftAuditFallbackPaths = draftGroundingState.normalizedPaths;
             const draftArtifactGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, draftArtifactPhase);
 
             const draftArtifactDef = {
@@ -2517,10 +2531,13 @@ export class ForgeOrchestrator {
           planContent = this.mergeDraftWithHeader(planContent, draftOutput);
           await this.atomicWrite(filePath, planContent);
           const auditBoundedPaths = extractConcretePlanPaths(planContent);
+          const persistedAuditPaths = auditBoundedPaths.length > 0
+            ? auditBoundedPaths
+            : draftAuditFallbackPaths;
           persistForgePhaseMetadata(planId, 'audit', {
-            researchComplete: auditBoundedPaths.length > 0,
-            candidatePaths: auditBoundedPaths,
-            allowlistPaths: auditBoundedPaths,
+            researchComplete: persistedAuditPaths.length > 0,
+            candidatePaths: persistedAuditPaths,
+            allowlistPaths: persistedAuditPaths,
           });
 
           // Update task title to match the drafter's Plan title (raw user input is often messy).
@@ -2774,6 +2791,7 @@ export class ForgeOrchestrator {
             candidatePaths: revisionGroundingState.normalizedPaths,
             allowlistPaths: revisionAllowlistPaths,
           });
+          revisionAuditFallbackPaths = revisionAllowlistPaths;
           const revisionArtifactGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, revisionArtifactPhase);
 
           const revisionArtifactDef = {
@@ -2902,10 +2920,13 @@ export class ForgeOrchestrator {
         planContent = this.mergeDraftWithHeader(planContent, revisionOutput);
         await this.atomicWrite(filePath, planContent);
         const revisedAuditBoundedPaths = extractConcretePlanPaths(planContent);
+        const persistedRevisedAuditPaths = revisedAuditBoundedPaths.length > 0
+          ? revisedAuditBoundedPaths
+          : revisionAuditFallbackPaths;
         persistForgePhaseMetadata(planId, 'audit', {
-          researchComplete: revisedAuditBoundedPaths.length > 0,
-          candidatePaths: revisedAuditBoundedPaths,
-          allowlistPaths: revisedAuditBoundedPaths,
+          researchComplete: persistedRevisedAuditPaths.length > 0,
+          candidatePaths: persistedRevisedAuditPaths,
+          allowlistPaths: persistedRevisedAuditPaths,
         });
       }
 

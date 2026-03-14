@@ -406,6 +406,20 @@ describe('executeForgeAction', () => {
 
   describe('forgeResume', () => {
     it('resumes forge on existing plan', async () => {
+      setForgePlanMetadata('plan-042', {
+        phaseState: {
+          currentPhase: 'audit',
+          researchComplete: true,
+        },
+        candidateBounds: {
+          candidatePaths: ['src/discord/actions-forge.ts'],
+          allowlistPaths: ['src/discord/actions-forge.ts'],
+        },
+        fallbackPolicy: {
+          onOutOfBounds: 're_research',
+          reResearchPhase: 'revision_research',
+        },
+      });
       const forgeCtx = makeForgeCtx();
       const result = await executeForgeAction(
         { type: 'forgeResume', planId: 'plan-042' },
@@ -420,6 +434,20 @@ describe('executeForgeAction', () => {
     });
 
     it('posts a status-aware forge review progress message for review plans', async () => {
+      setForgePlanMetadata('plan-042', {
+        phaseState: {
+          currentPhase: 'audit',
+          researchComplete: true,
+        },
+        candidateBounds: {
+          candidatePaths: ['src/discord/actions-forge.ts'],
+          allowlistPaths: ['src/discord/actions-forge.ts'],
+        },
+        fallbackPolicy: {
+          onOutOfBounds: 're_research',
+          reResearchPhase: 'revision_research',
+        },
+      });
       const edit = vi.fn(async () => ({}));
       const send = vi.fn(async () => ({ edit }));
       const fetch = vi.fn(async () => ({ send }));
@@ -454,6 +482,20 @@ describe('executeForgeAction', () => {
       const edit = vi.fn(async () => ({}));
       const send = vi.fn(async () => ({ edit }));
       const fetch = vi.fn(async () => ({ send }));
+      setForgePlanMetadata('plan-123', {
+        phaseState: {
+          currentPhase: 'audit',
+          researchComplete: true,
+        },
+        candidateBounds: {
+          candidatePaths: ['src/discord/actions-forge.ts'],
+          allowlistPaths: ['src/discord/actions-forge.ts'],
+        },
+        fallbackPolicy: {
+          onOutOfBounds: 're_research',
+          reResearchPhase: 'revision_research',
+        },
+      });
 
       const forgeCtx = makeForgeCtx();
       const result = await executeForgeAction(

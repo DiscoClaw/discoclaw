@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,9 +23,36 @@ import type { RuntimeAdapter, EngineEvent, RuntimeInvokeParams } from '../runtim
 import { TaskStore } from '../tasks/store.js';
 import { wrapRuntimeWithGlobalPolicies } from '../index.runtime.js';
 import { ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE } from './prompt-common.js';
+import { _resetForTest, setForgePlanMetadata } from './forge-plan-registry.js';
 
 async function makeTmpDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'forge-test-'));
+}
+
+function seedResumeMetadata(planId: string, candidatePaths: string[] = ['src/foo.ts']): void {
+  setForgePlanMetadata(planId, {
+    phaseState: {
+      currentPhase: 'audit',
+      researchComplete: true,
+    },
+    candidateBounds: {
+      candidatePaths,
+      allowlistPaths: candidatePaths,
+    },
+    fallbackPolicy: {
+      onOutOfBounds: 're_research',
+      reResearchPhase: 'revision_research',
+    },
+  });
+}
+
+function ensureConcretePlanPath(text: string): string {
+  if (!text.startsWith('# Plan:')) return text;
+  if (text.includes('src/') || text.includes('docs/') || text.includes('scripts/')) return text;
+  return text.replace(
+    /## Changes\s*\n\n/,
+    '## Changes\n\n- `src/foo.ts` — add the implementation detail.\n\n',
+  );
 }
 
 function makeMockRuntime(responses: string[]): RuntimeAdapter {
@@ -34,7 +61,7 @@ function makeMockRuntime(responses: string[]): RuntimeAdapter {
     id: 'claude_code' as const,
     capabilities: new Set(['streaming_text' as const]),
     invoke(_params) {
-      const text = responses[callIndex] ?? '(no response)';
+      const text = ensureConcretePlanPath(responses[callIndex] ?? '(no response)');
       callIndex++;
       return (async function* (): AsyncGenerator<EngineEvent> {
         yield { type: 'text_final', text };
@@ -56,7 +83,7 @@ function makeMockRuntimeWithError(errorOnCall: number, responses: string[]): Run
           yield { type: 'error', message: 'Runtime crashed' };
         })();
       }
-      const text = responses[idx] ?? '(no response)';
+      const text = ensureConcretePlanPath(responses[idx] ?? '(no response)');
       return (async function* (): AsyncGenerator<EngineEvent> {
         yield { type: 'text_final', text };
         yield { type: 'done' };
@@ -132,6 +159,10 @@ async function seedCodexNativeWriteContextFiles(tmpDir: string): Promise<void> {
   );
 }
 
+beforeEach(() => {
+  _resetForTest();
+});
+
 /**
  * Returns a runtime where each call index maps to either an error event or a
  * text response. `'error'` entries emit a runtime error; strings emit text.
@@ -149,7 +180,7 @@ function makeRetryableRuntime(callMap: Array<string | 'error'>): RuntimeAdapter 
           yield { type: 'error', message: 'hang detected' };
         })();
       }
-      const text = entry;
+      const text = ensureConcretePlanPath(entry);
       return (async function* (): AsyncGenerator<EngineEvent> {
         yield { type: 'text_final', text };
         yield { type: 'done' };
@@ -1450,7 +1481,7 @@ describe('ForgeOrchestrator', () => {
         const idx = callIdx++;
         if (idx === 0) {
           return (async function* (): AsyncGenerator<EngineEvent> {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
           })();
         }
@@ -1686,7 +1717,7 @@ describe('ForgeOrchestrator', () => {
       invoke(params) {
         prompts.push(params.prompt);
         const responses = [draftPlan, auditClean];
-        const text = responses[prompts.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[prompts.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -1727,7 +1758,7 @@ describe('ForgeOrchestrator', () => {
       invoke(params) {
         prompts.push(params.prompt);
         const responses = [draftPlan, auditClean];
-        const text = responses[prompts.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[prompts.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -1761,7 +1792,7 @@ describe('ForgeOrchestrator', () => {
       invoke(params) {
         prompts.push(params.prompt);
         const responses = [draftPlan, auditClean];
-        const text = responses[prompts.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[prompts.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -1800,7 +1831,7 @@ describe('ForgeOrchestrator', () => {
       invoke(params) {
         prompts.push(params.prompt);
         const responses = [draftPlan, auditClean];
-        const text = responses[prompts.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[prompts.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -1831,7 +1862,7 @@ describe('ForgeOrchestrator', () => {
       invoke(params) {
         invocations.push({ tools: params.tools, addDirs: params.addDirs });
         const responses = [draftPlan, auditClean];
-        const text = responses[invocations.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[invocations.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -2081,7 +2112,7 @@ _Filled in during/after implementation._
           // Cancel while the pipeline is running, then still yield the response.
           // The post-return guard should catch this before the output is processed.
           orchestrator.requestCancel();
-          yield { type: 'text_final', text: draftPlan };
+          yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
           yield { type: 'done' };
         })();
       },
@@ -2168,16 +2199,16 @@ _Filled in during/after implementation._
         return (async function* (): AsyncGenerator<EngineEvent> {
           if (idx === 0) {
             yield { type: 'text_delta', text: 'Inspecting the forge routing first.' };
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
           if (idx === 1) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2230,7 +2261,7 @@ _Filled in during/after implementation._
         systemPrompts.push(params.systemPrompt ?? '');
         return (async function* (): AsyncGenerator<EngineEvent> {
           if (idx === 0) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
@@ -2240,11 +2271,11 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 2) {
-            yield { type: 'text_final', text: revisedPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(revisedPlan) };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2297,11 +2328,11 @@ _Filled in during/after implementation._
                 input: { command: 'rg -n "forge"' },
               };
               await draftReleased;
-              yield { type: 'text_final', text: draftPlan };
+              yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
               yield { type: 'done' };
               return;
             }
-            yield { type: 'text_final', text: auditClean };
+            yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
             yield { type: 'done' };
           })();
         },
@@ -2359,11 +2390,11 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 1) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2429,11 +2460,11 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 1) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2497,11 +2528,11 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 1) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2566,11 +2597,11 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 2) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2650,7 +2681,7 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 1 || idx === 4) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
@@ -2705,7 +2736,7 @@ _Filled in during/after implementation._
         supervisors.push(params.supervisor);
         return (async function* (): AsyncGenerator<EngineEvent> {
           if (idx === 0) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
@@ -2722,11 +2753,11 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 3) {
-            yield { type: 'text_final', text: revisedPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(revisedPlan) };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2957,7 +2988,10 @@ _Filled in during/after implementation._
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: callCount === 2 ? draftPlan : auditClean };
+          yield {
+            type: 'text_final',
+            text: ensureConcretePlanPath(callCount === 2 ? draftPlan : auditClean),
+          };
           yield { type: 'done' };
         })();
       },
@@ -3094,7 +3128,7 @@ _Filled in during/after implementation._
       invoke(params) {
         prompts.push(params.prompt);
         const responses = [echoedTemplate, realDraft, auditClean];
-        const text = responses[prompts.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[prompts.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -3149,7 +3183,7 @@ _Filled in during/after implementation._
       invoke(params) {
         prompts.push(params.prompt);
         const responses = [draftPlan, auditClean];
-        const text = responses[prompts.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[prompts.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -3242,6 +3276,7 @@ describe('ForgeOrchestrator.resume()', () => {
       // Only audit output — no draft call
       '**Verdict:** Ready to approve.',
     ]));
+    seedResumeMetadata('plan-001');
 
     // Write plan file directly
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
@@ -3268,6 +3303,7 @@ describe('ForgeOrchestrator.resume()', () => {
     const opts = await baseOpts(tmpDir, makeMockRuntime([
       '**Verdict:** Ready to approve.',
     ]));
+    seedResumeMetadata('plan-001');
 
     const planContent = makePlanContent({ planId: 'plan-001', status: 'DRAFT' });
     const filePath = path.join(opts.plansDir, 'plan-001-test.md');
@@ -3294,6 +3330,7 @@ describe('ForgeOrchestrator.resume()', () => {
       makeMockRuntime(['**Verdict:** Ready to approve.']),
       { planForgeHeartbeatIntervalMs: 12_000 },
     );
+    seedResumeMetadata('plan-001');
     const heartbeat = await import('./phase-status-heartbeat.js');
     const createHeartbeatSpy = vi.spyOn(heartbeat, 'createPhaseStatusHeartbeatController');
 
@@ -3321,6 +3358,7 @@ describe('ForgeOrchestrator.resume()', () => {
       revisedPlan,    // revision
       auditClean,     // second audit
     ]));
+    seedResumeMetadata('plan-001');
 
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
     const filePath = path.join(opts.plansDir, 'plan-001-test.md');
@@ -3341,6 +3379,7 @@ describe('ForgeOrchestrator.resume()', () => {
     const auditClean = '**Verdict:** Ready to approve.';
 
     const opts = await baseOpts(tmpDir, makeMockRuntime([auditBlocking, revisedPlan, auditClean]));
+    seedResumeMetadata('plan-001');
 
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
     const filePath = path.join(opts.plansDir, 'plan-001-test.md');
@@ -3395,6 +3434,7 @@ describe('ForgeOrchestrator.resume()', () => {
     const opts = await baseOpts(tmpDir, makeMockRuntime([
       '**Verdict:** Ready to approve.',
     ]));
+    seedResumeMetadata('plan-001');
 
     // Plan already has Review 1 and Review 2
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW', reviews: 2 });
@@ -3523,6 +3563,7 @@ describe('ForgeOrchestrator.resume()', () => {
     // Call 0: audit attempt → retryable error, Call 1: audit retry → clean
     const runtime = makeRetryableRuntime(['error', auditClean]);
     const opts = await baseOpts(tmpDir, runtime);
+    seedResumeMetadata('plan-001');
 
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
     const filePath = path.join(opts.plansDir, 'plan-001-test.md');
@@ -3556,7 +3597,7 @@ function makeCaptureRuntime(responses: string[]): {
     capabilities: new Set(['streaming_text' as const, 'sessions' as const]),
     invoke(params) {
       invocations.push(params);
-      const text = responses[callIndex] ?? '(no response)';
+      const text = ensureConcretePlanPath(responses[callIndex] ?? '(no response)');
       callIndex++;
       return (async function* (): AsyncGenerator<EngineEvent> {
         yield { type: 'text_final', text };
@@ -3740,7 +3781,7 @@ describe('Forge session keys', () => {
         const idx = invocations.length - 1;
         return (async function* (): AsyncGenerator<EngineEvent> {
           if (idx === 0) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
@@ -3748,7 +3789,7 @@ describe('Forge session keys', () => {
             yield { type: 'error', message: 'timed out waiting for audit response' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -4098,6 +4139,7 @@ describe('Forge session keys', () => {
       '**Verdict:** Ready to approve.',
     ]);
     const opts = await baseOpts(tmpDir, runtime);
+    seedResumeMetadata('plan-001');
 
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
     const filePath = path.join(opts.plansDir, 'plan-001-test.md');
@@ -4132,7 +4174,7 @@ describe('auditorRuntime support', () => {
       invoke(params) {
         auditorInvocations.push(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -4178,7 +4220,7 @@ describe('auditorRuntime support', () => {
       invoke(params) {
         auditorInvocations.push(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -4208,7 +4250,7 @@ describe('auditorRuntime support', () => {
       invoke(params) {
         auditorInvocations.push(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -4389,7 +4431,7 @@ function makeMockRuntimeWithEvents(responseMap: Array<{ text: string; events?: E
       callIndex++;
       return (async function* (): AsyncGenerator<EngineEvent> {
         for (const evt of entry.events ?? []) yield evt;
-        yield { type: 'text_final', text: entry.text };
+        yield { type: 'text_final', text: ensureConcretePlanPath(entry.text) };
         yield { type: 'done' };
       })();
     },
@@ -4403,8 +4445,8 @@ describe('ForgeOrchestrator onEvent threading', () => {
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntimeWithEvents([
-      { text: draftPlan, events: [{ type: 'text_delta', text: '# Plan:' }] },
-      { text: auditClean },
+      { text: ensureConcretePlanPath(draftPlan), events: [{ type: 'text_delta', text: '# Plan:' }] },
+      { text: ensureConcretePlanPath(auditClean) },
     ]);
 
     const opts = await baseOpts(tmpDir, runtime);
@@ -4424,8 +4466,8 @@ describe('ForgeOrchestrator onEvent threading', () => {
 
     const runtime = wrapRuntimeWithGlobalPolicies({
       runtime: makeMockRuntimeWithEvents([
-        { text: draftPlan, events: [{ type: 'text_delta', text: '# Plan:' }] },
-        { text: auditClean },
+        { text: ensureConcretePlanPath(draftPlan), events: [{ type: 'text_delta', text: '# Plan:' }] },
+        { text: ensureConcretePlanPath(auditClean) },
       ]),
       maxConcurrentInvocations: 3,
       globalSupervisorEnabled: true,
@@ -4448,8 +4490,8 @@ describe('ForgeOrchestrator onEvent threading', () => {
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntimeWithEvents([
-      { text: draftPlan },
-      { text: auditClean, events: [{ type: 'text_delta', text: 'auditing...' }] },
+      { text: ensureConcretePlanPath(draftPlan) },
+      { text: ensureConcretePlanPath(auditClean), events: [{ type: 'text_delta', text: 'auditing...' }] },
     ]);
 
     const opts = await baseOpts(tmpDir, runtime);
