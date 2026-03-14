@@ -127,12 +127,14 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     dangerouslyBypassApprovalsAndSandbox: opts.dangerouslyBypassApprovalsAndSandbox,
     log: opts.log,
   });
+  const nativeCapabilities = new Set(baseAdapter.capabilities);
+  if (!opts.disableSessions) {
+    nativeCapabilities.add('mid_turn_steering');
+  }
 
   return {
     ...baseAdapter,
-    capabilities: createAdvertisedCodexCapabilities(
-      new Set([...baseAdapter.capabilities, 'mid_turn_steering']),
-    ),
+    capabilities: createAdvertisedCodexCapabilities(nativeCapabilities),
     invoke(params) {
       return (async function* () {
         const normalizedParams = normalizeInvokeParams(params, opts);

@@ -1552,6 +1552,7 @@ describe('Codex CLI runtime adapter', () => {
       defaultModel: 'gpt-5.3-codex',
       disableSessions: true,
     });
+    expectAdvertisedCodexCapabilities(rt.capabilities, { sessions: false });
     const client = appServerInstances[0]!;
 
     await collectEvents(rt.invoke({

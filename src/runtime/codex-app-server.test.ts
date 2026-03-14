@@ -172,7 +172,7 @@ describe('CodexAppServerClient', () => {
       network: {
         access: 'disabled',
       },
-      fidelity: 'exact',
+      fidelity: 'downgraded',
     });
 
     const description = formatCodexAppServerPromptSafeProfile(profile);
@@ -180,7 +180,9 @@ describe('CodexAppServerClient', () => {
     expect(description).toContain('read-only filesystem sandbox');
     expect(description).toContain('/tmp/discoclaw');
     expect(description).toContain('/tmp/other');
+    expect(description).toContain('Additional platform-default readable roots may also be available.');
     expect(description).toContain('Network access is disabled.');
+    expect(description).not.toContain('scoped to these roots');
     expectNoClaudeStyleToolClaims(description);
   });
 

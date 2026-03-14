@@ -1339,7 +1339,7 @@ export function resolveCodexAppServerPromptSafeProfile(
       network: {
         access: 'disabled',
       },
-      fidelity: 'exact',
+      fidelity: 'downgraded',
     };
   }
 
@@ -1364,9 +1364,14 @@ export function formatCodexAppServerPromptSafeProfile(
     const scopedRoots = profile.filesystem.readableRoots.length === 1
       ? profile.filesystem.readableRoots[0]
       : profile.filesystem.readableRoots.join(', ');
+    if (profile.fidelity === 'exact') {
+      return profile.filesystem.readableRoots.length === 1
+        ? `Codex native app-server uses generic command execution inside an enforced read-only filesystem sandbox scoped to ${scopedRoots}. Network access is disabled.`
+        : `Codex native app-server uses generic command execution inside an enforced read-only filesystem sandbox scoped to these roots: ${scopedRoots}. Network access is disabled.`;
+    }
     return profile.filesystem.readableRoots.length === 1
-      ? `Codex native app-server uses generic command execution inside an enforced read-only filesystem sandbox scoped to ${scopedRoots}. Network access is disabled.`
-      : `Codex native app-server uses generic command execution inside an enforced read-only filesystem sandbox scoped to these roots: ${scopedRoots}. Network access is disabled.`;
+      ? `Codex native app-server uses generic command execution inside an enforced read-only filesystem sandbox that includes at least ${scopedRoots}. Additional platform-default readable roots may also be available. Network access is disabled.`
+      : `Codex native app-server uses generic command execution inside an enforced read-only filesystem sandbox that includes at least these roots: ${scopedRoots}. Additional platform-default readable roots may also be available. Network access is disabled.`;
   }
 
   if (profile.filesystem.access === 'danger_full_access') {
