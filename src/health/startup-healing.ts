@@ -56,17 +56,19 @@ export async function healInterruptedCronRuns(
 }
 
 /**
- * Scenario 2: Remove stale cron run-stats records for threads that no longer exist.
+ * Scenario 2: Mark cron projections missing when their Discord threads no longer exist.
  *
  * Iterates all records in the persistent stats store. For each record, attempts
  * to fetch the Discord thread. If the thread is gone (null return or Discord
- * error code 10003 / HTTP 404), removes the record via `statsStore.removeByThreadId()`
- * and logs a structured warning.
+ * error code 10003 / HTTP 404), marks the record's projection as `missing` via
+ * `statsStore.markProjectionMissing()` so reconciliation can recreate the thread
+ * later. The canonical cron record is preserved — local persistence is the source
+ * of truth; Discord threads are a synchronized projection.
  *
  * Non-404 errors (network failures, rate-limits, etc.) are treated as transient:
  * the record is preserved and a fetch-error warning is logged instead.
  *
- * All remove-path errors are caught and logged (fail-open) to prevent healing
+ * All mark-path errors are caught and logged (fail-open) to prevent healing
  * from becoming a startup crash path.
  */
 export async function healStaleCronRecords(
@@ -101,15 +103,15 @@ export async function healStaleCronRecords(
     if (!threadGone) continue;
 
     try {
-      await statsStore.removeByThreadId(threadId);
+      await statsStore.markProjectionMissing(cronId);
       log?.warn(
         { cronId, threadId },
-        'startup:heal:cron removed stale stats record for deleted thread',
+        'startup:heal:cron marked projection missing for deleted thread (record preserved)',
       );
     } catch (err: unknown) {
       log?.warn(
         { cronId, threadId, err: err instanceof Error ? err.message : String(err) },
-        'startup:heal:cron failed to remove stale stats record — continuing',
+        'startup:heal:cron failed to mark projection missing — continuing',
       );
     }
   }
