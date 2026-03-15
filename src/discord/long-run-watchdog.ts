@@ -24,6 +24,7 @@ export type LongRunWatchdogRun = {
   checkInPosted: boolean;
   checkInPostedAt: number | null;
   completion: CompletionKind | null;
+  completionDetail: string | null;
   completedAt: number | null;
   finalPosted: boolean;
   finalPostAttempts: number;
@@ -43,6 +44,7 @@ export type StartLongRunInput = {
 
 export type CompleteLongRunInput = {
   outcome: Exclude<CompletionKind, 'interrupted'>;
+  detail?: string | null;
 };
 
 export type PostStillRunningSource = 'timer';
@@ -94,6 +96,13 @@ function asNullableString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
+function normalizeCompletionDetail(value: unknown): string | null {
+  const detail = asNullableString(value);
+  if (detail === null) return null;
+  const trimmed = detail.trim();
+  return trimmed ? trimmed.slice(0, 1500) : null;
+}
+
 function asRunStatus(value: unknown, fallback: RunStatus): RunStatus {
   return value === 'running' || value === 'completed' ? value : fallback;
 }
@@ -127,6 +136,7 @@ function normalizeRun(runId: string, raw: Record<string, unknown>, now: number):
     checkInPosted: asBoolean(raw.checkInPosted, false),
     checkInPostedAt: asNullableFiniteNumber(raw.checkInPostedAt),
     completion,
+    completionDetail: normalizeCompletionDetail(raw.completionDetail),
     completedAt,
     finalPosted,
     finalPostAttempts: Math.max(0, Math.floor(asFiniteNumber(raw.finalPostAttempts, 0))),
@@ -190,6 +200,7 @@ export class LongRunWatchdog {
         checkInPosted: false,
         checkInPostedAt: null,
         completion: null,
+        completionDetail: null,
         completedAt: null,
         finalPosted: false,
         finalPostAttempts: 0,
@@ -217,6 +228,9 @@ export class LongRunWatchdog {
         run.status = 'completed';
         run.completion = input.outcome;
         run.completedAt = this.now();
+      }
+      if (input.detail !== undefined) {
+        run.completionDetail = normalizeCompletionDetail(input.detail);
       }
       run.updatedAt = this.now();
       await this.persistStore();
@@ -266,6 +280,7 @@ export class LongRunWatchdog {
           this.clearCheckInTimer(run.runId);
           run.status = 'completed';
           run.completion = 'interrupted';
+          run.completionDetail = null;
           run.completedAt = now;
           run.updatedAt = now;
           run.finalPosted = false;
@@ -467,6 +482,7 @@ export class LongRunWatchdog {
 
   private requiresFinalPost(run: LongRunWatchdogRun): boolean {
     if (run.completion === 'interrupted') return true;
+    if (run.completion === 'failed' && run.completionDetail) return true;
     if (!run.notifyOnCompletion) return false;
     if (run.checkInPosted) return true;
     if (run.completedAt !== null && run.completedAt >= run.checkInDueAt) return true;

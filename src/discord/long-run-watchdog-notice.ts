@@ -1,4 +1,5 @@
 import { NO_MENTIONS } from './allowed-mentions.js';
+import { sanitizeErrorMessage } from './status-channel.js';
 
 type WatchdogNoticeMessage = {
   author?: { id?: string | null } | null;
@@ -25,6 +26,23 @@ function canEditSourceMessage(message: WatchdogNoticeMessage | null, botUserId?:
   if (typeof message.editable === 'boolean') return message.editable;
   const authorId = message.author?.id;
   return typeof authorId === 'string' && authorId.length > 0 && authorId === botUserId;
+}
+
+export function buildLongRunFinalNotice(args: {
+  completion: 'succeeded' | 'failed' | 'interrupted' | null;
+  completionDetail?: string | null;
+  source: 'complete' | 'startup-sweep';
+}): string {
+  const base = args.completion === 'succeeded'
+    ? 'Run complete.'
+    : args.completion === 'failed'
+      ? 'Run ended with errors.'
+      : 'Run interrupted by restart/shutdown.';
+  const recoveredSuffix = args.source === 'startup-sweep' ? ' (Recovered after restart.)' : '';
+  const rawDetail = typeof args.completionDetail === 'string' ? args.completionDetail.trim() : '';
+  if (!rawDetail || args.completion !== 'failed') return `${base}${recoveredSuffix}`;
+  const detail = sanitizeErrorMessage(rawDetail);
+  return `${base}${recoveredSuffix}\nReason: ${detail}`.slice(0, 2000);
 }
 
 export async function postLongRunWatchdogNoticeToChannel(

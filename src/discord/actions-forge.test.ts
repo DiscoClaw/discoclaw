@@ -1,5 +1,7 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildForgeCompletionWatchdogDetail,
+  buildForgeCrashWatchdogDetail,
   FORGE_ACTION_TYPES,
   evaluateForgeTurnGate,
   executeForgeAction,
@@ -96,6 +98,10 @@ function makeForgeCtx(overrides?: Partial<ForgeContext>): ForgeContext {
   };
 }
 
+async function settleBackgroundForge(): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, 20));
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -117,6 +123,29 @@ describe('FORGE_ACTION_TYPES', () => {
   it('does not contain non-forge types', () => {
     expect(FORGE_ACTION_TYPES.has('beadCreate')).toBe(false);
     expect(FORGE_ACTION_TYPES.has('cronCreate')).toBe(false);
+  });
+});
+
+describe('forge watchdog detail helpers', () => {
+  it('formats persistent forge failure detail with the partial plan hint', () => {
+    expect(buildForgeCompletionWatchdogDetail({
+      planId: 'plan-553',
+      filePath: '/tmp/plans/plan-553.md',
+      error: 'codex app-server websocket closed',
+    })).toBe('Forge failed during plan-553: codex app-server websocket closed. Partial plan saved: `!plan show plan-553`.');
+  });
+
+  it('captures summary delivery failures for durable watchdog notices', () => {
+    expect(buildForgeCompletionWatchdogDetail({
+      planId: 'plan-553',
+      filePath: '/tmp/plans/plan-553.md',
+    }, { summaryPosted: false })).toBe('Forge completed for plan-553, but the summary could not be posted back to Discord.');
+  });
+
+  it('sanitizes forge crash detail before persisting it', () => {
+    const err = 'Command failed with exit code 1: claude -p "You are a helpful assistant..."';
+    expect(buildForgeCrashWatchdogDetail(err, { resume: true, planId: 'plan-553' }))
+      .toBe('Forge resume crashed for plan-553: Command failed with exit code 1');
   });
 });
 
@@ -402,6 +431,42 @@ describe('executeForgeAction', () => {
         expect(result.error).toContain('plan-001');
       }
     });
+
+    it('persists forge failure detail into the watchdog on create errors', async () => {
+      const watchdog = {
+        start: vi.fn(async () => ({ run: {} as any, deduped: false })),
+        complete: vi.fn(async () => null),
+      };
+      const orch = makeMockOrchestrator();
+      orch.run = vi.fn(async () => ({
+        planId: 'plan-553',
+        filePath: '/tmp/plans/plan-553.md',
+        finalVerdict: 'error',
+        rounds: 0,
+        reachedMaxRounds: false,
+        error: 'codex app-server websocket closed',
+      }));
+      const forgeCtx = makeForgeCtx({
+        orchestratorFactory: vi.fn(() => orch) as any,
+        longRunWatchdog: watchdog,
+      });
+
+      const result = await executeForgeAction(
+        { type: 'forgeCreate', description: 'Investigate forge wedge' },
+        makeCtx(),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      await settleBackgroundForge();
+      expect(watchdog.complete).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          outcome: 'failed',
+          detail: 'Forge failed during plan-553: codex app-server websocket closed. Partial plan saved: `!plan show plan-553`.',
+        }),
+      );
+    });
   });
 
   describe('forgeResume', () => {
@@ -431,6 +496,59 @@ describe('executeForgeAction', () => {
         expect(result.summary).toContain('Forge resumed');
         expect(result.summary).toContain('plan-042');
       }
+    });
+
+    it('persists summary delivery failures into the watchdog on resume', async () => {
+      setForgePlanMetadata('plan-042', {
+        phaseState: {
+          currentPhase: 'audit',
+          researchComplete: true,
+        },
+        candidateBounds: {
+          candidatePaths: ['src/discord/actions-forge.ts'],
+          allowlistPaths: ['src/discord/actions-forge.ts'],
+        },
+        fallbackPolicy: {
+          onOutOfBounds: 're_research',
+          reResearchPhase: 'revision_research',
+        },
+      });
+      const watchdog = {
+        start: vi.fn(async () => ({ run: {} as any, deduped: false })),
+        complete: vi.fn(async () => null),
+      };
+      const orch = makeMockOrchestrator();
+      orch.resume = vi.fn(async () => ({
+        planId: 'plan-042',
+        filePath: '/tmp/plans/plan-042-test.md',
+        finalVerdict: 'minor',
+        rounds: 1,
+        reachedMaxRounds: false,
+        planSummary: 'Plan summary',
+      }));
+      const forgeCtx = makeForgeCtx({
+        orchestratorFactory: vi.fn(() => orch) as any,
+        longRunWatchdog: watchdog,
+        onProgress: vi.fn(async () => {
+          throw new Error('thread archived');
+        }),
+      });
+
+      const result = await executeForgeAction(
+        { type: 'forgeResume', planId: 'plan-042' },
+        makeCtx(),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      await settleBackgroundForge();
+      expect(watchdog.complete).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          outcome: 'failed',
+          detail: 'Forge completed for plan-042, but the summary could not be posted back to Discord.',
+        }),
+      );
     });
 
     it('posts a status-aware forge review progress message for review plans', async () => {
