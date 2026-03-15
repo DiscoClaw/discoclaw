@@ -118,6 +118,63 @@ export async function healStaleCronRecords(
 }
 
 /**
+ * Scenario 2b: Validate canonical cron store integrity.
+ *
+ * Iterates all records in the stats store and classifies each as either
+ * "recoverable" (has complete definition fields so it can be registered in
+ * the scheduler and execute without a Discord thread) or "incomplete"
+ * (missing definition fields — unrecoverable if the thread is also lost).
+ *
+ * This is informational: it does not mutate state. It runs at startup so
+ * operators get early visibility into any records that would be lost if their
+ * Discord projection disappears. Incomplete records are logged individually
+ * as warnings so they can be addressed (e.g., by opening the thread and
+ * triggering a re-parse).
+ *
+ * Never throws; all errors are caught and logged.
+ */
+export async function validateCanonicalCronIntegrity(
+  statsStore: CronRunStats,
+  log?: LoggerLike,
+): Promise<{ total: number; recoverable: number; incomplete: number }> {
+  const result = { total: 0, recoverable: 0, incomplete: 0 };
+  try {
+    const jobs = Object.values(statsStore.getStore().jobs);
+    result.total = jobs.length;
+
+    for (const record of jobs) {
+      const effectiveTriggerType = record.triggerType ?? 'schedule';
+      const hasDefinition =
+        Boolean(record.channel) &&
+        Boolean(record.prompt) &&
+        (effectiveTriggerType !== 'schedule' || Boolean(record.schedule));
+
+      if (hasDefinition) {
+        result.recoverable++;
+      } else {
+        result.incomplete++;
+        log?.warn(
+          { cronId: record.cronId, threadId: record.threadId },
+          'startup:heal:cron canonical record missing definition fields (unrecoverable without thread)',
+        );
+      }
+    }
+    if (result.total > 0) {
+      log?.info(
+        { total: result.total, recoverable: result.recoverable, incomplete: result.incomplete },
+        'startup:heal:cron canonical store integrity validated',
+      );
+    }
+  } catch (err: unknown) {
+    log?.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'startup:heal:cron integrity check failed — continuing',
+    );
+  }
+  return result;
+}
+
+/**
  * Scenario 3: Surface stale task thread references for deleted Discord threads.
  *
  * Iterates non-closed tasks with an `external_ref` of the form `discord:<threadId>`.

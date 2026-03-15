@@ -359,6 +359,9 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
         });
 
         // Re-register in scheduler from canonical definition.
+        // Clean up any stale scheduler entry first (e.g., from canonical orphan
+        // recovery at boot or threadDelete resilience — the cron may still be
+        // registered under the old/deleted thread ID).
         const def: ParsedCronDef = {
           triggerType: record.triggerType ?? 'schedule',
           schedule: record.schedule,
@@ -367,6 +370,10 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
           prompt: record.prompt,
         };
         try {
+          const staleJob = scheduler.getJobByCronId(cronId);
+          if (staleJob && staleJob.id !== newThread.id) {
+            scheduler.unregister(staleJob.id);
+          }
           scheduler.register(newThread.id, newThread.id, forum.guildId, threadName, def, cronId);
           if (record.disabled) scheduler.disable(newThread.id);
         } catch {

@@ -71,6 +71,14 @@ function makeScheduler(jobs: Array<{ id: string; threadId: string; cronId: strin
       if (!j) return undefined;
       return { id: j.id, cronId: j.cronId, threadId: j.threadId, guildId: 'g1', name: j.name, def: { schedule: j.schedule, timezone: 'UTC', channel: 'general', prompt: j.prompt }, cron: null, running: false };
     },
+    getJobByCronId: (cronId: string) => {
+      const j = jobs.find((jj) => jj.cronId === cronId);
+      if (!j) return undefined;
+      return { id: j.id, cronId: j.cronId, threadId: j.threadId, guildId: 'g1', name: j.name, def: { schedule: j.schedule, timezone: 'UTC', channel: 'general', prompt: j.prompt }, cron: null, running: false };
+    },
+    register: vi.fn(),
+    unregister: vi.fn(),
+    disable: vi.fn(),
   } as unknown as CronScheduler;
 }
 

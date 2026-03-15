@@ -88,6 +88,14 @@ export class CronScheduler {
     return this.jobs.get(id);
   }
 
+  /** Find a registered job by its stable cronId (O(n) scan). */
+  getJobByCronId(cronId: string): CronJob | undefined {
+    for (const job of this.jobs.values()) {
+      if (job.cronId === cronId) return job;
+    }
+    return undefined;
+  }
+
   listJobs(): Array<{ id: string; name: string; schedule: string | undefined; timezone: string; nextRun: Date | null }> {
     return Array.from(this.jobs.values()).map((job) => ({
       id: job.id,

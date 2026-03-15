@@ -64,6 +64,7 @@ function makeScheduler() {
     disable: vi.fn(),
     unregister: vi.fn(),
     getJob: vi.fn(),
+    getJobByCronId: vi.fn().mockReturnValue(undefined),
   };
 }
 
@@ -287,6 +288,7 @@ describe('initCronForum', () => {
     const statsStore = {
       getRecordByThreadId: vi.fn().mockReturnValue({ cronId: 'cron-recovered' }),
       getRecord: vi.fn().mockReturnValue({ cronId: 'cron-recovered', threadId: 'thread-1', disabled: false }),
+      getStore: vi.fn().mockReturnValue({ jobs: {} }),
       upsertRecord: vi.fn(async () => ({})),
     };
 
@@ -341,6 +343,7 @@ describe('initCronForum', () => {
         return undefined;
       }),
       getRecord: vi.fn().mockReturnValue({ cronId: 'cron-from-status-id', threadId: 'thread-1', disabled: false }),
+      getStore: vi.fn().mockReturnValue({ jobs: {} }),
       upsertRecord: vi.fn(async () => ({})),
     };
 
@@ -386,6 +389,7 @@ describe('initCronForum', () => {
         triggerType: 'schedule',
       }),
       getRecord: vi.fn(),
+      getStore: vi.fn().mockReturnValue({ jobs: {} }),
       upsertRecord: vi.fn(async () => ({})),
     };
 
@@ -454,6 +458,7 @@ describe('initCronForum', () => {
         threadId: 'thread-1',
         disabled: false,
       }),
+      getStore: vi.fn().mockReturnValue({ jobs: {} }),
       upsertRecord: vi.fn(async () => ({})),
     };
 
@@ -516,6 +521,7 @@ describe('initCronForum', () => {
         threadId: 'thread-1',
         disabled: false,
       }),
+      getStore: vi.fn().mockReturnValue({ jobs: {} }),
       upsertRecord: vi.fn(async () => ({})),
     };
 
@@ -558,6 +564,7 @@ describe('initCronForum', () => {
         authorId: 'u-allowed',
       }),
       getRecord: vi.fn(),
+      getStore: vi.fn().mockReturnValue({ jobs: {} }),
       upsertRecord: vi.fn(async () => ({})),
     };
 
@@ -606,6 +613,7 @@ describe('initCronForum', () => {
         authorId: 'u-not-allowed',
       }),
       getRecord: vi.fn(),
+      getStore: vi.fn().mockReturnValue({ jobs: {} }),
       upsertRecord: vi.fn(async () => ({})),
     };
 
@@ -655,6 +663,7 @@ describe('initCronForum', () => {
     const statsStore = {
       getRecordByThreadId: vi.fn().mockReturnValue({ cronId: 'cron-disabled', disabled: true }),
       getRecord: vi.fn().mockReturnValue({ cronId: 'cron-disabled', threadId: 'thread-1', disabled: true }),
+      getStore: vi.fn().mockReturnValue({ jobs: {} }),
       upsertRecord: vi.fn(async () => ({})),
     };
 

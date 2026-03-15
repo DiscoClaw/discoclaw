@@ -313,6 +313,61 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
   }
   log?.info({ loaded, total: activeThreads.size }, 'cron:forum initial load complete');
 
+  // --- Canonical orphan recovery ---
+  // The local stats store is the canonical source of truth. Any record with a
+  // complete definition that wasn't loaded from an active Discord thread is
+  // registered in the scheduler so automations survive thread deletion during
+  // offline periods. Discord threads are recreated later by cron-sync Phase 5.
+  let canonicalOrphansRecovered = 0;
+  if (statsStore) {
+    const allRecords = Object.entries(statsStore.getStore().jobs);
+    for (const [cronId, record] of allRecords) {
+      // Skip if already loaded from a thread above.
+      if (scheduler.getJobByCronId(cronId)) continue;
+
+      // Need a complete definition to register.
+      if (!record.channel || !record.prompt) continue;
+      const effectiveTriggerType = record.triggerType ?? 'schedule';
+      if (effectiveTriggerType === 'schedule' && !record.schedule) continue;
+
+      // Verify stored author is still permitted.
+      const authorId = record.authorId ?? '';
+      const botUserId = client.user?.id ?? '';
+      const isBotAuthored = botUserId !== '' && authorId === botUserId;
+      if (!authorId || (!allowUserIds.has(authorId) && !isBotAuthored)) {
+        log?.warn({ cronId, authorId }, 'cron:forum canonical orphan: author not allowlisted, skipping');
+        continue;
+      }
+
+      const def: ParsedCronDef = {
+        triggerType: effectiveTriggerType,
+        schedule: record.schedule,
+        timezone: record.timezone ?? 'UTC',
+        channel: record.channel,
+        prompt: record.prompt,
+      };
+
+      try {
+        const jobName = record.prompt.slice(0, 50).replace(/\n/g, ' ').trim() || cronId;
+        scheduler.register(record.threadId, record.threadId, guildId, jobName, def, cronId);
+        if (record.disabled) scheduler.disable(record.threadId);
+
+        // Mark projection missing so cron-sync Phase 5 recreates the thread.
+        if (record.projectionStatus !== 'missing') {
+          void statsStore.markProjectionMissing(cronId).catch(() => {});
+        }
+
+        canonicalOrphansRecovered++;
+        log?.info({ cronId, threadId: record.threadId }, 'cron:forum canonical orphan: registered from local store');
+      } catch (err) {
+        log?.warn({ err, cronId }, 'cron:forum canonical orphan: register failed');
+      }
+    }
+    if (canonicalOrphansRecovered > 0) {
+      log?.info({ recovered: canonicalOrphansRecovered }, 'cron:forum canonical orphan recovery complete');
+    }
+  }
+
   // --- Live event listeners ---
   const forumId = forum.id;
   const reparseTimers = new Map<string, NodeJS.Timeout>();
@@ -392,10 +447,14 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
     try {
       if (thread.parentId !== forumId) return;
       log?.info({ threadId: thread.id, name: thread.name }, 'cron:forum threadDelete');
-      scheduler.unregister(thread.id);
+      // Do NOT unregister the scheduler job. The local canonical record is the
+      // source of truth, and the cron should keep firing to its target channel
+      // even after the Discord thread (operator UI) is deleted. The stale
+      // scheduler entry will be cleaned up when cron-sync Phase 5 recreates
+      // the thread and re-registers with the new thread ID.
       opts.onCountChanged?.();
-      // Mark projection missing instead of removing the local canonical record.
-      // The record survives so reconciliation can recreate the Discord thread.
+      // Mark projection missing so reconciliation can recreate the Discord thread.
+      // The canonical record survives — Discord threads are a synchronized projection.
       if (statsStore) {
         const record = statsStore.getRecordByThreadId(thread.id);
         if (record) {

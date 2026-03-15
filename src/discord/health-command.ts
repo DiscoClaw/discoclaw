@@ -20,6 +20,9 @@ export type HealthConfigSnapshot = {
   reactionRemoveHandlerEnabled: boolean;
   loopActionsEnabled?: boolean;
   cronEnabled: boolean;
+  cronCanonicalCount?: number;
+  cronRegisteredCount?: number;
+  cronOrphanCount?: number;
   tasksEnabled: boolean;
   tasksActive: boolean;
   tasksSyncFailureRetryEnabled: boolean;
@@ -147,6 +150,12 @@ export function renderHealthReport(opts: {
     const tasksEnabled = opts.config.tasksEnabled;
     const tasksState = tasksActive ? 'active' : tasksEnabled ? 'degraded' : 'off';
     lines.push(`reactionHandler=${opts.config.reactionHandlerEnabled} reactionRemoveHandler=${opts.config.reactionRemoveHandlerEnabled} loopActions=${opts.config.loopActionsEnabled ?? false} cron=${opts.config.cronEnabled} tasks=${tasksState}`);
+    if (opts.config.cronEnabled && opts.config.cronCanonicalCount != null) {
+      const canonical = opts.config.cronCanonicalCount;
+      const registered = opts.config.cronRegisteredCount ?? 0;
+      const orphan = opts.config.cronOrphanCount ?? 0;
+      lines.push(`Cron store: canonical=${canonical} registered=${registered}${orphan > 0 ? ` orphan=${orphan}` : ''}`);
+    }
     lines.push(
       `taskSyncPolicy: failureRetry=${opts.config.tasksSyncFailureRetryEnabled ? 'on' : 'off'} failureDelayMs=${opts.config.tasksSyncFailureRetryDelayMs} deferredDelayMs=${opts.config.tasksSyncDeferredRetryDelayMs}`,
     );
