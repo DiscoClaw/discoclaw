@@ -9,6 +9,7 @@ import {
   type DashboardDoctorApiResponse,
   type DashboardDoctorFixApiResponse,
   type DashboardModelApiResponse,
+  type DashboardPresetApiResponse,
   type DashboardRestartApiResponse,
   type DashboardServer,
   type DashboardServiceApiResponse,
@@ -129,6 +130,7 @@ function makeDeps(overrides: Partial<DashboardDeps> = {}): DashboardDeps {
     loadDoctorContext: vi.fn(async () => makeDoctorContext()),
     saveModelConfig: vi.fn(async () => undefined),
     saveOverrides: vi.fn(async () => undefined),
+    updateEnvKey: vi.fn(async () => undefined),
     runCommand: vi.fn(async () => ({
       stdout: '   Active: active (running) since today\n',
       stderr: '',
@@ -820,6 +822,168 @@ describe('startDashboardServer', () => {
     expect(body.ok).toBe(false);
     expect(body.message).toBe('Model value must be one of the known saved options for chat.');
     expect(saveModelConfigMock).not.toHaveBeenCalled();
+  });
+
+  it('includes primaryRuntime in the snapshot', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, { path: '/api/snapshot' });
+    const body = parseJson<DashboardSnapshotApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.snapshot.primaryRuntime).toBe('claude');
+  });
+
+  it('rejects GET requests on /api/preset', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, { path: '/api/preset', method: 'GET' });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+
+    expect(response.status).toBe(405);
+    expect(body).toEqual({ ok: false, message: 'Method Not Allowed' });
+  });
+
+  it('rejects cross-origin POST on /api/preset', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/preset',
+      method: 'POST',
+      body: JSON.stringify({ preset: 'codex' }),
+      headers: { Origin: 'http://evil.example' },
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+
+    expect(response.status).toBe(403);
+    expect(body).toEqual({ ok: false, message: 'Cross-origin mutation requests are not allowed.' });
+  });
+
+  it('rejects unknown preset on /api/preset', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/preset',
+      method: 'POST',
+      body: JSON.stringify({ preset: 'openai' }),
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+
+    expect(response.status).toBe(400);
+    expect(body.ok).toBe(false);
+    expect(body.message).toContain('Unknown preset');
+  });
+
+  it('rejects missing preset on /api/preset', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/preset',
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+
+    expect(response.status).toBe(400);
+    expect(body.ok).toBe(false);
+    expect(body.message).toBe('Preset is required.');
+  });
+
+  it('applies codex preset and calls deps with expected args', async () => {
+    const ctx = makeDoctorContext({
+      runtimeOverrides: {
+        fastRuntime: 'openrouter',
+        ttsVoice: 'alloy',
+      },
+      runtimeOverridesFile: {
+        exists: true,
+        unknownKeys: [],
+        raw: {},
+        values: {
+          fastRuntime: 'openrouter',
+          ttsVoice: 'alloy',
+        },
+      },
+    });
+    const updateEnvKeyMock = vi.fn(async () => undefined);
+    const saveModelConfigMock = vi.fn(async () => undefined);
+    const saveOverridesMock = vi.fn(async () => undefined);
+    const { port } = await startServer({
+      loadDoctorContext: vi.fn(async () => ctx),
+      updateEnvKey: updateEnvKeyMock,
+      saveModelConfig: saveModelConfigMock,
+      saveOverrides: saveOverridesMock,
+    });
+
+    const response = await makeRequest(port, {
+      path: '/api/preset',
+      method: 'POST',
+      body: JSON.stringify({ preset: 'codex' }),
+    });
+    const body = parseJson<DashboardPresetApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.message).toContain('codex');
+    expect(body.message).toContain('tier defaults');
+    expect(updateEnvKeyMock).toHaveBeenCalledWith('/repo/.env', 'PRIMARY_RUNTIME', 'codex');
+    expect(saveOverridesMock).toHaveBeenCalledWith(
+      '/repo/data/runtime-overrides.json',
+      { ttsVoice: 'alloy' },
+    );
+    expect(saveModelConfigMock).toHaveBeenCalledWith(
+      '/repo/data/models.json',
+      expect.objectContaining({}),
+    );
+    expect(body.snapshot).toBeDefined();
+    expect(body.snapshot.primaryRuntime).toBe('claude');
+  });
+
+  it('applies claude preset correctly on /api/preset', async () => {
+    const ctx = makeDoctorContext();
+    const updateEnvKeyMock = vi.fn(async () => undefined);
+    const saveModelConfigMock = vi.fn(async () => undefined);
+    const saveOverridesMock = vi.fn(async () => undefined);
+    const { port } = await startServer({
+      loadDoctorContext: vi.fn(async () => ctx),
+      updateEnvKey: updateEnvKeyMock,
+      saveModelConfig: saveModelConfigMock,
+      saveOverrides: saveOverridesMock,
+    });
+
+    const response = await makeRequest(port, {
+      path: '/api/preset',
+      method: 'POST',
+      body: JSON.stringify({ preset: 'claude' }),
+    });
+    const body = parseJson<DashboardPresetApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.message).toContain('claude');
+    expect(updateEnvKeyMock).toHaveBeenCalledWith('/repo/.env', 'PRIMARY_RUNTIME', 'claude');
+  });
+
+  it('preserves ttsVoice when clearing overrides via /api/preset', async () => {
+    const ctx = makeDoctorContext({
+      runtimeOverrides: {
+        fastRuntime: 'openrouter',
+        voiceRuntime: 'anthropic',
+        ttsVoice: 'shimmer',
+      },
+    });
+    const saveOverridesMock = vi.fn(async () => undefined);
+    const { port } = await startServer({
+      loadDoctorContext: vi.fn(async () => ctx),
+      updateEnvKey: vi.fn(async () => undefined),
+      saveOverrides: saveOverridesMock,
+    });
+
+    await makeRequest(port, {
+      path: '/api/preset',
+      method: 'POST',
+      body: JSON.stringify({ preset: 'codex' }),
+    });
+
+    expect(saveOverridesMock).toHaveBeenCalledWith(
+      '/repo/data/runtime-overrides.json',
+      { ttsVoice: 'shimmer' },
+    );
   });
 
   it('rejects GET requests on /api/model', async () => {

@@ -117,6 +117,8 @@ export function renderDashboardPage(): string {
       font-size: 13px;
     }
 
+    .hero-preset { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
     .layout {
       display: grid;
       grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -473,6 +475,15 @@ export function renderDashboardPage(): string {
         <div id="hero-runtime-pill" class="pill">Overrides: loading</div>
         <div id="hero-url-pill" class="pill">Dashboard: loading</div>
       </div>
+      <div class="hero-preset">
+        <label class="field-label" for="preset-select">Runtime Preset</label>
+        <select id="preset-select">
+          <option value="claude">Claude</option>
+          <option value="codex">Codex</option>
+        </select>
+        <button id="preset-apply-btn" type="button">Apply Preset</button>
+      </div>
+      <div id="preset-status" class="status"></div>
       <div id="hero-status" class="status"></div>
     </section>
 
@@ -614,6 +625,8 @@ export function renderDashboardPage(): string {
     const mcpSummary = document.getElementById('mcp-summary');
     const mcpServers = document.getElementById('mcp-servers');
     const mcpWarningPill = document.getElementById('mcp-warning-pill');
+    const presetSelect = document.getElementById('preset-select');
+    const presetStatus = document.getElementById('preset-status');
     const ROLE_LABELS = {
       chat: 'Chat',
       'plan-run': 'Plan Run',
@@ -915,6 +928,7 @@ export function renderDashboardPage(): string {
       renderMcpStatus(snapshot);
 
       populateModelForm(selectedRole, selectedModel, false);
+      presetSelect.value = snapshot.primaryRuntime || 'claude';
       heroServicePill.textContent = 'Service: ' + formatServicePill(snapshot.serviceSummary);
       heroRuntimePill.textContent = 'Overrides: ' + formatRuntimePill(snapshot.runtimeOverrides);
       updateDashboardLocation();
@@ -1137,6 +1151,30 @@ export function renderDashboardPage(): string {
         setStatus(heroStatus, response.message, 'ok');
       } catch (error) {
         setStatus(modelStatus, String(error), 'error');
+      }
+    });
+
+    document.getElementById('preset-apply-btn').addEventListener('click', async () => {
+      const preset = presetSelect.value;
+      if (!window.confirm(
+        'Switch runtime preset to ' + preset + '?\\n\\n'
+        + 'This will:\\n'
+        + '  - Set PRIMARY_RUNTIME=' + preset + ' in .env\\n'
+        + '  - Clear fast and voice runtime overrides\\n'
+        + '  - Reset all model assignments to tier defaults\\n\\n'
+        + 'You will need to restart the service for changes to take effect.'
+      )) return;
+      try {
+        const response = await fetchJson('/api/preset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ preset }),
+        });
+        renderSnapshot(response.snapshot);
+        setStatus(presetStatus, response.message, 'ok');
+        setStatus(heroStatus, response.message + ' Click Restart to apply.', 'ok');
+      } catch (error) {
+        setStatus(presetStatus, String(error), 'error');
       }
     });
 

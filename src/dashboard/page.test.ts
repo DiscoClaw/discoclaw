@@ -44,6 +44,12 @@ describe('renderDashboardPage', () => {
     expect(html).toContain('id="doctor-fix-btn" type="button" disabled');
     expect(html).toContain('id="doctor-helper"');
     expect(html).toContain('id="mcp-warning-pill"');
+    expect(html).toContain('<select id="preset-select"');
+    expect(html).toContain('id="preset-apply-btn"');
+    expect(html).toContain('>Apply Preset<');
+    expect(html).toContain('id="preset-status"');
+    expect(html).toContain('Runtime Preset');
+    expect(html).toContain('presetSelect.value = snapshot.primaryRuntime');
     expect(html).toContain('id="mcp-summary"');
     expect(html).toContain('id="mcp-servers"');
     expect(html).toContain('Cleanup suggestions');

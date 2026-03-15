@@ -86,6 +86,7 @@ function makeDeps(overrides: Partial<DashboardDeps> = {}): DashboardDeps {
     loadDoctorContext: vi.fn(async () => makeDoctorContext()),
     saveModelConfig: vi.fn(async () => undefined),
     saveOverrides: vi.fn(async () => undefined),
+    updateEnvKey: vi.fn(async () => undefined),
     runCommand: vi.fn(async () => ({
       stdout: '   Active: active (running) since today\n',
       stderr: '',
@@ -155,6 +156,7 @@ describe('buildSnapshotResponse', () => {
           status: 'missing',
         },
         mcpWarnings: 0,
+        primaryRuntime: 'claude',
       },
     });
   });
