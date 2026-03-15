@@ -10,6 +10,14 @@ Maintainers: before changing webhook integration code, exposure assumptions, or 
 
 The DiscoClaw app binds the webhook server to `127.0.0.1:9400` by default — loopback only. External services like GitHub can't reach it unless you expose the port through a tunnel or reverse proxy.
 
+## Runtime restrictions
+
+Webhook requests are dispatched through the cron executor pipeline, but webhook jobs run with reduced capabilities:
+
+- No Discord actions
+- No local tool access
+- Prompt output should be plain channel text based on the incoming payload, not side effects like channel creation, thread management, or shell/tool use
+
 ## Exposure options
 
 ### Tailscale Funnel
@@ -120,7 +128,7 @@ Each source has:
 
 - **`secret`** (required) — HMAC-SHA256 key for signature verification
 - **`channel`** (required) — target Discord channel name or ID
-- **`prompt`** (optional) — instruction sent to the runtime; supports `{{body}}` and `{{source}}` placeholders. If omitted, a default prompt is built from the source name and payload.
+- **`prompt`** (optional) — instruction sent to the runtime; supports `{{body}}` and `{{source}}` placeholders. If omitted, a default prompt is built from the source name and payload. Webhook prompts cannot use Discord actions or local tools.
 
 ### Registering a webhook with GitHub
 

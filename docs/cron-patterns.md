@@ -394,6 +394,7 @@ For tunnel/proxy setup and security details, see [docs/webhook-exposure.md](webh
 
 - **Requires `DISCOCLAW_WEBHOOK_ENABLED=true`** and a config file pointed to by `DISCOCLAW_WEBHOOK_CONFIG`.
 - **HMAC-SHA256 signature verification is mandatory.** Every request must include a valid `X-Hub-Signature-256` header. There is no way to disable verification.
+- **Reduced capabilities.** Webhook-dispatched jobs run without Discord action permissions or local tool access. Write prompts that summarize, classify, or transform the payload into plain channel output.
 - **`{{body}}` and `{{source}}` are webhook-config placeholders**, not cron prompt placeholders. They are expanded from the incoming HTTP request, not from job state. `{{state}}` and other cron placeholders do not apply here.
 - **No schedule or forum thread involved.** Webhooks fire on demand when an HTTP POST arrives. They don't appear in the cron forum and have no run-stats thread.
 - **Each source is isolated.** Different sources (e.g., `github`, `stripe`) have independent secrets and target channels. Compromising one source's secret doesn't affect others.

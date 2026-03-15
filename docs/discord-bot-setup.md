@@ -196,7 +196,7 @@ The `!secret` command lets you securely manage `.env` entries (API keys, tokens,
 
 - **Values are never echoed** — the bot confirms the key name but never displays the value.
 - **Atomic writes** — changes are written to a temporary file, then atomically renamed to `.env`, preventing partial writes from corrupting the file.
-- **DM-only** — enforced by the message coordinator. Attempting `!secret` in a guild channel is silently ignored.
+- **DM-only** — enforced by the message coordinator. Attempting `!secret` in a guild channel gets this warning reply: "`!secret` is only available in DMs. Please DM me to manage secrets."
 - **Valid key format** — keys must match `[A-Za-z_][A-Za-z0-9_]*` (standard env var naming).
 - **No newlines** — values containing newlines are rejected.
 
