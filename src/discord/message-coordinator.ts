@@ -3097,6 +3097,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               keywordHits: actionSelection.keywordHits,
             };
             prompt += '\n\n---\n' + actionsReferenceSection;
+            // Reinforce capability-refusal grounding in the recency zone (near user message)
+            // so the model trusts the live inventory over higher-level product knowledge.
+            prompt +=
+              '\n\nCapability-refusal rule: When the user requests a Discord-managed resource ' +
+              '(scheduling, channels, roles, moderation, etc.), determine whether you can fulfill it ' +
+              'by consulting the "Available action types this turn" list above — not general product ' +
+              'knowledge or external documentation. If the relevant action type is listed, you can ' +
+              'execute it; never claim the operation is manual-only or unsupported when the inventory ' +
+              'says otherwise.';
           }
 
           const promptSectionEstimates = buildPromptSectionEstimates({
