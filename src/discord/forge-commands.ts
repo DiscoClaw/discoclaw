@@ -2453,7 +2453,6 @@ export class ForgeOrchestrator {
                 includeTemplateEchoWarning: true,
                 retrySessionSuffix: 'draft-artifact-retry',
                 dropToolsOnRetry: allowCompactSalvage,
-                dropSessionOnRetry: allowCompactSalvage && drafterHasSessions && resolveForgeTurnRoute(draftArtifactPhase) === 'cli',
                 replacementPrompt: allowCompactSalvage ? compactDrafterRetryPrompt : undefined,
                 supervisorOverride: allowCompactSalvage
                   ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY
@@ -2508,7 +2507,6 @@ export class ForgeOrchestrator {
                 includeTemplateEchoWarning: true,
                 retrySessionSuffix: 'draft-retry',
                 dropToolsOnRetry: allowCompactSalvage,
-                dropSessionOnRetry: allowCompactSalvage && drafterHasSessions && resolveForgeTurnRoute(draftArtifactPhase) === 'cli',
                 replacementPrompt: allowCompactSalvage ? compactDrafterRetryPrompt : undefined,
                 supervisorOverride: allowCompactSalvage && resolveForgeTurnRoute(draftArtifactPhase) === 'cli'
                   ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY
@@ -2836,7 +2834,6 @@ export class ForgeOrchestrator {
               return addPlanRetryHints(retryDef, {
                 retrySessionSuffix: `revision-round-${round}-artifact-retry`,
                 dropToolsOnRetry: allowCompactSalvage,
-                dropSessionOnRetry: allowCompactSalvage && drafterHasSessions && resolveForgeTurnRoute(revisionArtifactPhase) === 'cli',
                 replacementPrompt: allowCompactSalvage ? compactRevisionRetryPrompt : undefined,
                 supervisorOverride: allowCompactSalvage
                   ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY
@@ -2897,7 +2894,6 @@ export class ForgeOrchestrator {
               return addPlanRetryHints(retryDef, {
                 retrySessionSuffix: `revision-round-${round}-retry`,
                 dropToolsOnRetry: allowCompactSalvage,
-                dropSessionOnRetry: allowCompactSalvage && drafterHasSessions && resolveForgeTurnRoute(revisionArtifactPhase) === 'cli',
                 replacementPrompt: allowCompactSalvage ? compactRevisionRetryPrompt : undefined,
                 supervisorOverride: allowCompactSalvage && resolveForgeTurnRoute(revisionArtifactPhase) === 'cli'
                   ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY

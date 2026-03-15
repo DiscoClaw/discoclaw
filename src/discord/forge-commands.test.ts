@@ -2485,7 +2485,7 @@ _Filled in during/after implementation._
     expect(toolsSeen[1]).toBeUndefined();
     expect(addDirsSeen[1]).toBeUndefined();
     expect(nativeBypassSeen[1]).toBe(true);
-    expect(sessionKeys[1]).toBeUndefined();
+    expect(sessionKeys[1]).toBe(`${sessionKeys[0]}:draft-retry`);
     expect(supervisors[1]).toEqual(expect.objectContaining({
       limits: expect.objectContaining({ maxCycles: 2, maxRetries: 1 }),
     }));
@@ -2551,7 +2551,7 @@ _Filled in during/after implementation._
     expect(toolsSeen[1]).toBeUndefined();
     expect(addDirsSeen[1]).toBeUndefined();
     expect(nativeBypassSeen[1]).toBe(true);
-    expect(sessionKeys[1]).toBeUndefined();
+    expect(sessionKeys[1]).toBe(`${sessionKeys[0]}:draft-retry`);
     expect(prompts[1]).toContain('Do NOT use tools on this retry.');
     expect(prompts[1]).toContain('You are salvaging a stalled plan draft.');
     expect(systemPrompts[1]).toContain('Do not use tools on this retry.');
@@ -2658,7 +2658,7 @@ _Filled in during/after implementation._
     expect(progress.some((p) => p.includes('retrying'))).toBe(true);
   });
 
-  it('uses fresh sessionless salvage retries so revision fallback does not resume the draft retry thread', async () => {
+  it('uses fresh retry sessions so revision fallback does not resume the draft retry thread', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditBlocking = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
@@ -2699,11 +2699,11 @@ _Filled in during/after implementation._
     expect(result.error).toBeUndefined();
     expect(callIndex).toBe(6);
     expect(sessionKeys[0]).toMatch(/^forge:plan-\d+:test-model:drafter$/);
-    expect(sessionKeys[1]).toBeUndefined();
+    expect(sessionKeys[1]).toBe(`${sessionKeys[0]}:draft-retry`);
     expect(sessionKeys[2]).toMatch(/^forge:plan-\d+:test-model:auditor$/);
     expect(sessionKeys[3]).toBe(sessionKeys[0]);
-    expect(sessionKeys[4]).toBeUndefined();
-    expect(sessionKeys[1]).toBe(sessionKeys[4]);
+    expect(sessionKeys[4]).toBe(`${sessionKeys[3]}:revision-round-1-retry`);
+    expect(sessionKeys[1]).not.toBe(sessionKeys[4]);
     expect(sessionKeys[5]).toBe(sessionKeys[2]);
   });
 
@@ -2775,7 +2775,7 @@ _Filled in during/after implementation._
     expect(toolsSeen[3]).toBeUndefined();
     expect(addDirsSeen[3]).toBeUndefined();
     expect(nativeBypassSeen[3]).toBe(true);
-    expect(sessionKeys[3]).toBeUndefined();
+    expect(sessionKeys[3]).toBe(`${sessionKeys[2]}:revision-round-1-retry`);
     expect(supervisors[3]).toEqual(expect.objectContaining({
       limits: expect.objectContaining({ maxCycles: 2, maxRetries: 1 }),
     }));
