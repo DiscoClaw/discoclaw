@@ -80,7 +80,7 @@ import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
 import { TaskStore } from '../tasks/store.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './shortterm-memory.js';
-import { editThenSendChunks, shouldSuppressFollowUp, appendUnavailableActionTypesNotice, appendParseFailureNotice, buildFailureRetryPlaceholder } from './output-common.js';
+import { editThenSendChunks, editThenSendChunksWithPrefix, shouldSuppressFollowUp, appendUnavailableActionTypesNotice, appendParseFailureNotice, buildFailureRetryPlaceholder } from './output-common.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import { resolveReplyReference } from './reply-reference.js';
 import type { MessageWithReference } from './reply-reference.js';
@@ -3953,6 +3953,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 params.log?.info({ sessionKey, types: strippedUnrecognizedTypes }, 'discord:unrecognized-action-types-stripped');
               }
 
+              const followUpPlaceholderLines: string[] = [];
               if (currentFollowUpToken) {
                 const followUpOutcome: LongRunOutcome = (invokeHadError || abortSignal.aborted || isShuttingDown())
                   ? 'failed'
@@ -3967,7 +3968,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const terminalState: FollowUpTerminalState = completedRun && isDiscordActionFollowUpRun(completedRun)
                   ? resolveDiscordActionFollowUpTerminalState(completedRun)
                   : (followUpOutcome === 'failed' ? 'failed' : 'completed');
-                processedText = appendFollowUpLifecycleLine(processedText, currentFollowUpToken, terminalState);
+                followUpPlaceholderLines.push(buildFollowUpLifecycleLine(currentFollowUpToken, terminalState));
               }
 
               let nextFollowUp: PendingActionFollowUp | null = null;
@@ -3995,13 +3996,27 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     ? `${pendingLine}\n${failureRetryPlaceholder}`
                     : pendingLine,
                 };
-                processedText = appendFollowUpLifecycleLine(processedText, token, 'pending');
+                if (followUpDepth > 0 && currentFollowUpToken) {
+                  followUpPlaceholderLines.push(pendingLine);
+                } else {
+                  processedText = appendFollowUpLifecycleLine(processedText, token, 'pending');
+                }
               }
               pendingFollowUp = nextFollowUp;
 
               if (!isShuttingDown()) {
                 try {
-                  await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
+                  if (currentFollowUpToken) {
+                    await editThenSendChunksWithPrefix(
+                      reply,
+                      msg.channel,
+                      followUpPlaceholderLines.join('\n'),
+                      processedText,
+                      collectedImages,
+                    );
+                  } else {
+                    await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
+                  }
                   replyFinalized = true;
                 } catch (editErr) {
                   // Thread archived by a taskClose action — the close summary was already

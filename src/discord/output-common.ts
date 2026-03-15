@@ -99,6 +99,72 @@ export async function editThenSendChunks(
   }
 }
 
+export async function editThenSendChunksWithPrefix(
+  reply: { edit: (opts: SendOpts) => Promise<unknown> },
+  channel: { send: (opts: SendOpts) => Promise<unknown> },
+  prefix: string,
+  text: string,
+  images?: ImageData[],
+): Promise<void> {
+  const normalizedPrefix = closeFenceIfOpen(String(prefix ?? '').trimEnd());
+  if (!normalizedPrefix) {
+    await editThenSendChunks(reply, channel, text, images);
+    return;
+  }
+
+  const attachments = images && images.length > 0 ? buildAttachments(images) : [];
+  const chunks = prepareDiscordOutput(text);
+  const hasContent = chunks.length > 0 && chunks.some((c) => c.trim().length > 0);
+  const hasImages = attachments.length > 0;
+
+  if (!hasContent && !hasImages) {
+    await reply.edit({ content: normalizedPrefix, allowedMentions: NO_MENTIONS });
+    return;
+  }
+
+  if (!hasContent && hasImages) {
+    const firstBatch = attachments.slice(0, MAX_ATTACHMENTS_PER_MESSAGE);
+    await reply.edit({ content: normalizedPrefix, allowedMentions: NO_MENTIONS, files: firstBatch });
+    for (let i = MAX_ATTACHMENTS_PER_MESSAGE; i < attachments.length; i += MAX_ATTACHMENTS_PER_MESSAGE) {
+      await channel.send({ content: '', allowedMentions: NO_MENTIONS, files: attachments.slice(i, i + MAX_ATTACHMENTS_PER_MESSAGE) });
+    }
+    return;
+  }
+
+  let firstContent = normalizedPrefix;
+  let remainingText = chunks.slice(1).join('\n');
+  const separator = '\n\n';
+  const firstChunk = chunks[0] ?? '';
+  const availableForFirstChunk = 2000 - normalizedPrefix.length - separator.length;
+
+  if (availableForFirstChunk > 0 && firstChunk.trim().length > 0) {
+    const firstChunkPieces = splitDiscord(firstChunk, availableForFirstChunk);
+    const firstChunkPiece = firstChunkPieces[0] ?? '';
+    if (firstChunkPiece.trim().length > 0) {
+      firstContent = `${normalizedPrefix}${separator}${firstChunkPiece}`;
+      remainingText = [...firstChunkPieces.slice(1), ...chunks.slice(1)].join('\n');
+    } else {
+      remainingText = chunks.join('\n');
+    }
+  } else {
+    remainingText = chunks.join('\n');
+  }
+
+  if (!remainingText && attachments.length > 0) {
+    const firstBatch = attachments.slice(0, MAX_ATTACHMENTS_PER_MESSAGE);
+    await reply.edit({ content: firstContent, allowedMentions: NO_MENTIONS, files: firstBatch });
+    for (let i = MAX_ATTACHMENTS_PER_MESSAGE; i < attachments.length; i += MAX_ATTACHMENTS_PER_MESSAGE) {
+      await channel.send({ content: '', allowedMentions: NO_MENTIONS, files: attachments.slice(i, i + MAX_ATTACHMENTS_PER_MESSAGE) });
+    }
+    return;
+  }
+
+  await reply.edit({ content: firstContent, allowedMentions: NO_MENTIONS });
+  if (remainingText || attachments.length > 0) {
+    await sendChunks(channel, remainingText, images);
+  }
+}
+
 export async function replyThenSendChunks(
   message: {
     reply: (opts: SendOpts) => Promise<unknown>;

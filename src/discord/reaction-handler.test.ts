@@ -2532,6 +2532,109 @@ describe('reaction prompt interception', () => {
     expect(initialReply.edit.mock.calls.some((call) => String(call[0]?.content ?? '').includes(`Auto-follow-up \`${token}\`: pending.`))).toBe(true);
     expect(followUpReply.edit.mock.calls.some((call) => String(call[0]?.content ?? '').includes(`Auto-follow-up \`${token}\`: completed.`))).toBe(true);
   });
+
+  it('keeps terminal lifecycle on the placeholder when a reaction follow-up reply is chunked', async () => {
+    const invokeCalls: any[] = [];
+    const initialReply = mockReplyObject();
+    const followUpReply = mockReplyObject();
+    (initialReply as any).id = 'initial-reply';
+    (followUpReply as any).id = 'follow-up-reply';
+    const longBody = `Follow-up body ${'x'.repeat(2400)}`;
+    const reply = vi.fn()
+      .mockImplementationOnce(async () => initialReply)
+      .mockImplementationOnce(async () => followUpReply);
+    const message = mockMessage({ reply });
+    const reaction = mockReaction({ message });
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(prompt): AsyncIterable<EngineEvent> {
+        invokeCalls.push(prompt);
+        if (invokeCalls.length === 1) {
+          yield {
+            type: 'text_final',
+            text: 'Looking up channels.\n<discord-action>{"type":"channelList"}</discord-action>',
+          };
+        } else {
+          yield { type: 'text_final', text: longBody };
+        }
+        yield { type: 'done' };
+      },
+    };
+    const watchdog = {
+      start: vi.fn(async () => ({
+        deduped: false,
+        run: {
+          runId: 'run-1',
+          channelId: 'ch-1',
+          messageId: 'follow-up-reply',
+          sessionKey: 'session-1',
+          runKind: 'discord-action-followup',
+          correlationToken: 'token-1',
+          notifyOnCompletion: false,
+          status: 'running',
+          startedAt: 0,
+          checkInDueAt: 0,
+          checkInPosted: false,
+          checkInPostedAt: null,
+          completion: null,
+          completionDetail: null,
+          completedAt: null,
+          finalPosted: false,
+          finalPostAttempts: 0,
+          lastFinalAttemptAt: null,
+          finalError: null,
+          updatedAt: 0,
+        },
+      })),
+      complete: vi.fn(async () => ({
+        runId: 'run-1',
+        channelId: 'ch-1',
+        messageId: 'follow-up-reply',
+        sessionKey: 'session-1',
+        runKind: 'discord-action-followup',
+        correlationToken: 'token-1',
+        notifyOnCompletion: false,
+        status: 'completed',
+        startedAt: 0,
+        checkInDueAt: 0,
+        checkInPosted: false,
+        checkInPostedAt: null,
+        completion: 'succeeded',
+        completionDetail: null,
+        completedAt: 0,
+        finalPosted: false,
+        finalPostAttempts: 0,
+        lastFinalAttemptAt: null,
+        finalError: null,
+        updatedAt: 0,
+      })),
+      startupSweep: vi.fn(async () => ({ interruptedRuns: 0, finalRetried: 0, finalPosted: 0, finalFailed: 0 })),
+    };
+
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsChannels: true,
+      actionFollowupDepth: 1,
+      longRunWatchdog: watchdog as any,
+      longRunStillRunningDelayMs: 1_000,
+    });
+
+    const handler = createReactionAddHandler(params, mockQueue());
+    await handler(reaction as any, mockUser() as any);
+
+    const placeholderCall = reply.mock.calls[1]?.[0]?.content as string;
+    const token = placeholderCall.match(/`([^`]+)`/)?.[1];
+    expect(token).toBeTruthy();
+    expect(followUpReply.edit.mock.calls.some((call) => {
+      const content = String(call[0]?.content ?? '');
+      return content.includes(`Auto-follow-up \`${token}\`: completed.`)
+        && content.includes('Follow-up body');
+    })).toBe(true);
+    expect(message.channel.send).toHaveBeenCalled();
+    expect(String(message.channel.send.mock.calls[0]?.[0]?.content ?? '')).toContain('xxxxxxxx');
+  });
 });
 
 describe('🛑 per-message abort intercept', () => {

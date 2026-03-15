@@ -18,6 +18,7 @@ import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySectio
 import {
   buildFailureRetryPlaceholder,
   editThenSendChunks,
+  editThenSendChunksWithPrefix,
   appendUnavailableActionTypesNotice,
   appendParseFailureNotice,
 } from './output-common.js';
@@ -1083,6 +1084,7 @@ function createReactionHandler(
             }
           }
 
+          const followUpPlaceholderLines: string[] = [];
           if (currentFollowUpToken) {
             const completedRun = await params.longRunWatchdog?.complete(currentFollowUpRunId!, {
               outcome: invokeError ? 'failed' : 'succeeded',
@@ -1091,7 +1093,7 @@ function createReactionHandler(
               completedRun && isDiscordActionFollowUpRun(completedRun)
                 ? resolveDiscordActionFollowUpTerminalState(completedRun)
                 : (invokeError ? 'failed' : 'completed');
-            processedText = appendFollowUpLifecycleLine(processedText, currentFollowUpToken, terminalState);
+            followUpPlaceholderLines.push(buildFollowUpLifecycleLine(currentFollowUpToken, terminalState));
           }
 
           let nextFollowUp: PendingActionFollowUp | null = null;
@@ -1114,18 +1116,32 @@ function createReactionHandler(
                 ? `${pendingLine}\n${failureRetryPlaceholder}`
                 : pendingLine,
             };
-            processedText = appendFollowUpLifecycleLine(processedText, token, 'pending');
+            if (followUpDepth > 0 && currentFollowUpToken) {
+              followUpPlaceholderLines.push(pendingLine);
+            } else {
+              processedText = appendFollowUpLifecycleLine(processedText, token, 'pending');
+            }
           }
           pendingFollowUp = nextFollowUp;
 
           if (!isShuttingDown()) {
             try {
-              await editThenSendChunks(
-                reply!,
-                msg.channel as unknown as { send: (opts: { content: string; allowedMentions: unknown; files?: unknown[] }) => Promise<unknown> },
-                processedText,
-                collectedImages,
-              );
+              if (currentFollowUpToken) {
+                await editThenSendChunksWithPrefix(
+                  reply!,
+                  msg.channel as unknown as { send: (opts: { content: string; allowedMentions: unknown; files?: unknown[] }) => Promise<unknown> },
+                  followUpPlaceholderLines.join('\n'),
+                  processedText,
+                  collectedImages,
+                );
+              } else {
+                await editThenSendChunks(
+                  reply!,
+                  msg.channel as unknown as { send: (opts: { content: string; allowedMentions: unknown; files?: unknown[] }) => Promise<unknown> },
+                  processedText,
+                  collectedImages,
+                );
+              }
               replyFinalized = true;
             } catch (editErr) {
               if (errorCode(editErr) === 50083) {
