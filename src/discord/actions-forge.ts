@@ -1,12 +1,11 @@
+import path from 'node:path';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { ForgeOrchestrator } from './forge-commands.js';
 import { executePlanAction } from './actions-plan.js';
 import type { PlanContext } from './actions-plan.js';
 import type { TaskStore } from '../tasks/store.js';
-import { looksLikePlanId, findPlanFile, listPlanFiles } from './plan-commands.js';
-import type { HandlePlanCommandOpts } from './plan-commands.js';
-import { buildPlanSummary } from './forge-commands.js';
+import { findPlanFile } from './plan-commands.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
@@ -17,7 +16,15 @@ import {
   acquireWriterLock,
   setActiveOrchestrator,
   getRunningPlanIds,
+  resolveForgePlanPhaseGate,
 } from './forge-plan-registry.js';
+import {
+  isForgeFinalArtifactPhase,
+  isForgeResearchPhase,
+  resolveForgeReResearchPhase,
+  resolveForgeTurnRoute,
+} from '../forge-phase.js';
+import type { ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,6 +43,28 @@ const FORGE_TYPE_MAP: Record<ForgeActionRequest['type'], true> = {
   forgeCancel: true,
 };
 export const FORGE_ACTION_TYPES = new Set<string>(Object.keys(FORGE_TYPE_MAP));
+export type { ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
+export { isForgeFinalArtifactPhase, isForgeResearchPhase, resolveForgeTurnRoute } from '../forge-phase.js';
+
+export type ForgeTurnGateRequest = {
+  phase: ForgeTurnPhase;
+  researchComplete: boolean;
+  candidatePaths?: readonly string[] | null;
+  allowlistPaths?: readonly string[] | null;
+  allowResearchReset?: boolean;
+};
+
+export type ForgeTurnGateDecision = {
+  status: 'allow' | 'reject' | 're_research';
+  requestedPhase: ForgeTurnPhase;
+  nextPhase: ForgeTurnPhase;
+  route: ForgeTurnRoute;
+  researchComplete: boolean;
+  normalizedCandidatePaths: string[];
+  normalizedAllowlistPaths: string[];
+  outOfBoundsPaths: string[];
+  reason?: string;
+};
 
 export type ForgeContext = {
   orchestratorFactory: (overrides?: {
@@ -84,6 +113,162 @@ function isArchivedThreadError(err: unknown): boolean {
 
 function shouldRouteForgeResumeToPlanRun(status: string | undefined): boolean {
   return status === 'APPROVED' || status === 'IMPLEMENTING';
+}
+
+export function normalizeForgeCandidatePath(candidatePath: string): string | null {
+  const trimmed = candidatePath.trim();
+  if (!trimmed) return null;
+  const unwrapped = trimmed.startsWith('`') && trimmed.endsWith('`')
+    ? trimmed.slice(1, -1).trim()
+    : trimmed;
+  if (!unwrapped) return null;
+  const slashNormalized = unwrapped.replace(/\\/g, '/');
+  if (/^[a-z]:\//i.test(slashNormalized)) return null;
+  const normalized = path.posix.normalize(slashNormalized).replace(/^(\.\/)+/, '');
+  if (!normalized || normalized === '.' || normalized.startsWith('../') || path.posix.isAbsolute(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+export function normalizeForgeCandidatePathList(
+  candidatePaths: readonly string[] | null | undefined,
+): string[] {
+  if (!candidatePaths?.length) return [];
+  const normalized = new Set<string>();
+  for (const candidatePath of candidatePaths) {
+    const next = normalizeForgeCandidatePath(candidatePath);
+    if (next) normalized.add(next);
+  }
+  return [...normalized];
+}
+
+function collectNormalizedForgeCandidatePaths(
+  candidatePaths: readonly string[] | null | undefined,
+): { normalized: string[]; invalid: string[] } {
+  if (!candidatePaths?.length) return { normalized: [], invalid: [] };
+
+  const normalized = new Set<string>();
+  const invalid = new Set<string>();
+  for (const candidatePath of candidatePaths) {
+    const next = normalizeForgeCandidatePath(candidatePath);
+    if (next) {
+      normalized.add(next);
+      continue;
+    }
+    const trimmed = candidatePath.trim();
+    if (trimmed) invalid.add(trimmed);
+  }
+  return { normalized: [...normalized], invalid: [...invalid] };
+}
+
+export function evaluateForgeTurnGate(request: ForgeTurnGateRequest): ForgeTurnGateDecision {
+  const { normalized: normalizedCandidatePaths, invalid: invalidCandidatePaths } = collectNormalizedForgeCandidatePaths(request.candidatePaths);
+  const normalizedAllowlistPaths = normalizeForgeCandidatePathList(request.allowlistPaths);
+  const allowlistSet = new Set(normalizedAllowlistPaths);
+  const requestedPhase = request.phase;
+
+  if (isForgeFinalArtifactPhase(requestedPhase) && !request.researchComplete) {
+    return {
+      status: 'reject',
+      requestedPhase,
+      nextPhase: requestedPhase,
+      route: resolveForgeTurnRoute(requestedPhase),
+      researchComplete: false,
+      normalizedCandidatePaths,
+      normalizedAllowlistPaths,
+      outOfBoundsPaths: [],
+      reason: 'Research must be marked complete before running a final strict-output forge turn.',
+    };
+  }
+
+  if (isForgeFinalArtifactPhase(requestedPhase) && normalizedAllowlistPaths.length === 0) {
+    const reResearchPhase = resolveForgeReResearchPhase(requestedPhase);
+    const reason = `Final forge phase ${requestedPhase} is missing a grounded candidate allowlist.`;
+    if (request.allowResearchReset && reResearchPhase) {
+      return {
+        status: 're_research',
+        requestedPhase,
+        nextPhase: reResearchPhase,
+        route: resolveForgeTurnRoute(reResearchPhase),
+        researchComplete: false,
+        normalizedCandidatePaths,
+        normalizedAllowlistPaths,
+        outOfBoundsPaths: [],
+        reason: `${reason} Re-enter ${reResearchPhase} to refresh grounded inputs before continuing.`,
+      };
+    }
+
+    return {
+      status: 'reject',
+      requestedPhase,
+      nextPhase: requestedPhase,
+      route: resolveForgeTurnRoute(requestedPhase),
+      researchComplete: request.researchComplete,
+      normalizedCandidatePaths,
+      normalizedAllowlistPaths,
+      outOfBoundsPaths: [],
+      reason,
+    };
+  }
+
+  if (isForgeResearchPhase(requestedPhase)) {
+    return {
+      status: 'allow',
+      requestedPhase,
+      nextPhase: requestedPhase,
+      route: resolveForgeTurnRoute(requestedPhase),
+      researchComplete: request.researchComplete,
+      normalizedCandidatePaths,
+      normalizedAllowlistPaths,
+      outOfBoundsPaths: [],
+    };
+  }
+
+  const outOfBoundsPaths = [
+    ...invalidCandidatePaths,
+    ...normalizedCandidatePaths.filter((candidatePath) => !allowlistSet.has(candidatePath)),
+  ];
+  if (outOfBoundsPaths.length === 0) {
+    return {
+      status: 'allow',
+      requestedPhase,
+      nextPhase: requestedPhase,
+      route: resolveForgeTurnRoute(requestedPhase),
+      researchComplete: request.researchComplete,
+      normalizedCandidatePaths,
+      normalizedAllowlistPaths,
+      outOfBoundsPaths,
+    };
+  }
+
+  const reResearchPhase = resolveForgeReResearchPhase(requestedPhase);
+  const reason = `Candidate paths fall outside the bounded forge allowlist: ${outOfBoundsPaths.join(', ')}`;
+  if (request.allowResearchReset && reResearchPhase) {
+    return {
+      status: 're_research',
+      requestedPhase,
+      nextPhase: reResearchPhase,
+      route: resolveForgeTurnRoute(reResearchPhase),
+      researchComplete: false,
+      normalizedCandidatePaths,
+      normalizedAllowlistPaths,
+      outOfBoundsPaths,
+      reason: `${reason}. Re-enter ${reResearchPhase} to refresh grounded inputs before continuing.`,
+    };
+  }
+
+  return {
+    status: 'reject',
+    requestedPhase,
+    nextPhase: requestedPhase,
+    route: resolveForgeTurnRoute(requestedPhase),
+    researchComplete: request.researchComplete,
+    normalizedCandidatePaths,
+    normalizedAllowlistPaths,
+    outOfBoundsPaths,
+    reason,
+  };
 }
 
 async function resolveLinkedTaskForThread(
@@ -284,10 +469,6 @@ export async function executeForgeAction(
         };
       }
 
-      const planOpts: HandlePlanCommandOpts = {
-        workspaceCwd: forgeCtx.workspaceCwd,
-        taskStore: forgeCtx.taskStore,
-      };
       const found = await findPlanFile(forgeCtx.plansDir, action.planId);
       if (!found) {
         return { ok: false, error: `Plan not found: ${action.planId}` };
@@ -309,6 +490,21 @@ export async function executeForgeAction(
         return runResult.ok
           ? { ok: true, summary: runResult.summary ?? `Plan run started for ${found.header.planId}.` }
           : runResult;
+      }
+
+      const phaseGate = resolveForgePlanPhaseGate(found.header.planId, 'audit');
+      const turnGate = evaluateForgeTurnGate({
+        phase: 'audit',
+        researchComplete: phaseGate.researchComplete,
+        candidatePaths: phaseGate.candidatePaths,
+        allowlistPaths: phaseGate.allowlistPaths,
+        allowResearchReset: phaseGate.fallbackPolicy.onOutOfBounds === 're_research',
+      });
+      if (phaseGate.requiresFreshResearch || turnGate.status !== 'allow') {
+        return {
+          ok: false,
+          error: phaseGate.reason ?? turnGate.reason ?? `Forge resume for ${found.header.planId} requires fresh research before audit.`,
+        };
       }
 
       const progress = await buildProgressCallbacks(
@@ -430,5 +626,6 @@ export function forgeActionsPromptSection(): string {
 - Only one forge can run at a time. Check status before starting a new one.
 - Forge runs are asynchronous — progress updates are posted to the channel.
 - Use forgeResume when you want DiscoClaw to pick up a plan again; the next step depends on the plan's status.
-- Re-audit with forgeResume after manual plan edits when the plan is still in DRAFT or REVIEW.`;
+- Re-audit with forgeResume after manual plan edits when the plan is still in DRAFT or REVIEW.
+- Forge phases are bounded: research/discovery completes before any final strict-output turn, and candidate file access stays inside the grounded allowlist unless forge explicitly re-enters research.`;
 }

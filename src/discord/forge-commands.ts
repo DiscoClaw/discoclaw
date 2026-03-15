@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execa } from 'execa';
 import { createPlan, parsePlanFileHeader, resolvePlanHeaderTaskId } from './plan-commands.js';
 import type { TaskStore } from '../tasks/store.js';
-import type { RuntimeAdapter, EngineEvent, RuntimeSupervisorPolicy } from '../runtime/types.js';
+import type { RuntimeAdapter, EngineEvent, RuntimeSupervisorPolicy, ForgePhaseGuardrails } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { runPipeline } from '../pipeline/engine.js';
 import { auditPlanStructure, deriveVerdict, maxReviewNumber } from './audit-handler.js';
@@ -12,11 +12,17 @@ import { parseAuditVerdict } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { getSection, parsePlan } from './plan-parser.js';
 import { cliExecaEnv, stripAnsi } from '../runtime/cli-shared.js';
+import { resolveForgeTurnKind } from '../runtime/cli-strategy.js';
 import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
 import { buildPromptPreamble } from './prompt-common.js';
 import { createPhaseStatusHeartbeatController, resolvePlanHeaderHeartbeatPolicy } from './phase-status-heartbeat.js';
+import { resolveForgePlanPhaseGate, setForgePlanMetadata } from './forge-plan-registry.js';
+import { resolveForgeReResearchPhase, resolveForgeTurnRoute } from '../forge-phase.js';
+import type { ForgeTurnPhase } from '../forge-phase.js';
 export { parseAuditVerdict };
 export type { AuditVerdict };
+export type { ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
+export { resolveForgeTurnRoute } from '../forge-phase.js';
 
 const COMPOUND_LESSONS_PATH = 'docs/compound-lessons.md';
 const FORGE_STREAM_STALL_TIMEOUT_MS = 2 * 60_000;
@@ -306,10 +312,21 @@ function formatConcretePlanPaths(paths: readonly string[]): string {
 
 function extractConcretePlanPaths(planContent: string): string[] {
   const planForPrompt = stripAuditLogForPrompt(planContent);
-  const matches = [...planForPrompt.matchAll(/`([^`\n]+)`/g)]
-    .map((match) => match[1]!.trim())
-    .filter((value) => value.includes('/'));
-  return [...new Set(matches)];
+  const matches = new Set<string>();
+  const addCandidate = (rawValue: string) => {
+    const normalized = normalizeForgeCandidatePath(rawValue.replace(/[),.:;]+$/g, ''));
+    if (!normalized || !normalized.includes('/')) return;
+    matches.add(normalized);
+  };
+
+  for (const match of planForPrompt.matchAll(/`([^`\n]+)`/g)) {
+    addCandidate(match[1]!.trim());
+  }
+  for (const match of planForPrompt.matchAll(/\b(?:[A-Za-z0-9._-]+\/)+[A-Za-z0-9._-]+\b/g)) {
+    addCandidate(match[0]!.trim());
+  }
+
+  return [...matches];
 }
 
 function formatCandidatePathChoices(paths: readonly string[]): string {
@@ -450,6 +467,142 @@ function isCodexForgeRuntime(runtime: RuntimeAdapter): boolean {
     );
 }
 
+function routeForgeRuntimeForPhase(runtime: RuntimeAdapter, phase: ForgeTurnPhase): RuntimeAdapter {
+  return resolveForgeTurnRoute(phase) === 'cli' && isCodexForgeRuntime(runtime)
+    ? wrapWithNativeAppServerDisabled(runtime)
+    : runtime;
+}
+
+function resolveForgeFallbackPolicy(phase: ForgeTurnPhase): {
+  onOutOfBounds: ForgePhaseGuardrails['fallbackPolicy']['onOutOfBounds'];
+  reResearchPhase: ForgePhaseGuardrails['fallbackPolicy']['reResearchPhase'];
+} {
+  const reResearchPhase = resolveForgeReResearchPhase(phase);
+  return reResearchPhase
+    ? { onOutOfBounds: 're_research', reResearchPhase }
+    : { onOutOfBounds: 'reject', reResearchPhase: null };
+}
+
+function persistForgePhaseMetadata(
+  planId: string,
+  phase: ForgeTurnPhase,
+  opts: {
+    researchComplete: boolean;
+    candidatePaths: readonly string[];
+    allowlistPaths: readonly string[];
+  },
+): void {
+  const fallbackPolicy = resolveForgeFallbackPolicy(phase);
+  setForgePlanMetadata(planId, {
+    phaseState: {
+      currentPhase: phase,
+      researchComplete: opts.researchComplete,
+    },
+    candidateBounds: {
+      candidatePaths: opts.candidatePaths,
+      allowlistPaths: opts.allowlistPaths,
+    },
+    fallbackPolicy,
+  });
+}
+
+function resolveForgePhaseGuardrailsOrThrow(
+  planId: string,
+  phase: ForgeTurnPhase,
+): ForgePhaseGuardrails {
+  const gate = resolveForgePlanPhaseGate(planId, phase);
+  if (gate.nextPhase !== phase) {
+    throw new Error(gate.reason ?? `Forge phase ${phase} requires fresh research before dispatch.`);
+  }
+
+  return {
+    phase,
+    turnKind: resolveForgeTurnKind(phase),
+    candidateBoundPolicy: {
+      scope: gate.allowlistPaths.length > 0 ? 'allowlist' : 'unbounded',
+      candidatePaths: gate.candidatePaths,
+      allowlistPaths: gate.allowlistPaths,
+    },
+    fallbackPolicy: {
+      onOutOfBounds: gate.fallbackPolicy.onOutOfBounds,
+      reResearchPhase: gate.fallbackPolicy.reResearchPhase,
+      noWidening: true,
+    },
+    phaseState: {
+      researchComplete: gate.researchComplete,
+    },
+  };
+}
+
+function normalizeForgeCandidatePath(candidatePath: string): string | null {
+  const trimmed = candidatePath.trim();
+  if (!trimmed) return null;
+  const unwrapped = trimmed.startsWith('`') && trimmed.endsWith('`')
+    ? trimmed.slice(1, -1).trim()
+    : trimmed;
+  if (!unwrapped) return null;
+  const slashNormalized = unwrapped.replace(/\\/g, '/');
+  if (/^[a-z]:\//i.test(slashNormalized)) return null;
+  const normalized = path.posix.normalize(slashNormalized).replace(/^(\.\/)+/, '');
+  if (!normalized || normalized === '.' || normalized.startsWith('../') || path.posix.isAbsolute(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+function parseGroundingCandidatePaths(
+  output: string,
+  opts?: { allowNone?: boolean },
+): { normalizedPaths: string[]; invalidPaths: string[]; isNone: boolean } {
+  const allowNone = opts?.allowNone ?? false;
+  const trimmed = output.trim();
+  if (allowNone && trimmed === 'NONE') {
+    return { normalizedPaths: [], invalidPaths: [], isNone: true };
+  }
+
+  const normalized = new Set<string>();
+  const invalid = new Set<string>();
+  for (const line of trimmed.split('\n').map((value) => value.trim()).filter(Boolean)) {
+    const next = normalizeForgeCandidatePath(line);
+    if (!next) {
+      invalid.add(line);
+      continue;
+    }
+    normalized.add(next);
+  }
+
+  return {
+    normalizedPaths: [...normalized],
+    invalidPaths: [...invalid],
+    isNone: false,
+  };
+}
+
+function assertGroundingOutputWithinAllowlist(opts: {
+  phase: 'draft_research' | 'revision_research';
+  output: string;
+  candidateAllowlist?: readonly string[];
+  allowNone?: boolean;
+}): { normalizedPaths: string[]; isNone: boolean } {
+  const { phase, output, candidateAllowlist, allowNone } = opts;
+  const parsed = parseGroundingCandidatePaths(output, { allowNone });
+  if (parsed.invalidPaths.length > 0) {
+    throw new Error(`${phase} grounding output referenced invalid repo-relative paths: ${parsed.invalidPaths.join(', ')}`);
+  }
+
+  if (!candidateAllowlist?.length) {
+    return { normalizedPaths: parsed.normalizedPaths, isNone: parsed.isNone };
+  }
+
+  const allowlist = new Set(candidateAllowlist);
+  const outOfBoundsPaths = parsed.normalizedPaths.filter((candidatePath) => !allowlist.has(candidatePath));
+  if (outOfBoundsPaths.length > 0) {
+    throw new Error(`${phase} grounding output referenced paths outside the bounded candidate allowlist: ${outOfBoundsPaths.join(', ')}`);
+  }
+
+  return { normalizedPaths: parsed.normalizedPaths, isNone: parsed.isNone };
+}
+
 function shouldUseTwoStageCodexPlanFlow(runtime: RuntimeAdapter): boolean {
   return isCodexForgeRuntime(runtime)
     && runtime.capabilities.has('sessions')
@@ -463,15 +616,24 @@ function resolveForgePlanSystemPrompt(rt: RuntimeAdapter): string | undefined {
   return isCodexForgeRuntime(rt) ? undefined : FORGE_PLAN_SYSTEM_PROMPT;
 }
 
-function shouldForceCliCodexForgeTurns(rt: RuntimeAdapter): boolean {
-  return isCodexForgeRuntime(rt);
-}
-
 function wrapWithNativeAppServerDisabled(rt: RuntimeAdapter): RuntimeAdapter {
   return {
     ...rt,
     invoke(params) {
       return rt.invoke({ ...params, disableNativeAppServer: true });
+    },
+  };
+}
+
+function wrapWithForgePhaseGuardrails(
+  rt: RuntimeAdapter,
+  forgePhase: ForgePhaseGuardrails | undefined,
+): RuntimeAdapter {
+  if (!forgePhase) return rt;
+  return {
+    ...rt,
+    invoke(params) {
+      return rt.invoke({ ...params, forgePhase });
     },
   };
 }
@@ -913,7 +1075,7 @@ export function buildAuditorPrompt(
   planContent: string,
   roundNumber: number,
   projectContext?: string,
-  opts?: { hasTools?: boolean },
+  opts?: { hasTools?: boolean; allowlistPaths?: readonly string[] },
 ): string {
   const planForPrompt = stripAuditLogForPrompt(planContent);
   const priorAuditSummary = roundNumber > 1 ? summarizePriorAuditHistory(planContent) : undefined;
@@ -983,6 +1145,7 @@ export function buildAuditorPrompt(
   }
 
   const hasTools = opts?.hasTools ?? true;
+  const boundedAllowlistPaths = opts?.allowlistPaths ?? [];
 
   instructions.push(
     'Review the plan for:',
@@ -1007,6 +1170,14 @@ export function buildAuditorPrompt(
       '- If your concern evaporates after checking the code, do not raise it.',
       '',
     );
+    if (boundedAllowlistPaths.length > 0) {
+      instructions.push(
+        'Audit only within this grounded repo allowlist unless forge explicitly re-enters research:',
+        '',
+        formatCandidatePathChoices(boundedAllowlistPaths),
+        '',
+      );
+    }
   } else {
     instructions.push(
       '## Verification',
@@ -1348,6 +1519,19 @@ function assertPlanMarkdownOutput(output: string, phase: 'draft' | 'revision'): 
 function withRetrySessionKey(sessionKey: string | null | undefined, suffix: string): string | undefined {
   if (!sessionKey) return undefined;
   return `${sessionKey}:${suffix}`;
+}
+
+function addGroundingRetryHints(
+  def: Parameters<typeof runPipeline>[0],
+  opts: { retrySessionSuffix: string },
+): Parameters<typeof runPipeline>[0] {
+  return {
+    ...def,
+    steps: def.steps.map((step) =>
+      step.kind === 'prompt' && step.sessionKey !== undefined
+        ? { ...step, sessionKey: withRetrySessionKey(step.sessionKey, opts.retrySessionSuffix) }
+        : step),
+  };
 }
 
 function addPlanRetryHints(
@@ -1923,12 +2107,13 @@ export class ForgeOrchestrator {
         throw new Error(`Plan has structural issues: ${missing}. Fix the plan file before re-auditing.`);
       }
 
+      resolveForgePhaseGuardrailsOrThrow(planId, 'audit');
+
       // Load project context
       const projectContext = await this.loadProjectContext();
 
       // Determine start round from existing reviews
       const startRound = maxReviewNumber(planContent) + 1;
-
       return await this.auditLoop({
         planId,
         filePath,
@@ -2006,16 +2191,28 @@ export class ForgeOrchestrator {
     const rawDrafterModel = this.opts.drafterModel ?? this.opts.model;
     const rawAuditorModel = this.opts.auditorModel ?? this.opts.model;
     const drafterRuntimeBase = this.opts.drafterRuntime ?? this.opts.runtime;
-    const forceDrafterCli = shouldForceCliCodexForgeTurns(drafterRuntimeBase);
-    const drafterRt = forceDrafterCli
-      ? wrapWithNativeAppServerDisabled(drafterRuntimeBase)
-      : drafterRuntimeBase;
     const isClaudeDrafter = drafterRuntimeBase.id === 'claude_code';
     const hasExplicitDrafterModel = Boolean(this.opts.drafterModel);
     const drafterModel = isClaudeDrafter
       ? resolveModel(rawDrafterModel, drafterRuntimeBase.id)
       : (hasExplicitDrafterModel ? resolveModel(rawDrafterModel, drafterRuntimeBase.id) : '');
     const drafterReasoningEffort = resolveReasoningEffort(rawDrafterModel, drafterRuntimeBase.id);
+    const drafterHasSessions = drafterRuntimeBase.capabilities.has('sessions');
+    const drafterRuntimeWithReasoning = drafterReasoningEffort
+      ? wrapWithReasoningEffort(drafterRuntimeBase, drafterReasoningEffort)
+      : drafterRuntimeBase;
+    const auditorRuntimeBase = this.opts.auditorRuntime ?? this.opts.runtime;
+    const isClaudeAuditor = auditorRuntimeBase.id === 'claude_code';
+    const hasExplicitAuditorModel = Boolean(this.opts.auditorModel);
+    const auditorModel = isClaudeAuditor
+      ? resolveModel(rawAuditorModel, auditorRuntimeBase.id)
+      : (hasExplicitAuditorModel ? resolveModel(rawAuditorModel, auditorRuntimeBase.id) : '');
+    const auditorReasoningEffort = resolveReasoningEffort(rawAuditorModel, auditorRuntimeBase.id);
+    const auditorHasFileTools = auditorRuntimeBase.capabilities.has('tools_fs');
+    const auditorHasSessions = auditorRuntimeBase.capabilities.has('sessions');
+    const auditorRuntimeWithReasoning = auditorReasoningEffort
+      ? wrapWithReasoningEffort(auditorRuntimeBase, auditorReasoningEffort)
+      : auditorRuntimeBase;
     const readOnlyTools = ['Read', 'Glob', 'Grep'];
     const addDirs = [this.opts.cwd];
 
@@ -2025,24 +2222,36 @@ export class ForgeOrchestrator {
     const drafterSessionKey = `forge:${planId}:${rawDrafterModel}:drafter`;
     const auditorSessionKey = `forge:${planId}:${rawAuditorModel}:auditor`;
 
-    // Wrap drafter with reasoning effort if resolved (before event-forwarding so both compose).
-    const reasoningDrafterRt = drafterReasoningEffort
-      ? wrapWithReasoningEffort(drafterRt, drafterReasoningEffort)
-      : drafterRt;
-    const guardedDraftRt = wrapWithPlanPrefixGuard(reasoningDrafterRt, 'draft');
-    const guardedRevisionRt = wrapWithPlanPrefixGuard(reasoningDrafterRt, 'revision');
-    const guardedDraftResearchRt = wrapWithGroundingOutputGuard(reasoningDrafterRt, 'draft');
-    const guardedRevisionResearchRt = wrapWithGroundingOutputGuard(reasoningDrafterRt, 'revision', { allowNone: true });
-    const effectiveDraftResearchRt = onEvent ? wrapWithEventForwarding(guardedDraftResearchRt, onEvent) : guardedDraftResearchRt;
-    const effectiveRevisionResearchRt = onEvent ? wrapWithEventForwarding(guardedRevisionResearchRt, onEvent) : guardedRevisionResearchRt;
-    const effectiveDrafterRt = onEvent ? wrapWithEventForwarding(guardedDraftRt, onEvent) : guardedDraftRt;
-    const effectiveRevisionRt = onEvent ? wrapWithEventForwarding(guardedRevisionRt, onEvent) : guardedRevisionRt;
+    const buildDrafterPhaseRuntime = (
+      phase: 'draft_research' | 'draft_artifact' | 'revision_research' | 'revision_artifact',
+      forgePhase?: ForgePhaseGuardrails,
+    ): RuntimeAdapter => {
+      const routed = routeForgeRuntimeForPhase(drafterRuntimeWithReasoning, phase);
+      const bounded = wrapWithForgePhaseGuardrails(routed, forgePhase);
+      const guarded = phase === 'draft_research'
+        ? wrapWithGroundingOutputGuard(bounded, 'draft')
+        : phase === 'revision_research'
+          ? wrapWithGroundingOutputGuard(bounded, 'revision', { allowNone: true })
+          : phase === 'draft_artifact'
+            ? wrapWithPlanPrefixGuard(bounded, 'draft')
+            : wrapWithPlanPrefixGuard(bounded, 'revision');
+      return onEvent ? wrapWithEventForwarding(guarded, onEvent) : guarded;
+    };
+    const buildAuditorPhaseRuntime = (
+      forgePhase?: ForgePhaseGuardrails,
+    ): RuntimeAdapter => {
+      const routed = routeForgeRuntimeForPhase(auditorRuntimeWithReasoning, 'audit');
+      const bounded = wrapWithForgePhaseGuardrails(routed, forgePhase);
+      return onEvent ? wrapWithEventForwarding(bounded, onEvent) : bounded;
+    };
     const useTwoStageCodexDraftFlow = shouldUseTwoStageCodexPlanFlow(drafterRuntimeBase);
 
     let round = startRound - 1; // will be incremented at top of loop
     let planContent = await fs.readFile(filePath, 'utf-8');
     let lastAuditNotes = '';
     let lastVerdict: AuditVerdict = { maxSeverity: 'none', shouldLoop: false };
+    let draftAuditFallbackPaths: string[] = [];
+    let revisionAuditFallbackPaths: string[] = [];
     const heartbeatPolicy = resolvePlanHeaderHeartbeatPolicy(
       planContent,
       this.opts.planForgeHeartbeatIntervalMs,
@@ -2104,6 +2313,7 @@ export class ForgeOrchestrator {
           await setHeartbeatPhase(`Draft round ${round}/${maxRound}`);
           await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.draft, `Forging ${planId}... Drafting (reading codebase)`));
 
+          const draftArtifactPhase = 'draft_artifact' as const;
           const draftGroundingCandidatePaths = useTwoStageCodexDraftFlow
             ? await resolveCodexGroundingCandidatePaths({
               cwd: this.opts.cwd,
@@ -2118,6 +2328,13 @@ export class ForgeOrchestrator {
               'forge:codex draft grounding candidates resolved',
             );
           }
+          if (useTwoStageCodexDraftFlow) {
+            persistForgePhaseMetadata(planId, 'draft_research', {
+              researchComplete: false,
+              candidatePaths: draftGroundingCandidatePaths,
+              allowlistPaths: useBoundedDraftGrounding ? draftGroundingCandidatePaths : [],
+            });
+          }
           const drafterPrompt = buildDrafterPrompt(
             description,
             templateContent,
@@ -2130,66 +2347,88 @@ export class ForgeOrchestrator {
           const codexDraftWriteContext = useTwoStageCodexDraftFlow
             ? (codexNativeWriteContextSummary ?? '')
             : contextSummary;
-          const draftPrimaryDef = useTwoStageCodexDraftFlow
-            ? {
-              steps: [
-                {
-                  id: 'draft-grounding',
-                  kind: 'prompt' as const,
-                  prompt: useBoundedDraftGrounding
-                    ? buildCodexDraftCandidateSelectionPrompt(description, draftGroundingCandidatePaths)
-                    : buildCodexDraftGroundingPrompt(description),
-                  runtime: effectiveDraftResearchRt,
-                  model: drafterModel,
-                  tools: useBoundedDraftGrounding ? [] : readOnlyTools,
-                  ...(useBoundedDraftGrounding ? {} : { addDirs }),
-                  timeoutMs: this.opts.timeoutMs,
-                  streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
-                  progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
-                  ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
-                  sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
-                  supervisor: FORGE_GROUNDING_PHASE_SUPERVISOR_POLICY,
-                },
-                {
-                  id: 'draft-write',
-                  kind: 'prompt' as const,
-                  prompt: buildCodexDraftWritePrompt(
-                    description,
-                    templateContent,
-                    codexDraftWriteContext,
-                    '{{steps.draft-grounding.output}}',
-                  ),
-                  runtime: effectiveDrafterRt,
-                  systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
-                  model: drafterModel,
-                  tools: [],
-                  timeoutMs: this.opts.timeoutMs,
-                  streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
-                  progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
-                  ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
-                  sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
-                  supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
-                },
-              ],
+          let draftOutput = '';
+
+          if (useTwoStageCodexDraftFlow) {
+            const draftResearchGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, 'draft_research');
+            const draftResearchDef = {
+              steps: [{
+                id: 'draft-grounding',
+                kind: 'prompt' as const,
+                prompt: useBoundedDraftGrounding
+                  ? buildCodexDraftCandidateSelectionPrompt(description, draftGroundingCandidatePaths)
+                  : buildCodexDraftGroundingPrompt(description),
+                runtime: buildDrafterPhaseRuntime('draft_research', draftResearchGuardrails),
+                model: drafterModel,
+                tools: useBoundedDraftGrounding ? [] : readOnlyTools,
+                ...(useBoundedDraftGrounding ? {} : { addDirs }),
+                timeoutMs: this.opts.timeoutMs,
+                streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
+                progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                sessionKey: drafterHasSessions ? drafterSessionKey : undefined,
+                supervisor: FORGE_GROUNDING_PHASE_SUPERVISOR_POLICY,
+              }],
               runtime: this.opts.runtime,
               cwd: this.opts.cwd,
               model: this.opts.model,
               signal: this.abortController.signal,
+            };
+            const draftResearchResult = await this.runWithRetry(
+              draftResearchDef,
+              'Draft research',
+              onProgress,
+              undefined,
+              (retryDef) => addGroundingRetryHints(retryDef, { retrySessionSuffix: 'draft-research-retry' }),
+            );
+            if (!draftResearchResult) {
+              this.opts.log?.info({ planId, round, phase: 'draft_research' }, 'forge:cancelled');
+              await this.updatePlanStatus(filePath, 'CANCELLED');
+              await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.cancelled, `Forge ${planId} cancelled.`), { force: true });
+              await completeHeartbeat('cancelled', `Cancelled during draft in round ${round}/${maxRound}.`);
+              return {
+                planId,
+                filePath,
+                finalVerdict: 'CANCELLED',
+                rounds: round - startRound + 1,
+                reachedMaxRounds: false,
+              };
             }
-            : {
+
+            const draftGroundingOutput = draftResearchResult.outputs[0] ?? '';
+            const draftGroundingState = assertGroundingOutputWithinAllowlist({
+              phase: 'draft_research',
+              output: draftGroundingOutput,
+              candidateAllowlist: useBoundedDraftGrounding ? draftGroundingCandidatePaths : undefined,
+            });
+            if (draftGroundingState.isNone || draftGroundingState.normalizedPaths.length === 0) {
+              throw new Error('draft_artifact is missing bounded repo inputs from draft_research.');
+            }
+            persistForgePhaseMetadata(planId, draftArtifactPhase, {
+              researchComplete: true,
+              candidatePaths: draftGroundingState.normalizedPaths,
+              allowlistPaths: draftGroundingState.normalizedPaths,
+            });
+            draftAuditFallbackPaths = draftGroundingState.normalizedPaths;
+            const draftArtifactGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, draftArtifactPhase);
+
+            const draftArtifactDef = {
               steps: [{
+                id: 'draft-write',
                 kind: 'prompt' as const,
-                prompt: drafterPrompt,
-                runtime: effectiveDrafterRt,
-                systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
+                prompt: buildCodexDraftWritePrompt(
+                  description,
+                  templateContent,
+                  codexDraftWriteContext,
+                  draftGroundingOutput,
+                ),
+                runtime: buildDrafterPhaseRuntime(draftArtifactPhase, draftArtifactGuardrails),
+                systemPrompt: resolveForgePlanSystemPrompt(drafterRuntimeBase),
                 model: drafterModel,
-                tools: readOnlyTools,
-                addDirs,
+                tools: [],
                 timeoutMs: this.opts.timeoutMs,
                 streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
                 progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
-                ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
-                sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+                sessionKey: drafterHasSessions ? drafterSessionKey : undefined,
                 supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
               }],
               runtime: this.opts.runtime,
@@ -2197,66 +2436,109 @@ export class ForgeOrchestrator {
               model: this.opts.model,
               signal: this.abortController.signal,
             };
-          const draftRetryBaseDef = {
-            steps: [{
-              kind: 'prompt' as const,
-              prompt: drafterPrompt,
-              runtime: effectiveDrafterRt,
-              systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
-              model: drafterModel,
-              tools: readOnlyTools,
-              addDirs,
-              timeoutMs: this.opts.timeoutMs,
-              streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
-              progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
-              ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
-              sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
-              supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
-            }],
-            runtime: this.opts.runtime,
-            cwd: this.opts.cwd,
-            model: this.opts.model,
-            signal: this.abortController.signal,
-          };
-
-          const draftPipelineResult = await this.runWithRetry(draftPrimaryDef, 'Draft', onProgress, (result) => {
-            const output = result.outputs[result.outputs.length - 1] ?? '';
-            assertPlanMarkdownOutput(output, 'draft');
-            if (isTemplateEchoed(output)) {
-              this.opts.log?.warn({ planId, round, phase: 'draft' }, 'forge:template-echo');
-              throw new Error('drafter echoed the template');
-            }
-          }, (retryDef, retryCtx) => {
-            const dropToolsOnRetry = shouldDropToolsOnCodexPlanRetry(drafterRt, retryCtx.firstError);
-            return addPlanRetryHints(useTwoStageCodexDraftFlow ? draftRetryBaseDef : retryDef, {
-              includeTemplateEchoWarning: true,
-              retrySessionSuffix: 'draft-retry',
-              dropToolsOnRetry,
-              dropSessionOnRetry: dropToolsOnRetry && forceDrafterCli,
-              replacementPrompt: dropToolsOnRetry ? compactDrafterRetryPrompt : undefined,
-              supervisorOverride: dropToolsOnRetry && forceDrafterCli
-                ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY
-                : undefined,
+            const draftArtifactResult = await this.runWithRetry(draftArtifactDef, 'Draft', onProgress, (result) => {
+              const output = result.outputs[result.outputs.length - 1] ?? '';
+              assertPlanMarkdownOutput(output, 'draft');
+              if (isTemplateEchoed(output)) {
+                this.opts.log?.warn({ planId, round, phase: 'draft_artifact' }, 'forge:template-echo');
+                throw new Error('drafter echoed the template');
+              }
+            }, (retryDef, retryCtx) => {
+              const allowCompactSalvage = shouldDropToolsOnCodexPlanRetry(drafterRuntimeBase, retryCtx.firstError);
+              return addPlanRetryHints(retryDef, {
+                includeTemplateEchoWarning: true,
+                retrySessionSuffix: 'draft-artifact-retry',
+                dropToolsOnRetry: allowCompactSalvage,
+                dropSessionOnRetry: allowCompactSalvage && drafterHasSessions && resolveForgeTurnRoute(draftArtifactPhase) === 'cli',
+                replacementPrompt: allowCompactSalvage ? compactDrafterRetryPrompt : undefined,
+                supervisorOverride: allowCompactSalvage
+                  ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY
+                  : undefined,
+              });
             });
-          });
-          if (!draftPipelineResult) {
-            this.opts.log?.info({ planId, round, phase: 'draft' }, 'forge:cancelled');
-            await this.updatePlanStatus(filePath, 'CANCELLED');
-            await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.cancelled, `Forge ${planId} cancelled.`), { force: true });
-            await completeHeartbeat('cancelled', `Cancelled during draft in round ${round}/${maxRound}.`);
-            return {
-              planId,
-              filePath,
-              finalVerdict: 'CANCELLED',
-              rounds: round - startRound + 1,
-              reachedMaxRounds: false,
+            if (!draftArtifactResult) {
+              this.opts.log?.info({ planId, round, phase: 'draft_artifact' }, 'forge:cancelled');
+              await this.updatePlanStatus(filePath, 'CANCELLED');
+              await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.cancelled, `Forge ${planId} cancelled.`), { force: true });
+              await completeHeartbeat('cancelled', `Cancelled during draft in round ${round}/${maxRound}.`);
+              return {
+                planId,
+                filePath,
+                finalVerdict: 'CANCELLED',
+                rounds: round - startRound + 1,
+                reachedMaxRounds: false,
+              };
+            }
+            draftOutput = draftArtifactResult.outputs[draftArtifactResult.outputs.length - 1] ?? '';
+          } else {
+            const draftPrimaryDef = {
+              steps: [{
+                kind: 'prompt' as const,
+                prompt: drafterPrompt,
+                runtime: buildDrafterPhaseRuntime(draftArtifactPhase),
+                systemPrompt: resolveForgePlanSystemPrompt(drafterRuntimeBase),
+                model: drafterModel,
+                tools: readOnlyTools,
+                addDirs,
+                timeoutMs: this.opts.timeoutMs,
+                streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
+                progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+                sessionKey: drafterHasSessions ? drafterSessionKey : undefined,
+                supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
+              }],
+              runtime: this.opts.runtime,
+              cwd: this.opts.cwd,
+              model: this.opts.model,
+              signal: this.abortController.signal,
             };
+            const draftPipelineResult = await this.runWithRetry(draftPrimaryDef, 'Draft', onProgress, (result) => {
+              const output = result.outputs[result.outputs.length - 1] ?? '';
+              assertPlanMarkdownOutput(output, 'draft');
+              if (isTemplateEchoed(output)) {
+                this.opts.log?.warn({ planId, round, phase: 'draft_artifact' }, 'forge:template-echo');
+                throw new Error('drafter echoed the template');
+              }
+            }, (retryDef, retryCtx) => {
+              const allowCompactSalvage = shouldDropToolsOnCodexPlanRetry(drafterRuntimeBase, retryCtx.firstError);
+              return addPlanRetryHints(retryDef, {
+                includeTemplateEchoWarning: true,
+                retrySessionSuffix: 'draft-retry',
+                dropToolsOnRetry: allowCompactSalvage,
+                dropSessionOnRetry: allowCompactSalvage && drafterHasSessions && resolveForgeTurnRoute(draftArtifactPhase) === 'cli',
+                replacementPrompt: allowCompactSalvage ? compactDrafterRetryPrompt : undefined,
+                supervisorOverride: allowCompactSalvage && resolveForgeTurnRoute(draftArtifactPhase) === 'cli'
+                  ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY
+                  : undefined,
+              });
+            });
+            if (!draftPipelineResult) {
+              this.opts.log?.info({ planId, round, phase: 'draft_artifact' }, 'forge:cancelled');
+              await this.updatePlanStatus(filePath, 'CANCELLED');
+              await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.cancelled, `Forge ${planId} cancelled.`), { force: true });
+              await completeHeartbeat('cancelled', `Cancelled during draft in round ${round}/${maxRound}.`);
+              return {
+                planId,
+                filePath,
+                finalVerdict: 'CANCELLED',
+                rounds: round - startRound + 1,
+                reachedMaxRounds: false,
+              };
+            }
+            draftOutput = draftPipelineResult.outputs[draftPipelineResult.outputs.length - 1] ?? '';
           }
-          const draftOutput = draftPipelineResult.outputs[draftPipelineResult.outputs.length - 1] ?? '';
 
           // Write the draft — preserve the header (planId, taskId) from the created file.
           planContent = this.mergeDraftWithHeader(planContent, draftOutput);
           await this.atomicWrite(filePath, planContent);
+          const auditBoundedPaths = extractConcretePlanPaths(planContent);
+          const persistedAuditPaths = auditBoundedPaths.length > 0
+            ? auditBoundedPaths
+            : draftAuditFallbackPaths;
+          persistForgePhaseMetadata(planId, 'audit', {
+            researchComplete: persistedAuditPaths.length > 0,
+            candidatePaths: persistedAuditPaths,
+            allowlistPaths: persistedAuditPaths,
+          });
 
           // Update task title to match the drafter's Plan title (raw user input is often messy).
           const mergedHeader = parsePlanFileHeader(planContent);
@@ -2286,42 +2568,28 @@ export class ForgeOrchestrator {
           ),
         );
 
-        const auditorRt = this.opts.auditorRuntime ?? this.opts.runtime;
-        const forceAuditorCli = shouldForceCliCodexForgeTurns(auditorRt);
-        const auditorRuntimeBase = forceAuditorCli
-          ? wrapWithNativeAppServerDisabled(auditorRt)
-          : auditorRt;
-        const isClaudeAuditor = auditorRt.id === 'claude_code';
-        const auditorHasFileTools = auditorRt.capabilities.has('tools_fs');
-        const hasExplicitAuditorModel = Boolean(this.opts.auditorModel);
-        const effectiveAuditorModel = isClaudeAuditor
-          ? resolveModel(rawAuditorModel, auditorRt.id)
-          : (hasExplicitAuditorModel ? resolveModel(rawAuditorModel, auditorRt.id) : '');
-        const auditorReasoningEffort = resolveReasoningEffort(rawAuditorModel, auditorRt.id);
-        const reasoningAuditorRt = auditorReasoningEffort
-          ? wrapWithReasoningEffort(auditorRuntimeBase, auditorReasoningEffort)
-          : auditorRuntimeBase;
-
+        const auditGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, 'audit');
         const auditorPrompt = buildAuditorPrompt(
           planContent,
           round,
           projectContext,
-          { hasTools: auditorHasFileTools },
+          {
+            hasTools: auditorHasFileTools,
+            allowlistPaths: auditGuardrails.candidateBoundPolicy.allowlistPaths,
+          },
         );
-        const effectiveAuditorRt = onEvent ? wrapWithEventForwarding(reasoningAuditorRt, onEvent) : reasoningAuditorRt;
         const auditPipelineResult = await this.runWithRetry({
           steps: [{
             kind: 'prompt',
             prompt: auditorPrompt,
-            runtime: effectiveAuditorRt,
-            model: effectiveAuditorModel,
+            runtime: buildAuditorPhaseRuntime(auditGuardrails),
+            model: auditorModel,
             tools: auditorHasFileTools ? readOnlyTools : [],
             ...(auditorHasFileTools ? { addDirs } : {}),
             timeoutMs: this.opts.timeoutMs,
             streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
             progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
-            ...(forceAuditorCli ? { disableNativeAppServer: true } : {}),
-            sessionKey: auditorRt.capabilities.has('sessions') ? auditorSessionKey : undefined,
+            sessionKey: auditorHasSessions ? auditorSessionKey : undefined,
             supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
           }],
           runtime: this.opts.runtime,
@@ -2431,11 +2699,13 @@ export class ForgeOrchestrator {
           auditOutput,
           description,
         );
+        const revisionArtifactPhase = 'revision_artifact' as const;
+        const existingRevisionPaths = extractConcretePlanPaths(planContent);
         const revisionGroundingCandidatePaths = useTwoStageCodexDraftFlow
           ? await resolveCodexGroundingCandidatePaths({
             cwd: this.opts.cwd,
-            query: [description, auditOutput, ...extractConcretePlanPaths(planContent)].join('\n'),
-            existingPaths: extractConcretePlanPaths(planContent),
+            query: [description, auditOutput, ...existingRevisionPaths].join('\n'),
+            existingPaths: existingRevisionPaths,
             log: this.opts.log,
           })
           : [];
@@ -2446,67 +2716,103 @@ export class ForgeOrchestrator {
             'forge:codex revision grounding candidates resolved',
           );
         }
-        const revisionPrimaryDef = useTwoStageCodexDraftFlow
-          ? {
-            steps: [
-              {
-                id: `revision-round-${round}-grounding`,
-                kind: 'prompt' as const,
-                prompt: useBoundedRevisionGrounding
-                  ? buildCodexRevisionCandidateSelectionPrompt(planContent, auditOutput, revisionGroundingCandidatePaths)
-                  : buildCodexRevisionGroundingPrompt(planContent, auditOutput),
-                runtime: effectiveRevisionResearchRt,
-                model: drafterModel,
-                tools: useBoundedRevisionGrounding ? [] : readOnlyTools,
-                ...(useBoundedRevisionGrounding ? {} : { addDirs }),
-                timeoutMs: this.opts.timeoutMs,
-                streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
-                progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
-                ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
-                sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
-                supervisor: FORGE_GROUNDING_PHASE_SUPERVISOR_POLICY,
-              },
-              {
-                id: `revision-round-${round}-write`,
-                kind: 'prompt' as const,
-                prompt: buildCodexRevisionWritePrompt(
-                  planContent,
-                  auditOutput,
-                  description,
-                  useTwoStageCodexDraftFlow ? codexNativeWriteContextSummary : projectContext,
-                  `{{steps.revision-round-${round}-grounding.output}}`,
-                ),
-                runtime: effectiveRevisionRt,
-                systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
-                model: drafterModel,
-                tools: [],
-                timeoutMs: this.opts.timeoutMs,
-                streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
-                progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
-                ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
-                sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
-                supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
-              },
-            ],
+        if (useTwoStageCodexDraftFlow) {
+          persistForgePhaseMetadata(planId, 'revision_research', {
+            researchComplete: false,
+            candidatePaths: useBoundedRevisionGrounding ? revisionGroundingCandidatePaths : existingRevisionPaths,
+            allowlistPaths: useBoundedRevisionGrounding ? revisionGroundingCandidatePaths : [],
+          });
+        }
+        let revisionOutput = '';
+
+        if (useTwoStageCodexDraftFlow) {
+          const revisionResearchGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, 'revision_research');
+          const revisionResearchDef = {
+            steps: [{
+              id: `revision-round-${round}-grounding`,
+              kind: 'prompt' as const,
+              prompt: useBoundedRevisionGrounding
+                ? buildCodexRevisionCandidateSelectionPrompt(planContent, auditOutput, revisionGroundingCandidatePaths)
+                : buildCodexRevisionGroundingPrompt(planContent, auditOutput),
+              runtime: buildDrafterPhaseRuntime('revision_research', revisionResearchGuardrails),
+              model: drafterModel,
+              tools: useBoundedRevisionGrounding ? [] : readOnlyTools,
+              ...(useBoundedRevisionGrounding ? {} : { addDirs }),
+              timeoutMs: this.opts.timeoutMs,
+              streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
+              progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+              sessionKey: drafterHasSessions ? drafterSessionKey : undefined,
+              supervisor: FORGE_GROUNDING_PHASE_SUPERVISOR_POLICY,
+            }],
             runtime: this.opts.runtime,
             cwd: this.opts.cwd,
             model: this.opts.model,
             signal: this.abortController.signal,
+          };
+          const revisionResearchResult = await this.runWithRetry(
+            revisionResearchDef,
+            `Revision research after round ${round}`,
+            onProgress,
+            undefined,
+            (retryDef) => addGroundingRetryHints(retryDef, {
+              retrySessionSuffix: `revision-round-${round}-research-retry`,
+            }),
+          );
+          if (!revisionResearchResult) {
+            this.opts.log?.info({ planId, round, phase: 'revision_research' }, 'forge:cancelled');
+            await this.updatePlanStatus(filePath, 'CANCELLED');
+            await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.cancelled, `Forge ${planId} cancelled.`), { force: true });
+            await completeHeartbeat('cancelled', `Cancelled during revision after round ${round}/${maxRound}.`);
+            return {
+              planId,
+              filePath,
+              finalVerdict: 'CANCELLED',
+              rounds: round - startRound + 1,
+              reachedMaxRounds: false,
+            };
           }
-          : {
+
+          const revisionGroundingOutput = revisionResearchResult.outputs[0] ?? '';
+          const revisionGroundingState = assertGroundingOutputWithinAllowlist({
+            phase: 'revision_research',
+            output: revisionGroundingOutput,
+            candidateAllowlist: useBoundedRevisionGrounding ? revisionGroundingCandidatePaths : undefined,
+            allowNone: true,
+          });
+          const revisionAllowlistPaths = [...new Set([
+            ...existingRevisionPaths,
+            ...revisionGroundingState.normalizedPaths,
+          ])];
+          if (revisionAllowlistPaths.length === 0) {
+            throw new Error('revision_artifact is missing bounded repo inputs from revision_research.');
+          }
+          persistForgePhaseMetadata(planId, revisionArtifactPhase, {
+            researchComplete: true,
+            candidatePaths: revisionGroundingState.normalizedPaths,
+            allowlistPaths: revisionAllowlistPaths,
+          });
+          revisionAuditFallbackPaths = revisionAllowlistPaths;
+          const revisionArtifactGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, revisionArtifactPhase);
+
+          const revisionArtifactDef = {
             steps: [{
+              id: `revision-round-${round}-write`,
               kind: 'prompt' as const,
-              prompt: revisionPrompt,
-              runtime: effectiveRevisionRt,
-              systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
+              prompt: buildCodexRevisionWritePrompt(
+                planContent,
+                auditOutput,
+                description,
+                codexNativeWriteContextSummary ?? projectContext,
+                revisionGroundingOutput,
+              ),
+              runtime: buildDrafterPhaseRuntime(revisionArtifactPhase, revisionArtifactGuardrails),
+              systemPrompt: resolveForgePlanSystemPrompt(drafterRuntimeBase),
               model: drafterModel,
-              tools: readOnlyTools,
-              addDirs,
+              tools: [],
               timeoutMs: this.opts.timeoutMs,
               streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
               progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
-              ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
-              sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
+              sessionKey: drafterHasSessions ? drafterSessionKey : undefined,
               supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
             }],
             runtime: this.opts.runtime,
@@ -2514,59 +2820,114 @@ export class ForgeOrchestrator {
             model: this.opts.model,
             signal: this.abortController.signal,
           };
-        const revisionRetryBaseDef = {
-          steps: [{
-            kind: 'prompt' as const,
-            prompt: revisionPrompt,
-            runtime: effectiveRevisionRt,
-            systemPrompt: resolveForgePlanSystemPrompt(drafterRt),
-            model: drafterModel,
-            tools: readOnlyTools,
-            addDirs,
-            timeoutMs: this.opts.timeoutMs,
-            streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
-            progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
-            ...(forceDrafterCli ? { disableNativeAppServer: true } : {}),
-            sessionKey: drafterRt.capabilities.has('sessions') ? drafterSessionKey : undefined,
-            supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
-          }],
-          runtime: this.opts.runtime,
-          cwd: this.opts.cwd,
-          model: this.opts.model,
-          signal: this.abortController.signal,
-        };
-
-        const revisionPipelineResult = await this.runWithRetry(revisionPrimaryDef, `Revision after round ${round}`, onProgress, (result) => {
-          assertPlanMarkdownOutput(result.outputs[result.outputs.length - 1] ?? '', 'revision');
-        }, (retryDef, retryCtx) => {
-          const dropToolsOnRetry = shouldDropToolsOnCodexPlanRetry(drafterRt, retryCtx.firstError);
-          return addPlanRetryHints(useTwoStageCodexDraftFlow ? revisionRetryBaseDef : retryDef, {
-            retrySessionSuffix: `revision-round-${round}-retry`,
-            dropToolsOnRetry,
-            dropSessionOnRetry: dropToolsOnRetry && forceDrafterCli,
-            replacementPrompt: dropToolsOnRetry ? compactRevisionRetryPrompt : undefined,
-            supervisorOverride: dropToolsOnRetry && forceDrafterCli
-              ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY
-              : undefined,
+          const revisionArtifactResult = await this.runWithRetry(
+            revisionArtifactDef,
+            `Revision after round ${round}`,
+            onProgress,
+            (result) => {
+              assertPlanMarkdownOutput(result.outputs[result.outputs.length - 1] ?? '', 'revision');
+            },
+            (retryDef, retryCtx) => {
+              const allowCompactSalvage = shouldDropToolsOnCodexPlanRetry(drafterRuntimeBase, retryCtx.firstError);
+              return addPlanRetryHints(retryDef, {
+                retrySessionSuffix: `revision-round-${round}-artifact-retry`,
+                dropToolsOnRetry: allowCompactSalvage,
+                dropSessionOnRetry: allowCompactSalvage && drafterHasSessions && resolveForgeTurnRoute(revisionArtifactPhase) === 'cli',
+                replacementPrompt: allowCompactSalvage ? compactRevisionRetryPrompt : undefined,
+                supervisorOverride: allowCompactSalvage
+                  ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY
+                  : undefined,
+              });
+            },
+          );
+          if (!revisionArtifactResult) {
+            this.opts.log?.info({ planId, round, phase: 'revision_artifact' }, 'forge:cancelled');
+            await this.updatePlanStatus(filePath, 'CANCELLED');
+            await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.cancelled, `Forge ${planId} cancelled.`), { force: true });
+            await completeHeartbeat('cancelled', `Cancelled during revision after round ${round}/${maxRound}.`);
+            return {
+              planId,
+              filePath,
+              finalVerdict: 'CANCELLED',
+              rounds: round - startRound + 1,
+              reachedMaxRounds: false,
+            };
+          }
+          revisionOutput = revisionArtifactResult.outputs[revisionArtifactResult.outputs.length - 1] ?? '';
+        } else {
+          persistForgePhaseMetadata(planId, revisionArtifactPhase, {
+            researchComplete: existingRevisionPaths.length > 0,
+            candidatePaths: existingRevisionPaths,
+            allowlistPaths: existingRevisionPaths,
           });
-        });
-        if (!revisionPipelineResult) {
-          this.opts.log?.info({ planId, round, phase: 'revision' }, 'forge:cancelled');
-          await this.updatePlanStatus(filePath, 'CANCELLED');
-          await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.cancelled, `Forge ${planId} cancelled.`), { force: true });
-          await completeHeartbeat('cancelled', `Cancelled during revision after round ${round}/${maxRound}.`);
-          return {
-            planId,
-            filePath,
-            finalVerdict: 'CANCELLED',
-            rounds: round - startRound + 1,
-            reachedMaxRounds: false,
+          const revisionArtifactGuardrails = resolveForgePhaseGuardrailsOrThrow(planId, revisionArtifactPhase);
+          const revisionPrimaryDef = {
+            steps: [{
+              kind: 'prompt' as const,
+              prompt: revisionPrompt,
+              runtime: buildDrafterPhaseRuntime(revisionArtifactPhase, revisionArtifactGuardrails),
+              systemPrompt: resolveForgePlanSystemPrompt(drafterRuntimeBase),
+              model: drafterModel,
+              tools: readOnlyTools,
+              addDirs,
+              timeoutMs: this.opts.timeoutMs,
+              streamStallTimeoutMs: forgePhaseLiveness.streamStallTimeoutMs,
+              progressStallTimeoutMs: forgePhaseLiveness.progressStallTimeoutMs,
+              sessionKey: drafterHasSessions ? drafterSessionKey : undefined,
+              supervisor: FORGE_PLAN_PHASE_SUPERVISOR_POLICY,
+            }],
+            runtime: this.opts.runtime,
+            cwd: this.opts.cwd,
+            model: this.opts.model,
+            signal: this.abortController.signal,
           };
+          const revisionPipelineResult = await this.runWithRetry(
+            revisionPrimaryDef,
+            `Revision after round ${round}`,
+            onProgress,
+            (result) => {
+              assertPlanMarkdownOutput(result.outputs[result.outputs.length - 1] ?? '', 'revision');
+            },
+            (retryDef, retryCtx) => {
+              const allowCompactSalvage = shouldDropToolsOnCodexPlanRetry(drafterRuntimeBase, retryCtx.firstError);
+              return addPlanRetryHints(retryDef, {
+                retrySessionSuffix: `revision-round-${round}-retry`,
+                dropToolsOnRetry: allowCompactSalvage,
+                dropSessionOnRetry: allowCompactSalvage && drafterHasSessions && resolveForgeTurnRoute(revisionArtifactPhase) === 'cli',
+                replacementPrompt: allowCompactSalvage ? compactRevisionRetryPrompt : undefined,
+                supervisorOverride: allowCompactSalvage && resolveForgeTurnRoute(revisionArtifactPhase) === 'cli'
+                  ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY
+                  : undefined,
+              });
+            },
+          );
+          if (!revisionPipelineResult) {
+            this.opts.log?.info({ planId, round, phase: 'revision_artifact' }, 'forge:cancelled');
+            await this.updatePlanStatus(filePath, 'CANCELLED');
+            await onProgress(withForgeIcon(FORGE_PROGRESS_ICON.cancelled, `Forge ${planId} cancelled.`), { force: true });
+            await completeHeartbeat('cancelled', `Cancelled during revision after round ${round}/${maxRound}.`);
+            return {
+              planId,
+              filePath,
+              finalVerdict: 'CANCELLED',
+              rounds: round - startRound + 1,
+              reachedMaxRounds: false,
+            };
+          }
+          revisionOutput = revisionPipelineResult.outputs[revisionPipelineResult.outputs.length - 1] ?? '';
         }
-        const revisionOutput = revisionPipelineResult.outputs[revisionPipelineResult.outputs.length - 1] ?? '';
 
         planContent = this.mergeDraftWithHeader(planContent, revisionOutput);
         await this.atomicWrite(filePath, planContent);
+        const revisedAuditBoundedPaths = extractConcretePlanPaths(planContent);
+        const persistedRevisedAuditPaths = revisedAuditBoundedPaths.length > 0
+          ? revisedAuditBoundedPaths
+          : revisionAuditFallbackPaths;
+        persistForgePhaseMetadata(planId, 'audit', {
+          researchComplete: persistedRevisedAuditPaths.length > 0,
+          candidatePaths: persistedRevisedAuditPaths,
+          allowlistPaths: persistedRevisedAuditPaths,
+        });
       }
 
       // Cap reached

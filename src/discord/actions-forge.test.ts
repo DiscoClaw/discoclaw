@@ -1,9 +1,24 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { FORGE_ACTION_TYPES, executeForgeAction, forgeActionsPromptSection } from './actions-forge.js';
+import {
+  FORGE_ACTION_TYPES,
+  evaluateForgeTurnGate,
+  executeForgeAction,
+  forgeActionsPromptSection,
+  normalizeForgeCandidatePath,
+  resolveForgeTurnRoute,
+} from './actions-forge.js';
 import type { ForgeContext } from './actions-forge.js';
 import type { ActionContext } from './actions.js';
-import { _resetForTest, setActiveOrchestrator, addRunningPlan } from './forge-plan-registry.js';
+import { _resetForTest, setActiveOrchestrator, addRunningPlan, setForgePlanMetadata } from './forge-plan-registry.js';
 import { TaskStore } from '../tasks/store.js';
+
+const { readFileMock } = vi.hoisted(() => ({
+  readFileMock: vi.fn(async () => '# Plan: Test Plan\n\n## Changes\n\n- `src/discord/actions-forge.ts` — tighten forge gating.\n'),
+}));
+
+vi.mock('node:fs/promises', () => ({
+  readFile: readFileMock,
+}));
 
 vi.mock('./actions-plan.js', () => ({
   executePlanAction: vi.fn(async (action: { type: string; planId: string }) => ({
@@ -88,6 +103,7 @@ function makeForgeCtx(overrides?: Partial<ForgeContext>): ForgeContext {
 beforeEach(() => {
   _resetForTest();
   vi.clearAllMocks();
+  readFileMock.mockResolvedValue('# Plan: Test Plan\n\n## Changes\n\n- `src/discord/actions-forge.ts` — tighten forge gating.\n');
 });
 
 describe('FORGE_ACTION_TYPES', () => {
@@ -101,6 +117,114 @@ describe('FORGE_ACTION_TYPES', () => {
   it('does not contain non-forge types', () => {
     expect(FORGE_ACTION_TYPES.has('beadCreate')).toBe(false);
     expect(FORGE_ACTION_TYPES.has('cronCreate')).toBe(false);
+  });
+});
+
+describe('forge turn gate', () => {
+  it('rejects final strict-output turns before research completes', () => {
+    const decision = evaluateForgeTurnGate({
+      phase: 'draft_artifact',
+      researchComplete: false,
+      allowlistPaths: ['src/discord/actions-forge.ts'],
+      candidatePaths: ['src/discord/actions-forge.ts'],
+    });
+
+    expect(decision.status).toBe('reject');
+    expect(decision.nextPhase).toBe('draft_artifact');
+    expect(decision.route).toBe('cli');
+    expect(decision.reason).toContain('Research must be marked complete');
+  });
+
+  it('normalizes candidate paths before enforcing the allowlist', () => {
+    expect(normalizeForgeCandidatePath('`./src\\\\discord/./actions-forge.ts`')).toBe('src/discord/actions-forge.ts');
+
+    const decision = evaluateForgeTurnGate({
+      phase: 'revision_artifact',
+      researchComplete: true,
+      allowlistPaths: [
+        'src/discord/actions-forge.ts',
+        'src/discord/actions-forge.test.ts',
+      ],
+      candidatePaths: [
+        '`./src\\\\discord/./actions-forge.ts`',
+        'src/discord//actions-forge.test.ts',
+      ],
+    });
+
+    expect(decision.status).toBe('allow');
+    expect(decision.route).toBe('cli');
+    expect(decision.normalizedCandidatePaths).toEqual([
+      'src/discord/actions-forge.ts',
+      'src/discord/actions-forge.test.ts',
+    ]);
+    expect(decision.outOfBoundsPaths).toEqual([]);
+  });
+
+  it('rejects out-of-bounds candidate paths when forge does not explicitly re-enter research', () => {
+    const decision = evaluateForgeTurnGate({
+      phase: 'revision_artifact',
+      researchComplete: true,
+      allowlistPaths: ['src/discord/actions-forge.ts'],
+      candidatePaths: ['src/discord/actions-forge.ts', 'src/discord/forge-commands.ts'],
+    });
+
+    expect(decision.status).toBe('reject');
+    expect(decision.nextPhase).toBe('revision_artifact');
+    expect(decision.outOfBoundsPaths).toEqual(['src/discord/forge-commands.ts']);
+    expect(decision.reason).toContain('outside the bounded forge allowlist');
+  });
+
+  it('fails closed on invalid candidate paths instead of dropping them during normalization', () => {
+    const decision = evaluateForgeTurnGate({
+      phase: 'revision_artifact',
+      researchComplete: true,
+      allowlistPaths: ['src/discord/actions-forge.ts'],
+      candidatePaths: ['../secrets.txt'],
+    });
+
+    expect(decision.status).toBe('reject');
+    expect(decision.outOfBoundsPaths).toEqual(['../secrets.txt']);
+  });
+
+  it('redirects out-of-bounds audit access into explicit re-research when allowed', () => {
+    const decision = evaluateForgeTurnGate({
+      phase: 'audit',
+      researchComplete: true,
+      allowlistPaths: ['src/discord/actions-forge.ts'],
+      candidatePaths: ['src/discord/forge-commands.ts'],
+      allowResearchReset: true,
+    });
+
+    expect(decision.status).toBe('re_research');
+    expect(decision.nextPhase).toBe('revision_research');
+    expect(decision.route).toBe('native');
+    expect(decision.reason).toContain('Re-enter revision_research');
+  });
+
+  it('rejects audit when research is incomplete or the allowlist is empty', () => {
+    const incompleteDecision = evaluateForgeTurnGate({
+      phase: 'audit',
+      researchComplete: false,
+      allowlistPaths: ['src/discord/actions-forge.ts'],
+      candidatePaths: ['src/discord/actions-forge.ts'],
+    });
+    expect(incompleteDecision.status).toBe('reject');
+    expect(incompleteDecision.reason).toContain('Research must be marked complete');
+
+    const ungroundedDecision = evaluateForgeTurnGate({
+      phase: 'audit',
+      researchComplete: true,
+      allowlistPaths: [],
+      candidatePaths: [],
+    });
+    expect(ungroundedDecision.status).toBe('reject');
+    expect(ungroundedDecision.reason).toContain('missing a grounded candidate allowlist');
+  });
+
+  it('routes forge turns by bounded phase instead of salvage side effects', () => {
+    expect(resolveForgeTurnRoute('draft_research')).toBe('native');
+    expect(resolveForgeTurnRoute('audit')).toBe('hybrid');
+    expect(resolveForgeTurnRoute('revision_artifact')).toBe('cli');
   });
 });
 
@@ -282,6 +406,20 @@ describe('executeForgeAction', () => {
 
   describe('forgeResume', () => {
     it('resumes forge on existing plan', async () => {
+      setForgePlanMetadata('plan-042', {
+        phaseState: {
+          currentPhase: 'audit',
+          researchComplete: true,
+        },
+        candidateBounds: {
+          candidatePaths: ['src/discord/actions-forge.ts'],
+          allowlistPaths: ['src/discord/actions-forge.ts'],
+        },
+        fallbackPolicy: {
+          onOutOfBounds: 're_research',
+          reResearchPhase: 'revision_research',
+        },
+      });
       const forgeCtx = makeForgeCtx();
       const result = await executeForgeAction(
         { type: 'forgeResume', planId: 'plan-042' },
@@ -296,6 +434,20 @@ describe('executeForgeAction', () => {
     });
 
     it('posts a status-aware forge review progress message for review plans', async () => {
+      setForgePlanMetadata('plan-042', {
+        phaseState: {
+          currentPhase: 'audit',
+          researchComplete: true,
+        },
+        candidateBounds: {
+          candidatePaths: ['src/discord/actions-forge.ts'],
+          allowlistPaths: ['src/discord/actions-forge.ts'],
+        },
+        fallbackPolicy: {
+          onOutOfBounds: 're_research',
+          reResearchPhase: 'revision_research',
+        },
+      });
       const edit = vi.fn(async () => ({}));
       const send = vi.fn(async () => ({ edit }));
       const fetch = vi.fn(async () => ({ send }));
@@ -330,6 +482,20 @@ describe('executeForgeAction', () => {
       const edit = vi.fn(async () => ({}));
       const send = vi.fn(async () => ({ edit }));
       const fetch = vi.fn(async () => ({ send }));
+      setForgePlanMetadata('plan-123', {
+        phaseState: {
+          currentPhase: 'audit',
+          researchComplete: true,
+        },
+        candidateBounds: {
+          candidatePaths: ['src/discord/actions-forge.ts'],
+          allowlistPaths: ['src/discord/actions-forge.ts'],
+        },
+        fallbackPolicy: {
+          onOutOfBounds: 're_research',
+          reResearchPhase: 'revision_research',
+        },
+      });
 
       const forgeCtx = makeForgeCtx();
       const result = await executeForgeAction(
@@ -342,6 +508,62 @@ describe('executeForgeAction', () => {
       expect(send).toHaveBeenCalledWith(expect.objectContaining({
         content: 'Resuming forge review for **plan-123** from DRAFT status...',
       }));
+    });
+
+    it('uses stored bounded metadata for root-level resume allowlists without reading the plan body', async () => {
+      readFileMock.mockResolvedValueOnce([
+        '# Plan: Test Plan',
+        '',
+        '## Changes',
+        '',
+        '- `src/discord/forge-commands.ts` — unrelated nested path mention.',
+        '',
+        '## Audit Log',
+        '',
+        '- Mentioned `docs/out-of-bounds.md` in prose.',
+      ].join('\n'));
+      setForgePlanMetadata('plan-042', {
+        phaseState: {
+          currentPhase: 'audit',
+          researchComplete: true,
+        },
+        candidateBounds: {
+          candidatePaths: ['package.json', 'README.md'],
+          allowlistPaths: ['package.json', 'README.md'],
+        },
+        fallbackPolicy: {
+          onOutOfBounds: 're_research',
+          reResearchPhase: 'revision_research',
+        },
+      });
+
+      const forgeCtx = makeForgeCtx();
+      const result = await executeForgeAction(
+        { type: 'forgeResume', planId: 'plan-042' },
+        makeCtx(),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(true);
+      expect(readFileMock).not.toHaveBeenCalled();
+      expect(forgeCtx.orchestratorFactory).toHaveBeenCalled();
+    });
+
+    it('blocks resume when bounded metadata is missing instead of inferring scope from the plan content', async () => {
+      readFileMock.mockResolvedValueOnce('# Plan: Test Plan\n\n## Changes\n\n- `package.json` — root file.\n- `README.md` — docs.\n');
+
+      const forgeCtx = makeForgeCtx();
+      const result = await executeForgeAction(
+        { type: 'forgeResume', planId: 'plan-042' },
+        makeCtx(),
+        forgeCtx,
+      );
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error('expected resume to be blocked');
+      expect(result.error).toContain('Re-enter revision_research');
+      expect(readFileMock).not.toHaveBeenCalled();
+      expect(forgeCtx.orchestratorFactory).not.toHaveBeenCalled();
     });
 
     it('routes approved plans into planRun instead of re-auditing', async () => {
@@ -598,5 +820,11 @@ describe('forgeActionsPromptSection', () => {
     expect(section).toContain('APPROVED / IMPLEMENTING');
     expect(section).toContain('planRun');
     expect(section).toContain('pick up a plan again; the next step depends on the plan\'s status');
+  });
+
+  it('documents the bounded forge phase gate', () => {
+    const section = forgeActionsPromptSection();
+    expect(section).toContain('research/discovery completes before any final strict-output turn');
+    expect(section).toContain('grounded allowlist');
   });
 });

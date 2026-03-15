@@ -49,8 +49,8 @@ import type { PlanAuditResult } from './audit-handler.js';
 import type { PreparePlanRunResult } from './plan-commands.js';
 import { parseForgeCommand, ForgeOrchestrator, buildPlanImplementationMessage } from './forge-commands.js';
 import type { ForgeOrchestratorOpts, ForgeResult } from './forge-commands.js';
-import { runNextPhase, resolveProjectCwd, readPhasesFile, buildPostRunSummary } from './plan-manager.js';
-import type { PlanRunEvent } from './plan-manager.js';
+import { runNextPhase, resolveProjectCwd, readPhasesFile, buildPostRunSummary, checkStaleness } from './plan-manager.js';
+import type { PlanRunEvent, PlanPhases } from './plan-manager.js';
 import type { RunVerificationEvidence } from './verification-evidence.js';
 import {
   acquireWriterLock as registryAcquireWriterLock,
@@ -1488,6 +1488,35 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             return { summary: runResult.summary ?? '' };
           },
           isPlanRunning,
+          checkWorkspaceContextPristine: async (planId: string) => {
+            const found = await findPlanFile(planCtx.plansDir, planId);
+            if (!found) {
+              return { pristine: false, reason: `Plan not found: ${planId}` };
+            }
+
+            const phasesFilePath = path.join(planCtx.plansDir, `${planId}-phases.md`);
+            let phases: PlanPhases;
+            try {
+              phases = readPhasesFile(phasesFilePath, { log: params.log });
+            } catch (err) {
+              const code = (err as NodeJS.ErrnoException).code;
+              if (code === 'ENOENT') {
+                return { pristine: true };
+              }
+              return {
+                pristine: false,
+                reason: `Failed to read phases file: ${String(err)}`,
+              };
+            }
+
+            const planContent = await fs.readFile(found.filePath, 'utf-8');
+            const staleness = checkStaleness(phases, planContent);
+            if (staleness.stale) {
+              return { pristine: false, reason: staleness.message };
+            }
+
+            return { pristine: true };
+          },
           log: params.log,
         };
 

@@ -7,6 +7,8 @@ import type { RuntimeAdapter, RuntimeInvokeParams } from './types.js';
 import { createCliRuntime, killAllSubprocesses } from './cli-adapter.js';
 import { CodexAppServerClient } from './codex-app-server.js';
 import { remapCrossRuntimeTierModel, resolveReasoningEffort } from './model-tiers.js';
+import { createRuntimeErrorEvent } from './runtime-failure.js';
+import { resolveForgeCliRoute } from './cli-strategy.js';
 import { createCodexStrategy } from './strategies/codex-strategy.js';
 import { createAdvertisedCodexCapabilities } from './tool-capabilities.js';
 
@@ -88,6 +90,17 @@ function hasNonDefaultCwd(cwd: string, defaultCwd: string): boolean {
   return path.resolve(cwd) !== defaultCwd;
 }
 
+function buildForgePhaseRouteError(
+  params: RuntimeInvokeParams,
+  reason: string,
+): AsyncIterable<ReturnType<typeof createRuntimeErrorEvent> | { type: 'done' }> {
+  return (async function* () {
+    params.rawEventTap?.(createRuntimeErrorEvent(reason));
+    yield createRuntimeErrorEvent(reason);
+    yield { type: 'done' as const };
+  })();
+}
+
 export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter {
   const appServerUrl = process.env.CODEX_APP_SERVER_URL?.trim();
   const nativeEnabled = isTruthyEnv(process.env.CODEX_APP_SERVER_NATIVE);
@@ -112,7 +125,39 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
       ...baseAdapter,
       capabilities: advertisedCapabilities,
       invoke(params) {
-        return baseAdapter.invoke(normalizeInvokeParams(params, opts));
+        return (async function* () {
+          const normalizedParams = normalizeInvokeParams(params, opts);
+          const forgeRoute = normalizedParams.forgePhase
+            ? resolveForgeCliRoute(normalizedParams.forgePhase)
+            : null;
+
+          if (forgeRoute && forgeRoute.status !== 'allow') {
+            yield* buildForgePhaseRouteError(
+              normalizedParams,
+              forgeRoute.reason ?? `Forge phase ${forgeRoute.requestedPhase} cannot dispatch on the current route.`,
+            );
+            return;
+          }
+
+          if (forgeRoute && forgeRoute.route === 'native') {
+            yield* buildForgePhaseRouteError(
+              normalizedParams,
+              `Forge phase ${forgeRoute.requestedPhase} requires native Codex routing, but the app-server is unavailable.`,
+            );
+            return;
+          }
+
+          if (forgeRoute && forgeRoute.route === 'hybrid') {
+            yield {
+              type: 'text_delta' as const,
+              text: NATIVE_APP_SERVER_FALLBACK_NOTICE,
+            };
+          }
+
+          for await (const event of baseAdapter.invoke(normalizedParams)) {
+            yield event;
+          }
+        })();
       },
     };
   }
@@ -138,22 +183,61 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     invoke(params) {
       return (async function* () {
         const normalizedParams = normalizeInvokeParams(params, opts);
+        const forgeRoute = normalizedParams.forgePhase
+          ? resolveForgeCliRoute(normalizedParams.forgePhase)
+          : null;
 
-        if (normalizedParams.images && normalizedParams.images.length > 0) {
+        if (forgeRoute && forgeRoute.status !== 'allow') {
+          yield* buildForgePhaseRouteError(
+            normalizedParams,
+            forgeRoute.reason ?? `Forge phase ${forgeRoute.requestedPhase} cannot dispatch on the current route.`,
+          );
+          return;
+        }
+
+        const requiresDirectCli = Boolean(
+          normalizedParams.images?.length
+          || normalizedParams.disableNativeAppServer
+          || hasNonDefaultCwd(normalizedParams.cwd, defaultCwd),
+        );
+
+        if (requiresDirectCli) {
+          if (forgeRoute && forgeRoute.route !== 'cli') {
+            yield* buildForgePhaseRouteError(
+              normalizedParams,
+              `Forge phase ${forgeRoute.requestedPhase} cannot widen to direct CLI routing from ${forgeRoute.route}.`,
+            );
+            return;
+          }
+
           for await (const event of baseAdapter.invoke(normalizedParams)) {
             yield event;
           }
           return;
         }
 
-        if (normalizedParams.disableNativeAppServer) {
+        if (!forgeRoute && normalizedParams.images && normalizedParams.images.length > 0) {
           for await (const event of baseAdapter.invoke(normalizedParams)) {
             yield event;
           }
           return;
         }
 
-        if (hasNonDefaultCwd(normalizedParams.cwd, defaultCwd)) {
+        if (!forgeRoute && normalizedParams.disableNativeAppServer) {
+          for await (const event of baseAdapter.invoke(normalizedParams)) {
+            yield event;
+          }
+          return;
+        }
+
+        if (!forgeRoute && hasNonDefaultCwd(normalizedParams.cwd, defaultCwd)) {
+          for await (const event of baseAdapter.invoke(normalizedParams)) {
+            yield event;
+          }
+          return;
+        }
+
+        if (forgeRoute && forgeRoute.route === 'cli') {
           for await (const event of baseAdapter.invoke(normalizedParams)) {
             yield event;
           }
@@ -172,6 +256,13 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
             },
             'codex-app-server: bootstrap failed; falling back to CLI',
           );
+          if (forgeRoute && forgeRoute.fallbackRoute !== 'cli') {
+            yield* buildForgePhaseRouteError(
+              normalizedParams,
+              `Forge phase ${forgeRoute.requestedPhase} requires ${forgeRoute.route} routing and does not allow CLI fallback.`,
+            );
+            return;
+          }
           yield {
             type: 'text_delta' as const,
             text: NATIVE_APP_SERVER_FALLBACK_NOTICE,

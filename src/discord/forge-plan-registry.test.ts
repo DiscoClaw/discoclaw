@@ -12,6 +12,11 @@ import {
   getRunningPlanIds,
   getForgeStatusSummary,
   isRunActiveInChannel,
+  setForgePlanMetadata,
+  getForgePlanMetadata,
+  clearForgePlanMetadata,
+  resolveForgePlanPhaseGate,
+  resolveForgeTurnRoute,
   _resetForTest,
 } from './forge-plan-registry.js';
 
@@ -216,6 +221,197 @@ describe('running plan IDs', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Stored forge plan metadata
+// ---------------------------------------------------------------------------
+
+describe('stored forge plan metadata', () => {
+  it('persists complete phase state, candidate bounds, and fallback policy', () => {
+    const stored = setForgePlanMetadata('plan-001', {
+      phaseState: {
+        currentPhase: 'revision_artifact',
+        researchComplete: true,
+      },
+      candidateBounds: {
+        candidatePaths: ['`./src\\\\discord/./forge-plan-registry.ts`'],
+        allowlistPaths: [
+          'src/discord/forge-plan-registry.ts',
+          'src/discord/forge-plan-registry.test.ts',
+        ],
+      },
+      fallbackPolicy: {
+        onOutOfBounds: 're_research',
+        reResearchPhase: 'revision_research',
+      },
+    });
+
+    expect(stored.compatibility).toBe('current');
+    expect(stored.phaseState).toEqual({
+      currentPhase: 'revision_artifact',
+      researchComplete: true,
+    });
+    expect(stored.candidateBounds).toEqual({
+      candidatePaths: ['src/discord/forge-plan-registry.ts'],
+      allowlistPaths: [
+        'src/discord/forge-plan-registry.ts',
+        'src/discord/forge-plan-registry.test.ts',
+      ],
+    });
+    expect(stored.fallbackPolicy).toEqual({
+      onOutOfBounds: 're_research',
+      reResearchPhase: 'revision_research',
+    });
+    expect(stored.requiresFreshResearch).toBe(false);
+
+    const gate = resolveForgePlanPhaseGate('plan-001', 'revision_artifact');
+    expect(gate.requiresFreshResearch).toBe(false);
+    expect(gate.nextPhase).toBe('revision_artifact');
+    expect(gate.route).toBe('cli');
+  });
+
+  it('treats partial legacy records as research incomplete instead of silently widening draft access', () => {
+    setForgePlanMetadata('plan-legacy-draft', {
+      phaseState: {
+        currentPhase: 'draft_artifact',
+        researchComplete: true,
+      },
+      candidateBounds: {
+        candidatePaths: ['src/discord/forge-plan-registry.ts'],
+      },
+    });
+
+    const metadata = getForgePlanMetadata('plan-legacy-draft', {
+      requestedPhase: 'draft_artifact',
+    });
+    expect(metadata.compatibility).toBe('legacy_incomplete');
+    expect(metadata.phaseState).toEqual({
+      currentPhase: 'draft_research',
+      researchComplete: false,
+    });
+    expect(metadata.candidateBounds.allowlistPaths).toEqual([]);
+    expect(metadata.requiresFreshResearch).toBe(true);
+
+    const gate = resolveForgePlanPhaseGate('plan-legacy-draft', 'draft_artifact');
+    expect(gate.requiresFreshResearch).toBe(true);
+    expect(gate.nextPhase).toBe('draft_research');
+    expect(gate.route).toBe('native');
+    expect(gate.reason).toContain('Re-enter draft_research');
+  });
+
+  it('fails closed when fallback policy is missing even if phase state and allowlist are present', () => {
+    setForgePlanMetadata('plan-legacy-revision', {
+      phaseState: {
+        currentPhase: 'revision_artifact',
+        researchComplete: true,
+      },
+      candidateBounds: {
+        candidatePaths: ['src/discord/forge-plan-registry.ts'],
+        allowlistPaths: ['src/discord/forge-plan-registry.ts'],
+      },
+    });
+
+    const metadata = getForgePlanMetadata('plan-legacy-revision', {
+      requestedPhase: 'revision_artifact',
+    });
+    expect(metadata.compatibility).toBe('legacy_incomplete');
+    expect(metadata.phaseState.researchComplete).toBe(false);
+    expect(metadata.requiresFreshResearch).toBe(true);
+
+    const gate = resolveForgePlanPhaseGate('plan-legacy-revision', 'revision_artifact');
+    expect(gate.nextPhase).toBe('revision_research');
+    expect(gate.route).toBe('native');
+    expect(gate.allowlistPaths).toEqual(['src/discord/forge-plan-registry.ts']);
+  });
+
+  it('requires fresh research when stored candidates drift outside the allowlist', () => {
+    setForgePlanMetadata('plan-out-of-bounds', {
+      phaseState: {
+        currentPhase: 'revision_artifact',
+        researchComplete: true,
+      },
+      candidateBounds: {
+        candidatePaths: [
+          'src/discord/forge-plan-registry.ts',
+          'src/discord/forge-commands.ts',
+        ],
+        allowlistPaths: ['src/discord/forge-plan-registry.ts'],
+      },
+      fallbackPolicy: {
+        onOutOfBounds: 're_research',
+        reResearchPhase: 'revision_research',
+      },
+    });
+
+    const metadata = getForgePlanMetadata('plan-out-of-bounds', {
+      requestedPhase: 'revision_artifact',
+    });
+    expect(metadata.compatibility).toBe('current');
+    expect(metadata.requiresFreshResearch).toBe(true);
+
+    const gate = resolveForgePlanPhaseGate('plan-out-of-bounds', 'revision_artifact');
+    expect(gate.requiresFreshResearch).toBe(true);
+    expect(gate.nextPhase).toBe('revision_research');
+    expect(gate.reason).toContain('out-of-bounds candidates');
+  });
+
+  it('treats missing registry entries as bounded research incomplete for final turns', () => {
+    const metadata = getForgePlanMetadata('plan-missing', {
+      requestedPhase: 'revision_artifact',
+    });
+
+    expect(metadata.compatibility).toBe('legacy_incomplete');
+    expect(metadata.phaseState).toEqual({
+      currentPhase: 'revision_research',
+      researchComplete: false,
+    });
+    expect(metadata.candidateBounds).toEqual({
+      candidatePaths: [],
+      allowlistPaths: [],
+    });
+    expect(metadata.requiresFreshResearch).toBe(true);
+
+    const gate = resolveForgePlanPhaseGate('plan-missing', 'revision_artifact');
+    expect(gate.requiresFreshResearch).toBe(true);
+    expect(gate.nextPhase).toBe('revision_research');
+    expect(gate.route).toBe('native');
+  });
+
+  it('treats audit as a final bounded phase when metadata is missing', () => {
+    const gate = resolveForgePlanPhaseGate('plan-missing-audit', 'audit');
+
+    expect(gate.requiresFreshResearch).toBe(true);
+    expect(gate.nextPhase).toBe('revision_research');
+    expect(gate.route).toBe('native');
+    expect(gate.reason).toContain('Re-enter revision_research');
+  });
+
+  it('can clear stored forge plan metadata', () => {
+    setForgePlanMetadata('plan-001', {
+      phaseState: {
+        currentPhase: 'audit',
+        researchComplete: true,
+      },
+      candidateBounds: {
+        candidatePaths: ['src/discord/forge-plan-registry.ts'],
+        allowlistPaths: ['src/discord/forge-plan-registry.ts'],
+      },
+      fallbackPolicy: {
+        onOutOfBounds: 're_research',
+        reResearchPhase: 'revision_research',
+      },
+    });
+
+    clearForgePlanMetadata('plan-001');
+
+    const metadata = getForgePlanMetadata('plan-001', {
+      requestedPhase: 'audit',
+    });
+    expect(metadata.compatibility).toBe('legacy_incomplete');
+    expect(metadata.phaseState.researchComplete).toBe(false);
+    expect(metadata.requiresFreshResearch).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // getForgeStatusSummary
 // ---------------------------------------------------------------------------
 
@@ -254,6 +450,14 @@ describe('getForgeStatusSummary', () => {
   it('does not report plan runs suffix when none are active', () => {
     setActiveOrchestrator({ isRunning: true, activePlanId: 'plan-007' } as any);
     expect(getForgeStatusSummary()).toBe('Forge is running: plan-007.');
+  });
+});
+
+describe('resolveForgeTurnRoute', () => {
+  it('routes by explicit forge phase', () => {
+    expect(resolveForgeTurnRoute('draft_research')).toBe('native');
+    expect(resolveForgeTurnRoute('audit')).toBe('hybrid');
+    expect(resolveForgeTurnRoute('revision_artifact')).toBe('cli');
   });
 });
 

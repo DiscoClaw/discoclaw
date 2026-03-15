@@ -1,4 +1,14 @@
+import path from 'node:path';
 import type { ForgeOrchestrator } from './forge-commands.js';
+import {
+  isForgeResearchPhase,
+  isForgeTurnPhase,
+  resolveForgeReResearchPhase,
+  resolveForgeTurnRoute,
+} from '../forge-phase.js';
+import type { ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
+export type { ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
+export { isForgeFinalArtifactPhase, isForgeResearchPhase, resolveForgeTurnRoute } from '../forge-phase.js';
 
 // ---------------------------------------------------------------------------
 // Shared forge/plan lifecycle state
@@ -15,7 +25,250 @@ import type { ForgeOrchestrator } from './forge-commands.js';
 // memory mutations that touch the workspace filesystem.
 // ---------------------------------------------------------------------------
 
+export type ForgePlanFallbackMode = 're_research' | 'reject';
+
+export type ForgePlanPhaseState = {
+  currentPhase: ForgeTurnPhase;
+  researchComplete: boolean;
+};
+
+export type ForgePlanCandidateBounds = {
+  candidatePaths: string[];
+  allowlistPaths: string[];
+};
+
+export type ForgePlanFallbackPolicy = {
+  onOutOfBounds: ForgePlanFallbackMode;
+  reResearchPhase: ForgeTurnPhase | null;
+};
+
+export type ForgePlanMetadataCompatibility = 'current' | 'legacy_incomplete';
+
+export type ForgePlanMetadata = {
+  phaseState: ForgePlanPhaseState;
+  candidateBounds: ForgePlanCandidateBounds;
+  fallbackPolicy: ForgePlanFallbackPolicy;
+  compatibility: ForgePlanMetadataCompatibility;
+  requiresFreshResearch: boolean;
+};
+
+export type ForgePlanMetadataInput = {
+  phaseState?: Partial<ForgePlanPhaseState> | null;
+  candidateBounds?: Partial<{
+    candidatePaths: readonly string[] | null;
+    allowlistPaths: readonly string[] | null;
+  }> | null;
+  fallbackPolicy?: Partial<ForgePlanFallbackPolicy> | null;
+};
+
+export type ForgePlanPhaseGate = {
+  requestedPhase: ForgeTurnPhase;
+  nextPhase: ForgeTurnPhase;
+  route: ForgeTurnRoute;
+  researchComplete: boolean;
+  candidatePaths: string[];
+  allowlistPaths: string[];
+  fallbackPolicy: ForgePlanFallbackPolicy;
+  compatibility: ForgePlanMetadataCompatibility;
+  requiresFreshResearch: boolean;
+  reason?: string;
+};
+
+type StoredForgePlanMetadata = {
+  phaseState?: Partial<ForgePlanPhaseState>;
+  candidateBounds?: Partial<{
+    candidatePaths: readonly string[] | null;
+    allowlistPaths: readonly string[] | null;
+  }>;
+  fallbackPolicy?: Partial<ForgePlanFallbackPolicy>;
+};
+
+const _planMetadata = new Map<string, StoredForgePlanMetadata>();
+
 let writerLockChain: Promise<void> = Promise.resolve();
+
+function isForgePlanFallbackMode(value: unknown): value is ForgePlanFallbackMode {
+  return value === 're_research' || value === 'reject';
+}
+
+function resolveCompatibilityResearchPhase(phase: ForgeTurnPhase): ForgeTurnPhase {
+  return phase === 'draft_research' || phase === 'draft_artifact'
+    ? 'draft_research'
+    : 'revision_research';
+}
+
+function normalizeForgeCandidatePath(candidatePath: string): string | null {
+  const trimmed = candidatePath.trim();
+  if (!trimmed) return null;
+  const unwrapped = trimmed.startsWith('`') && trimmed.endsWith('`')
+    ? trimmed.slice(1, -1).trim()
+    : trimmed;
+  if (!unwrapped) return null;
+  const slashNormalized = unwrapped.replace(/\\/g, '/');
+  if (/^[a-z]:\//i.test(slashNormalized)) return null;
+  const normalized = path.posix.normalize(slashNormalized).replace(/^(\.\/)+/, '');
+  if (!normalized || normalized === '.' || normalized.startsWith('../') || path.posix.isAbsolute(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+function normalizeForgeCandidatePathList(
+  candidatePaths: readonly string[] | null | undefined,
+): string[] {
+  if (!candidatePaths?.length) return [];
+  const normalized = new Set<string>();
+  for (const candidatePath of candidatePaths) {
+    const next = normalizeForgeCandidatePath(candidatePath);
+    if (next) normalized.add(next);
+  }
+  return [...normalized];
+}
+
+function hasOutOfBoundsCandidatePaths(bounds: ForgePlanCandidateBounds): boolean {
+  if (bounds.candidatePaths.length === 0) return false;
+  const allowlist = new Set(bounds.allowlistPaths);
+  return bounds.candidatePaths.some((candidatePath) => !allowlist.has(candidatePath));
+}
+
+function mergeStoredSection<T extends object>(
+  previous: Partial<T> | undefined,
+  next: Partial<T> | null | undefined,
+): Partial<T> | undefined {
+  if (next === null) return undefined;
+  if (next === undefined) return previous;
+  return { ...(previous ?? {}), ...next };
+}
+
+function hasCompleteFallbackPolicy(
+  value: Partial<ForgePlanFallbackPolicy> | undefined,
+): value is ForgePlanFallbackPolicy {
+  if (!value || !isForgePlanFallbackMode(value.onOutOfBounds)) return false;
+  if (value.onOutOfBounds === 'reject') {
+    return value.reResearchPhase === null || value.reResearchPhase === undefined;
+  }
+  return isForgeTurnPhase(value.reResearchPhase);
+}
+
+function resolveDefaultFallbackPolicy(phase: ForgeTurnPhase): ForgePlanFallbackPolicy {
+  const reResearchPhase = resolveForgeReResearchPhase(phase);
+  return reResearchPhase
+    ? { onOutOfBounds: 're_research', reResearchPhase }
+    : { onOutOfBounds: 'reject', reResearchPhase: null };
+}
+
+function normalizeForgePlanMetadata(
+  stored: StoredForgePlanMetadata | undefined,
+  requestedPhase?: ForgeTurnPhase,
+): ForgePlanMetadata {
+  const storedPhase = isForgeTurnPhase(stored?.phaseState?.currentPhase)
+    ? stored.phaseState.currentPhase
+    : undefined;
+  const phaseForGate = requestedPhase ?? storedPhase ?? 'draft_research';
+  const compatibilityPhase = resolveCompatibilityResearchPhase(phaseForGate);
+  const hasCompletePhaseState = !!storedPhase && typeof stored?.phaseState?.researchComplete === 'boolean';
+  const hasCompleteBounds = Array.isArray(stored?.candidateBounds?.candidatePaths)
+    && Array.isArray(stored?.candidateBounds?.allowlistPaths);
+  const storedFallbackPolicy = stored?.fallbackPolicy;
+  const hasFallbackPolicy = hasCompleteFallbackPolicy(storedFallbackPolicy);
+  const compatibility: ForgePlanMetadataCompatibility = hasCompletePhaseState && hasCompleteBounds && hasFallbackPolicy
+    ? 'current'
+    : 'legacy_incomplete';
+  const candidateBounds = {
+    candidatePaths: normalizeForgeCandidatePathList(stored?.candidateBounds?.candidatePaths),
+    allowlistPaths: normalizeForgeCandidatePathList(stored?.candidateBounds?.allowlistPaths),
+  };
+  const hasOutOfBoundsCandidates = hasOutOfBoundsCandidatePaths(candidateBounds);
+  const phaseState = {
+    currentPhase: compatibility === 'current' && storedPhase ? storedPhase : compatibilityPhase,
+    researchComplete: compatibility === 'current' && stored?.phaseState?.researchComplete === true,
+  };
+  const fallbackPolicy = compatibility === 'current' && hasFallbackPolicy
+    ? storedFallbackPolicy
+    : resolveDefaultFallbackPolicy(phaseState.currentPhase);
+  const requiresFreshResearch = !isForgeResearchPhase(phaseForGate)
+    && (
+      compatibility !== 'current'
+      || !phaseState.researchComplete
+      || candidateBounds.allowlistPaths.length === 0
+      || hasOutOfBoundsCandidates
+    );
+
+  return {
+    phaseState,
+    candidateBounds,
+    fallbackPolicy,
+    compatibility,
+    requiresFreshResearch,
+  };
+}
+
+export function setForgePlanMetadata(planId: string, metadata: ForgePlanMetadataInput): ForgePlanMetadata {
+  const previous = _planMetadata.get(planId);
+  const next: StoredForgePlanMetadata = {
+    phaseState: mergeStoredSection(previous?.phaseState, metadata.phaseState),
+    candidateBounds: mergeStoredSection(previous?.candidateBounds, metadata.candidateBounds),
+    fallbackPolicy: mergeStoredSection(previous?.fallbackPolicy, metadata.fallbackPolicy),
+  };
+  _planMetadata.set(planId, next);
+  return normalizeForgePlanMetadata(next);
+}
+
+export function getForgePlanMetadata(
+  planId: string,
+  opts?: { requestedPhase?: ForgeTurnPhase },
+): ForgePlanMetadata {
+  return normalizeForgePlanMetadata(_planMetadata.get(planId), opts?.requestedPhase);
+}
+
+export function clearForgePlanMetadata(planId: string): void {
+  _planMetadata.delete(planId);
+}
+
+export function resolveForgePlanPhaseGate(planId: string, requestedPhase: ForgeTurnPhase): ForgePlanPhaseGate {
+  const metadata = getForgePlanMetadata(planId, { requestedPhase });
+  if (isForgeResearchPhase(requestedPhase)) {
+    return {
+      requestedPhase,
+      nextPhase: requestedPhase,
+      route: resolveForgeTurnRoute(requestedPhase),
+      researchComplete: metadata.phaseState.researchComplete,
+      candidatePaths: metadata.candidateBounds.candidatePaths,
+      allowlistPaths: metadata.candidateBounds.allowlistPaths,
+      fallbackPolicy: metadata.fallbackPolicy,
+      compatibility: metadata.compatibility,
+      requiresFreshResearch: false,
+    };
+  }
+
+  if (!metadata.requiresFreshResearch) {
+    return {
+      requestedPhase,
+      nextPhase: requestedPhase,
+      route: resolveForgeTurnRoute(requestedPhase),
+      researchComplete: metadata.phaseState.researchComplete,
+      candidatePaths: metadata.candidateBounds.candidatePaths,
+      allowlistPaths: metadata.candidateBounds.allowlistPaths,
+      fallbackPolicy: metadata.fallbackPolicy,
+      compatibility: metadata.compatibility,
+      requiresFreshResearch: false,
+    };
+  }
+
+  const nextPhase = metadata.fallbackPolicy.reResearchPhase ?? resolveCompatibilityResearchPhase(requestedPhase);
+  return {
+    requestedPhase,
+    nextPhase,
+    route: resolveForgeTurnRoute(nextPhase),
+    researchComplete: false,
+    candidatePaths: metadata.candidateBounds.candidatePaths,
+    allowlistPaths: metadata.candidateBounds.allowlistPaths,
+    fallbackPolicy: metadata.fallbackPolicy,
+    compatibility: metadata.compatibility,
+    requiresFreshResearch: true,
+    reason: `Stored forge metadata is legacy, partial, unbounded, or carries out-of-bounds candidates. Re-enter ${nextPhase} before ${requestedPhase}.`,
+  };
+}
 
 /**
  * Acquire the workspace writer lock. Returns a release function.
@@ -167,4 +420,5 @@ export function _resetForTest(): void {
   _activeForgeChannelId = undefined;
   _activeForgeChannelIds.clear();
   _runningPlanIds.clear();
+  _planMetadata.clear();
 }

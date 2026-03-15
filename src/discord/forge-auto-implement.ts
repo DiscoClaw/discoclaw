@@ -9,6 +9,9 @@ export type ForgeAutoImplementDeps = {
   planApprove: (planId: string) => Promise<void>;
   planRun: (planId: string) => Promise<ForgeAutoImplementRunSummary>;
   isPlanRunning: (planId: string) => boolean;
+  checkWorkspaceContextPristine?: (
+    planId: string,
+  ) => Promise<{ pristine: boolean; reason?: string }>;
   log?: LoggerLike;
 };
 
@@ -33,7 +36,7 @@ export async function autoImplementForgePlan(
   deps: ForgeAutoImplementDeps,
 ): Promise<ForgeAutoImplementOutcome> {
   const { planId, result } = opts;
-  const { planApprove, planRun, isPlanRunning, log } = deps;
+  const { planApprove, planRun, isPlanRunning, checkWorkspaceContextPristine, log } = deps;
   const verdict = result.finalVerdict;
   const normalizedVerdict = typeof verdict === 'string' ? verdict.toLowerCase() : '';
   const severity = normalizedVerdict && normalizedVerdict !== 'none' ? normalizedVerdict : undefined;
@@ -64,6 +67,18 @@ export async function autoImplementForgePlan(
 
   if (isPlanRunning(planId)) {
     return manualOutcome(planId, 'A plan run is already in progress for this plan.');
+  }
+
+  if (checkWorkspaceContextPristine) {
+    const workspaceContext = await checkWorkspaceContextPristine(planId);
+    if (!workspaceContext.pristine) {
+      return manualOutcome(
+        planId,
+        workspaceContext.reason
+          ? `Workspace context is not pristine for auto-implementation: ${workspaceContext.reason}`
+          : 'Workspace context is not pristine for auto-implementation. Manual review is required.',
+      );
+    }
   }
 
   try {

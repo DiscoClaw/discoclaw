@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,9 +23,36 @@ import type { RuntimeAdapter, EngineEvent, RuntimeInvokeParams } from '../runtim
 import { TaskStore } from '../tasks/store.js';
 import { wrapRuntimeWithGlobalPolicies } from '../index.runtime.js';
 import { ROOT_POLICY, TRACKED_DEFAULTS_PREAMBLE } from './prompt-common.js';
+import { _resetForTest, setForgePlanMetadata } from './forge-plan-registry.js';
 
 async function makeTmpDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'forge-test-'));
+}
+
+function seedResumeMetadata(planId: string, candidatePaths: string[] = ['src/foo.ts']): void {
+  setForgePlanMetadata(planId, {
+    phaseState: {
+      currentPhase: 'audit',
+      researchComplete: true,
+    },
+    candidateBounds: {
+      candidatePaths,
+      allowlistPaths: candidatePaths,
+    },
+    fallbackPolicy: {
+      onOutOfBounds: 're_research',
+      reResearchPhase: 'revision_research',
+    },
+  });
+}
+
+function ensureConcretePlanPath(text: string): string {
+  if (!text.startsWith('# Plan:')) return text;
+  if (text.includes('src/') || text.includes('docs/') || text.includes('scripts/')) return text;
+  return text.replace(
+    /## Changes\s*\n\n/,
+    '## Changes\n\n- `src/foo.ts` — add the implementation detail.\n\n',
+  );
 }
 
 function makeMockRuntime(responses: string[]): RuntimeAdapter {
@@ -34,7 +61,7 @@ function makeMockRuntime(responses: string[]): RuntimeAdapter {
     id: 'claude_code' as const,
     capabilities: new Set(['streaming_text' as const]),
     invoke(_params) {
-      const text = responses[callIndex] ?? '(no response)';
+      const text = ensureConcretePlanPath(responses[callIndex] ?? '(no response)');
       callIndex++;
       return (async function* (): AsyncGenerator<EngineEvent> {
         yield { type: 'text_final', text };
@@ -56,7 +83,7 @@ function makeMockRuntimeWithError(errorOnCall: number, responses: string[]): Run
           yield { type: 'error', message: 'Runtime crashed' };
         })();
       }
-      const text = responses[idx] ?? '(no response)';
+      const text = ensureConcretePlanPath(responses[idx] ?? '(no response)');
       return (async function* (): AsyncGenerator<EngineEvent> {
         yield { type: 'text_final', text };
         yield { type: 'done' };
@@ -132,6 +159,10 @@ async function seedCodexNativeWriteContextFiles(tmpDir: string): Promise<void> {
   );
 }
 
+beforeEach(() => {
+  _resetForTest();
+});
+
 /**
  * Returns a runtime where each call index maps to either an error event or a
  * text response. `'error'` entries emit a runtime error; strings emit text.
@@ -149,7 +180,7 @@ function makeRetryableRuntime(callMap: Array<string | 'error'>): RuntimeAdapter 
           yield { type: 'error', message: 'hang detected' };
         })();
       }
-      const text = entry;
+      const text = ensureConcretePlanPath(entry);
       return (async function* (): AsyncGenerator<EngineEvent> {
         yield { type: 'text_final', text };
         yield { type: 'done' };
@@ -1450,7 +1481,7 @@ describe('ForgeOrchestrator', () => {
         const idx = callIdx++;
         if (idx === 0) {
           return (async function* (): AsyncGenerator<EngineEvent> {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
           })();
         }
@@ -1559,7 +1590,14 @@ describe('ForgeOrchestrator', () => {
     expect(cancelledCalls.length).toBeGreaterThanOrEqual(1);
     const lastCancelled = cancelledCalls[cancelledCalls.length - 1]!;
     expect(lastCancelled[0]).toHaveProperty('phase');
-    expect(['loop-entry', 'draft', 'audit', 'revision']).toContain(lastCancelled[0].phase);
+    expect([
+      'loop-entry',
+      'draft_research',
+      'draft_artifact',
+      'audit',
+      'revision_research',
+      'revision_artifact',
+    ]).toContain(lastCancelled[0].phase);
   });
 
   it('requestCancel(reason) logs the reason', async () => {
@@ -1589,7 +1627,7 @@ describe('ForgeOrchestrator', () => {
     expect(cancelRequestedCalls[0]![0]).toMatchObject({ reason: 'user-initiated' });
   });
 
-  it('cancel during draft phase logs phase:draft', async () => {
+  it('cancel during draft phase logs a draft_* phase', async () => {
     const tmpDir = await makeTmpDir();
 
     let orchestrator!: ForgeOrchestrator;
@@ -1619,7 +1657,7 @@ describe('ForgeOrchestrator', () => {
       (c: unknown[]) => c[1] === 'forge:cancelled',
     );
     expect(cancelledCalls.length).toBeGreaterThanOrEqual(1);
-    expect(cancelledCalls[0]![0]).toMatchObject({ phase: 'draft' });
+    expect(cancelledCalls[0]![0].phase).toMatch(/^draft/);
   });
 
   it('concurrent forge throws error', async () => {
@@ -1679,7 +1717,7 @@ describe('ForgeOrchestrator', () => {
       invoke(params) {
         prompts.push(params.prompt);
         const responses = [draftPlan, auditClean];
-        const text = responses[prompts.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[prompts.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -1720,7 +1758,7 @@ describe('ForgeOrchestrator', () => {
       invoke(params) {
         prompts.push(params.prompt);
         const responses = [draftPlan, auditClean];
-        const text = responses[prompts.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[prompts.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -1754,7 +1792,7 @@ describe('ForgeOrchestrator', () => {
       invoke(params) {
         prompts.push(params.prompt);
         const responses = [draftPlan, auditClean];
-        const text = responses[prompts.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[prompts.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -1793,7 +1831,7 @@ describe('ForgeOrchestrator', () => {
       invoke(params) {
         prompts.push(params.prompt);
         const responses = [draftPlan, auditClean];
-        const text = responses[prompts.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[prompts.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -1824,7 +1862,7 @@ describe('ForgeOrchestrator', () => {
       invoke(params) {
         invocations.push({ tools: params.tools, addDirs: params.addDirs });
         const responses = [draftPlan, auditClean];
-        const text = responses[invocations.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[invocations.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -2074,7 +2112,7 @@ _Filled in during/after implementation._
           // Cancel while the pipeline is running, then still yield the response.
           // The post-return guard should catch this before the output is processed.
           orchestrator.requestCancel();
-          yield { type: 'text_final', text: draftPlan };
+          yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
           yield { type: 'done' };
         })();
       },
@@ -2161,16 +2199,16 @@ _Filled in during/after implementation._
         return (async function* (): AsyncGenerator<EngineEvent> {
           if (idx === 0) {
             yield { type: 'text_delta', text: 'Inspecting the forge routing first.' };
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
           if (idx === 1) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2223,7 +2261,7 @@ _Filled in during/after implementation._
         systemPrompts.push(params.systemPrompt ?? '');
         return (async function* (): AsyncGenerator<EngineEvent> {
           if (idx === 0) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
@@ -2233,11 +2271,11 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 2) {
-            yield { type: 'text_final', text: revisedPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(revisedPlan) };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2290,11 +2328,11 @@ _Filled in during/after implementation._
                 input: { command: 'rg -n "forge"' },
               };
               await draftReleased;
-              yield { type: 'text_final', text: draftPlan };
+              yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
               yield { type: 'done' };
               return;
             }
-            yield { type: 'text_final', text: auditClean };
+            yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
             yield { type: 'done' };
           })();
         },
@@ -2352,11 +2390,11 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 1) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2422,11 +2460,11 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 1) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2490,11 +2528,11 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 1) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2519,9 +2557,13 @@ _Filled in during/after implementation._
     expect(systemPrompts[1]).toContain('Do not use tools on this retry.');
   });
 
-  it('bypasses inner grounding retries and salvages through a fresh outer retry session', async () => {
+  it('retries draft research in a fresh bounded session before the artifact turn', async () => {
     const tmpDir = await makeTmpDir();
     await seedCodexCandidateFiles(tmpDir);
+    const groundedPaths = [
+      '`src/discord/forge-commands.ts`',
+      '`src/runtime/codex-app-server.ts`',
+    ].join('\n');
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
 
@@ -2550,11 +2592,16 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 1) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: groundedPaths };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          if (idx === 2) {
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
+            yield { type: 'done' };
+            return;
+          }
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2577,7 +2624,7 @@ _Filled in during/after implementation._
     });
 
     expect(result.error).toBeUndefined();
-    expect(callIndex).toBe(3);
+    expect(callIndex).toBe(4);
     expect(supervisors[0]).toEqual(expect.objectContaining({
       limits: expect.objectContaining({
         maxCycles: 1,
@@ -2594,14 +2641,20 @@ _Filled in during/after implementation._
       expect(addDirsSeen[0]).toEqual([tmpDir]);
     }
     expect(sessionKeys[0]).toMatch(/^forge:plan-\d+:test-model:drafter$/);
-    expect(toolsSeen[1]).toBeUndefined();
-    expect(addDirsSeen[1]).toBeUndefined();
-    expect(nativeBypassSeen[1]).toBe(true);
-    expect(sessionKeys[1]).toBeUndefined();
+    expect(sessionKeys[1]).toBe(`${sessionKeys[0]}:draft-research-retry`);
     expect(supervisors[1]).toEqual(expect.objectContaining({
-      limits: expect.objectContaining({ maxCycles: 2, maxRetries: 1 }),
+      limits: expect.objectContaining({ maxCycles: 1, maxRetries: 0 }),
     }));
-    expect(prompts[1]).toContain('You are salvaging a stalled plan draft.');
+    expect(nativeBypassSeen[0]).toBeUndefined();
+    expect(nativeBypassSeen[1]).toBeUndefined();
+    expect(prompts[1]).toContain('repo-relative file paths');
+    expect(prompts[2]).toContain('## Grounded Repo Inputs');
+    expect(toolsSeen[2]).toEqual([]);
+    expect(addDirsSeen[2]).toBeUndefined();
+    expect(nativeBypassSeen[2]).toBe(true);
+    expect(sessionKeys[2]).toBe(sessionKeys[0]);
+    expect(sessionKeys[3]).toMatch(/^forge:plan-\d+:test-model:auditor$/);
+    expect(nativeBypassSeen[3]).toBeUndefined();
     expect(progress.some((p) => p.includes('retrying'))).toBe(true);
   });
 
@@ -2628,7 +2681,7 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 1 || idx === 4) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
@@ -2683,7 +2736,7 @@ _Filled in during/after implementation._
         supervisors.push(params.supervisor);
         return (async function* (): AsyncGenerator<EngineEvent> {
           if (idx === 0) {
-            yield { type: 'text_final', text: draftPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
             yield { type: 'done' };
             return;
           }
@@ -2700,11 +2753,11 @@ _Filled in during/after implementation._
             return;
           }
           if (idx === 3) {
-            yield { type: 'text_final', text: revisedPlan };
+            yield { type: 'text_final', text: ensureConcretePlanPath(revisedPlan) };
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -2935,7 +2988,10 @@ _Filled in during/after implementation._
             yield { type: 'done' };
             return;
           }
-          yield { type: 'text_final', text: callCount === 2 ? draftPlan : auditClean };
+          yield {
+            type: 'text_final',
+            text: ensureConcretePlanPath(callCount === 2 ? draftPlan : auditClean),
+          };
           yield { type: 'done' };
         })();
       },
@@ -3072,7 +3128,7 @@ _Filled in during/after implementation._
       invoke(params) {
         prompts.push(params.prompt);
         const responses = [echoedTemplate, realDraft, auditClean];
-        const text = responses[prompts.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[prompts.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -3127,7 +3183,7 @@ _Filled in during/after implementation._
       invoke(params) {
         prompts.push(params.prompt);
         const responses = [draftPlan, auditClean];
-        const text = responses[prompts.length - 1] ?? '(no response)';
+        const text = ensureConcretePlanPath(responses[prompts.length - 1] ?? '(no response)');
         return (async function* (): AsyncGenerator<EngineEvent> {
           yield { type: 'text_final', text };
           yield { type: 'done' };
@@ -3220,6 +3276,7 @@ describe('ForgeOrchestrator.resume()', () => {
       // Only audit output — no draft call
       '**Verdict:** Ready to approve.',
     ]));
+    seedResumeMetadata('plan-001');
 
     // Write plan file directly
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
@@ -3246,6 +3303,7 @@ describe('ForgeOrchestrator.resume()', () => {
     const opts = await baseOpts(tmpDir, makeMockRuntime([
       '**Verdict:** Ready to approve.',
     ]));
+    seedResumeMetadata('plan-001');
 
     const planContent = makePlanContent({ planId: 'plan-001', status: 'DRAFT' });
     const filePath = path.join(opts.plansDir, 'plan-001-test.md');
@@ -3272,6 +3330,7 @@ describe('ForgeOrchestrator.resume()', () => {
       makeMockRuntime(['**Verdict:** Ready to approve.']),
       { planForgeHeartbeatIntervalMs: 12_000 },
     );
+    seedResumeMetadata('plan-001');
     const heartbeat = await import('./phase-status-heartbeat.js');
     const createHeartbeatSpy = vi.spyOn(heartbeat, 'createPhaseStatusHeartbeatController');
 
@@ -3299,6 +3358,7 @@ describe('ForgeOrchestrator.resume()', () => {
       revisedPlan,    // revision
       auditClean,     // second audit
     ]));
+    seedResumeMetadata('plan-001');
 
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
     const filePath = path.join(opts.plansDir, 'plan-001-test.md');
@@ -3319,6 +3379,7 @@ describe('ForgeOrchestrator.resume()', () => {
     const auditClean = '**Verdict:** Ready to approve.';
 
     const opts = await baseOpts(tmpDir, makeMockRuntime([auditBlocking, revisedPlan, auditClean]));
+    seedResumeMetadata('plan-001');
 
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
     const filePath = path.join(opts.plansDir, 'plan-001-test.md');
@@ -3373,6 +3434,7 @@ describe('ForgeOrchestrator.resume()', () => {
     const opts = await baseOpts(tmpDir, makeMockRuntime([
       '**Verdict:** Ready to approve.',
     ]));
+    seedResumeMetadata('plan-001');
 
     // Plan already has Review 1 and Review 2
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW', reviews: 2 });
@@ -3501,6 +3563,7 @@ describe('ForgeOrchestrator.resume()', () => {
     // Call 0: audit attempt → retryable error, Call 1: audit retry → clean
     const runtime = makeRetryableRuntime(['error', auditClean]);
     const opts = await baseOpts(tmpDir, runtime);
+    seedResumeMetadata('plan-001');
 
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
     const filePath = path.join(opts.plansDir, 'plan-001-test.md');
@@ -3534,7 +3597,7 @@ function makeCaptureRuntime(responses: string[]): {
     capabilities: new Set(['streaming_text' as const, 'sessions' as const]),
     invoke(params) {
       invocations.push(params);
-      const text = responses[callIndex] ?? '(no response)';
+      const text = ensureConcretePlanPath(responses[callIndex] ?? '(no response)');
       callIndex++;
       return (async function* (): AsyncGenerator<EngineEvent> {
         yield { type: 'text_final', text };
@@ -3608,12 +3671,14 @@ describe('Forge session keys', () => {
     expect(invocations[1]!.sessionKey).toBe(invocations[0]!.sessionKey);
     expect(invocations[2]!.sessionKey).toContain(':auditor');
     expect(invocations[2]!.sessionKey).not.toBe(invocations[0]!.sessionKey);
-    expect(invocations.every((params) => params.disableNativeAppServer === true)).toBe(true);
+    expect(invocations[0]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[1]!.disableNativeAppServer).toBe(true);
+    expect(invocations[2]!.disableNativeAppServer).toBeUndefined();
     expect(invocations[0]!.systemPrompt).toBeUndefined();
     expect(invocations[1]!.systemPrompt).toBeUndefined();
   });
 
-  it('treats codex-like wrapped runtimes as CLI-first forge runtimes', async () => {
+  it('routes codex-like wrapped runtimes by forge phase', async () => {
     const tmpDir = await makeTmpDir();
     await seedCodexCandidateFiles(tmpDir);
     await seedCodexNativeWriteContextFiles(tmpDir);
@@ -3670,9 +3735,80 @@ describe('Forge session keys', () => {
     }
     expect(invocations[1]!.prompt).toContain('## Grounded Repo Inputs');
     expect(invocations[2]!.sessionKey).toContain(':auditor');
-    expect(invocations.every((params) => params.disableNativeAppServer === true)).toBe(true);
+    expect(invocations[0]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[1]!.disableNativeAppServer).toBe(true);
+    expect(invocations[2]!.disableNativeAppServer).toBeUndefined();
     expect(invocations[0]!.systemPrompt).toBeUndefined();
     expect(invocations[1]!.systemPrompt).toBeUndefined();
+  });
+
+  it('fails closed when bounded draft research deviates from the grounded path contract', async () => {
+    const tmpDir = await makeTmpDir();
+    await seedCodexCandidateFiles(tmpDir);
+
+    const invocations: RuntimeInvokeParams[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const, 'mid_turn_steering' as const]),
+      invoke(params) {
+        invocations.push(params);
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          yield { type: 'text_final', text: '`src/not-in-candidates.ts`' };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeDefined();
+    expect(
+      result.error?.includes('outside the bounded candidate allowlist')
+      || result.error?.includes('draft output must start with # Plan:'),
+    ).toBe(true);
+    expect(invocations.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('keeps audit retries on the audit phase route instead of escalating to CLI salvage', async () => {
+    const tmpDir = await makeTmpDir();
+    const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- src/foo.ts — add bar\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
+    const auditClean = '**Verdict:** Ready to approve.';
+    const invocations: RuntimeInvokeParams[] = [];
+    const runtime: RuntimeAdapter = {
+      id: 'codex' as const,
+      capabilities: new Set(['streaming_text' as const, 'tools_fs' as const, 'sessions' as const]),
+      invoke(params) {
+        invocations.push(params);
+        const idx = invocations.length - 1;
+        return (async function* (): AsyncGenerator<EngineEvent> {
+          if (idx === 0) {
+            yield { type: 'text_final', text: ensureConcretePlanPath(draftPlan) };
+            yield { type: 'done' };
+            return;
+          }
+          if (idx === 1) {
+            yield { type: 'error', message: 'timed out waiting for audit response' };
+            return;
+          }
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
+          yield { type: 'done' };
+        })();
+      },
+    };
+
+    const opts = await baseOpts(tmpDir, runtime);
+    const orchestrator = new ForgeOrchestrator(opts);
+
+    const result = await orchestrator.run('Test feature', async () => {});
+
+    expect(result.error).toBeUndefined();
+    expect(invocations).toHaveLength(3);
+    expect(invocations[0]!.disableNativeAppServer).toBe(true);
+    expect(invocations[1]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[2]!.disableNativeAppServer).toBeUndefined();
   });
 
   it('prioritizes src candidates ahead of noisy script and env files for Codex draft grounding', async () => {
@@ -3790,7 +3926,12 @@ describe('Forge session keys', () => {
     expect(invocations[4]!.prompt).not.toContain('codex native compound lesson');
     expect(invocations[4]!.tools).toEqual([]);
     expect(invocations[4]!.addDirs).toBeUndefined();
-    expect(invocations.every((params) => params.disableNativeAppServer === true)).toBe(true);
+    expect(invocations[0]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[1]!.disableNativeAppServer).toBe(true);
+    expect(invocations[2]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[3]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[4]!.disableNativeAppServer).toBe(true);
+    expect(invocations[5]!.disableNativeAppServer).toBeUndefined();
     expect(invocations[3]!.systemPrompt).toBeUndefined();
     expect(invocations[4]!.systemPrompt).toBeUndefined();
   });
@@ -4002,6 +4143,7 @@ describe('Forge session keys', () => {
       '**Verdict:** Ready to approve.',
     ]);
     const opts = await baseOpts(tmpDir, runtime);
+    seedResumeMetadata('plan-001');
 
     const planContent = makePlanContent({ planId: 'plan-001', status: 'REVIEW' });
     const filePath = path.join(opts.plansDir, 'plan-001-test.md');
@@ -4036,7 +4178,7 @@ describe('auditorRuntime support', () => {
       invoke(params) {
         auditorInvocations.push(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -4082,7 +4224,7 @@ describe('auditorRuntime support', () => {
       invoke(params) {
         auditorInvocations.push(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -4112,7 +4254,7 @@ describe('auditorRuntime support', () => {
       invoke(params) {
         auditorInvocations.push(params);
         return (async function* (): AsyncGenerator<EngineEvent> {
-          yield { type: 'text_final', text: auditClean };
+          yield { type: 'text_final', text: ensureConcretePlanPath(auditClean) };
           yield { type: 'done' };
         })();
       },
@@ -4293,7 +4435,7 @@ function makeMockRuntimeWithEvents(responseMap: Array<{ text: string; events?: E
       callIndex++;
       return (async function* (): AsyncGenerator<EngineEvent> {
         for (const evt of entry.events ?? []) yield evt;
-        yield { type: 'text_final', text: entry.text };
+        yield { type: 'text_final', text: ensureConcretePlanPath(entry.text) };
         yield { type: 'done' };
       })();
     },
@@ -4307,8 +4449,8 @@ describe('ForgeOrchestrator onEvent threading', () => {
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntimeWithEvents([
-      { text: draftPlan, events: [{ type: 'text_delta', text: '# Plan:' }] },
-      { text: auditClean },
+      { text: ensureConcretePlanPath(draftPlan), events: [{ type: 'text_delta', text: '# Plan:' }] },
+      { text: ensureConcretePlanPath(auditClean) },
     ]);
 
     const opts = await baseOpts(tmpDir, runtime);
@@ -4328,8 +4470,8 @@ describe('ForgeOrchestrator onEvent threading', () => {
 
     const runtime = wrapRuntimeWithGlobalPolicies({
       runtime: makeMockRuntimeWithEvents([
-        { text: draftPlan, events: [{ type: 'text_delta', text: '# Plan:' }] },
-        { text: auditClean },
+        { text: ensureConcretePlanPath(draftPlan), events: [{ type: 'text_delta', text: '# Plan:' }] },
+        { text: ensureConcretePlanPath(auditClean) },
       ]),
       maxConcurrentInvocations: 3,
       globalSupervisorEnabled: true,
@@ -4352,8 +4494,8 @@ describe('ForgeOrchestrator onEvent threading', () => {
     const auditClean = '**Verdict:** Ready to approve.';
 
     const runtime = makeMockRuntimeWithEvents([
-      { text: draftPlan },
-      { text: auditClean, events: [{ type: 'text_delta', text: 'auditing...' }] },
+      { text: ensureConcretePlanPath(draftPlan) },
+      { text: ensureConcretePlanPath(auditClean), events: [{ type: 'text_delta', text: 'auditing...' }] },
     ]);
 
     const opts = await baseOpts(tmpDir, runtime);
