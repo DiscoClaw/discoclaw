@@ -62,6 +62,7 @@ describe('LongRunWatchdog', () => {
     const state = await watchdog.getRun('run-1');
     expect(state?.status).toBe('completed');
     expect(state?.completion).toBe('succeeded');
+    expect(state?.completionDetail).toBeNull();
     expect(state?.finalPosted).toBe(true);
     expect(state?.finalError).toBeNull();
 
@@ -99,6 +100,36 @@ describe('LongRunWatchdog', () => {
     expect(sweep.finalRetried).toBe(0);
     expect(sweep.finalPosted).toBe(0);
     expect(sweep.finalFailed).toBe(0);
+    watchdog.dispose();
+  });
+
+  it('posts a final follow-up for fast failed runs when a durable failure detail is provided', async () => {
+    const filePath = path.join(tmpDir, 'watchdog.json');
+    const postStillRunning = vi.fn(async () => {});
+    const postFinal = vi.fn(async () => {});
+    const watchdog = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning,
+      postFinal,
+      stillRunningDelayMs: 10_000,
+    });
+
+    await watchdog.start({
+      runId: 'run-fast-failed',
+      channelId: 'chan-1',
+      messageId: 'msg-1',
+    });
+    await watchdog.complete('run-fast-failed', {
+      outcome: 'failed',
+      detail: 'Forge failed during plan-553: codex app-server websocket closed',
+    });
+
+    expect(postStillRunning).toHaveBeenCalledTimes(0);
+    expect(postFinal).toHaveBeenCalledTimes(1);
+    const state = await watchdog.getRun('run-fast-failed');
+    expect(state?.completion).toBe('failed');
+    expect(state?.completionDetail).toBe('Forge failed during plan-553: codex app-server websocket closed');
+    expect(state?.finalPosted).toBe(true);
     watchdog.dispose();
   });
 
@@ -211,6 +242,59 @@ describe('LongRunWatchdog', () => {
     expect(state?.status).toBe('completed');
     expect(state?.finalPosted).toBe(true);
     watchdog.dispose();
+  });
+
+  it('persists failure detail across retries and restart recovery', async () => {
+    const filePath = path.join(tmpDir, 'watchdog.json');
+    const postStillRunningA = vi.fn(async () => {});
+    const postFinalA = vi.fn()
+      .mockRejectedValueOnce(new Error('transient discord error'))
+      .mockResolvedValue(undefined);
+
+    const beforeRestart = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning: postStillRunningA,
+      postFinal: postFinalA,
+      stillRunningDelayMs: 1_000,
+    });
+
+    await beforeRestart.start({
+      runId: 'run-detail',
+      channelId: 'chan-1',
+      messageId: 'msg-1',
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await beforeRestart._waitForIdleForTest();
+    await beforeRestart.complete('run-detail', {
+      outcome: 'failed',
+      detail: 'Forge failed during plan-553: codex app-server websocket closed',
+    });
+
+    const afterFailedPost = await beforeRestart.getRun('run-detail');
+    expect(afterFailedPost?.completionDetail).toBe('Forge failed during plan-553: codex app-server websocket closed');
+    expect(afterFailedPost?.finalPosted).toBe(false);
+    beforeRestart.dispose();
+
+    const postStillRunningB = vi.fn(async () => {});
+    const postFinalB = vi.fn(async (run: { completionDetail: string | null }) => {
+      expect(run.completionDetail).toBe('Forge failed during plan-553: codex app-server websocket closed');
+    });
+    const afterRestart = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning: postStillRunningB,
+      postFinal: postFinalB,
+      stillRunningDelayMs: 1_000,
+    });
+
+    const sweep = await afterRestart.startupSweep();
+    expect(sweep.finalRetried).toBe(1);
+    expect(sweep.finalPosted).toBe(1);
+    expect(postFinalB).toHaveBeenCalledTimes(1);
+
+    const recovered = await afterRestart.getRun('run-detail');
+    expect(recovered?.completionDetail).toBe('Forge failed during plan-553: codex app-server websocket closed');
+    expect(recovered?.finalPosted).toBe(true);
+    afterRestart.dispose();
   });
 
   it('startup sweep retries failed final posts until one succeeds, then stops', async () => {

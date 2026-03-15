@@ -34,7 +34,7 @@ import { configureLoopScheduler } from './discord/actions-loop.js';
 import { startDiscordBot, getActiveForgeId } from './discord.js';
 import { toBootReportMcpStatus, type StatusPoster } from './discord/status-channel.js';
 import { LongRunWatchdog, type LongRunWatchdogRun } from './discord/long-run-watchdog.js';
-import { postLongRunWatchdogNoticeToChannel } from './discord/long-run-watchdog-notice.js';
+import { buildLongRunFinalNotice, postLongRunWatchdogNoticeToChannel } from './discord/long-run-watchdog-notice.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
 import { CronScheduler } from './cron/scheduler.js';
@@ -495,15 +495,6 @@ async function postLongRunWatchdogNotice(run: Pick<LongRunWatchdogRun, 'runId' |
   });
 }
 
-function buildLongRunFinalNotice(run: Pick<LongRunWatchdogRun, 'completion'>, source: 'complete' | 'startup-sweep'): string {
-  const base = run.completion === 'succeeded'
-    ? 'Run complete.'
-    : run.completion === 'failed'
-      ? 'Run ended with errors.'
-      : 'Run interrupted by restart/shutdown.';
-  return source === 'startup-sweep' ? `${base} (Recovered after restart.)` : base;
-}
-
 const messageCoordinatorWatchdog = completionNotifyEnabled
   ? (() => {
     const watchdog = new LongRunWatchdog({
@@ -513,7 +504,11 @@ const messageCoordinatorWatchdog = completionNotifyEnabled
         // No-op: streaming preview heartbeats make a separate "Still running" message redundant.
       },
       postFinal: async (run, meta) => {
-        await postLongRunWatchdogNotice(run, buildLongRunFinalNotice(run, meta.source));
+        await postLongRunWatchdogNotice(run, buildLongRunFinalNotice({
+          completion: run.completion,
+          completionDetail: run.completionDetail,
+          source: meta.source,
+        }));
       },
       log,
     });

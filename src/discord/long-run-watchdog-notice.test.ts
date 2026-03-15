@@ -1,6 +1,25 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { postLongRunWatchdogNoticeToChannel } from './long-run-watchdog-notice.js';
+import { buildLongRunFinalNotice, postLongRunWatchdogNoticeToChannel } from './long-run-watchdog-notice.js';
+
+describe('buildLongRunFinalNotice', () => {
+  it('includes persisted failure detail in the final notice', () => {
+    expect(buildLongRunFinalNotice({
+      completion: 'failed',
+      completionDetail: 'Forge failed during plan-553: codex app-server websocket closed',
+      source: 'complete',
+    })).toBe('Run ended with errors.\nReason: Forge failed during plan-553: codex app-server websocket closed');
+  });
+
+  it('sanitizes leaked prompt content in failure detail and preserves restart recovery suffixes', () => {
+    const detail = 'Command failed with exit code 1: claude -p "You are a helpful assistant..."';
+    expect(buildLongRunFinalNotice({
+      completion: 'failed',
+      completionDetail: detail,
+      source: 'startup-sweep',
+    })).toBe('Run ended with errors. (Recovered after restart.)\nReason: Command failed with exit code 1');
+  });
+});
 
 describe('postLongRunWatchdogNoticeToChannel', () => {
   it('edits the original bot-authored progress message when it is still editable', async () => {

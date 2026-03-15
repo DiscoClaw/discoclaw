@@ -18,6 +18,11 @@ import { shouldTriggerFollowUp } from './action-categories.js';
 import { countPinnedMessages, normalizePinnedMessages } from './pinned-message-utils.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import type { CronContext } from './actions-crons.js';
+import {
+  buildForgeCompletionWatchdogDetail,
+  buildForgeCrashWatchdogDetail,
+  buildForgePostProcessingWatchdogDetail,
+} from './actions-forge.js';
 import type { ForgeContext } from './actions-forge.js';
 import { executePlanAction } from './actions-plan.js';
 import type { PlanContext } from './actions-plan.js';
@@ -502,12 +507,13 @@ async function completeWatchdogRun(opts: {
   watchdog?: LongRunWatchdogLike;
   runId: string | null;
   outcome: LongRunOutcome;
+  detail?: string;
   log?: LoggerLike;
   flow: string;
 }): Promise<void> {
   if (!opts.watchdog || !opts.runId) return;
   try {
-    await opts.watchdog.complete(opts.runId, { outcome: opts.outcome });
+    await opts.watchdog.complete(opts.runId, { outcome: opts.outcome, detail: opts.detail });
   } catch (err) {
     opts.log?.warn({ err, runId: opts.runId, outcome: opts.outcome }, `${opts.flow}: watchdog complete failed`);
   }
@@ -2510,6 +2516,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 resumeOrchestrator.resume(found.header.planId, found.filePath, found.header.title, onProgress, forgeResumeOnEvent).then(
                   async (result) => {
                     let outcome: LongRunOutcome = result.error ? 'failed' : 'succeeded';
+                    let completionDetail = buildForgeCompletionWatchdogDetail(result, { summaryPosted: true });
                     forgeResumeStreaming.dispose();
                     setActiveOrchestrator(null);
                     forgeReleaseLock();
@@ -2521,16 +2528,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                           await msg.channel.send({ content: result.planSummary, allowedMentions: NO_MENTIONS });
                         } catch {
                           outcome = 'failed';
+                          completionDetail ??= buildForgeCompletionWatchdogDetail(result, { summaryPosted: false });
                         }
                       }
                       await sendForgeImplementationFollowup(result);
-                    } catch {
+                    } catch (err) {
                       outcome = 'failed';
+                      completionDetail ??= buildForgePostProcessingWatchdogDetail(result.planId, err);
                     } finally {
                       await completeWatchdogRun({
                         watchdog: longRunWatchdog,
                         runId: forgeResumeWatchdogId,
                         outcome,
+                        detail: completionDetail,
                         log: params.log,
                         flow: 'forge:resume',
                       });
@@ -2553,6 +2563,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                         watchdog: longRunWatchdog,
                         runId: forgeResumeWatchdogId,
                         outcome: 'failed',
+                        detail: buildForgeCrashWatchdogDetail(err, { resume: true, planId: found.header.planId }),
                         log: params.log,
                         flow: 'forge:resume',
                       });
@@ -2655,6 +2666,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               createOrchestrator.run(forgeCmd.args, onProgress, forgeContext, forgeCreateOnEvent).then(
                 async (result) => {
                   let outcome: LongRunOutcome = result.error ? 'failed' : 'succeeded';
+                  let completionDetail = buildForgeCompletionWatchdogDetail(result, { summaryPosted: true });
                   forgeCreateStreaming.dispose();
                   setActiveOrchestrator(null);
                   forgeReleaseLock();
@@ -2665,16 +2677,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                         await msg.channel.send({ content: result.planSummary, allowedMentions: NO_MENTIONS });
                       } catch {
                         outcome = 'failed';
+                        completionDetail ??= buildForgeCompletionWatchdogDetail(result, { summaryPosted: false });
                       }
                     }
                     await sendForgeImplementationFollowup(result);
-                  } catch {
+                  } catch (err) {
                     outcome = 'failed';
+                    completionDetail ??= buildForgePostProcessingWatchdogDetail(result.planId, err);
                   } finally {
                     await completeWatchdogRun({
                       watchdog: longRunWatchdog,
                       runId: forgeCreateWatchdogId,
                       outcome,
+                      detail: completionDetail,
                       log: params.log,
                       flow: 'forge:create',
                     });
@@ -2697,6 +2712,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       watchdog: longRunWatchdog,
                       runId: forgeCreateWatchdogId,
                       outcome: 'failed',
+                      detail: buildForgeCrashWatchdogDetail(err),
                       log: params.log,
                       flow: 'forge:create',
                     });

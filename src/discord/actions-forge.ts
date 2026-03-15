@@ -1,13 +1,14 @@
 import path from 'node:path';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import type { LoggerLike } from '../logging/logger-like.js';
-import type { ForgeOrchestrator } from './forge-commands.js';
+import type { ForgeOrchestrator, ForgeResult } from './forge-commands.js';
 import { executePlanAction } from './actions-plan.js';
 import type { PlanContext } from './actions-plan.js';
 import type { TaskStore } from '../tasks/store.js';
 import { findPlanFile } from './plan-commands.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
+import { sanitizeErrorMessage } from './status-channel.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import type { LongRunWatchdog } from './long-run-watchdog.js';
 import {
@@ -113,6 +114,60 @@ function isArchivedThreadError(err: unknown): boolean {
 
 function shouldRouteForgeResumeToPlanRun(status: string | undefined): boolean {
   return status === 'APPROVED' || status === 'IMPLEMENTING';
+}
+
+function hasVisibleForgePlanId(planId: string | undefined): planId is string {
+  return typeof planId === 'string' && planId.trim().length > 0 && planId !== '(none)';
+}
+
+export function buildForgeCompletionWatchdogDetail(
+  result: Pick<ForgeResult, 'planId' | 'filePath' | 'error'>,
+  opts?: { summaryPosted?: boolean },
+): string | undefined {
+  if (result.error) {
+    const detail = sanitizeErrorMessage(result.error);
+    if (hasVisibleForgePlanId(result.planId)) {
+      const detailSentence = /[.!?]$/.test(detail) ? detail : `${detail}.`;
+      const partialPlanSuffix = result.filePath ? ` Partial plan saved: \`!plan show ${result.planId}\`.` : '';
+      return `Forge failed during ${result.planId}: ${detailSentence}${partialPlanSuffix}`;
+    }
+    return `Forge failed: ${detail}`;
+  }
+
+  if (opts?.summaryPosted === false) {
+    return hasVisibleForgePlanId(result.planId)
+      ? `Forge completed for ${result.planId}, but the summary could not be posted back to Discord.`
+      : 'Forge completed, but the summary could not be posted back to Discord.';
+  }
+
+  return undefined;
+}
+
+export function buildForgeCrashWatchdogDetail(
+  err: unknown,
+  opts?: { resume?: boolean; planId?: string },
+): string {
+  const detail = sanitizeErrorMessage(String(err instanceof Error ? err.message : err));
+  if (opts?.resume && hasVisibleForgePlanId(opts.planId)) {
+    return `Forge resume crashed for ${opts.planId}: ${detail}`;
+  }
+  if (opts?.resume) {
+    return `Forge resume crashed: ${detail}`;
+  }
+  if (hasVisibleForgePlanId(opts?.planId)) {
+    return `Forge crashed during ${opts.planId}: ${detail}`;
+  }
+  return `Forge crashed: ${detail}`;
+}
+
+export function buildForgePostProcessingWatchdogDetail(
+  planId: string | undefined,
+  err: unknown,
+): string {
+  const detail = sanitizeErrorMessage(String(err instanceof Error ? err.message : err));
+  return hasVisibleForgePlanId(planId)
+    ? `Forge completed for ${planId}, but post-processing failed: ${detail}`
+    : `Forge completed, but post-processing failed: ${detail}`;
 }
 
 export function normalizeForgeCandidatePath(candidatePath: string): string | null {
@@ -424,9 +479,10 @@ export async function executeForgeAction(
           let outcome: 'succeeded' | 'failed' = result.error ? 'failed' : 'succeeded';
           const postedSummary = await progress.sendPlanSummary(result.planSummary);
           if (!postedSummary) outcome = 'failed';
+          const detail = buildForgeCompletionWatchdogDetail(result, { summaryPosted: postedSummary });
           if (watchdog) {
             try {
-              await watchdog.complete(watchdogRunId, { outcome });
+              await watchdog.complete(watchdogRunId, { outcome, detail });
             } catch (err) {
               forgeCtx.log?.warn({ err, runId: watchdogRunId }, 'forge:action:create watchdog complete failed');
             }
@@ -436,7 +492,10 @@ export async function executeForgeAction(
           forgeCtx.log?.error({ err }, 'forge:action:create failed');
           if (watchdog) {
             try {
-              await watchdog.complete(watchdogRunId, { outcome: 'failed' });
+              await watchdog.complete(watchdogRunId, {
+                outcome: 'failed',
+                detail: buildForgeCrashWatchdogDetail(err),
+              });
             } catch (completeErr) {
               forgeCtx.log?.warn({ err: completeErr, runId: watchdogRunId }, 'forge:action:create watchdog complete failed');
             }
@@ -538,9 +597,10 @@ export async function executeForgeAction(
           let outcome: 'succeeded' | 'failed' = result.error ? 'failed' : 'succeeded';
           const postedSummary = await progress.sendPlanSummary(result.planSummary);
           if (!postedSummary) outcome = 'failed';
+          const detail = buildForgeCompletionWatchdogDetail(result, { summaryPosted: postedSummary });
           if (watchdog) {
             try {
-              await watchdog.complete(watchdogRunId, { outcome });
+              await watchdog.complete(watchdogRunId, { outcome, detail });
             } catch (err) {
               forgeCtx.log?.warn({ err, runId: watchdogRunId, planId: found.header.planId }, 'forge:action:resume watchdog complete failed');
             }
@@ -550,7 +610,10 @@ export async function executeForgeAction(
           forgeCtx.log?.error({ err, planId: action.planId }, 'forge:action:resume failed');
           if (watchdog) {
             try {
-              await watchdog.complete(watchdogRunId, { outcome: 'failed' });
+              await watchdog.complete(watchdogRunId, {
+                outcome: 'failed',
+                detail: buildForgeCrashWatchdogDetail(err, { resume: true, planId: found.header.planId }),
+              });
             } catch (completeErr) {
               forgeCtx.log?.warn({ err: completeErr, runId: watchdogRunId, planId: found.header.planId }, 'forge:action:resume watchdog complete failed');
             }
