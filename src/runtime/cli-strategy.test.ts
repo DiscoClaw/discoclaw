@@ -29,7 +29,7 @@ describe('resolveForgeCliRoute', () => {
 
     expect(decision.status).toBe('re_research');
     expect(decision.nextPhase).toBe('revision_research');
-    expect(decision.route).toBe('native');
+    expect(decision.route).toBe('cli');
     expect(decision.reason).toContain('outside the bounded allowlist');
   });
 

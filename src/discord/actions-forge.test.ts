@@ -226,7 +226,7 @@ describe('forge turn gate', () => {
 
     expect(decision.status).toBe('re_research');
     expect(decision.nextPhase).toBe('revision_research');
-    expect(decision.route).toBe('native');
+    expect(decision.route).toBe('cli');
     expect(decision.reason).toContain('Re-enter revision_research');
   });
 
@@ -251,8 +251,8 @@ describe('forge turn gate', () => {
   });
 
   it('routes forge turns by bounded phase instead of salvage side effects', () => {
-    expect(resolveForgeTurnRoute('draft_research')).toBe('native');
-    expect(resolveForgeTurnRoute('audit')).toBe('hybrid');
+    expect(resolveForgeTurnRoute('draft_research')).toBe('cli');
+    expect(resolveForgeTurnRoute('audit')).toBe('cli');
     expect(resolveForgeTurnRoute('revision_artifact')).toBe('cli');
   });
 });

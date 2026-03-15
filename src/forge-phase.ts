@@ -31,8 +31,9 @@ export function resolveForgeTurnKind(phase: ForgeTurnPhase): ForgeTurnKind {
 }
 
 export function resolveForgeTurnRoute(phase: ForgeTurnPhase): ForgeTurnRoute {
-  if (isForgeResearchPhase(phase)) return 'native';
-  if (phase === 'audit') return 'hybrid';
+  // Forge stays on CLI for every phase because it has been materially more
+  // reliable than the native/hybrid Codex transport in long-running draft and
+  // audit flows.
   return 'cli';
 }
 
