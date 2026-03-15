@@ -20,7 +20,7 @@ import { renderDashboardPage } from './page.js';
 import { buildSnapshotResponse, type DashboardSnapshotApiResponse } from './api/snapshot.js';
 import { mapListenError } from './server-errors.js';
 import type { DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
-import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext } from '../health/config-doctor.js';
+import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext, updateEnvKey } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
 import { isModelTier } from '../runtime/model-tiers.js';
 import type { RuntimeOverrides } from '../runtime-overrides.js';
@@ -116,6 +116,12 @@ export type DashboardModelApiResponse = {
   snapshot: DashboardSnapshot;
 };
 
+export type DashboardPresetApiResponse = {
+  ok: true;
+  message: string;
+  snapshot: DashboardSnapshot;
+};
+
 function createDefaultDeps(): DashboardDeps {
   return {
     inspect,
@@ -123,6 +129,7 @@ function createDefaultDeps(): DashboardDeps {
     loadDoctorContext,
     saveModelConfig,
     saveOverrides,
+    updateEnvKey,
     runCommand(cmd: string, args: string[]) {
       return new Promise((resolve) => {
         execFile(cmd, args, { timeout: 15_000 }, (err, stdout, stderr) => {
@@ -467,6 +474,47 @@ async function buildModelResponse(
   };
 }
 
+const ALLOWED_PRESETS = new Set(['claude', 'codex']);
+
+async function applyPreset(
+  preset: string,
+  inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
+  deps: DashboardDeps,
+): Promise<{ message: string; snapshot: DashboardSnapshot }> {
+  if (!ALLOWED_PRESETS.has(preset)) {
+    throw new Error(`Unknown preset: ${preset}. Allowed values: ${[...ALLOWED_PRESETS].join(', ')}`);
+  }
+
+  const ctx = await deps.loadDoctorContext(inspectOpts);
+  await deps.updateEnvKey(ctx.configPaths.env, 'PRIMARY_RUNTIME', preset);
+
+  const preservedOverrides: RuntimeOverrides = {};
+  if (ctx.runtimeOverrides.ttsVoice) {
+    preservedOverrides.ttsVoice = ctx.runtimeOverrides.ttsVoice;
+  }
+  await deps.saveOverrides(ctx.configPaths.runtimeOverrides, preservedOverrides);
+  await deps.saveModelConfig(ctx.configPaths.models, { ...MODEL_DEFAULTS });
+
+  return {
+    message: `Preset switched to ${preset}. Models reset to tier defaults. Restart the service to apply.`,
+    snapshot: await collectDashboardSnapshot(inspectOpts, deps),
+  };
+}
+
+async function buildPresetResponse(
+  input: JsonRecord,
+  inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
+  deps: DashboardDeps,
+): Promise<DashboardPresetApiResponse> {
+  const preset = typeof input.preset === 'string' ? input.preset.trim().toLowerCase() : '';
+  if (!preset) throw new Error('Preset is required.');
+
+  return {
+    ok: true,
+    ...await applyPreset(preset, inspectOpts, deps),
+  };
+}
+
 function isDashboardBadRequest(message: string): boolean {
   return (
     message === 'Request body too large'
@@ -480,6 +528,8 @@ function isDashboardBadRequest(message: string): boolean {
     || message.startsWith('No default model is configured')
     || message.includes('accepts only model tiers')
     || message.startsWith('Model value must be one of the known saved options')
+    || message.startsWith('Unknown preset:')
+    || message === 'Preset is required.'
   );
 }
 
@@ -600,6 +650,28 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           200,
           withStartupMcpSnapshot(
             await buildModelResponse(body, inspectOpts, deps, KNOWN_RUNTIMES),
+            opts.startupMcpStatus,
+            opts.startupMcpWarnings,
+          ),
+        );
+        return;
+      }
+
+      if (pathname === '/api/preset') {
+        if (method !== 'POST') {
+          respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
+          return;
+        }
+        if (!hasSafeDashboardOrigin(req, trustedHosts)) {
+          respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
+          return;
+        }
+        const body = await readJsonBody(req);
+        respondJson(
+          res,
+          200,
+          withStartupMcpSnapshot(
+            await buildPresetResponse(body, inspectOpts, deps),
             opts.startupMcpStatus,
             opts.startupMcpWarnings,
           ),
