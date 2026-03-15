@@ -1,0 +1,2476 @@
+import { EventEmitter } from 'node:events';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { EngineEvent } from './types.js';
+import {
+  CodexAppServerClient,
+  formatCodexAppServerPromptSafeProfile,
+} from './codex-app-server.js';
+
+class MockWebSocket extends EventEmitter {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSED = 3;
+
+  readyState = MockWebSocket.CONNECTING;
+  readonly sent: unknown[] = [];
+  pingCount = 0;
+  private readonly handlers = new Map<string, (message: Record<string, unknown>) => void>();
+
+  send(payload: string): void {
+    const parsed = JSON.parse(payload) as Record<string, unknown>;
+    this.sent.push(parsed);
+    const method = typeof parsed.method === 'string' ? parsed.method : '';
+    this.handlers.get(method)?.(parsed);
+  }
+
+  ping(): void {
+    this.pingCount += 1;
+  }
+
+  close(): void {
+    this.closeWith();
+  }
+
+  closeWith(code = 1000, reason = ''): void {
+    if (this.readyState === MockWebSocket.CLOSED) return;
+    this.readyState = MockWebSocket.CLOSED;
+    this.emit('close', code, Buffer.from(reason));
+  }
+
+  open(): void {
+    this.readyState = MockWebSocket.OPEN;
+    this.emit('open');
+  }
+
+  reply(id: unknown, result: unknown): void {
+    this.emit('message', Buffer.from(JSON.stringify({ id, result })));
+  }
+
+  fail(id: unknown, message: string): void {
+    this.emit('message', Buffer.from(JSON.stringify({
+      id,
+      error: { code: -32000, message },
+    })));
+  }
+
+  notify(method: string, params: unknown): void {
+    this.emit('message', Buffer.from(JSON.stringify({ method, params })));
+  }
+
+  onMethod(method: string, handler: (message: Record<string, unknown>) => void): void {
+    this.handlers.set(method, handler);
+  }
+}
+
+describe('CodexAppServerClient', () => {
+  const sockets: MockWebSocket[] = [];
+  const readOnlySandbox = {
+    sandboxPolicy: {
+      type: 'readOnly',
+      access: {
+        type: 'restricted',
+        includePlatformDefaults: true,
+        readableRoots: ['/tmp/discoclaw'],
+      },
+      networkAccess: false,
+    },
+  };
+  const dangerFullAccessSandbox = {
+    approvalPolicy: 'never',
+    sandboxPolicy: {
+      type: 'dangerFullAccess',
+    },
+  };
+
+  afterEach(() => {
+    sockets.length = 0;
+  });
+
+  function makeClient(
+    timeoutMsOrOpts: number | {
+      timeoutMs?: number;
+      streamStallTimeoutMs?: number;
+      progressStallTimeoutMs?: number;
+      verbosePreview?: boolean;
+      itemTypeDebug?: boolean;
+      traceNotifications?: boolean;
+      dangerouslyBypassApprovalsAndSandbox?: boolean;
+      log?: {
+        debug?: (...args: unknown[]) => void;
+        info?: (...args: unknown[]) => void;
+        warn?: (...args: unknown[]) => void;
+      };
+    } = 50,
+  ): CodexAppServerClient {
+    const timeoutMs = typeof timeoutMsOrOpts === 'number'
+      ? timeoutMsOrOpts
+      : (timeoutMsOrOpts.timeoutMs ?? 50);
+    return new CodexAppServerClient({
+      baseUrl: 'ws://127.0.0.1:4321',
+      timeoutMs,
+      ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.streamStallTimeoutMs !== undefined
+        ? { streamStallTimeoutMs: timeoutMsOrOpts.streamStallTimeoutMs }
+        : {}),
+      ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.progressStallTimeoutMs !== undefined
+        ? { progressStallTimeoutMs: timeoutMsOrOpts.progressStallTimeoutMs }
+        : {}),
+      ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.verbosePreview !== undefined
+        ? { verbosePreview: timeoutMsOrOpts.verbosePreview }
+        : {}),
+      ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.itemTypeDebug !== undefined
+        ? { itemTypeDebug: timeoutMsOrOpts.itemTypeDebug }
+        : {}),
+      ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.traceNotifications !== undefined
+        ? { traceNotifications: timeoutMsOrOpts.traceNotifications }
+        : {}),
+      ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.dangerouslyBypassApprovalsAndSandbox !== undefined
+        ? { dangerouslyBypassApprovalsAndSandbox: timeoutMsOrOpts.dangerouslyBypassApprovalsAndSandbox }
+        : {}),
+      ...(typeof timeoutMsOrOpts === 'object' && timeoutMsOrOpts.log !== undefined
+        ? { log: timeoutMsOrOpts.log }
+        : {}),
+      wsFactory: () => {
+        const socket = new MockWebSocket();
+        sockets.push(socket);
+        return socket as never;
+      },
+    });
+  }
+
+  function primeHandshake(socket: MockWebSocket): void {
+    socket.onMethod('initialize', (message) => {
+      socket.reply(message.id, { userAgent: 'test-agent' });
+    });
+  }
+
+  async function collect(iterable: AsyncIterable<EngineEvent>): Promise<EngineEvent[]> {
+    const events: EngineEvent[] = [];
+    for await (const event of iterable) {
+      events.push(event);
+    }
+    return events;
+  }
+
+  function expectNoClaudeStyleToolClaims(text: string): void {
+    expect(text).not.toMatch(/\b(Read|Write|Edit|Glob|Grep|Bash)\b/);
+  }
+
+  it('formats a prompt-safe read-only native profile without Claude-style tool claims', () => {
+    const client = makeClient();
+    const profile = client.getPromptSafeProfile({
+      cwd: '/tmp/discoclaw',
+      addDirs: ['/tmp/discoclaw', '/tmp/other'],
+    });
+
+    expect(profile).toEqual({
+      transport: 'codex_app_server',
+      executionMode: 'generic_command_execution',
+      filesystem: {
+        access: 'read_only',
+        readableRoots: ['/tmp/discoclaw', '/tmp/other'],
+      },
+      network: {
+        access: 'disabled',
+      },
+      fidelity: 'downgraded',
+    });
+
+    const description = formatCodexAppServerPromptSafeProfile(profile);
+    expect(description).toContain('generic command execution');
+    expect(description).toContain('read-only filesystem sandbox');
+    expect(description).toContain('/tmp/discoclaw');
+    expect(description).toContain('/tmp/other');
+    expect(description).toContain('Additional platform-default readable roots may also be available.');
+    expect(description).toContain('Network access is disabled.');
+    expect(description).not.toContain('scoped to these roots');
+    expectNoClaudeStyleToolClaims(description);
+  });
+
+  it('downshifts prompt-safe dangerFullAccess output to generic access claims', () => {
+    const client = makeClient({ dangerouslyBypassApprovalsAndSandbox: true });
+    const profile = client.getPromptSafeProfile({ cwd: '/tmp/discoclaw' });
+
+    expect(profile).toEqual({
+      transport: 'codex_app_server',
+      executionMode: 'generic_command_execution',
+      filesystem: {
+        access: 'danger_full_access',
+        readableRoots: [],
+      },
+      network: {
+        access: 'unknown',
+      },
+      fidelity: 'downgraded',
+    });
+
+    const description = formatCodexAppServerPromptSafeProfile(profile);
+    expect(description).toContain('generic command execution');
+    expect(description).toContain('unrestricted filesystem access');
+    expect(description).toContain('Network restrictions are not guaranteed');
+    expect(description).not.toContain('read-only');
+    expect(description).not.toContain('Network access is disabled');
+    expectNoClaudeStyleToolClaims(description);
+  });
+
+  it('downshifts prompt-safe profile output when readable roots are unknown', () => {
+    const client = makeClient();
+    const profile = client.getPromptSafeProfile();
+
+    expect(profile).toEqual({
+      transport: 'codex_app_server',
+      executionMode: 'generic_command_execution',
+      filesystem: {
+        access: 'unknown',
+        readableRoots: [],
+      },
+      network: {
+        access: 'unknown',
+      },
+      fidelity: 'downgraded',
+    });
+
+    const description = formatCodexAppServerPromptSafeProfile(profile);
+    expect(description).toContain('generic command execution');
+    expect(description).toContain('Filesystem and network restrictions are not guaranteed');
+    expect(description).not.toContain('read-only');
+    expect(description).not.toContain('/tmp/discoclaw');
+    expectNoClaudeStyleToolClaims(description);
+  });
+
+  it('starts a thread and stores the returned threadId', async () => {
+    const client = makeClient();
+
+    const createPromise = client.createThread('session-1', {
+      cwd: '/tmp/discoclaw',
+      model: 'gpt-5.4',
+      systemPrompt: 'system',
+    });
+
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('thread/start', (message) => {
+      socket.reply(message.id, { threadId: 'thread-1' });
+    });
+    socket.open();
+
+    await expect(createPromise).resolves.toBe('thread-1');
+    expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+    expect(socket.sent[2]).toEqual({
+      id: 2,
+      method: 'thread/start',
+      params: {
+        cwd: '/tmp/discoclaw',
+        model: 'gpt-5.4',
+        developerInstructions: 'system',
+        ...readOnlySandbox,
+      },
+    });
+  });
+
+  it('times out when thread/start does not return', async () => {
+    const client = makeClient(10);
+
+    const createPromise = client.createThread('session-1', { cwd: '/tmp/discoclaw', model: 'gpt-5.4' });
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.open();
+
+    await expect(createPromise).rejects.toThrow('codex app-server request timed out (thread/start)');
+  });
+
+  it('falls back to thread/create when thread/start is unavailable', async () => {
+    const client = makeClient();
+
+    const createPromise = client.createThread('session-1', { cwd: '/tmp/discoclaw', model: 'gpt-5.4' });
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('thread/start', (message) => {
+      socket.emit('message', Buffer.from(JSON.stringify({
+        id: message.id,
+        error: { code: -32601, message: 'Unknown method thread/start. Did you mean thread/create?' },
+      })));
+    });
+    socket.onMethod('thread/create', (message) => {
+      socket.reply(message.id, { threadId: 'thread-legacy-1' });
+    });
+    socket.open();
+
+    await expect(createPromise).resolves.toBe('thread-legacy-1');
+    expect(socket.sent[2]).toEqual({
+      id: 2,
+      method: 'thread/start',
+      params: {
+        cwd: '/tmp/discoclaw',
+        model: 'gpt-5.4',
+        ...readOnlySandbox,
+      },
+    });
+    expect(socket.sent[3]).toEqual({
+      id: 3,
+      method: 'thread/create',
+      params: {
+        cwd: '/tmp/discoclaw',
+        model: 'gpt-5.4',
+        ...readOnlySandbox,
+      },
+    });
+  });
+
+  it('rejects createThread when the server returns a JSON-RPC error', async () => {
+    const client = makeClient();
+
+    const createPromise = client.createThread('session-1', { cwd: '/tmp/discoclaw', model: 'gpt-5.4' });
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('thread/start', (message) => {
+      socket.fail(message.id, 'cannot create thread');
+    });
+    socket.open();
+
+    await expect(createPromise).rejects.toThrow('cannot create thread');
+  });
+
+  it('uses dangerFullAccess sandbox params when dangerous bypass is enabled', async () => {
+    const client = makeClient({ dangerouslyBypassApprovalsAndSandbox: true });
+
+    const createPromise = client.createThread('session-1', { cwd: '/tmp/discoclaw', model: 'gpt-5.4' });
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('thread/start', (message) => {
+      socket.reply(message.id, { threadId: 'thread-danger-1' });
+    });
+    socket.open();
+
+    await expect(createPromise).resolves.toBe('thread-danger-1');
+    expect(socket.sent[2]).toEqual({
+      id: 2,
+      method: 'thread/start',
+      params: {
+        cwd: '/tmp/discoclaw',
+        model: 'gpt-5.4',
+        ...dangerFullAccessSandbox,
+      },
+    });
+  });
+
+  it('starts a turn, tracks the returned turnId, and returns a stream handle', async () => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello world', {
+      cwd: '/tmp/discoclaw',
+      model: 'gpt-5.4',
+      reasoningEffort: 'high',
+    });
+
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.open();
+
+    const handle = await startPromise;
+    expect(handle.threadId).toBe('thread-1');
+    expect(handle.turnId).toBe('turn-1');
+    expect(handle.stream).toBeDefined();
+    expect(client.getSessionState('session-1')).toEqual({
+      threadId: 'thread-1',
+      activeTurnId: 'turn-1',
+    });
+    expect(socket.sent[2]).toEqual({
+      id: 2,
+      method: 'turn/start',
+      params: {
+        threadId: 'thread-1',
+        input: [{
+          type: 'text',
+          text: 'hello world',
+          text_elements: [],
+        }],
+        cwd: '/tmp/discoclaw',
+        model: 'gpt-5.4',
+        effort: 'high',
+        ...readOnlySandbox,
+      },
+    });
+  });
+
+  it('starts a turn without a response turnId and learns it from later notifications', async () => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello world');
+
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turn: { items: [], status: 'inProgress', error: null } });
+    });
+    socket.open();
+
+    const handle = await startPromise;
+    expect(handle.threadId).toBe('thread-1');
+    expect(handle.turnId).toBeUndefined();
+    expect(client.getSessionState('session-1')).toEqual({
+      threadId: 'thread-1',
+    });
+
+    const eventsPromise = collect(handle.stream);
+    socket.notify('turn/started', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+    });
+    socket.notify('turn/text_delta', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      delta: 'hello later',
+    });
+    socket.notify('turn/completed', {
+      threadId: 'thread-1',
+      turn: { id: 'turn-1', items: [], status: 'completed', error: null },
+    });
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'hello later' },
+      { type: 'text_final', text: 'hello later' },
+      { type: 'done' },
+    ]);
+    expect(client.getSessionState('session-1')).toEqual({
+      threadId: 'thread-1',
+    });
+  });
+
+  it('marks one-shot threads as ephemeral during invokeViaTurn', async () => {
+    const client = makeClient();
+
+    const eventsPromise = collect(client.invokeViaTurn({
+      prompt: 'ephemeral run',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+    }));
+
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('thread/start', (message) => {
+      expect(message.params).toEqual({
+        cwd: '/tmp/discoclaw',
+        model: 'gpt-5.4',
+        ephemeral: true,
+        ...readOnlySandbox,
+      });
+      socket.reply(message.id, { threadId: 'thread-ephemeral-1' });
+    });
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turn: { id: 'turn-1', items: [], status: 'inProgress', error: null } });
+      socket.notify('item/completed', {
+        threadId: 'thread-ephemeral-1',
+        turnId: 'turn-1',
+        item: { type: 'agentMessage', id: 'msg-1', text: 'done', phase: null },
+      });
+      socket.notify('turn/completed', {
+        threadId: 'thread-ephemeral-1',
+        turn: { id: 'turn-1', items: [], status: 'completed', error: null },
+      });
+    });
+    socket.open();
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'done' },
+      { type: 'text_final', text: 'done' },
+      { type: 'done' },
+    ]);
+  });
+
+  it('rejects startTurn when the server returns a JSON-RPC error', async () => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello world');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.fail(message.id, 'turn rejected');
+    });
+    socket.open();
+
+    await expect(startPromise).rejects.toThrow('turn rejected');
+  });
+
+  it('consumeStream yields text deltas, tool events, completion, and clears active turn state', async () => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.open();
+    await startPromise;
+
+    const eventsPromise = collect(client.consumeStream('session-1'));
+    socket.notify('item/agentMessage/delta', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'msg-1',
+      delta: 'hello',
+    });
+    socket.notify('item/started', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: {
+        type: 'dynamicToolCall',
+        id: 'tool-1',
+        tool: 'readFile',
+        arguments: { path: 'README.md' },
+        status: 'inProgress',
+        contentItems: null,
+        success: null,
+        durationMs: null,
+      },
+    });
+    socket.notify('item/completed', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: {
+        type: 'dynamicToolCall',
+        id: 'tool-1',
+        tool: 'readFile',
+        arguments: { path: 'README.md' },
+        status: 'completed',
+        contentItems: 'ok',
+        success: true,
+        durationMs: 5,
+      },
+    });
+    socket.notify('item/completed', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: { type: 'agentMessage', id: 'msg-1', text: 'hello world', phase: null },
+    });
+    socket.notify('thread/tokenUsage/updated', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      tokenUsage: {
+        total: {
+          totalTokens: 15,
+          inputTokens: 10,
+          cachedInputTokens: 0,
+          outputTokens: 5,
+          reasoningOutputTokens: 0,
+        },
+        last: {
+          totalTokens: 15,
+          inputTokens: 10,
+          cachedInputTokens: 0,
+          outputTokens: 5,
+          reasoningOutputTokens: 0,
+        },
+        modelContextWindow: null,
+      },
+    });
+    socket.notify('turn/completed', {
+      threadId: 'thread-1',
+      turn: { id: 'turn-1', items: [], status: 'completed', error: null },
+    });
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'hello' },
+      { type: 'tool_start', name: 'readFile', input: { path: 'README.md' } },
+      { type: 'tool_end', name: 'readFile', ok: true, output: { contentItems: 'ok' } },
+      { type: 'text_delta', text: ' world' },
+      { type: 'text_final', text: 'hello world' },
+      { type: 'usage', inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      { type: 'done' },
+    ]);
+    expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+  });
+
+  it('consumeStream yields failure and done when the turn fails', async () => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.open();
+    await startPromise;
+
+    const eventsPromise = collect(client.consumeStream('session-1'));
+    socket.notify('turn/completed', {
+      threadId: 'thread-1',
+      turn: { id: 'turn-1', items: [], status: 'failed', error: { message: 'tool crashed' } },
+    });
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'error', message: 'tool crashed' },
+      { type: 'done' },
+    ]);
+    expect(client.getSessionState('session-1')).toBeUndefined();
+  });
+
+  it('consumeStream accumulates turn/text_delta into the synthesized final text', async () => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.open();
+    await startPromise;
+
+    const eventsPromise = collect(client.consumeStream('session-1'));
+    socket.notify('turn/text_delta', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      delta: 'hello',
+    });
+    socket.notify('turn/text_delta', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      delta: ' world',
+    });
+    socket.notify('turn/completed', {
+      threadId: 'thread-1',
+      turn: { id: 'turn-1', items: [], status: 'completed', error: null },
+    });
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'hello' },
+      { type: 'text_delta', text: ' world' },
+      { type: 'text_final', text: 'hello world' },
+      { type: 'done' },
+    ]);
+  });
+
+  it('consumeStream emits final text from terminal turn items when no prior text was streamed', async () => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.open();
+    await startPromise;
+
+    const eventsPromise = collect(client.consumeStream('session-1'));
+    socket.notify('turn/completed', {
+      threadId: 'thread-1',
+      turn: {
+        id: 'turn-1',
+        status: 'completed',
+        error: null,
+        items: [
+          {
+            type: 'reasoning',
+            id: 'reason-1',
+            summary: 'Looked around first',
+          },
+          {
+            type: 'agentMessage',
+            id: 'msg-1',
+            text: '# Plan:\nterminal-only answer',
+            phase: null,
+          },
+        ],
+      },
+    });
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_final', text: '# Plan:\nterminal-only answer' },
+      { type: 'done' },
+    ]);
+  });
+
+  it('surfaces native preview/debug lifecycle events for reasoning and commands', async () => {
+    const client = makeClient({
+      verbosePreview: true,
+      itemTypeDebug: true,
+    });
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turn: { id: 'turn-1', items: [], status: 'inProgress', error: null } });
+    });
+    socket.open();
+    await startPromise;
+
+    const eventsPromise = collect(client.consumeStream('session-1'));
+    socket.notify('turn/started', {
+      threadId: 'thread-1',
+      turn: { id: 'turn-1', status: 'inProgress' },
+    });
+    socket.notify('item/started', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: {
+        id: 'reason-1',
+        type: 'reasoning',
+        status: 'inProgress',
+      },
+    });
+    socket.notify('item/completed', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: {
+        id: 'reason-1',
+        type: 'reasoning',
+        summary: 'Planning the patch carefully.',
+      },
+    });
+    socket.notify('item/started', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: {
+        id: 'cmd-1',
+        type: 'commandExecution',
+        command: 'rg native',
+        cwd: '/tmp/discoclaw',
+        status: 'inProgress',
+      },
+    });
+    socket.notify('item/completed', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: {
+        id: 'cmd-1',
+        type: 'commandExecution',
+        command: 'rg native',
+        aggregatedOutput: 'src/runtime/codex-app-server.ts',
+        exitCode: 0,
+        status: 'completed',
+      },
+    });
+    socket.notify('item/agentMessage/delta', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'msg-1',
+      delta: 'done',
+    });
+    socket.notify('turn/completed', {
+      threadId: 'thread-1',
+      turn: { id: 'turn-1', items: [], status: 'completed', error: null },
+    });
+
+    const events = await eventsPromise;
+
+    expect(events).toContainEqual({ type: 'log_line', stream: 'stdout', line: 'Native Codex turn started.' });
+    expect(events).toContainEqual({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'started',
+      itemType: 'reasoning',
+      itemId: 'reason-1',
+      status: 'inProgress',
+      label: 'Hypothesis: reasoning in progress.',
+    });
+    expect(events).toContainEqual({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'completed',
+      itemType: 'reasoning',
+      itemId: 'reason-1',
+      label: 'Reasoning: Planning the patch carefully.',
+    });
+    expect(events).toContainEqual({ type: 'log_line', stream: 'stdout', line: 'Reasoning completed: Planning the patch carefully.' });
+    expect(events).toContainEqual({ type: 'thinking_delta', text: 'Planning the patch carefully.' });
+    expect(events).toContainEqual({
+      type: 'tool_start',
+      name: 'command_execution',
+      input: { command: 'rg native', cwd: '/tmp/discoclaw' },
+    });
+    expect(events).toContainEqual({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'started',
+      itemType: 'command_execution',
+      itemId: 'cmd-1',
+      status: 'inProgress',
+    });
+    expect(events).toContainEqual({ type: 'log_line', stream: 'stdout', line: 'Command started: rg native' });
+    expect(events).toContainEqual({
+      type: 'tool_end',
+      name: 'command_execution',
+      ok: true,
+      output: {
+        command: 'rg native',
+        exitCode: 0,
+        output: 'src/runtime/codex-app-server.ts',
+      },
+    });
+    expect(events).toContainEqual({
+      type: 'preview_debug',
+      source: 'codex',
+      phase: 'completed',
+      itemType: 'command_execution',
+      itemId: 'cmd-1',
+      status: 'completed',
+    });
+    expect(events).toContainEqual({
+      type: 'log_line',
+      stream: 'stdout',
+      line: 'Command output: src/runtime/codex-app-server.ts',
+    });
+    expect(events).toContainEqual({ type: 'text_delta', text: 'done' });
+    expect(events).toContainEqual({ type: 'text_final', text: 'done' });
+    expect(events.at(-1)).toEqual({ type: 'done' });
+  });
+
+  it('consumeStream treats turn/failed as terminal and preserves nested error + usage details', async () => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.open();
+    await startPromise;
+
+    const eventsPromise = collect(client.consumeStream('session-1'));
+    socket.notify('thread/tokenUsage/updated', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      tokenUsage: {
+        last: {
+          totalTokens: 12,
+          inputTokens: 7,
+          outputTokens: 5,
+        },
+      },
+    });
+    socket.notify('turn/failed', {
+      threadId: 'thread-1',
+      turn: {
+        id: 'turn-1',
+        status: 'failed',
+        error: { message: 'tool crashed hard' },
+      },
+    });
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'error', message: 'tool crashed hard' },
+      { type: 'usage', inputTokens: 7, outputTokens: 5, totalTokens: 12 },
+      { type: 'done' },
+    ]);
+    expect(client.getSessionState('session-1')).toBeUndefined();
+  });
+
+  it.each([
+    [
+      'turn/interrupted',
+      {
+        threadId: 'thread-1',
+        turn: {
+          id: 'turn-1',
+          status: 'interrupted',
+          error: { message: 'provider interrupted the turn' },
+        },
+      },
+      'provider interrupted the turn',
+    ],
+    [
+      'turn/cancelled',
+      {
+        threadId: 'thread-1',
+        turn: {
+          id: 'turn-1',
+          status: 'cancelled',
+        },
+      },
+      'codex app-server turn cancelled',
+    ],
+  ] as const)('consumeStream treats %s as terminal instead of hanging', async (method, payload, expectedMessage) => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.open();
+    await startPromise;
+
+    const eventsPromise = collect(client.consumeStream('session-1'));
+    socket.notify('thread/tokenUsage/updated', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      tokenUsage: {
+        last: {
+          totalTokens: 12,
+          inputTokens: 7,
+          outputTokens: 5,
+        },
+      },
+    });
+    socket.notify(method, payload);
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'error', message: expectedMessage },
+      { type: 'usage', inputTokens: 7, outputTokens: 5, totalTokens: 12 },
+      { type: 'done' },
+    ]);
+    expect(client.getSessionState('session-1')).toBeUndefined();
+  });
+
+  it('consumeStream emits an error and done when the websocket disconnects mid-stream', async () => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.open();
+    await startPromise;
+
+    const eventsPromise = collect(client.consumeStream('session-1'));
+    socket.notify('item/agentMessage/delta', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'msg-1',
+      delta: 'partial',
+    });
+    socket.close();
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'partial' },
+      expect.objectContaining({
+        type: 'error',
+        message: 'codex app-server websocket closed',
+        failure: expect.objectContaining({
+          code: 'CODEX_APP_SERVER_DISCONNECTED',
+          retryable: false,
+        }),
+      }),
+      { type: 'done' },
+    ]);
+    expect(client.getSessionState('session-1')).toBeUndefined();
+  });
+
+  it('logs websocket close details when the native socket disconnects mid-stream', async () => {
+    const log = { info: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+    const client = makeClient({ log });
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.open();
+    await startPromise;
+
+    const eventsPromise = collect(client.consumeStream('session-1'));
+    socket.notify('item/agentMessage/delta', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'msg-1',
+      delta: 'partial',
+    });
+    socket.closeWith(1011, 'upstream dropped');
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'partial' },
+      expect.objectContaining({
+        type: 'error',
+        message: 'codex app-server websocket closed',
+      }),
+      { type: 'done' },
+    ]);
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        closeCode: 1011,
+        closeReason: 'upstream dropped',
+      }),
+      'codex-app-server: websocket closed',
+    );
+  });
+
+  it('invokeViaTurn drives createThread, startTurn, and stream consumption end to end', async () => {
+    const client = makeClient();
+
+    const eventsPromise = collect(client.invokeViaTurn({
+      prompt: 'answer this',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('thread/start', (message) => {
+      socket.reply(message.id, { threadId: 'thread-1' });
+    });
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turn: { id: 'turn-1', items: [], status: 'inProgress', error: null } });
+      socket.notify('item/agentMessage/delta', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'msg-1',
+        delta: 'first chunk',
+      });
+      socket.notify('item/started', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'dynamicToolCall',
+          id: 'tool-1',
+          tool: 'search',
+          arguments: { query: 'discoclaw' },
+          status: 'inProgress',
+          contentItems: null,
+          success: null,
+          durationMs: null,
+        },
+      });
+      socket.notify('item/completed', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'dynamicToolCall',
+          id: 'tool-1',
+          tool: 'search',
+          arguments: { query: 'discoclaw' },
+          status: 'completed',
+          contentItems: { hits: 1 },
+          success: true,
+          durationMs: 5,
+        },
+      });
+      socket.notify('item/completed', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: { type: 'agentMessage', id: 'msg-1', text: 'final answer', phase: null },
+      });
+      socket.notify('turn/completed', {
+        threadId: 'thread-1',
+        turn: { id: 'turn-1', items: [], status: 'completed', error: null },
+      });
+    });
+    socket.open();
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'first chunk' },
+      { type: 'tool_start', name: 'search', input: { query: 'discoclaw' } },
+      { type: 'tool_end', name: 'search', ok: true, output: { contentItems: { hits: 1 } } },
+      { type: 'text_delta', text: 'final answer' },
+      { type: 'text_final', text: 'final answer' },
+      { type: 'done' },
+    ]);
+    expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+  });
+
+  it('invokeViaTurn fails cleanly when a native turn produces no progress after start', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient({ timeoutMs: 50 });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+
+      await vi.advanceTimersByTimeAsync(45_001);
+
+      await expect(eventsPromise).resolves.toEqual([
+        expect.objectContaining({
+          type: 'error',
+          message: 'progress stall: no runtime progress for 45000ms (native turn produced no text output)',
+          failure: expect.objectContaining({
+            code: 'PROGRESS_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+      expect(client.getSessionState('session-1')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invokeViaTurn extends the initial no-text timeout after early tool activity', async () => {
+    vi.useFakeTimers();
+    try {
+      const log = { info: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+      const client = makeClient({ timeoutMs: 50, progressStallTimeoutMs: 60_000, log });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+      let settled = false;
+      void eventsPromise.finally(() => {
+        settled = true;
+      });
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+        socket.notify('item/started', {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          item: {
+            type: 'dynamicToolCall',
+            id: 'tool-1',
+            tool: 'search',
+            arguments: { query: 'discoclaw' },
+            status: 'inProgress',
+            contentItems: null,
+            success: null,
+            durationMs: null,
+          },
+        });
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+
+      await vi.advanceTimersByTimeAsync(45_001);
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      await expect(eventsPromise).resolves.toEqual([
+        { type: 'tool_start', name: 'search', input: { query: 'discoclaw' } },
+        expect.objectContaining({
+          type: 'error',
+          message: 'progress stall: no runtime progress for 60000ms (native turn produced no text output)',
+          failure: expect.objectContaining({
+            code: 'PROGRESS_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+      expect(log.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          notificationMethod: 'item/started',
+          eventTypes: ['tool_start'],
+        }),
+        'codex-app-server: initial turn activity observed before text output',
+      );
+      expect(client.getSessionState('session-1')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('sends websocket keepalive pings while connected', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient();
+
+      const createPromise = client.createThread('session-1', {
+        cwd: '/tmp/discoclaw',
+        model: 'gpt-5.4',
+      });
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.open();
+
+      await expect(createPromise).resolves.toBe('thread-1');
+      expect(socket.pingCount).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(socket.pingCount).toBe(1);
+
+      socket.closeWith(1000, 'normal shutdown');
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(socket.pingCount).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('logs native lifecycle milestones through first progress and completion', async () => {
+    const log = { info: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+    const client = makeClient({ timeoutMs: 50, log });
+
+    const eventsPromise = collect(client.invokeViaTurn({
+      prompt: 'answer this',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('thread/start', (message) => {
+      socket.reply(message.id, { threadId: 'thread-1' });
+    });
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+      socket.notify('turn/started', {
+        threadId: 'thread-1',
+        turn: { id: 'turn-1', status: 'inProgress' },
+      });
+      socket.notify('turn/text_delta', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        text: 'first chunk',
+      });
+      socket.notify('turn/completed', {
+        threadId: 'thread-1',
+        turn: { id: 'turn-1', status: 'completed', error: null },
+      });
+    });
+    socket.open();
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'first chunk' },
+      { type: 'text_final', text: 'first chunk' },
+      { type: 'done' },
+    ]);
+
+    expect(log.info.mock.calls).toEqual(expect.arrayContaining([
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          cwd: '/tmp/discoclaw',
+          model: 'gpt-5.4',
+          ephemeral: false,
+        }),
+        'codex-app-server: thread/start requested',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          requestMethod: 'thread/start',
+        }),
+        'codex-app-server: thread ready',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          model: 'gpt-5.4',
+          promptChars: 'answer this'.length,
+        }),
+        'codex-app-server: turn/start requested',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          turnIdKnown: true,
+        }),
+        'codex-app-server: turn ready',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+        }),
+        'codex-app-server: turn started',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          notificationMethod: 'turn/started',
+        }),
+        'codex-app-server: first turn notification received',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          notificationMethod: 'turn/text_delta',
+          eventTypes: ['text_delta'],
+        }),
+        'codex-app-server: first turn progress observed',
+      ],
+      [
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          status: 'completed',
+        }),
+        'codex-app-server: turn completed',
+      ],
+    ]));
+    expect(log.warn).not.toHaveBeenCalled();
+  });
+
+  it('logs notification trace details when per-notification tracing is enabled', async () => {
+    const log = { info: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+    const client = makeClient({ timeoutMs: 50, traceNotifications: true, log });
+
+    const eventsPromise = collect(client.invokeViaTurn({
+      prompt: 'answer this',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('thread/start', (message) => {
+      socket.reply(message.id, { threadId: 'thread-1' });
+    });
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+      socket.notify('turn/text_delta', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        text: 'first chunk',
+      });
+      socket.notify('item/completed', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          id: 'reason-1',
+          type: 'reasoning',
+          summary: 'Thinking through the task.',
+        },
+      });
+      socket.notify('turn/completed', {
+        threadId: 'thread-1',
+        turn: { id: 'turn-1', status: 'completed', error: null },
+      });
+    });
+    socket.open();
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'first chunk' },
+      { type: 'thinking_delta', text: 'Thinking through the task.' },
+      { type: 'text_final', text: 'first chunk' },
+      { type: 'done' },
+    ]);
+
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: 'session-1',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        notificationMethod: 'turn/text_delta',
+        eventTypes: ['text_delta'],
+        eventSummaries: [{
+          type: 'text_delta',
+          textPreview: 'first chunk',
+          textLength: 'first chunk'.length,
+          hasNonWhitespace: true,
+        }],
+        progressEventTypes: ['text_delta'],
+        progressObservedBefore: false,
+        progressObservedAfter: true,
+        streamTimerReset: true,
+        progressTimerReset: true,
+      }),
+      'codex-app-server: notification trace',
+    );
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: 'session-1',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        notificationMethod: 'item/completed',
+        eventTypes: ['thinking_delta'],
+        eventSummaries: [{
+          type: 'thinking_delta',
+          textPreview: 'Thinking through the task.',
+          textLength: 'Thinking through the task.'.length,
+          hasNonWhitespace: true,
+        }],
+        progressEventTypes: [],
+        progressObservedBefore: true,
+        progressObservedAfter: true,
+        streamTimerReset: true,
+        progressTimerReset: false,
+      }),
+      'codex-app-server: notification trace',
+    );
+  });
+
+  it('invokeViaTurn fails cleanly when a native turn goes idle after initial progress', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient({ timeoutMs: 50, streamStallTimeoutMs: 5_000 });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+        socket.notify('turn/text_delta', {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          text: 'first chunk',
+        });
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+
+      await vi.advanceTimersByTimeAsync(5_001);
+
+      await expect(eventsPromise).resolves.toEqual([
+        { type: 'text_delta', text: 'first chunk' },
+        expect.objectContaining({
+          type: 'error',
+          message: 'stream stall: no output for 5000ms — increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS to allow longer gaps (current: 5000ms)',
+          failure: expect.objectContaining({
+            code: 'STREAM_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+      expect(client.getSessionState('session-1')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invokeViaTurn fires progress stall when only thinking deltas continue after initial text', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient({ timeoutMs: 50, streamStallTimeoutMs: 5_000, progressStallTimeoutMs: 250 });
+      let resolveTurnStarted!: () => void;
+      const turnStarted = new Promise<void>((resolve) => {
+        resolveTurnStarted = resolve;
+      });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+        socket.notify('turn/text_delta', {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          text: 'first chunk',
+        });
+        resolveTurnStarted();
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+      await turnStarted;
+
+      socket.notify('item/completed', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          id: 'reasoning-1',
+          type: 'reasoning',
+          summary: 'Thinking through the task.',
+        },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      socket.notify('item/completed', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          id: 'reasoning-2',
+          type: 'reasoning',
+          summary: 'Still reasoning about the patch.',
+        },
+      });
+      await vi.advanceTimersByTimeAsync(151);
+
+      await expect(eventsPromise).resolves.toEqual([
+        { type: 'text_delta', text: 'first chunk' },
+        { type: 'thinking_delta', text: 'Thinking through the task.' },
+        { type: 'thinking_delta', text: 'Still reasoning about the patch.' },
+        expect.objectContaining({
+          type: 'error',
+          message: 'progress stall: no runtime progress for 250ms',
+          failure: expect.objectContaining({
+            code: 'PROGRESS_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+      expect(client.getSessionState('session-1')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invokeViaTurn fires progress stall when only tool churn continues after initial text', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient({ timeoutMs: 50, streamStallTimeoutMs: 5_000, progressStallTimeoutMs: 250 });
+      let resolveTurnStarted!: () => void;
+      const turnStarted = new Promise<void>((resolve) => {
+        resolveTurnStarted = resolve;
+      });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+        socket.notify('turn/text_delta', {
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          text: 'first chunk',
+        });
+        resolveTurnStarted();
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+      await turnStarted;
+
+      socket.notify('item/started', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'commandExecution',
+          id: 'cmd-1',
+          command: 'rg -n FORGE_AUDITOR_RUNTIME .',
+          status: 'inProgress',
+        },
+      });
+      socket.notify('item/completed', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'commandExecution',
+          id: 'cmd-1',
+          command: 'rg -n FORGE_AUDITOR_RUNTIME .',
+          status: 'completed',
+          exitCode: 0,
+          aggregatedOutput: 'src/index.ts:1164:const { drafterRuntime, auditorRuntime } = resolveForgeRuntimes({',
+        },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      socket.notify('item/started', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'commandExecution',
+          id: 'cmd-2',
+          command: 'sed -n 1140,1185p src/index.ts',
+          status: 'inProgress',
+        },
+      });
+      socket.notify('item/completed', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        item: {
+          type: 'commandExecution',
+          id: 'cmd-2',
+          command: 'sed -n 1140,1185p src/index.ts',
+          status: 'completed',
+          exitCode: 0,
+          aggregatedOutput: 'const { drafterRuntime, auditorRuntime } = resolveForgeRuntimes({',
+        },
+      });
+      await vi.advanceTimersByTimeAsync(151);
+
+      await expect(eventsPromise).resolves.toEqual([
+        { type: 'text_delta', text: 'first chunk' },
+        { type: 'tool_start', name: 'command_execution', input: { command: 'rg -n FORGE_AUDITOR_RUNTIME .' } },
+        {
+          type: 'tool_end',
+          name: 'command_execution',
+          ok: true,
+          output: {
+            command: 'rg -n FORGE_AUDITOR_RUNTIME .',
+            exitCode: 0,
+            output: 'src/index.ts:1164:const { drafterRuntime, auditorRuntime } = resolveForgeRuntimes({',
+          },
+        },
+        { type: 'tool_start', name: 'command_execution', input: { command: 'sed -n 1140,1185p src/index.ts' } },
+        {
+          type: 'tool_end',
+          name: 'command_execution',
+          ok: true,
+          output: {
+            command: 'sed -n 1140,1185p src/index.ts',
+            exitCode: 0,
+            output: 'const { drafterRuntime, auditorRuntime } = resolveForgeRuntimes({',
+          },
+        },
+        expect.objectContaining({
+          type: 'error',
+          message: 'progress stall: no runtime progress for 250ms',
+          failure: expect.objectContaining({
+            code: 'PROGRESS_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+      expect(client.getSessionState('session-1')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('logs native turn failures that never reach a terminal notification', async () => {
+    vi.useFakeTimers();
+    try {
+      const log = { info: vi.fn(), warn: vi.fn(), debug: vi.fn() };
+      const client = makeClient({ timeoutMs: 50, log });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+
+      await vi.advanceTimersByTimeAsync(45_001);
+
+      await expect(eventsPromise).resolves.toEqual([
+        expect.objectContaining({
+          type: 'error',
+          message: 'progress stall: no runtime progress for 45000ms (native turn produced no text output)',
+        }),
+        { type: 'done' },
+      ]);
+
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sessionKey: 'session-1',
+          threadId: 'thread-1',
+          turnId: 'turn-1',
+          errorCode: 'codex_app_server_progress_stall',
+          error: 'progress stall: no runtime progress for 45000ms (native turn produced no text output)',
+          progressObserved: false,
+          firstNotificationLogged: false,
+        }),
+        'codex-app-server: turn failed before terminal notification',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invokeViaTurn fails cleanly when the native turn exceeds timeoutMs without finishing', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient();
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+        timeoutMs: 5_000,
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+
+      await vi.advanceTimersByTimeAsync(5_001);
+
+      await expect(eventsPromise).resolves.toEqual([
+        expect.objectContaining({
+          type: 'error',
+          message: 'codex timed out after 5000ms',
+          failure: expect.objectContaining({
+            code: 'RUNTIME_TIMEOUT',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+      expect(client.getSessionState('session-1')).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invokeViaTurn prefers per-invocation stream stall timeout overrides', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient({ timeoutMs: 50, streamStallTimeoutMs: 5_000, progressStallTimeoutMs: 30_000 });
+      const anyClient = client as any;
+      let resolveTurnStarted!: () => void;
+      const turnStarted = new Promise<void>((resolve) => {
+        resolveTurnStarted = resolve;
+      });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+        streamStallTimeoutMs: 250,
+        progressStallTimeoutMs: 5_000,
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+        resolveTurnStarted();
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+      await turnStarted;
+      await Promise.resolve();
+      const streamState = anyClient.turnStreams.get('session-1');
+      expect(streamState).toBeDefined();
+      expect(streamState.streamStallTimeoutMs).toBe(250);
+      expect(streamState.progressStallTimeoutMs).toBe(5_000);
+      anyClient.enqueueTurnStreamEvent(streamState, { type: 'text_delta', text: 'hello' });
+      anyClient.noteTurnStreamProgress('session-1', streamState, 'item/agentMessage/delta', [{ type: 'text_delta', text: 'hello' }]);
+
+      await vi.advanceTimersByTimeAsync(251);
+
+      await expect(eventsPromise).resolves.toEqual([
+        { type: 'text_delta', text: 'hello' },
+        expect.objectContaining({
+          type: 'error',
+          message: 'stream stall: no output for 250ms — increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS to allow longer gaps (current: 250ms)',
+          failure: expect.objectContaining({
+            code: 'STREAM_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invokeViaTurn prefers per-invocation progress stall timeout overrides', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient({ timeoutMs: 50, streamStallTimeoutMs: 5_000, progressStallTimeoutMs: 5_000 });
+      const anyClient = client as any;
+      let resolveTurnStarted!: () => void;
+      const turnStarted = new Promise<void>((resolve) => {
+        resolveTurnStarted = resolve;
+      });
+
+      const eventsPromise = collect(client.invokeViaTurn({
+        prompt: 'answer this',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+        streamStallTimeoutMs: 5_000,
+        progressStallTimeoutMs: 250,
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      socket.onMethod('thread/start', (message) => {
+        socket.reply(message.id, { threadId: 'thread-1' });
+      });
+      socket.onMethod('turn/start', (message) => {
+        socket.reply(message.id, { turnId: 'turn-1' });
+        resolveTurnStarted();
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+      await turnStarted;
+      await Promise.resolve();
+      const streamState = anyClient.turnStreams.get('session-1');
+      expect(streamState).toBeDefined();
+      expect(streamState.streamStallTimeoutMs).toBe(5_000);
+      expect(streamState.progressStallTimeoutMs).toBe(250);
+      anyClient.enqueueTurnStreamEvent(streamState, { type: 'text_delta', text: 'hello' });
+      anyClient.noteTurnStreamProgress('session-1', streamState, 'item/agentMessage/delta', [{ type: 'text_delta', text: 'hello' }]);
+
+      await vi.advanceTimersByTimeAsync(251);
+
+      await expect(eventsPromise).resolves.toEqual([
+        { type: 'text_delta', text: 'hello' },
+        expect.objectContaining({
+          type: 'error',
+          message: 'progress stall: no runtime progress for 250ms',
+          failure: expect.objectContaining({
+            code: 'PROGRESS_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invokeViaTurn rejects so the caller can fall back when the websocket connection fails', async () => {
+    const client = makeClient();
+
+    const eventsPromise = collect(client.invokeViaTurn({
+      prompt: 'answer this',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    const socket = sockets[0]!;
+    socket.emit('error', new Error('ECONNREFUSED'));
+
+    await expect(eventsPromise).rejects.toThrow('codex app-server websocket failed');
+  });
+
+  it('invokeViaTurn rejects so the caller can fall back when websocket construction fails', async () => {
+    const client = new CodexAppServerClient({
+      baseUrl: 'not a websocket url',
+      timeoutMs: 50,
+      wsFactory: () => {
+        throw new Error('bad url');
+      },
+    });
+
+    const eventsPromise = collect(client.invokeViaTurn({
+      prompt: 'answer this',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    await expect(eventsPromise).rejects.toThrow('codex app-server websocket failed');
+  });
+
+  it('invokeViaTurn rejects so the caller can fall back when initialize fails', async () => {
+    const client = makeClient();
+
+    const eventsPromise = collect(client.invokeViaTurn({
+      prompt: 'answer this',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    const socket = sockets[0]!;
+    socket.onMethod('initialize', (message) => {
+      socket.fail(message.id, 'initialize broke');
+    });
+    socket.open();
+
+    await expect(eventsPromise).rejects.toThrow('codex app-server initialize failed');
+  });
+
+  it('invokeViaTurn reuses an existing threadId and skips createThread on the second call', async () => {
+    const client = makeClient();
+
+    const firstEvents = collect(client.invokeViaTurn({
+      prompt: 'first',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    let turnIndex = 0;
+    socket.onMethod('thread/start', (message) => {
+      socket.reply(message.id, { threadId: 'thread-1' });
+    });
+    socket.onMethod('turn/start', (message) => {
+      turnIndex += 1;
+      const turnId = `turn-${turnIndex}`;
+      socket.reply(message.id, { turn: { id: turnId, items: [], status: 'inProgress', error: null } });
+      socket.notify('item/completed', {
+        threadId: 'thread-1',
+        turnId,
+        item: {
+          type: 'agentMessage',
+          id: `msg-${turnIndex}`,
+          text: turnIndex === 1 ? 'first done' : 'second done',
+          phase: null,
+        },
+      });
+      socket.notify('turn/completed', {
+        threadId: 'thread-1',
+        turn: { id: turnId, items: [], status: 'completed', error: null },
+      });
+    });
+    socket.open();
+
+    await expect(firstEvents).resolves.toEqual([
+      { type: 'text_delta', text: 'first done' },
+      { type: 'text_final', text: 'first done' },
+      { type: 'done' },
+    ]);
+
+    const secondEvents = collect(client.invokeViaTurn({
+      prompt: 'second',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    await expect(secondEvents).resolves.toEqual([
+      { type: 'text_delta', text: 'second done' },
+      { type: 'text_final', text: 'second done' },
+      { type: 'done' },
+    ]);
+
+    const createCalls = socket.sent.filter((entry) => {
+      return typeof entry === 'object'
+        && entry !== null
+        && 'method' in entry
+        && (entry as { method?: string }).method === 'thread/start';
+    });
+    expect(createCalls).toHaveLength(1);
+  });
+
+  it('invokeViaTurn starts a fresh thread after a progress stall clears the native session', async () => {
+    vi.useFakeTimers();
+    try {
+      const client = makeClient({ timeoutMs: 50, streamStallTimeoutMs: 5_000, progressStallTimeoutMs: 250 });
+
+      const firstEvents = collect(client.invokeViaTurn({
+        prompt: 'first',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+
+      const socket = sockets[0]!;
+      primeHandshake(socket);
+      let threadIndex = 0;
+      socket.onMethod('thread/start', (message) => {
+        threadIndex += 1;
+        socket.reply(message.id, { threadId: `thread-${threadIndex}` });
+      });
+      socket.onMethod('turn/start', (message) => {
+        const threadId = (message.params as { threadId?: string }).threadId;
+        if (threadId === 'thread-1') {
+          socket.reply(message.id, { turnId: 'turn-1' });
+          socket.notify('turn/text_delta', {
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+            text: 'partial',
+          });
+          return;
+        }
+
+        socket.reply(message.id, { turnId: 'turn-2' });
+        socket.notify('item/completed', {
+          threadId: 'thread-2',
+          turnId: 'turn-2',
+          item: {
+            type: 'agentMessage',
+            id: 'msg-2',
+            text: 'second done',
+            phase: null,
+          },
+        });
+        socket.notify('turn/completed', {
+          threadId: 'thread-2',
+          turn: { id: 'turn-2', items: [], status: 'completed', error: null },
+        });
+      });
+      socket.onMethod('turn/interrupt', (message) => {
+        socket.reply(message.id, {});
+      });
+      socket.open();
+
+      await vi.advanceTimersByTimeAsync(251);
+
+      await expect(firstEvents).resolves.toEqual([
+        { type: 'text_delta', text: 'partial' },
+        expect.objectContaining({
+          type: 'error',
+          message: 'progress stall: no runtime progress for 250ms',
+          failure: expect.objectContaining({
+            code: 'PROGRESS_STALL',
+            retryable: true,
+          }),
+        }),
+        { type: 'done' },
+      ]);
+      expect(client.getSessionState('session-1')).toBeUndefined();
+
+      const secondEvents = collect(client.invokeViaTurn({
+        prompt: 'second',
+        model: 'gpt-5.4',
+        cwd: '/tmp/discoclaw',
+        sessionKey: 'session-1',
+      }));
+
+      await expect(secondEvents).resolves.toEqual([
+        { type: 'text_delta', text: 'second done' },
+        { type: 'text_final', text: 'second done' },
+        { type: 'done' },
+      ]);
+      expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-2' });
+
+      const createCalls = socket.sent.filter((entry) => {
+        return typeof entry === 'object'
+          && entry !== null
+          && 'method' in entry
+          && (entry as { method?: string }).method === 'thread/start';
+      });
+      expect(createCalls).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invokeViaTurn starts a fresh thread after a websocket disconnect resets the active session', async () => {
+    const client = makeClient();
+
+    const firstEvents = collect(client.invokeViaTurn({
+      prompt: 'first',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    const firstSocket = sockets[0]!;
+    primeHandshake(firstSocket);
+    firstSocket.onMethod('thread/start', (message) => {
+      firstSocket.reply(message.id, { threadId: 'thread-1' });
+    });
+    firstSocket.onMethod('turn/start', (message) => {
+      firstSocket.reply(message.id, { turnId: 'turn-1' });
+      firstSocket.notify('turn/text_delta', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        text: 'partial',
+      });
+      firstSocket.closeWith(1006, '');
+    });
+    firstSocket.open();
+
+    await expect(firstEvents).resolves.toEqual([
+      { type: 'text_delta', text: 'partial' },
+      expect.objectContaining({
+        type: 'error',
+        message: 'codex app-server websocket closed',
+      }),
+      { type: 'done' },
+    ]);
+    expect(client.getSessionState('session-1')).toBeUndefined();
+
+    const secondEvents = collect(client.invokeViaTurn({
+      prompt: 'second',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+    }));
+
+    const secondSocket = sockets[1]!;
+    primeHandshake(secondSocket);
+    secondSocket.onMethod('thread/start', (message) => {
+      secondSocket.reply(message.id, { threadId: 'thread-2' });
+    });
+    secondSocket.onMethod('turn/start', (message) => {
+      secondSocket.reply(message.id, { turnId: 'turn-2' });
+      secondSocket.notify('item/completed', {
+        threadId: 'thread-2',
+        turnId: 'turn-2',
+        item: {
+          type: 'agentMessage',
+          id: 'msg-2',
+          text: 'second done',
+          phase: null,
+        },
+      });
+      secondSocket.notify('turn/completed', {
+        threadId: 'thread-2',
+        turn: { id: 'turn-2', items: [], status: 'completed', error: null },
+      });
+    });
+    secondSocket.open();
+
+    await expect(secondEvents).resolves.toEqual([
+      { type: 'text_delta', text: 'second done' },
+      { type: 'text_final', text: 'second done' },
+      { type: 'done' },
+    ]);
+    expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-2' });
+
+    const secondCreateCalls = secondSocket.sent.filter((entry) => {
+      return typeof entry === 'object'
+        && entry !== null
+        && 'method' in entry
+        && (entry as { method?: string }).method === 'thread/start';
+    });
+    expect(secondCreateCalls).toHaveLength(1);
+  });
+
+  it('invokeViaTurn honors AbortSignal by interrupting the active turn and emitting aborted', async () => {
+    const client = makeClient();
+    const abortController = new AbortController();
+
+    const eventsPromise = collect(client.invokeViaTurn({
+      prompt: 'answer this',
+      model: 'gpt-5.4',
+      cwd: '/tmp/discoclaw',
+      sessionKey: 'session-1',
+      signal: abortController.signal,
+    }));
+
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('thread/start', (message) => {
+      socket.reply(message.id, { threadId: 'thread-1' });
+    });
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turn: { id: 'turn-1', items: [], status: 'inProgress', error: null } });
+      socket.notify('turn/text_delta', {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        delta: 'partial',
+      });
+      queueMicrotask(() => {
+        abortController.abort();
+      });
+    });
+    socket.onMethod('turn/interrupt', (message) => {
+      socket.reply(message.id, {});
+    });
+    socket.open();
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'partial' },
+      expect.objectContaining({ type: 'error', message: 'aborted' }),
+      { type: 'done' },
+    ]);
+    expect(socket.sent).toContainEqual({
+      id: 4,
+      method: 'turn/interrupt',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+      },
+    });
+    expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+  });
+
+  it('returns false when steering without an active turn', async () => {
+    const client = makeClient();
+
+    await expect(client.steer('session-1', 'hello')).resolves.toBe(false);
+    expect(sockets).toHaveLength(0);
+  });
+
+  it('returns false when interrupting without an active turn', async () => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    await expect(client.interrupt('session-1')).resolves.toBe(false);
+    expect(sockets).toHaveLength(0);
+  });
+
+  it('opens a websocket, initializes once, and sends steer payloads over JSON-RPC', async () => {
+    const client = makeClient();
+    client.setActiveTurn('session-1', 'thread-1', 'turn-1');
+
+    const steerPromise = client.steer('session-1', 'keep going');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/steer', (message) => {
+      socket.reply(message.id, { turnId: 'turn-2' });
+    });
+    socket.open();
+
+    await expect(steerPromise).resolves.toBe(true);
+    expect(socket.sent).toEqual([
+      {
+        id: 1,
+        method: 'initialize',
+        params: {
+          clientInfo: {
+            name: 'discoclaw',
+            title: 'DiscoClaw',
+            version: '0.0.0',
+          },
+          capabilities: null,
+        },
+      },
+      { method: 'initialized' },
+      {
+        id: 2,
+        method: 'turn/steer',
+        params: {
+          threadId: 'thread-1',
+          input: [{
+            type: 'text',
+            text: 'keep going',
+            text_elements: [],
+          }],
+          expectedTurnId: 'turn-1',
+        },
+      },
+    ]);
+    expect(client.getSessionState('session-1')).toEqual({
+      threadId: 'thread-1',
+      activeTurnId: 'turn-2',
+    });
+  });
+
+  it('keeps streaming on a replacement turnId returned by turn/steer', async () => {
+    const client = makeClient();
+    client.setThread('session-1', 'thread-1');
+
+    const startPromise = client.startTurn('session-1', 'hello');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/start', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.onMethod('turn/steer', (message) => {
+      socket.reply(message.id, { turnId: 'turn-2' });
+    });
+    socket.open();
+
+    const handle = await startPromise;
+    const eventsPromise = collect(handle.stream);
+
+    await expect(client.steer('session-1', 'keep going')).resolves.toBe(true);
+    socket.notify('turn/text_delta', {
+      threadId: 'thread-1',
+      turnId: 'turn-2',
+      delta: 'continued',
+    });
+    socket.notify('turn/completed', {
+      threadId: 'thread-1',
+      turn: { id: 'turn-2', items: [], status: 'completed', error: null },
+    });
+
+    await expect(eventsPromise).resolves.toEqual([
+      { type: 'text_delta', text: 'continued' },
+      { type: 'text_final', text: 'continued' },
+      { type: 'done' },
+    ]);
+    expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+  });
+
+  it('reuses the initialized websocket for follow-up interrupt requests', async () => {
+    const client = makeClient();
+    client.setActiveTurn('session-1', 'thread-1', 'turn-1');
+
+    const steerPromise = client.steer('session-1', 'keep going');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/steer', (message) => {
+      socket.reply(message.id, { turnId: 'turn-1' });
+    });
+    socket.onMethod('turn/interrupt', (message) => {
+      socket.reply(message.id, {});
+    });
+    socket.open();
+
+    await expect(steerPromise).resolves.toBe(true);
+    await expect(client.interrupt('session-1')).resolves.toBe(true);
+    expect(sockets).toHaveLength(1);
+    expect(socket.sent[3]).toEqual({
+      id: 3,
+      method: 'turn/interrupt',
+      params: {
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+      },
+    });
+    expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-1' });
+  });
+
+  it('returns false when the websocket connect times out', async () => {
+    const client = makeClient(10);
+    client.setActiveTurn('session-1', 'thread-1', 'turn-1');
+
+    await expect(client.steer('session-1', 'hello')).resolves.toBe(false);
+    expect(sockets).toHaveLength(1);
+  });
+
+  it('returns false when the server returns a JSON-RPC error', async () => {
+    const client = makeClient();
+    client.setActiveTurn('session-1', 'thread-1', 'turn-1');
+
+    const interruptPromise = client.interrupt('session-1');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/interrupt', (message) => {
+      socket.fail(message.id, 'turn mismatch');
+    });
+    socket.open();
+
+    await expect(interruptPromise).resolves.toBe(false);
+    expect(socket.readyState).toBe(MockWebSocket.OPEN);
+  });
+
+  it('returns false on steer JSON-RPC errors without closing the shared websocket', async () => {
+    const client = makeClient();
+    client.setActiveTurn('session-1', 'thread-1', 'turn-1');
+
+    const steerPromise = client.steer('session-1', 'keep going');
+    const socket = sockets[0]!;
+    primeHandshake(socket);
+    socket.onMethod('turn/steer', (message) => {
+      socket.fail(message.id, 'turn mismatch');
+    });
+    socket.open();
+
+    await expect(steerPromise).resolves.toBe(false);
+    expect(socket.readyState).toBe(MockWebSocket.OPEN);
+  });
+
+  it('reconnects after the socket closes', async () => {
+    const client = makeClient();
+    client.setActiveTurn('session-1', 'thread-1', 'turn-1');
+
+    const firstInterrupt = client.interrupt('session-1');
+    const firstSocket = sockets[0]!;
+    primeHandshake(firstSocket);
+    firstSocket.onMethod('turn/interrupt', (message) => {
+      firstSocket.reply(message.id, {});
+    });
+    firstSocket.open();
+    await expect(firstInterrupt).resolves.toBe(true);
+
+    client.setActiveTurn('session-1', 'thread-1', 'turn-2');
+    firstSocket.close();
+
+    const secondInterrupt = client.interrupt('session-1');
+    const secondSocket = sockets[1]!;
+    primeHandshake(secondSocket);
+    secondSocket.onMethod('turn/interrupt', (message) => {
+      secondSocket.reply(message.id, {});
+    });
+    secondSocket.open();
+
+    await expect(secondInterrupt).resolves.toBe(true);
+    expect(sockets).toHaveLength(2);
+  });
+
+  it('clears stale turn state when the thread changes', () => {
+    const client = makeClient();
+    client.setActiveTurn('session-1', 'thread-1', 'turn-1');
+    client.setThread('session-1', 'thread-2');
+
+    expect(client.getSessionState('session-1')).toEqual({ threadId: 'thread-2' });
+  });
+
+  it('logs failures instead of throwing when wsFactory throws', async () => {
+    const log = { debug: vi.fn() };
+    const client = new CodexAppServerClient({
+      baseUrl: 'ws://127.0.0.1:4321',
+      timeoutMs: 50,
+      log,
+      wsFactory: () => {
+        throw new Error('boom');
+      },
+    });
+    client.setActiveTurn('session-1', 'thread-1', 'turn-1');
+
+    await expect(client.steer('session-1', 'hello')).resolves.toBe(false);
+    expect(log.debug).toHaveBeenCalled();
+  });
+});

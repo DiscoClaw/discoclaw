@@ -1,0 +1,367 @@
+import type { EngineEvent } from '../runtime/types.js';
+
+function envFlagEnabled(name: string): boolean {
+  const value = process.env[name];
+  if (!value) return false;
+  return /^(1|true|yes|on)$/i.test(value.trim());
+}
+
+/**
+ * Debug-only kill-switch for stream sanitization and action-tag stripping.
+ * Intended for live troubleshooting when we need to inspect raw stream output.
+ */
+export function isStreamingSanitizationDisabled(): boolean {
+  return envFlagEnabled('DISCOCLAW_DISABLE_STREAM_SANITIZATION');
+}
+
+/**
+ * If the text ends inside an unclosed fenced code block, append the matching
+ * closing fence so that any subsequently appended text lands outside the block.
+ * Handles both backtick and tilde fences, respecting fence length.
+ */
+export function closeFenceIfOpen(text: string): string {
+  const lines = text.split('\n');
+  let inFence = false;
+  let fenceChar = '';
+  let fenceLen = 0;
+
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    if (!inFence) {
+      // Opening fence: 3+ identical chars (` or ~), optionally followed by info string
+      const match = trimmed.match(/^(`{3,}|~{3,})/);
+      if (match) {
+        inFence = true;
+        fenceChar = match[1][0];
+        fenceLen = match[1].length;
+      }
+    } else {
+      // Closing fence: same char, at least as many, nothing else on the line
+      const match = trimmed.match(/^(`{3,}|~{3,})\s*$/);
+      if (match && match[1][0] === fenceChar && match[1].length >= fenceLen) {
+        inFence = false;
+      }
+    }
+  }
+
+  if (!inFence) return text;
+  return text + '\n' + fenceChar.repeat(fenceLen);
+}
+
+/**
+ * Safely append suffix text after body, closing any unclosed fenced code
+ * block first so the suffix renders as normal markdown rather than leaking
+ * inside the code block.
+ */
+export function appendOutsideFence(body: string, suffix: string): string {
+  if (!suffix) return body;
+  if (!body) return suffix;
+  return closeFenceIfOpen(body.trimEnd()) + '\n\n' + suffix;
+}
+
+export function splitDiscord(text: string, limit = 2000): string[] {
+  // Minimal fence-safe markdown chunking.
+  const normalized = text.replace(/\r\n?/g, '\n');
+  if (normalized.length <= limit) return [normalized];
+
+  const rawLines = normalized.split('\n');
+  const chunks: string[] = [];
+
+  let cur = '';
+  let inFence = false;
+  let fenceHeader = '```';
+
+  const effectiveCurLen = () => {
+    if (cur.length > 0) return cur.length;
+    return inFence ? fenceHeader.length : 0;
+  };
+
+  const remainingRoom = () => {
+    const base = effectiveCurLen();
+    const sep = base > 0 ? 1 : 0;
+    return Math.max(0, limit - base - sep);
+  };
+
+  const ensureFenceOpen = () => {
+    if (cur) return;
+    if (inFence) cur = `${fenceHeader}`;
+  };
+
+  const flush = () => {
+    if (!cur) return;
+    if (inFence && !cur.trimEnd().endsWith('```')) {
+      const close = '\n```';
+      if (cur.length + close.length <= limit) {
+        cur += close;
+      }
+    }
+    chunks.push(cur);
+    cur = '';
+  };
+
+  const appendLine = (line: string) => {
+    ensureFenceOpen();
+    const sep = cur.length > 0 ? '\n' : '';
+    cur += sep + line;
+  };
+
+  for (const line of rawLines) {
+    const curLen = effectiveCurLen();
+    const nextLen = (curLen ? curLen + 1 : 0) + line.length;
+    if (nextLen > limit && cur) {
+      flush();
+    }
+
+    if (line.length > remainingRoom()) {
+      let rest = line;
+      while (rest.length > 0) {
+        const room = Math.max(1, remainingRoom());
+        const take = rest.slice(0, room);
+        appendLine(take);
+        rest = rest.slice(room);
+        if (rest.length > 0) {
+          flush();
+        }
+      }
+    } else {
+      appendLine(line);
+    }
+
+    const trimmed = line.trimStart();
+    if (trimmed.startsWith('```')) {
+      if (!inFence) {
+        inFence = true;
+        fenceHeader = trimmed.trimEnd();
+      } else {
+        inFence = false;
+        fenceHeader = '```';
+      }
+    }
+
+    if (inFence && cur.length >= limit - 8) {
+      flush();
+    }
+  }
+
+  flush();
+  return chunks.filter((c) => c.trim().length > 0);
+}
+
+export function truncateCodeBlocks(text: string, maxLines = 20): string {
+  // Truncate fenced code blocks that exceed maxLines, keeping first/last lines.
+  return text.replace(/^([ \t]*```[^\n]*\n)([\s\S]*?)(^[ \t]*```[ \t]*$)/gm, (_match, open: string, body: string, close: string) => {
+    const lines = body.split('\n');
+    const trimmedLines = lines.length > 0 && lines[lines.length - 1] === '' ? lines.slice(0, -1) : lines;
+    if (trimmedLines.length <= maxLines) return open + body + close;
+
+    const keepTop = Math.ceil(maxLines / 2);
+    const keepBottom = Math.floor(maxLines / 2);
+    const omitted = trimmedLines.length - keepTop - keepBottom;
+    const top = trimmedLines.slice(0, keepTop);
+    const bottom = trimmedLines.slice(trimmedLines.length - keepBottom);
+    return (
+      open +
+      top.join('\n') + '\n' +
+      `... (${omitted} lines omitted)\n` +
+      bottom.join('\n') + '\n' +
+      close
+    );
+  });
+}
+
+export function renderDiscordTail(text: string, maxLines = 8, maxWidth = 72): string {
+  const normalized = String(text ?? '').replace(/\r\n?/g, '\n');
+  const lines = normalized.split('\n').filter((l) => l.length > 0);
+  const tail = lines.slice(-maxLines).map((l) =>
+    l.length > maxWidth ? l.slice(0, maxWidth - 1) + '\u2026' : l,
+  );
+  while (tail.length < maxLines) tail.unshift('\u200b');
+  const safe = tail.join('\n').replace(/```/g, '``\\`');
+  return `\`\`\`text\n${safe}\n\`\`\``;
+}
+
+export function formatBoldLabel(label: string, maxWidth = 72): string {
+  const singleLine = label.split('\n').find((l) => l.length > 0) ?? '';
+  const truncated = singleLine.length > maxWidth
+    ? singleLine.slice(0, maxWidth - 1) + '\u2026'
+    : singleLine;
+  const safe = truncated.replace(/([*_~|`\\[\]])/g, '\\$1');
+  return `**${safe}**`;
+}
+
+export function renderActivityTail(label: string, maxLines = 8, maxWidth = 72): string {
+  const lines: string[] = [];
+  for (let i = 0; i < maxLines; i++) lines.push('\u200b');
+  const safe = lines.join('\n').replace(/```/g, '``\\`');
+  return `${formatBoldLabel(label, maxWidth)}\n\`\`\`text\n${safe}\n\`\`\``;
+}
+
+export function thinkingLabel(tick: number): string {
+  const dotCounts = [1, 2, 3, 0];
+  return 'Thinking' + '.'.repeat(dotCounts[tick % 4]);
+}
+
+export function formatElapsed(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 60) return `(${totalSeconds}s)`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `(${minutes}m${seconds}s)`;
+}
+
+export function buildCompletionNotice(elapsedMs: number): string {
+  return `Done ${formatElapsed(elapsedMs)}`;
+}
+
+export type StreamingPreviewMode = 'compact' | 'raw';
+
+function truncatePreviewSignal(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  return text.slice(0, maxChars - 1) + '\u2026';
+}
+
+function sanitizePreviewSignalText(text: string, maxChars: number): string {
+  if (isStreamingSanitizationDisabled()) return text;
+  const singleLine = stripActionTags(text)
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n+/g, ' \\n ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return truncatePreviewSignal(singleLine, maxChars);
+}
+
+function stringifyPreviewSignalPayload(payload: unknown): string {
+  if (typeof payload === 'string') return payload;
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return String(payload);
+  }
+}
+
+function formatUsageSignal(evt: Extract<EngineEvent, { type: 'usage' }>, mode: StreamingPreviewMode): string {
+  const parts: string[] = [];
+  if (typeof evt.inputTokens === 'number') parts.push(`in=${evt.inputTokens}`);
+  if (typeof evt.outputTokens === 'number') parts.push(`out=${evt.outputTokens}`);
+  if (typeof evt.totalTokens === 'number') parts.push(`total=${evt.totalTokens}`);
+  if (typeof evt.costUsd === 'number') {
+    const precision = mode === 'raw' ? 6 : 4;
+    parts.push(`cost=$${evt.costUsd.toFixed(precision)}`);
+  }
+  return parts.length > 0 ? `[usage] ${parts.join(' ')}` : '[usage]';
+}
+
+export function formatRuntimePreviewSignal(
+  evt: EngineEvent,
+  mode: StreamingPreviewMode = 'compact',
+): string | null {
+  switch (evt.type) {
+    case 'tool_start': {
+      if (mode === 'compact') return `[tool:start] ${evt.name}`;
+      const input = evt.input === undefined ? '' : sanitizePreviewSignalText(stringifyPreviewSignalPayload(evt.input), 300);
+      return input ? `[tool:start] ${evt.name} input=${input}` : `[tool:start] ${evt.name}`;
+    }
+    case 'tool_end': {
+      if (mode === 'compact') return `[tool:end] ${evt.name} ${evt.ok ? 'ok' : 'failed'}`;
+      const output = evt.output === undefined ? '' : sanitizePreviewSignalText(stringifyPreviewSignalPayload(evt.output), 300);
+      const status = evt.ok ? 'ok' : 'failed';
+      return output ? `[tool:end] ${evt.name} ${status} output=${output}` : `[tool:end] ${evt.name} ${status}`;
+    }
+    case 'log_line': {
+      const prefix = evt.stream === 'stderr' ? '[stderr]' : '[stdout]';
+      const maxChars = mode === 'raw' ? 400 : 180;
+      return `${prefix} ${sanitizePreviewSignalText(evt.line, maxChars)}`;
+    }
+    case 'thinking_delta': {
+      const maxCharsThinking = mode === 'raw' ? 400 : 180;
+      return `[thinking] ${sanitizePreviewSignalText(evt.text, maxCharsThinking)}`;
+    }
+    case 'usage':
+      return formatUsageSignal(evt, mode);
+    case 'preview_debug': {
+      const status = mode === 'raw' && evt.status
+        ? ` status=${sanitizePreviewSignalText(evt.status, 80)}`
+        : '';
+      return `[preview:${evt.source}] ${evt.itemType} ${evt.phase}${status}`;
+    }
+    default:
+      return null;
+  }
+}
+
+function renderStreamingTail(text: string, mode: StreamingPreviewMode): string {
+  const maxLines = mode === 'raw' ? 14 : 8;
+  const maxWidth = mode === 'raw' ? 120 : 72;
+  return renderDiscordTail(stripActionTags(text), maxLines, maxWidth);
+}
+
+function hasVisiblePreviewText(text: string): boolean {
+  const sanitized = stripActionTags(text).replace(/\r\n?/g, '\n');
+  return sanitized
+    .split('\n')
+    .some((line) => line.trim().length > 0);
+}
+
+function renderLabeledPreview(label: string, body: string, mode: StreamingPreviewMode): string {
+  return `${formatBoldLabel(label)}\n${renderStreamingTail(body, mode)}`;
+}
+
+function buildWaitingPreviewLine(elapsedMs?: number): string {
+  if (elapsedMs === undefined) return '[stream] waiting for runtime output';
+  return `[stream] waiting for runtime output ${formatElapsed(elapsedMs)}`;
+}
+
+/**
+ * Strip hidden machine-readable blocks from text so raw payloads never leak
+ * into streaming previews visible to users.
+ */
+export function stripActionTags(text: string): string {
+  if (isStreamingSanitizationDisabled()) return text;
+  return text
+    .replace(/<discord-action>[\s\S]*?<\/discord-action>/g, '')  // complete tags
+    .replace(/<discord-action>[\s\S]*$/g, '')                     // trailing incomplete tag (mid-stream)
+    .replace(/<continuation-capsule>[\s\S]*?<\/continuation-capsule>/g, '')
+    .replace(/<continuation-capsule>[\s\S]*$/g, '')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
+export function selectStreamingOutput(opts: {
+  deltaText: string;
+  activityLabel: string;
+  finalText: string;
+  statusTick: number;
+  previewMode?: StreamingPreviewMode;
+  showPreview?: boolean;
+  elapsedMs?: number;
+}): string {
+  const preview = opts.showPreview ?? true;
+  const previewMode = opts.previewMode ?? 'compact';
+  const prefix = opts.elapsedMs !== undefined ? formatElapsed(opts.elapsedMs) + ' ' : '';
+  // finalText always bypasses the gate — completion/error output renders immediately.
+  if (!preview && !opts.finalText && !opts.deltaText) {
+    if (opts.activityLabel) return formatBoldLabel(prefix + opts.activityLabel);
+    return formatBoldLabel(prefix + thinkingLabel(opts.statusTick));
+  }
+  if (opts.deltaText) {
+    const label = prefix + thinkingLabel(opts.statusTick);
+    if (!hasVisiblePreviewText(opts.deltaText)) {
+      const fallback = opts.activityLabel
+        ? `[activity] ${prefix + opts.activityLabel}`
+        : buildWaitingPreviewLine(opts.elapsedMs);
+      return renderLabeledPreview(label, fallback, previewMode);
+    }
+    return renderLabeledPreview(label, opts.deltaText, previewMode);
+  }
+  if (opts.activityLabel) {
+    const label = prefix + opts.activityLabel;
+    return renderLabeledPreview(label, `[activity] ${label}`, previewMode);
+  }
+  if (opts.finalText) {
+    if (!hasVisiblePreviewText(opts.finalText)) {
+      return renderStreamingTail('[stream] no previewable output', previewMode);
+    }
+    return renderStreamingTail(opts.finalText, previewMode);
+  }
+  const thinking = prefix + thinkingLabel(opts.statusTick);
+  return renderLabeledPreview(thinking, buildWaitingPreviewLine(opts.elapsedMs), previewMode);
+}

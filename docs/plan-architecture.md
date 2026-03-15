@@ -1,0 +1,476 @@
+# Plan & Forge Architecture
+
+> Part of the [Plan & Forge](plan-and-forge.md) documentation.
+
+---
+
+## Forge Orchestration Loop
+
+The forge runs a draft → audit → revise cycle:
+
+```
+1. Create plan file via !plan create
+2. Load plan template + project context
+3. DRAFT: Invoke drafter agent (reads codebase, fills template)
+4. Write draft to plan file
+
+   ┌─── while round < maxAuditRounds ───┐
+   │                                      │
+   │  Check cancel → CANCELLED if yes     │
+   │                                      │
+   │  AUDIT: Invoke auditor agent         │
+   │  Parse verdict (parseAuditVerdict)   │
+   │  Append audit notes to plan file     │
+   │                                      │
+   │  if shouldLoop = false → REVIEW      │──► exit (success)
+   │                                      │
+   │  REVISE: Invoke reviser agent        │
+   │  Write revised plan to file          │
+   │                                      │
+   └──────────────────────────────────────┘
+          │
+          ▼ (loop exhausted)
+   Append VERDICT: CAP_REACHED → REVIEW   ──► exit (cap reached)
+```
+
+### Severity Model
+
+The audit system uses a four-tier concern severity model plus a clean-pass marker:
+
+| Level | Triggers loop? | Description |
+|-------|---------------|-------------|
+| `blocking` | **Yes** | Correctness bugs, security issues, architectural flaws, missing critical functionality. The plan cannot ship with this unresolved. |
+| `medium` | No | Substantive improvements that would make the plan better but aren't showstoppers. Missing edge case handling, incomplete error paths. |
+| `minor` | No | Small issues: naming, style, minor clarity gaps. Worth noting, not worth looping over. |
+| `suggestion` | No | Ideas for future improvement. Not problems with the current plan. |
+| `none` | No | No concerns were found. This is emitted as a standalone clean-pass marker, not as a concern severity. |
+
+Only `blocking` findings trigger the revision loop. All other severities are noted in the audit log but auto-approved.
+
+**Backward compatibility:** Old `high` markers are treated as `blocking`, old `low` markers as `minor`. Case-insensitive matching is preserved (`HIGH`, `High`, `high` all work).
+
+### Verdict parsing
+
+`parseAuditVerdict()` in `forge-commands.ts` determines whether to loop:
+
+| Severity detected | `maxSeverity` | `shouldLoop` |
+|-------------------|---------------|--------------|
+| `severity: blocking` | `blocking` | `true` — revise and re-audit |
+| `severity: high` (backward compat) | `blocking` | `true` — revise and re-audit |
+| `severity: medium` | `medium` | `false` — stop, ready for review |
+| `severity: minor` | `minor` | `false` — stop, ready for review |
+| `severity: low` (backward compat) | `minor` | `false` — stop, ready for review |
+| `severity: suggestion` | `suggestion` | `false` — stop, ready for review |
+| `severity: none` | `none` | `false` — stop, clean audit |
+| "ready to approve" text (no markers, legacy fallback) | `minor` | `false` — stop |
+| "needs revision" text (no markers, legacy fallback) | `blocking` | `true` — stop |
+| No severity markers and no verdict | `none` | `false` — stop (malformed → human review) |
+
+### Status transitions during forge
+
+- **Normal completion (audit passes):** Plan set to `REVIEW`. Happens when `shouldLoop` is false (any non-blocking severity).
+- **Cap reached:** `VERDICT: CAP_REACHED` appended to plan content, then status set to `REVIEW`. Concerns remain — manual review required.
+- **Cancellation:** Status set to `CANCELLED` when the forge's `AbortSignal` is raised. The signal interrupts the active AI invocation immediately — the forge does not finish the current audit/draft/revise call before stopping. Triggered by `!forge cancel`, the 🛑 reaction on the progress message, or `!stop`.
+- **Error:** Status reset to `DRAFT` in the catch block (best-effort partial state save).
+
+### Concurrent session constraint
+
+Only one forge can run at a time per DM handler instance. The `forgeOrchestrator` variable in `discord.ts` is a module-level singleton. If you attempt a second forge while one is running, the handler returns a rejection message without creating a new orchestrator.
+
+### Model and runtime selection
+
+The drafter/reviser uses `FORGE_DRAFTER_MODEL` if set, otherwise the main `RUNTIME_MODEL`. The auditor uses `FORGE_AUDITOR_MODEL` if set, otherwise the main model. The drafter/reviser gets read-only tools (Read, Glob, Grep); the auditor also gets read-only tools when its runtime declares the `tools_fs` capability (Claude and Codex both do). Runtimes without `tools_fs` (e.g., the OpenAI HTTP adapter when `OPENAI_COMPAT_TOOLS_ENABLED` is off) get a text-only prompt instead.
+
+**Multi-provider auditor:** The auditor can optionally use a non-Claude runtime via `FORGE_AUDITOR_RUNTIME`. Two adapters are available:
+
+- `FORGE_AUDITOR_RUNTIME=codex` — routes through the Codex CLI adapter (`src/runtime/codex-cli.ts`), which shells out to `codex exec`. Auth is handled natively by the Codex CLI (`~/.codex/auth.json`). This is the recommended path for OpenAI models like `gpt-5.4` that aren't available on the public chat completions API.
+- `FORGE_AUDITOR_RUNTIME=openai` — routes through the OpenAI-compatible HTTP adapter (`src/runtime/openai-compat.ts`) using a static `OPENAI_API_KEY`. Works for models available on the `/v1/chat/completions` endpoint.
+
+This enables cross-model auditing — the plan is drafted by one model family and audited by another.
+
+When the auditor uses a non-Claude runtime:
+- Tool access depends on the adapter's capabilities. The Codex CLI adapter declares `tools_fs` and receives read-only tools (Read, Glob, Grep) just like Claude. The OpenAI HTTP adapter gets a text-only "no codebase access" prompt by default; when `OPENAI_COMPAT_TOOLS_ENABLED=1` it declares `tools_fs` + `tools_exec` and receives tools like the other adapters.
+- Session persistence depends on the adapter's capabilities. Adapters that declare the `sessions` capability (Claude and Codex CLI) maintain conversation context across audit rounds — the auditor remembers previous concerns and the drafter remembers previous revisions. The Codex CLI adapter maps session keys to Codex thread IDs in memory, using `codex exec resume <thread_id>` for subsequent calls. Session state is in-memory only and resets on service restart. Adapters without `sessions` (e.g., the OpenAI HTTP adapter) start fresh each round.
+- If `FORGE_AUDITOR_MODEL` is not set, the model defaults to the adapter's `defaultModel`: for codex, `CODEX_MODEL` (default `gpt-5.4`); for openai, `OPENAI_MODEL` (default `gpt-4o`)
+
+---
+
+## Phase Manager
+
+The phase manager decomposes an approved plan into executable phases, manages dependencies, and runs them sequentially.
+
+### Decomposition logic
+
+`decomposePlan()` in `plan-manager.ts`:
+
+1. Extract the `## Changes` section from the plan
+2. Parse file paths from the section by looking for backtick-wrapped entries in list items, headings, and the bolded file headers used in the file-by-file breakdowns
+3. Group files into batches (respecting `PLAN_PHASE_MAX_CONTEXT_FILES`)
+   - Module + test file pairs are kept together
+   - Remaining files grouped by directory
+4. Generate one `implement` phase per batch
+5. Append one `audit` phase that depends on all implement phases (the post-implementation audit is always generated, even when the phase list falls back to the read/implement flow)
+
+When `extractFilePaths()` yields nothing, the fallback phases are now `read` → `implement` → `audit`, so the plan manager always includes a post-implementation audit even for plans that don't enumerate specific files.
+
+### Phase kinds
+
+| Kind | Description | Tools granted |
+|------|-------------|---------------|
+| `implement` | Make code changes | Read, Write, Edit, Glob, Grep, Bash |
+| `read` | Read and analyze files | Read, Glob, Grep |
+| `audit` | Audit implementation against plan | Read, Glob, Grep |
+
+### Dependency chains
+
+Phases declare dependencies via `dependsOn`. A phase can run only when all dependencies are `done` or `skipped`. The runner (`getNextPhase()`) prioritizes:
+
+1. Resume any `in-progress` phase
+2. Retry any `failed` phase
+3. First `pending` phase with all deps met
+
+### Target-phase execution path
+
+`!plan run-phase <plan-id> <phase-id>` uses the same execution engine as `run`/`run-one`, but with a target selector:
+
+1. `preparePlanRun(planId, ..., targetPhaseId)` validates plan status, staleness, and dependency graph integrity
+2. `selectRunnablePhase(phases, targetPhaseId)` enforces target constraints:
+   - target phase exists
+   - target is not already `done`/`skipped`
+   - all target dependencies are terminal (`done` or `skipped`)
+3. `runNextPhase(..., targetPhaseId)` executes exactly that phase in single-phase mode
+
+If any check fails, the run is blocked before execution with a specific message (missing phase, unmet deps, non-runnable status, etc.).
+
+### Staleness detection
+
+Phases are generated with a `planContentHash` — a 16-character truncated SHA-256 of the plan file content at generation time, computed by `computePlanHash()` in `plan-manager.ts`.
+
+Before running a phase, both `preparePlanRun()` (in `plan-commands.ts`) and `runNextPhase()` (in `plan-manager.ts`) call `checkStaleness()`, which recomputes the hash and compares. If they differ, the run is blocked:
+
+```
+Plan file has changed since phases were generated — the existing phases may not match the current plan intent and cannot run safely.
+
+**Fix:** `!plan phases --regenerate <plan-id>`
+
+This regenerates phases from the current plan content. All phase statuses are reset to `pending` — previously completed phases will be re-executed. Git commits from completed phases are preserved on the branch, but the phase tracker loses their `done` status.
+```
+
+Default remedy is `!plan phases --regenerate <plan-id>`. When you want to preserve prior completed work, use `!plan phases --regenerate --keep-done <plan-id>` to resequence with done-phase carryover.
+
+### `--keep-done` resequencing and dependency validation
+
+`resequenceKeepingDone(previous, regenerated)` applies completion carryover after regeneration:
+
+1. Build semantic signatures for old `done` phases (title, kind, description, sorted context files, change spec)
+2. Match regenerated phases by signature and copy done metadata (`status`, output, commit hash, modified files, convergence metadata)
+3. Mark unmatched prior done phases as dropped
+4. Revalidate dependencies for copied phases; if a copied phase now depends on missing or non-terminal deps, demote it back to `pending` and clear done metadata
+
+After resequencing, `validatePhaseDependencies()` still runs and reports missing deps/cycles. This ensures `--keep-done` cannot preserve an invalid execution graph.
+
+### Per-phase git commits
+
+On successful `implement` phases, the runner:
+
+1. Captures a git diff snapshot before and after execution
+2. Stages only files that were modified by the phase
+3. Commits with message: `{planId} {phaseId}: {title}`
+4. Records the commit hash in the phases file
+
+### Retry semantics
+
+When retrying a failed phase:
+1. Check that `modifiedFiles` and `failureHashes` are recorded (otherwise retry is blocked)
+2. For each modified file, verify the current content hash matches the failure hash
+3. Revert tracked files via `git checkout`, clean untracked files via `git clean`
+4. Re-execute the phase
+
+If a file has been modified since the failure, it's skipped during revert (the retry proceeds with current state).
+
+### Audit convergence guard
+
+Audit phases track an `auditConvergence` signature (`computeAuditConvergenceSignature`) built from audit output + modified file set. If the same failing signature repeats `AUDIT_CONVERGENCE_REPEAT_LIMIT` times (currently 2), `runNextPhase()` returns `retry_blocked` instead of continuing replay loops.
+
+This guard prevents infinite audit-fix/re-audit churn and forces manual intervention. Operator recovery is then explicit: inspect phases, use `!plan run-phase` for a targeted retry, or `!plan skip-to` to move past the blocked segment.
+
+### Skip semantics
+
+`!plan skip` changes the first `in-progress` or `failed` phase to `skipped`. Downstream phases that depend on it can proceed (skipped counts as "met" for dependency resolution).
+
+`!plan skip-to <plan-id> <phase-id>` applies a wider skip transform: earlier non-terminal phases (and non-terminal transitive dependencies of the target) are marked `skipped`, then the target phase is validated as runnable.
+
+---
+
+## Plan File Format
+
+Plans are markdown files in `workspace/plans/` named `plan-NNN-slug.md`.
+
+### Header fields
+
+```markdown
+# Plan: <title>
+
+**ID:** plan-NNN
+**Task:** <task-id>
+**Created:** YYYY-MM-DD
+**Status:** DRAFT | REVIEW | APPROVED | IMPLEMENTING | AUDITING | DONE | CLOSED | CANCELLED
+**Project:** discoclaw
+```
+
+**Parsing:** `parsePlanFileHeader()` in `plan-commands.ts` extracts these fields via regex.
+
+**Status updates:** `updatePlanFileStatus()` in `plan-commands.ts` regex-replaces the `**Status:**` line.
+
+### Template
+
+The plan template source is `workspace/plans/.plan-template.md` (tried first). If the file is missing or unreadable, the inline `FALLBACK_TEMPLATE` in `plan-commands.ts` is used. As of this writing, the on-disk template does not exist — only the fallback is active. To customize, place a `.plan-template.md` file in `workspace/plans/`.
+
+### Placeholder tokens
+
+| Token | Replaced with |
+|-------|---------------|
+| `{{TITLE}}` | Plan description |
+| `{{PLAN_ID}}` | Generated plan ID (e.g., `plan-017`) |
+| `{{TASK_ID}}` | Backing task ID |
+| `{{DATE}}` | ISO date (YYYY-MM-DD) |
+| `{{PROJECT}}` | Hardcoded to `discoclaw` |
+
+Additionally, the status line is normalized to just `DRAFT` (removes any options list from the template).
+
+### Template sections
+
+```markdown
+## Objective
+## Scope
+## Changes        ← file-by-file changes (parsed by phase decomposition)
+## Risks
+## Testing
+---
+## Audit Log      ← forge appends audit rounds here
+---
+## Implementation Notes
+```
+
+### Required sections (human drafter guide)
+
+When writing a plan manually (via `!plan <desc>` or by editing the file directly), the following sections are required for the plan to pass the structural audit gate and for phase decomposition to work correctly:
+
+| Section | Required | Purpose |
+|---------|----------|---------|
+| `## Objective` | Yes | One paragraph: what problem this plan solves and why. |
+| `## Scope` | Yes | What is in scope and explicitly what is out of scope. Helps the auditor and the phase runner bound the work. |
+| `## Changes` | Yes | File-by-file change specifications. Parsed by the phase decomposer — format matters (see below). |
+| `## Risks` | Yes | Known risks, failure modes, and mitigations. Required by the structural pre-flight check. |
+| `## Testing` | Yes | How the changes will be verified. At minimum: what commands to run, what to look for. |
+| `## Audit Log` | Yes (auto-filled) | Appended by the forge auditor and `!plan audit`. Leave the heading present; the bot fills the content. |
+| `## Implementation Notes` | Yes (can be empty) | Scratch space for the implementor: notes that don't fit in the main plan but should travel with it. |
+
+Missing any of the first five sections (`Objective`, `Scope`, `Changes`, `Risks`, `Testing`) will cause the structural pre-flight check in `!plan audit` to report a `high` severity finding and abort before the AI audit runs.
+
+### What the phase decomposer needs from `## Changes`
+
+`decomposePlan()` calls `extractFilePathsDeterministic()` (plus a legacy fallback) to find file paths in the `## Changes` section. It matches **backtick-wrapped paths** in three line types only — all other lines are ignored:
+
+1. **List item lines** — lines starting with `-`, `*`, or `+`
+
+   ```markdown
+   - `src/webhook.ts` — Create new webhook handler with rate limiting.
+   - `src/webhook.test.ts` — Unit tests for the rate limiter.
+   ```
+
+2. **Markdown heading lines** — lines starting with `#`
+
+   ```markdown
+   ### `src/webhook.ts`
+   ```
+
+3. **Bold entry lines** — lines where the first non-whitespace token is a bold-wrapped backtick path (`**\`path\`**` or `***\`path\`***`)
+
+   ```markdown
+   **`src/webhook.ts`** — New module.
+   **`src/config.ts`** — Add `WEBHOOK_RATE_LIMIT_RPM` env var.
+   ```
+
+Paths that are not backtick-wrapped, or that appear in plain prose lines, are **not** picked up by the decomposer. If the decomposer finds no paths anywhere (including the Change Manifest below), it falls back to a generic `read → implement → audit` phase sequence rather than file-specific phases.
+
+**`isLikelyFilePath` filter:** The decomposer also rejects tokens that look like config keys (`ALL_CAPS`), PascalCase type names, quoted strings, or single words without a path separator or file extension. Tokens must contain `/` or a `.ext` to pass.
+
+### `## Change Manifest` alternative
+
+If your plan's `## Changes` section is prose-heavy, you can add a separate `## Change Manifest` section containing a JSON array of file paths. The decomposer checks this section first: if it finds a valid JSON array with at least one path, those paths are used instead of anything parsed from `## Changes`.
+
+```markdown
+## Change Manifest
+
+```json
+["src/webhook.ts", "src/webhook.test.ts", "src/config.ts"]
+```
+```
+
+Rules:
+- The section must contain a bare JSON array (no wrapping object).
+- Paths are still filtered by `isLikelyFilePath` — plain strings without `/` or a file extension are ignored.
+- `## Change Manifest` takes **precedence** over `## Changes` for file discovery. The `## Changes` prose is still used to extract per-file change specs for phase prompts, so keep it even when using a manifest.
+- Use this when you want a clean, machine-readable file list decoupled from the narrative change description.
+
+---
+
+## Phases File Format
+
+Phases are persisted in both `workspace/plans/plan-NNN-phases.md` and the adjacent JSON state file `workspace/plans/plan-NNN-phases.json`. The markdown view is serialized by `serializePhases()` / `deserializePhases()`, and the JSON state is serialized by `serializePhasesStateJson()` / `deserializePhasesStateJson()` in `plan-manager.ts`.
+
+In markdown, only headings of the form `## phase-N:` start a new phase section. Structured metadata such as `**Evidence:**` is read from the phase preamble only, so human-readable descriptions and runtime transcripts can contain ordinary markdown headings and prose without being reinterpreted as control data.
+
+### Structure
+
+```markdown
+# Phases: plan-017 — workspace/plans/plan-017-slug.md
+Created: 2026-02-12
+Updated: 2026-02-12
+Plan hash: a1b2c3d4e5f6g7h8
+
+## phase-1: Implement src/webhook.ts
+**Kind:** implement
+**Status:** pending
+**Context:** `src/webhook.ts`
+**Depends on:** (none)
+
+Implement changes for: `src/webhook.ts`
+
+**Change spec:**
+- `src/webhook.ts` — Create new webhook handler module...
+
+---
+
+## phase-2: Post-implementation audit
+**Kind:** audit
+**Status:** pending
+**Context:** `src/webhook.ts`, `src/webhook.test.ts`
+**Depends on:** phase-1
+
+Audit all changes against the plan specification.
+
+---
+```
+
+### Field reference
+
+**Header fields:**
+
+| Field | Description |
+|-------|-------------|
+| `planId` | Plan ID (e.g., `plan-017`) |
+| `planFile` | Relative path to the plan file |
+| `planContentHash` | 16-char truncated SHA-256 of plan content at generation time |
+| `createdAt` | ISO date |
+| `updatedAt` | ISO date (updated on each phase status change) |
+
+**Per-phase fields (`PlanPhase` type):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Phase ID (e.g., `phase-1`) |
+| `title` | string | Human-readable title |
+| `kind` | `implement` \| `read` \| `audit` | Phase type |
+| `description` | string | What this phase does |
+| `status` | `pending` \| `in-progress` \| `done` \| `failed` \| `skipped` | Current status |
+| `dependsOn` | string[] | Phase IDs that must complete first |
+| `contextFiles` | string[] | Files relevant to this phase |
+| `changeSpec` | string? | Extracted change specification from plan |
+| `output` | string? | Runtime output after execution |
+| `error` | string? | Error message if failed |
+| `gitCommit` | string? | Short commit hash if auto-committed |
+| `modifiedFiles` | string[]? | Files changed during execution |
+| `failureHashes` | Record<string, string>? | Content hashes of modified files at failure time (for safe retry) |
+| `evidence` | `VerificationEvidence[]`? | Structured build/test/audit verification records for downstream consumers. Persists alongside `output`/`error` without replacing the human-readable phase transcript. |
+
+### Verification Evidence
+
+`VerificationEvidence` is the canonical machine-readable record for verification performed during a plan run. It exists so dashboards, quality gates, and auto-close logic can query what was verified, how it was verified, and why it passed or failed without scraping free-text phase output.
+
+```ts
+type VerificationEvidence = {
+  kind: 'build' | 'test' | 'audit';
+  status: 'pass' | 'fail';
+  command?: string;
+  summary?: string;
+  reason?: string;
+};
+```
+
+Field semantics:
+
+| Field | Required | Meaning |
+|-------|----------|---------|
+| `kind` | Yes | Verification category. Use `build` for compile/package checks, `test` for automated test execution, and `audit` for plan-conformance review or post-run audit verdicts. |
+| `status` | Yes | Machine-readable verdict for that verification record. `pass` means the verification completed successfully. `fail` means the verification completed and produced a negative result. |
+| `command` | No | The exact verification command or invocation that produced the evidence, when applicable (for example `pnpm build` or `pnpm test -- --runInBand`). |
+| `summary` | No | Short success-oriented human summary. Use for compact positive outcomes such as "dist built cleanly" or "all targeted tests passed". |
+| `reason` | No, but required for `fail` | Failure-oriented explanation for why verification failed. This is the primary machine-readable explanation downstream consumers should surface. For audit failures, prefer the concrete blocking concern text over a generic severity summary. |
+
+Production path:
+
+- Implement phases may append a dedicated trailer line to their worker response: `**Phase Evidence:** [JSON array]`. Those worker-supplied records are limited to `build` and `test` kinds; implement workers cannot emit `audit` evidence. The phase runner extracts that trailer before persisting `output`, validates it through the canonical evidence parser, and stores the resulting records in `phase.evidence`. If the trailer is missing or invalid, the phase still completes and `phase.evidence` remains unset so downstream consumers can treat it as "no trustworthy structured evidence persisted" rather than a failed implementation.
+- Audit phases do not rely on worker-supplied JSON. The runner synthesizes an `audit` evidence record directly from the parsed audit verdict, so audit evidence is always available on successful audit execution.
+- Phase retries clear previously stored evidence before rerunning, so `phase.evidence` always reflects the latest execution attempt rather than stale prior results.
+
+Outcome semantics:
+
+| Verification outcome | How it is represented | Notes |
+|----------------------|-----------------------|-------|
+| `pass` | `VerificationEvidence.status = 'pass'` | Verification ran and succeeded. Prefer `summary`; do not attach a failure `reason`. |
+| `fail` | `VerificationEvidence.status = 'fail'` | Verification ran and returned a negative result. A `reason` should explain the failure. |
+| `skip` | No evidence record for that verification, usually paired with phase `status: skipped` | Skips are phase-level execution outcomes, not evidence statuses. If a command was intentionally not run, downstream code should infer "skipped" from the phase state and the absence of corresponding evidence. |
+| `error` | Phase `status: failed` plus phase-level `error` / `output` | Errors represent runner/tool failures that prevented trustworthy verification from being recorded. They are operational failures, not verification verdicts, so they are not encoded as `VerificationEvidence.status`. |
+
+Malformed audit output is treated as a phase-level `error`, not as passing evidence. Clean modern audit output should include `**Severity: none**` when no concerns exist. For backward compatibility, verdict-only audit text still falls back to the parsed verdict and records evidence with a legacy-fallback summary/reason. Text with neither severity markers nor a verdict remains a phase-level error.
+
+Evidence differs from phase output:
+
+- `output` and `error` remain the full human-readable transcript for operators. The optional `**Phase Evidence:**` trailer is stripped before `output` is persisted, including malformed trailers that fail evidence validation and are discarded.
+- `evidence` is the compact structured contract for machines and summaries.
+- Evidence should capture verification intent and verdict, while `output` preserves raw logs, stack traces, and contextual detail.
+- Evidence is persisted in both the JSON state file and the markdown phases file so downstream readers can recover the same machine-readable contract from either storage format. In markdown, the persisted evidence JSON lives in the phase metadata preamble; arbitrary free-text transcript content is not scanned for evidence markers.
+
+### Run-Level Evidence
+
+Per-phase evidence is flattened into a run-scoped summary by `collectRunEvidence()` in `verification-evidence.ts`. `buildPostRunSummary()` calls it first, then returns both the human-readable summary text and the structured evidence array so run-completion pathways do not need to re-read or manually iterate `phase.evidence`.
+
+The flattened row shape can be thought of as a `PhaseEvidenceSummary`:
+
+```ts
+type PhaseEvidenceSummary = VerificationEvidence & {
+  phaseId: string;
+  phaseTitle: string;
+  phaseKind: 'implement' | 'read' | 'audit';
+  phaseStatus: 'pending' | 'in-progress' | 'done' | 'failed' | 'skipped';
+};
+```
+
+In code, this is currently exported as `RunVerificationEvidence`; the semantics are the same. Each row keeps the original verification `kind`/`status` plus the phase metadata needed to interpret where that record came from and what state the owning phase ended in.
+
+Aggregation rules:
+
+- `collectRunEvidence(phases)` preserves phase order and emits one run-level row for each persisted `phase.evidence` entry.
+- The function does not synthesize records for phases with no evidence. Missing rows therefore mean "no trustworthy structured verification was persisted for this phase", not necessarily "verification passed" or "verification failed".
+- `buildPostRunSummary()` returns `{ text, evidence }`, where `evidence` is the direct output of `collectRunEvidence()`. This is what the `!plan run` completion message path and the action-run completion callback both use.
+
+Interpretation rules:
+
+| Phase kind | Typical evidence kinds | Interpretation |
+|------------|------------------------|----------------|
+| `implement` | `build`, `test` | Successful implement phases may contribute zero or more build/test records. They never emit `audit` evidence. A done implement phase with no row means either the worker explicitly reported `[]` (nothing ran) or no structured trailer was persisted. |
+| `read` | none | Read phases normally contribute no evidence. Their purpose is context gathering, so absence of rows is expected. |
+| `audit` | `audit` | Audit phases contribute exactly the synthesized audit verdict when execution reaches verdict parsing. `phaseStatus: failed` with `status: fail` means the audit completed and found blocking deviations, not that the runner crashed. |
+
+Phase status and evidence status answer different questions:
+
+| Phase status | Evidence interpretation |
+|--------------|-------------------------|
+| `done` | Any included rows are trustworthy completed verification results. Their `status` field carries the actual verification verdict (`pass` or `fail`). |
+| `failed` | Use the evidence rows if present, but read them together with `phaseKind`. The common case is an audit phase with `kind: 'audit'` and `status: 'fail'`; implement/runtime failures usually have no evidence row and rely on phase-level `error`. |
+| `skipped` | No synthetic `skip` evidence is created. If a skipped phase somehow still carries persisted rows (for example after resequencing or manual state edits), those rows describe historical verification that existed before the skip, not a new skip verdict. |
+| `pending` / `in-progress` | Evidence may be absent because the phase has not reached verification yet. If rows do exist, `collectRunEvidence()` preserves them unchanged so downstream consumers can surface partial progress without inventing a new evidence state. |
+
+The key rule is that `VerificationEvidence.status` always represents a completed verification verdict (`pass` or `fail`), while `phaseStatus` represents the execution lifecycle of the owning phase. Consumers that need to distinguish "not run", "skipped", "runner error", and "verification failed" must read both layers together.

@@ -1,0 +1,39 @@
+node_modules/
+dist/
+/workspace
+exports
+legacy
+content
+var
+.env
+.env.*
+!.env.example
+!.env.example.full
+data/*.json
+data/*.pid
+data/memory/
+*.log
+.codex-home-discoclaw/
+
+# Local Claude Code state (skills installs, etc.)
+.claude/skills/*
+!.claude/skills/README.md
+
+# Per-session working dirs (keep the README)
+groups/*
+!groups/README.md
+
+# Audit reports (point-in-time, kept locally but not shipped)
+docs/*-audit*
+docs/code-review/
+docs/release-audit/
+
+# Legacy plan files (not shipped)
+plans/*.md
+plans/community/*
+
+# User's own recipes (not shipped)
+recipes/community/*
+!recipes/community/.gitkeep
+.beads/
+website/

@@ -1,0 +1,1157 @@
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { PLAN_ACTION_TYPES, executePlanAction, planActionsPromptSection } from './actions-plan.js';
+import type { PlanContext } from './actions-plan.js';
+import type { ActionContext } from './actions.js';
+import { TaskStore } from '../tasks/store.js';
+
+// ---------------------------------------------------------------------------
+// Mocks
+// ---------------------------------------------------------------------------
+
+vi.mock('./plan-commands.js', () => ({
+  resolvePlanHeaderTaskId: vi.fn((header: { taskId?: string }) =>
+    header.taskId?.trim() || '',
+  ),
+  findPlanFile: vi.fn(async (_dir: string, id: string) => {
+    if (id === 'plan-notfound') return null;
+    if (id === 'plan-implementing') {
+      return {
+        filePath: `/tmp/plans/${id}-test.md`,
+        header: { planId: id, taskId: 'ws-010', status: 'IMPLEMENTING', title: 'Active Plan', project: 'discoclaw', created: '2026-01-01' },
+      };
+    }
+    return {
+      filePath: `/tmp/plans/${id}-test.md`,
+      header: { planId: id, taskId: 'ws-001', status: 'REVIEW', title: 'Test Plan', project: 'discoclaw', created: '2026-01-01' },
+    };
+  }),
+  listPlanFiles: vi.fn(async () => [
+    {
+      filePath: '/tmp/plans/plan-001-test.md',
+      header: { planId: 'plan-001', taskId: 'ws-001', status: 'DRAFT', title: 'First Plan', project: 'discoclaw', created: '2026-01-01' },
+    },
+    {
+      filePath: '/tmp/plans/plan-002-test.md',
+      header: { planId: 'plan-002', taskId: 'ws-002', status: 'APPROVED', title: 'Second Plan', project: 'discoclaw', created: '2026-01-02' },
+    },
+  ]),
+  updatePlanFileStatus: vi.fn(async () => {}),
+  handlePlanCommand: vi.fn(async (_cmd: any, _opts: any) => {
+    return 'Plan created: **plan-003** (task: `ws-003`)\nFile: `workspace/plans/plan-003-test.md`\nDescription: New feature';
+  }),
+  preparePlanRun: vi.fn(async (_id: string, _opts: any) => ({
+    phasesFilePath: '/tmp/plans/plan-042-phases.md',
+    planFilePath: '/tmp/plans/plan-042-test.md',
+    planContent: '---\nproject: discoclaw\n---\n# Plan',
+    nextPhase: { id: 'phase-1', title: 'First phase', kind: 'implement', status: 'pending', deps: [], contextFiles: [] },
+  })),
+  NO_PHASES_SENTINEL: 'NO_PHASES',
+  closePlanIfComplete: vi.fn(async () => ({ closed: false, reason: 'not_all_complete' })),
+}));
+
+vi.mock('./plan-manager.js', () => ({
+  runNextPhase: vi.fn(async () => ({ result: 'nothing_to_run' })),
+  resolveProjectCwd: vi.fn((_content: string, workspaceCwd: string) => workspaceCwd),
+  readPhasesFile: vi.fn(() => ({ phases: [] })),
+  buildPostRunSummary: vi.fn(() => ({ text: '', evidence: [] })),
+}));
+
+vi.mock('./forge-plan-registry.js', () => ({
+  acquireWriterLock: vi.fn(async () => vi.fn()),
+  addRunningPlan: vi.fn(),
+  removeRunningPlan: vi.fn(),
+  isPlanRunning: vi.fn(() => false),
+}));
+
+vi.mock('./allowed-mentions.js', () => ({
+  NO_MENTIONS: { parse: [] },
+}));
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeStatusMessage() {
+  return { edit: vi.fn(async (_opts: { content: string; allowedMentions: unknown }) => {}) };
+}
+
+function makeSendFn(statusMsg?: ReturnType<typeof makeStatusMessage>) {
+  const msg = statusMsg ?? makeStatusMessage();
+  return { fn: vi.fn(async (_payload: { content: string; allowedMentions: unknown }) => msg), msg };
+}
+
+function makeCtx(sendSetup?: ReturnType<typeof makeSendFn>): ActionContext & { statusMsg: ReturnType<typeof makeStatusMessage> } {
+  const setup = sendSetup ?? makeSendFn();
+  return {
+    guild: {} as any,
+    client: {
+      channels: {
+        fetch: vi.fn(async () => ({ send: setup.fn })),
+      },
+    } as any,
+    channelId: 'test-channel',
+    messageId: 'test-message',
+    statusMsg: setup.msg,
+  };
+}
+
+function makePlanCtx(overrides?: Partial<PlanContext>): PlanContext {
+  return {
+    plansDir: '/tmp/plans',
+    workspaceCwd: '/tmp/workspace',
+    taskStore: new TaskStore(),
+    log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('PLAN_ACTION_TYPES', () => {
+  it('contains all plan action types', () => {
+    expect(PLAN_ACTION_TYPES.has('planList')).toBe(true);
+    expect(PLAN_ACTION_TYPES.has('planShow')).toBe(true);
+    expect(PLAN_ACTION_TYPES.has('planApprove')).toBe(true);
+    expect(PLAN_ACTION_TYPES.has('planClose')).toBe(true);
+    expect(PLAN_ACTION_TYPES.has('planCreate')).toBe(true);
+    expect(PLAN_ACTION_TYPES.has('planRun')).toBe(true);
+  });
+
+  it('does not contain non-plan types', () => {
+    expect(PLAN_ACTION_TYPES.has('forgeCreate')).toBe(false);
+    expect(PLAN_ACTION_TYPES.has('beadCreate')).toBe(false);
+  });
+});
+
+describe('executePlanAction', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('planList', () => {
+    it('lists all plans', async () => {
+      const result = await executePlanAction(
+        { type: 'planList' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('plan-001');
+        expect(result.summary).toContain('plan-002');
+        expect(result.summary).toContain('First Plan');
+        expect(result.summary).toContain('Second Plan');
+        expect(result.summary).toContain('[pending]');
+      }
+    });
+
+    it('shows pending verification when phases state is missing', async () => {
+      const { readPhasesFile } = await import('./plan-manager.js');
+      (readPhasesFile as any)
+        .mockImplementationOnce(() => {
+          const err = new Error('missing phases');
+          (err as NodeJS.ErrnoException).code = 'ENOENT';
+          throw err;
+        })
+        .mockImplementationOnce(() => {
+          const err = new Error('missing phases');
+          (err as NodeJS.ErrnoException).code = 'ENOENT';
+          throw err;
+        });
+
+      const result = await executePlanAction(
+        { type: 'planList' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('[pending]');
+      }
+    });
+
+    it('filters by status', async () => {
+      const result = await executePlanAction(
+        { type: 'planList', status: 'APPROVED' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('plan-002');
+        expect(result.summary).not.toContain('plan-001');
+      }
+    });
+
+    it('returns message when no plans match status filter', async () => {
+      const result = await executePlanAction(
+        { type: 'planList', status: 'IMPLEMENTING' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('No plans with status');
+      }
+    });
+
+    it('returns message when no plans exist', async () => {
+      const { listPlanFiles } = await import('./plan-commands.js');
+      (listPlanFiles as any).mockResolvedValueOnce([]);
+
+      const result = await executePlanAction(
+        { type: 'planList' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('No plans found');
+      }
+    });
+  });
+
+  describe('planShow', () => {
+    it('shows plan details', async () => {
+      const result = await executePlanAction(
+        { type: 'planShow', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('plan-042');
+        expect(result.summary).toContain('Test Plan');
+        expect(result.summary).toContain('REVIEW');
+        expect(result.summary).toContain('Verification: [pending]');
+      }
+    });
+
+    it('shows pending verification when phases state is missing', async () => {
+      const { readPhasesFile } = await import('./plan-manager.js');
+      (readPhasesFile as any).mockImplementationOnce(() => {
+        const err = new Error('missing phases');
+        (err as NodeJS.ErrnoException).code = 'ENOENT';
+        throw err;
+      });
+
+      const result = await executePlanAction(
+        { type: 'planShow', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('Verification: [pending]');
+      }
+    });
+
+    it('fails without planId', async () => {
+      const result = await executePlanAction(
+        { type: 'planShow', planId: '' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('requires a planId');
+    });
+
+    it('fails when plan not found', async () => {
+      const result = await executePlanAction(
+        { type: 'planShow', planId: 'plan-notfound' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('Plan not found');
+    });
+  });
+
+  describe('planApprove', () => {
+    it('approves a plan', async () => {
+      const { updatePlanFileStatus } = await import('./plan-commands.js');
+
+      const result = await executePlanAction(
+        { type: 'planApprove', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('approved');
+        expect(result.summary).toContain('plan-042');
+      }
+      expect(updatePlanFileStatus).toHaveBeenCalledWith(
+        '/tmp/plans/plan-042-test.md',
+        'APPROVED',
+      );
+    });
+
+    it('fails without planId', async () => {
+      const result = await executePlanAction(
+        { type: 'planApprove', planId: '' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('requires a planId');
+    });
+
+    it('fails when plan not found', async () => {
+      const result = await executePlanAction(
+        { type: 'planApprove', planId: 'plan-notfound' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('Plan not found');
+    });
+
+    it('rejects when plan is currently implementing', async () => {
+      const result = await executePlanAction(
+        { type: 'planApprove', planId: 'plan-implementing' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('currently being implemented');
+    });
+  });
+
+  describe('planClose', () => {
+    it('closes a plan', async () => {
+      const { updatePlanFileStatus } = await import('./plan-commands.js');
+
+      const result = await executePlanAction(
+        { type: 'planClose', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('closed');
+        expect(result.summary).toContain('plan-042');
+      }
+      expect(updatePlanFileStatus).toHaveBeenCalledWith(
+        '/tmp/plans/plan-042-test.md',
+        'CLOSED',
+      );
+    });
+
+    it('fails without planId', async () => {
+      const result = await executePlanAction(
+        { type: 'planClose', planId: '' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('requires a planId');
+    });
+
+    it('fails when plan not found', async () => {
+      const result = await executePlanAction(
+        { type: 'planClose', planId: 'plan-notfound' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('Plan not found');
+    });
+
+    it('rejects when plan is currently implementing', async () => {
+      const result = await executePlanAction(
+        { type: 'planClose', planId: 'plan-implementing' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('currently being implemented');
+    });
+  });
+
+  describe('planCreate', () => {
+    it('creates a new plan', async () => {
+      const result = await executePlanAction(
+        { type: 'planCreate', description: 'New feature' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('plan-003');
+        expect(result.summary).toContain('New feature');
+      }
+    });
+
+    it('passes context to handlePlanCommand', async () => {
+      const { handlePlanCommand } = await import('./plan-commands.js');
+
+      await executePlanAction(
+        { type: 'planCreate', description: 'New feature', context: 'Extra context here' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+
+      expect(handlePlanCommand).toHaveBeenCalledWith(
+        { action: 'create', args: 'New feature', context: 'Extra context here' },
+        expect.objectContaining({ workspaceCwd: '/tmp/workspace' }),
+      );
+    });
+
+    it('fails without description', async () => {
+      const result = await executePlanAction(
+        { type: 'planCreate', description: '' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('requires a description');
+    });
+
+    it('returns error when handlePlanCommand fails', async () => {
+      const { handlePlanCommand } = await import('./plan-commands.js');
+      (handlePlanCommand as any).mockResolvedValueOnce('Failed to create backing bead: ENOENT');
+
+      const result = await executePlanAction(
+        { type: 'planCreate', description: 'Broken plan' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('Failed');
+    });
+  });
+
+  describe('planRun', () => {
+    it('starts a plan run and returns summary', async () => {
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('Plan run started');
+        expect(result.summary).toContain('plan-042');
+      }
+    });
+
+    it('resolves plan-run model tiers before phase execution', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: { id: 'codex' } as any, model: 'capable' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(runNextPhase).toHaveBeenCalled();
+      const phaseOpts = (runNextPhase as any).mock.calls[0][2];
+      expect(phaseOpts.model).toBe('gpt-5.4');
+      expect(phaseOpts.reasoningEffort).toBe('high');
+    });
+
+    it('requires an explicit plan-run model when plan-run is unset', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: { id: 'codex' } as any }),
+      );
+
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
+      expect(result.error).toContain('plan-run model');
+      expect(runNextPhase).not.toHaveBeenCalled();
+    });
+
+    it('surfaces archived-thread (50083) as a stopped run reason', async () => {
+      const statusMsg = {
+        edit: vi.fn(async () => {
+          throw Object.assign(new Error('Thread is archived'), { code: 50083 });
+        }),
+      };
+      const setup = makeSendFn(statusMsg as ReturnType<typeof makeStatusMessage>);
+      const ctx = makeCtx(setup);
+
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(true);
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const sentContents = setup.fn.mock.calls.map((call) => String(call[0]!.content));
+      expect(sentContents.some((text) => text.includes('Stopped: Thread is archived (50083)'))).toBe(true);
+    });
+
+    it('adapts runtime events to concise Discord text without leaking raw JSON payloads', async () => {
+      // Ensure stream sanitization is enabled so structured payloads are redacted.
+      const prev = process.env.DISCOCLAW_DISABLE_STREAM_SANITIZATION;
+      delete process.env.DISCOCLAW_DISABLE_STREAM_SANITIZATION;
+
+      try {
+        const { runNextPhase } = await import('./plan-manager.js');
+        const rawStructuredPayload = '{"event":"engine_update","token_count":42}';
+        const runtimeEvent = { type: 'log_line', stream: 'stdout', line: rawStructuredPayload } as const;
+
+        (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+          opts.onEvent?.(runtimeEvent);
+          return { result: 'nothing_to_run' };
+        });
+
+        const setup = makeSendFn();
+        const ctx = makeCtx(setup);
+
+        await executePlanAction(
+          { type: 'planRun', planId: 'plan-042' },
+          ctx,
+          makePlanCtx({ runtime: {} as any, model: 'opus' }),
+        );
+
+        // The streaming controller fires edits on a 1250ms interval; wait long enough for it to fire.
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        const editContents = setup.msg.edit.mock.calls.map((call) => String(call[0]!.content));
+        expect(editContents.some((text) => text.includes('Runtime update (details omitted).'))).toBe(true);
+        expect(editContents.some((text) => text.includes(rawStructuredPayload))).toBe(false);
+        // The internal runtime event payload remains untouched.
+        expect(runtimeEvent.line).toBe(rawStructuredPayload);
+      } finally {
+        if (prev !== undefined) process.env.DISCOCLAW_DISABLE_STREAM_SANITIZATION = prev;
+      }
+    });
+
+    it('can disable tool-aware runtime event streaming for plan actions', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      let capturedOnEvent: unknown = 'unset';
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        capturedOnEvent = opts.onEvent;
+        return { result: 'nothing_to_run' };
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus', toolAwareStreaming: false }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(capturedOnEvent).toBeUndefined();
+    });
+
+    it('fails without planId', async () => {
+      const result = await executePlanAction(
+        { type: 'planRun', planId: '' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('requires a planId');
+    });
+
+    it('fails without runtime', async () => {
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('requires runtime');
+    });
+
+    it('blocks at recursion depth >= 1', async () => {
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus', depth: 1 }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('recursion depth');
+    });
+
+    it('rejects when plan is already running', async () => {
+      const { isPlanRunning } = await import('./forge-plan-registry.js');
+      (isPlanRunning as any).mockReturnValueOnce(true);
+
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('already in progress');
+    });
+
+    it('rejects plan with DRAFT status via preparePlanRun gate', async () => {
+      const { preparePlanRun } = await import('./plan-commands.js');
+      (preparePlanRun as any).mockResolvedValueOnce({ error: 'Plan plan-draft has status DRAFT — must be APPROVED or IMPLEMENTING to run.' });
+
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-draft' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('DRAFT');
+    });
+
+    it('rejects plan with REVIEW status via preparePlanRun gate', async () => {
+      const { preparePlanRun } = await import('./plan-commands.js');
+      (preparePlanRun as any).mockResolvedValueOnce({ error: 'Plan plan-review has status REVIEW — must be APPROVED or IMPLEMENTING to run.' });
+
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-review' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('REVIEW');
+    });
+
+    it('calls closePlanIfComplete after phase loop completes', async () => {
+      const { closePlanIfComplete } = await import('./plan-commands.js');
+
+      const result = await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+      expect(result.ok).toBe(true);
+
+      // closePlanIfComplete is called in the fire-and-forget async block;
+      // yield to let it execute.
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(closePlanIfComplete).toHaveBeenCalledWith(
+        '/tmp/plans/plan-042-phases.md',
+        '/tmp/plans/plan-042-test.md',
+        expect.any(TaskStore),
+        expect.any(Function),
+        expect.anything(),
+        undefined,
+      );
+    });
+
+    it('calls closePlanIfComplete even when some phases fail', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      const { closePlanIfComplete } = await import('./plan-commands.js');
+      (runNextPhase as any).mockResolvedValueOnce({ result: 'failed', phase: { id: 'phase-1', title: 'Fail' }, error: 'build error' });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // closePlanIfComplete should still be called — it checks internally
+      expect(closePlanIfComplete).toHaveBeenCalled();
+    });
+
+    it('sends initial status message and edits it with final outcome after run finishes', async () => {
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Two sends: initial status message + standalone completion message
+      expect(setup.fn).toHaveBeenCalledTimes(2);
+      const firstSendContent: string = setup.fn.mock.calls[0]![0]!.content;
+      expect(firstSendContent).toContain('plan-042');
+      expect(firstSendContent).toContain('Plan run started');
+
+      // Second send: standalone completion message posted as a new message
+      const completionSendContent: string = setup.fn.mock.calls[1]![0]!.content;
+      expect(completionSendContent).toContain('plan-042');
+      expect(completionSendContent).toContain('Plan run complete');
+
+      // Status message also edited in place with final summary (backwards compat)
+      expect(setup.msg.edit).toHaveBeenCalled();
+      const lastEdit = setup.msg.edit.mock.calls.at(-1)![0]!;
+      expect(lastEdit.content).toContain('plan-042');
+      expect(lastEdit.content).toContain('Phases run:');
+      expect(lastEdit.allowedMentions).toEqual({ parse: [] });
+    });
+
+    it('logs aggregated run evidence after building the post-run summary', async () => {
+      const { buildPostRunSummary } = await import('./plan-manager.js');
+      const planCtx = makePlanCtx({ runtime: {} as any, model: 'opus' });
+
+      (buildPostRunSummary as any).mockReturnValueOnce({
+        text: '[x] **phase-1:** First phase — build: pass (dist built cleanly)',
+        evidence: [
+          {
+            phaseId: 'phase-1',
+            phaseTitle: 'First phase',
+            phaseKind: 'implement',
+            phaseStatus: 'done',
+            kind: 'build',
+            status: 'pass',
+            summary: 'dist built cleanly',
+          },
+        ],
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        planCtx,
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(planCtx.log?.info).toHaveBeenCalledWith(
+        {
+          planId: 'plan-042',
+          phasesRun: 0,
+          evidence: [
+            {
+              phaseId: 'phase-1',
+              phaseTitle: 'First phase',
+              phaseKind: 'implement',
+              phaseStatus: 'done',
+              kind: 'build',
+              status: 'pass',
+              summary: 'dist built cleanly',
+            },
+          ],
+        },
+        'plan:action:run complete evidence',
+      );
+    });
+
+    it('posts a new message when a phase starts', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        await opts.onPlanEvent?.({
+          type: 'phase_start',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        });
+        return { result: 'nothing_to_run' };
+      });
+
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const contents = setup.fn.mock.calls.map((call) => String(call[0]!.content));
+      expect(contents.some((text) => text.includes('Starting phase: First phase...'))).toBe(true);
+    });
+
+    it('deduplicates phase-start posts for repeated progress lines in the same run', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        const event = {
+          type: 'phase_start',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        };
+        await opts.onPlanEvent?.(event);
+        await opts.onPlanEvent?.(event);
+        return { result: 'nothing_to_run' };
+      });
+
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      const phaseStartMessages = setup.fn.mock.calls
+        .map((call) => String(call[0]!.content))
+        .filter((content) => content.includes('Starting phase: First phase...'));
+      expect(phaseStartMessages).toHaveLength(1);
+    });
+
+    it('skips completion notification when skipCompletionNotify is true', async () => {
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus', skipCompletionNotify: true }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(setup.fn).not.toHaveBeenCalled();
+      expect(setup.msg.edit).not.toHaveBeenCalled();
+    });
+
+    it('posts phase-start updates even when skipCompletionNotify is true', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        await opts.onPlanEvent?.({
+          type: 'phase_start',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        });
+        return { result: 'nothing_to_run' };
+      });
+
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus', skipCompletionNotify: true }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(setup.fn).toHaveBeenCalledOnce();
+      const sent = String(setup.fn.mock.calls[0]![0]!.content);
+      expect(sent).toContain('Starting phase: First phase...');
+      expect(setup.msg.edit).not.toHaveBeenCalled();
+    });
+
+    it('includes stop reason in completion notification when a phase fails', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+      (runNextPhase as any).mockResolvedValueOnce({ result: 'audit_failed', error: 'lint errors' });
+
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(setup.fn).toHaveBeenCalledTimes(2);
+      const lastEdit = setup.msg.edit.mock.calls.at(-1)![0]!;
+      expect(lastEdit.content).toContain('Stopped:');
+    });
+
+    it('calls onRunComplete with final content after run completes', async () => {
+      const onRunComplete = vi.fn(async (_result: { content: string; evidence: unknown[] }) => {});
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus', onRunComplete }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(onRunComplete).toHaveBeenCalledOnce();
+      const completion = onRunComplete.mock.calls[0]![0]!;
+      const content: string = completion.content;
+      expect(content).toContain('Plan run complete');
+      expect(content).toContain('plan-042');
+      expect(content).toContain('Phases run:');
+      expect(completion.evidence).toEqual([]);
+    });
+
+    it('passes aggregated run evidence into onRunComplete', async () => {
+      const { buildPostRunSummary } = await import('./plan-manager.js');
+      const onRunComplete = vi.fn(async (_result: { content: string; evidence: unknown[] }) => {});
+
+      (buildPostRunSummary as any).mockReturnValueOnce({
+        text: '[x] **phase-1:** First phase — build: pass (dist built cleanly)',
+        evidence: [
+          {
+            phaseId: 'phase-1',
+            phaseTitle: 'First phase',
+            phaseKind: 'implement',
+            phaseStatus: 'done',
+            kind: 'build',
+            status: 'pass',
+            summary: 'dist built cleanly',
+          },
+        ],
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        makeCtx(),
+        makePlanCtx({ runtime: {} as any, model: 'opus', onRunComplete }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(onRunComplete).toHaveBeenCalledOnce();
+      expect(onRunComplete.mock.calls[0]![0]!.evidence).toEqual([
+        {
+          phaseId: 'phase-1',
+          phaseTitle: 'First phase',
+          phaseKind: 'implement',
+          phaseStatus: 'done',
+          kind: 'build',
+          status: 'pass',
+          summary: 'dist built cleanly',
+        },
+      ]);
+    });
+
+    it('calls onRunComplete even when skipCompletionNotify is true', async () => {
+      const onRunComplete = vi.fn(async (_result: { content: string; evidence: unknown[] }) => {});
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus', skipCompletionNotify: true, onRunComplete }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // No Discord messages should be sent
+      expect(setup.fn).not.toHaveBeenCalled();
+      expect(setup.msg.edit).not.toHaveBeenCalled();
+      // But onRunComplete is still called
+      expect(onRunComplete).toHaveBeenCalledOnce();
+      const completion = onRunComplete.mock.calls[0]![0]!;
+      const content: string = completion.content;
+      expect(content).toContain('Plan run complete');
+      expect(content).toContain('plan-042');
+      expect(completion.evidence).toEqual([]);
+    });
+
+    it('includes auto-close note in completion notification when plan is closed', async () => {
+      const { closePlanIfComplete } = await import('./plan-commands.js');
+      (closePlanIfComplete as any).mockResolvedValueOnce({ closed: true, reason: 'all_phases_complete' });
+
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      expect(setup.fn).toHaveBeenCalledTimes(2);
+      const lastEdit = setup.msg.edit.mock.calls.at(-1)![0]!;
+      expect(lastEdit.content).toContain('auto-closed');
+    });
+
+    it('edits phase-start message to done state on phase completion', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+
+      // Create distinct message objects per send call to distinguish phase-start from status.
+      const sendMsgs: Array<{ edit: ReturnType<typeof vi.fn> }> = [];
+      const sendFn = vi.fn(async () => {
+        const msg = { edit: vi.fn(async () => {}) };
+        sendMsgs.push(msg);
+        return msg;
+      });
+
+      const ctx: ActionContext = {
+        guild: {} as any,
+        client: { channels: { fetch: vi.fn(async () => ({ send: sendFn })) } } as any,
+        channelId: 'test-channel',
+        messageId: 'test-message',
+      };
+
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        await opts.onPlanEvent?.({
+          type: 'phase_start',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        });
+        await opts.onPlanEvent?.({
+          type: 'phase_complete',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+          status: 'done',
+        });
+        return { result: 'done', phase: { id: 'phase-1', title: 'First phase', kind: 'implement' }, output: 'ok' };
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // send order: [0] initial status, [1] phase-start, [2] completion
+      expect(sendMsgs.length).toBeGreaterThanOrEqual(2);
+      const phaseMsg = sendMsgs[1]!;
+      expect(phaseMsg.edit).toHaveBeenCalled();
+      const doneEdit = phaseMsg.edit.mock.calls.find((call) =>
+        String(call[0]!.content).includes('Phase complete: First phase.'),
+      );
+      expect(doneEdit).toBeDefined();
+      expect(String(doneEdit![0]!.content)).toContain('First phase');
+    });
+
+    it('edits phase-start message to failed state when phase fails', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+
+      const sendMsgs: Array<{ edit: ReturnType<typeof vi.fn> }> = [];
+      const sendFn = vi.fn(async () => {
+        const msg = { edit: vi.fn(async () => {}) };
+        sendMsgs.push(msg);
+        return msg;
+      });
+
+      const ctx: ActionContext = {
+        guild: {} as any,
+        client: { channels: { fetch: vi.fn(async () => ({ send: sendFn })) } } as any,
+        channelId: 'test-channel',
+        messageId: 'test-message',
+      };
+
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        await opts.onPlanEvent?.({
+          type: 'phase_start',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        });
+        await opts.onPlanEvent?.({
+          type: 'phase_complete',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+          status: 'failed',
+        });
+        return { result: 'failed', phase: { id: 'phase-1', title: 'First phase', kind: 'implement' }, output: '', error: 'build error' };
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // send order: [0] initial status, [1] phase-start, [2] completion
+      expect(sendMsgs.length).toBeGreaterThanOrEqual(2);
+      const phaseMsg = sendMsgs[1]!;
+      expect(phaseMsg.edit).toHaveBeenCalled();
+      const failEdit = phaseMsg.edit.mock.calls.find((call) =>
+        String(call[0]!.content).includes('Phase failed: First phase.'),
+      );
+      expect(failEdit).toBeDefined();
+      expect(String(failEdit![0]!.content)).toContain('First phase');
+    });
+
+    it('posts a new standalone completion message after run finishes', async () => {
+      const setup = makeSendFn();
+      const ctx = makeCtx(setup);
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Two sends: initial status + standalone completion message
+      expect(setup.fn).toHaveBeenCalledTimes(2);
+      const completionContent: string = setup.fn.mock.calls[1]![0]!.content;
+      expect(completionContent).toContain('Plan run complete');
+      expect(completionContent).toContain('plan-042');
+      expect(completionContent).toContain('Phases run:');
+      expect(setup.fn.mock.calls[1]![0]!.allowedMentions).toEqual({ parse: [] });
+    });
+
+    it('handles gracefully when phase-start message edit fails', async () => {
+      const { runNextPhase } = await import('./plan-manager.js');
+
+      const failingEdit = vi.fn(async () => { throw new Error('edit failed'); });
+      let sendCallCount = 0;
+      const sendFn = vi.fn(async () => {
+        sendCallCount++;
+        if (sendCallCount === 2) return { edit: failingEdit };
+        return { edit: vi.fn(async () => {}) };
+      });
+
+      const ctx: ActionContext = {
+        guild: {} as any,
+        client: { channels: { fetch: vi.fn(async () => ({ send: sendFn })) } } as any,
+        channelId: 'test-channel',
+        messageId: 'test-message',
+      };
+
+      (runNextPhase as any).mockImplementationOnce(async (_phases: string, _plan: string, opts: any) => {
+        await opts.onPlanEvent?.({
+          type: 'phase_start',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+        });
+        await opts.onPlanEvent?.({
+          type: 'phase_complete',
+          planId: 'plan-042',
+          phase: { id: 'phase-1', title: 'First phase', kind: 'implement' },
+          status: 'done',
+        });
+        return { result: 'done', phase: { id: 'phase-1', title: 'First phase', kind: 'implement' }, output: 'ok' };
+      });
+
+      await executePlanAction(
+        { type: 'planRun', planId: 'plan-042' },
+        ctx,
+        makePlanCtx({ runtime: {} as any, model: 'opus' }),
+      );
+
+      await new Promise(resolve => setTimeout(resolve, 50));
+
+      // Edit was attempted on the failing message
+      expect(failingEdit).toHaveBeenCalled();
+      // Run still completed — completion message was sent (initial + phase-start + completion = 3)
+      expect(sendCallCount).toBeGreaterThanOrEqual(3);
+    });
+  });
+});
+
+describe('planActionsPromptSection', () => {
+  it('returns non-empty prompt section', () => {
+    const section = planActionsPromptSection();
+    expect(section).toContain('planList');
+    expect(section).toContain('planShow');
+    expect(section).toContain('planApprove');
+    expect(section).toContain('planClose');
+    expect(section).toContain('planCreate');
+    expect(section).toContain('planRun');
+  });
+
+  it('includes plan guidelines', () => {
+    const section = planActionsPromptSection();
+    expect(section).toContain('DRAFT');
+    expect(section).toContain('APPROVED');
+    expect(section).toContain('forgeCreate');
+  });
+});

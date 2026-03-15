@@ -1,0 +1,694 @@
+import path from 'node:path';
+import type { DiscordActionResult, ActionContext } from './actions.js';
+import type { LoggerLike } from '../logging/logger-like.js';
+import type { ForgeOrchestrator, ForgeResult } from './forge-commands.js';
+import { executePlanAction } from './actions-plan.js';
+import type { PlanContext } from './actions-plan.js';
+import type { TaskStore } from '../tasks/store.js';
+import { findPlanFile } from './plan-commands.js';
+import { createStreamingProgress } from './streaming-progress.js';
+import { NO_MENTIONS } from './allowed-mentions.js';
+import { sanitizeErrorMessage } from './status-channel.js';
+import { taskThreadCache } from '../tasks/thread-cache.js';
+import type { LongRunWatchdog } from './long-run-watchdog.js';
+import {
+  getActiveOrchestrator,
+  getActiveForgeId,
+  acquireWriterLock,
+  setActiveOrchestrator,
+  getRunningPlanIds,
+  resolveForgePlanPhaseGate,
+} from './forge-plan-registry.js';
+import {
+  isForgeFinalArtifactPhase,
+  isForgeResearchPhase,
+  resolveForgeReResearchPhase,
+  resolveForgeTurnRoute,
+} from '../forge-phase.js';
+import type { ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type ForgeActionRequest =
+  | { type: 'forgeCreate'; description: string; context?: string }
+  | { type: 'forgeResume'; planId: string }
+  | { type: 'forgeStatus' }
+  | { type: 'forgeCancel' };
+
+const FORGE_TYPE_MAP: Record<ForgeActionRequest['type'], true> = {
+  forgeCreate: true,
+  forgeResume: true,
+  forgeStatus: true,
+  forgeCancel: true,
+};
+export const FORGE_ACTION_TYPES = new Set<string>(Object.keys(FORGE_TYPE_MAP));
+export type { ForgeTurnPhase, ForgeTurnRoute } from '../forge-phase.js';
+export { isForgeFinalArtifactPhase, isForgeResearchPhase, resolveForgeTurnRoute } from '../forge-phase.js';
+
+export type ForgeTurnGateRequest = {
+  phase: ForgeTurnPhase;
+  researchComplete: boolean;
+  candidatePaths?: readonly string[] | null;
+  allowlistPaths?: readonly string[] | null;
+  allowResearchReset?: boolean;
+};
+
+export type ForgeTurnGateDecision = {
+  status: 'allow' | 'reject' | 're_research';
+  requestedPhase: ForgeTurnPhase;
+  nextPhase: ForgeTurnPhase;
+  route: ForgeTurnRoute;
+  researchComplete: boolean;
+  normalizedCandidatePaths: string[];
+  normalizedAllowlistPaths: string[];
+  outOfBoundsPaths: string[];
+  reason?: string;
+};
+
+export type ForgeContext = {
+  orchestratorFactory: (overrides?: {
+    existingTaskId?: string;
+    taskDescription?: string;
+    pinnedThreadSummary?: string;
+  }) => ForgeOrchestrator;
+  plansDir: string;
+  workspaceCwd: string;
+  taskStore: TaskStore;
+  /** Callback to send progress messages to the originating channel. */
+  onProgress: (msg: string, opts?: { force?: boolean }) => Promise<void>;
+  /** Static-progress throttle for streaming progress edits. */
+  progressThrottleMs?: number;
+  /** Whether runtime event-driven tool/text streaming is enabled. Defaults to true. */
+  toolAwareStreaming?: boolean;
+  log?: LoggerLike;
+  /** Recursion depth — 0 for user/cron origins, 1+ for action-triggered sub-invocations. */
+  depth?: number;
+  /** Optional lifecycle watchdog for long-running forge runs. */
+  longRunWatchdog?: Pick<LongRunWatchdog, 'start' | 'complete'>;
+  /** Optional override for watchdog still-running check-in delay. */
+  longRunStillRunningDelayMs?: number;
+  /** Optional plan action context so approved plans can resume implementation via planRun. */
+  planCtx?: PlanContext;
+};
+
+type SendFn = (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>;
+
+function resolveSendFn(channel: unknown): SendFn | null {
+  if (!channel || typeof channel !== 'object') return null;
+  const maybeSend = (channel as { send?: unknown }).send;
+  if (typeof maybeSend !== 'function') return null;
+  return maybeSend.bind(channel) as SendFn;
+}
+
+function errorCode(err: unknown): number | null {
+  if (typeof err !== 'object' || err === null || !('code' in err)) return null;
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'number' ? code : null;
+}
+
+function isArchivedThreadError(err: unknown): boolean {
+  return errorCode(err) === 50083;
+}
+
+function shouldRouteForgeResumeToPlanRun(status: string | undefined): boolean {
+  return status === 'APPROVED' || status === 'IMPLEMENTING';
+}
+
+function hasVisibleForgePlanId(planId: string | undefined): planId is string {
+  return typeof planId === 'string' && planId.trim().length > 0 && planId !== '(none)';
+}
+
+export function buildForgeCompletionWatchdogDetail(
+  result: Pick<ForgeResult, 'planId' | 'filePath' | 'error'>,
+  opts?: { summaryPosted?: boolean },
+): string | undefined {
+  if (result.error) {
+    const detail = sanitizeErrorMessage(result.error);
+    if (hasVisibleForgePlanId(result.planId)) {
+      const detailSentence = /[.!?]$/.test(detail) ? detail : `${detail}.`;
+      const partialPlanSuffix = result.filePath ? ` Partial plan saved: \`!plan show ${result.planId}\`.` : '';
+      return `Forge failed during ${result.planId}: ${detailSentence}${partialPlanSuffix}`;
+    }
+    return `Forge failed: ${detail}`;
+  }
+
+  if (opts?.summaryPosted === false) {
+    return hasVisibleForgePlanId(result.planId)
+      ? `Forge completed for ${result.planId}, but the summary could not be posted back to Discord.`
+      : 'Forge completed, but the summary could not be posted back to Discord.';
+  }
+
+  return undefined;
+}
+
+export function buildForgeCrashWatchdogDetail(
+  err: unknown,
+  opts?: { resume?: boolean; planId?: string },
+): string {
+  const detail = sanitizeErrorMessage(String(err instanceof Error ? err.message : err));
+  if (opts?.resume && hasVisibleForgePlanId(opts.planId)) {
+    return `Forge resume crashed for ${opts.planId}: ${detail}`;
+  }
+  if (opts?.resume) {
+    return `Forge resume crashed: ${detail}`;
+  }
+  if (hasVisibleForgePlanId(opts?.planId)) {
+    return `Forge crashed during ${opts.planId}: ${detail}`;
+  }
+  return `Forge crashed: ${detail}`;
+}
+
+export function buildForgePostProcessingWatchdogDetail(
+  planId: string | undefined,
+  err: unknown,
+): string {
+  const detail = sanitizeErrorMessage(String(err instanceof Error ? err.message : err));
+  return hasVisibleForgePlanId(planId)
+    ? `Forge completed for ${planId}, but post-processing failed: ${detail}`
+    : `Forge completed, but post-processing failed: ${detail}`;
+}
+
+export function normalizeForgeCandidatePath(candidatePath: string): string | null {
+  const trimmed = candidatePath.trim();
+  if (!trimmed) return null;
+  const unwrapped = trimmed.startsWith('`') && trimmed.endsWith('`')
+    ? trimmed.slice(1, -1).trim()
+    : trimmed;
+  if (!unwrapped) return null;
+  const slashNormalized = unwrapped.replace(/\\/g, '/');
+  if (/^[a-z]:\//i.test(slashNormalized)) return null;
+  const normalized = path.posix.normalize(slashNormalized).replace(/^(\.\/)+/, '');
+  if (!normalized || normalized === '.' || normalized.startsWith('../') || path.posix.isAbsolute(normalized)) {
+    return null;
+  }
+  return normalized;
+}
+
+export function normalizeForgeCandidatePathList(
+  candidatePaths: readonly string[] | null | undefined,
+): string[] {
+  if (!candidatePaths?.length) return [];
+  const normalized = new Set<string>();
+  for (const candidatePath of candidatePaths) {
+    const next = normalizeForgeCandidatePath(candidatePath);
+    if (next) normalized.add(next);
+  }
+  return [...normalized];
+}
+
+function collectNormalizedForgeCandidatePaths(
+  candidatePaths: readonly string[] | null | undefined,
+): { normalized: string[]; invalid: string[] } {
+  if (!candidatePaths?.length) return { normalized: [], invalid: [] };
+
+  const normalized = new Set<string>();
+  const invalid = new Set<string>();
+  for (const candidatePath of candidatePaths) {
+    const next = normalizeForgeCandidatePath(candidatePath);
+    if (next) {
+      normalized.add(next);
+      continue;
+    }
+    const trimmed = candidatePath.trim();
+    if (trimmed) invalid.add(trimmed);
+  }
+  return { normalized: [...normalized], invalid: [...invalid] };
+}
+
+export function evaluateForgeTurnGate(request: ForgeTurnGateRequest): ForgeTurnGateDecision {
+  const { normalized: normalizedCandidatePaths, invalid: invalidCandidatePaths } = collectNormalizedForgeCandidatePaths(request.candidatePaths);
+  const normalizedAllowlistPaths = normalizeForgeCandidatePathList(request.allowlistPaths);
+  const allowlistSet = new Set(normalizedAllowlistPaths);
+  const requestedPhase = request.phase;
+
+  if (isForgeFinalArtifactPhase(requestedPhase) && !request.researchComplete) {
+    return {
+      status: 'reject',
+      requestedPhase,
+      nextPhase: requestedPhase,
+      route: resolveForgeTurnRoute(requestedPhase),
+      researchComplete: false,
+      normalizedCandidatePaths,
+      normalizedAllowlistPaths,
+      outOfBoundsPaths: [],
+      reason: 'Research must be marked complete before running a final strict-output forge turn.',
+    };
+  }
+
+  if (isForgeFinalArtifactPhase(requestedPhase) && normalizedAllowlistPaths.length === 0) {
+    const reResearchPhase = resolveForgeReResearchPhase(requestedPhase);
+    const reason = `Final forge phase ${requestedPhase} is missing a grounded candidate allowlist.`;
+    if (request.allowResearchReset && reResearchPhase) {
+      return {
+        status: 're_research',
+        requestedPhase,
+        nextPhase: reResearchPhase,
+        route: resolveForgeTurnRoute(reResearchPhase),
+        researchComplete: false,
+        normalizedCandidatePaths,
+        normalizedAllowlistPaths,
+        outOfBoundsPaths: [],
+        reason: `${reason} Re-enter ${reResearchPhase} to refresh grounded inputs before continuing.`,
+      };
+    }
+
+    return {
+      status: 'reject',
+      requestedPhase,
+      nextPhase: requestedPhase,
+      route: resolveForgeTurnRoute(requestedPhase),
+      researchComplete: request.researchComplete,
+      normalizedCandidatePaths,
+      normalizedAllowlistPaths,
+      outOfBoundsPaths: [],
+      reason,
+    };
+  }
+
+  if (isForgeResearchPhase(requestedPhase)) {
+    return {
+      status: 'allow',
+      requestedPhase,
+      nextPhase: requestedPhase,
+      route: resolveForgeTurnRoute(requestedPhase),
+      researchComplete: request.researchComplete,
+      normalizedCandidatePaths,
+      normalizedAllowlistPaths,
+      outOfBoundsPaths: [],
+    };
+  }
+
+  const outOfBoundsPaths = [
+    ...invalidCandidatePaths,
+    ...normalizedCandidatePaths.filter((candidatePath) => !allowlistSet.has(candidatePath)),
+  ];
+  if (outOfBoundsPaths.length === 0) {
+    return {
+      status: 'allow',
+      requestedPhase,
+      nextPhase: requestedPhase,
+      route: resolveForgeTurnRoute(requestedPhase),
+      researchComplete: request.researchComplete,
+      normalizedCandidatePaths,
+      normalizedAllowlistPaths,
+      outOfBoundsPaths,
+    };
+  }
+
+  const reResearchPhase = resolveForgeReResearchPhase(requestedPhase);
+  const reason = `Candidate paths fall outside the bounded forge allowlist: ${outOfBoundsPaths.join(', ')}`;
+  if (request.allowResearchReset && reResearchPhase) {
+    return {
+      status: 're_research',
+      requestedPhase,
+      nextPhase: reResearchPhase,
+      route: resolveForgeTurnRoute(reResearchPhase),
+      researchComplete: false,
+      normalizedCandidatePaths,
+      normalizedAllowlistPaths,
+      outOfBoundsPaths,
+      reason: `${reason}. Re-enter ${reResearchPhase} to refresh grounded inputs before continuing.`,
+    };
+  }
+
+  return {
+    status: 'reject',
+    requestedPhase,
+    nextPhase: requestedPhase,
+    route: resolveForgeTurnRoute(requestedPhase),
+    researchComplete: request.researchComplete,
+    normalizedCandidatePaths,
+    normalizedAllowlistPaths,
+    outOfBoundsPaths,
+    reason,
+  };
+}
+
+async function resolveLinkedTaskForThread(
+  ctx: ActionContext,
+  forgeCtx: ForgeContext,
+): Promise<{ existingTaskId?: string; taskDescription?: string }> {
+  if (!ctx.threadParentId) return {};
+  try {
+    const task = await taskThreadCache.get(ctx.channelId, forgeCtx.taskStore);
+    if (!task) return {};
+    return { existingTaskId: task.id, taskDescription: task.description };
+  } catch (err) {
+    forgeCtx.log?.warn({ err, channelId: ctx.channelId }, 'forge:action thread-task lookup failed');
+    return {};
+  }
+}
+
+async function buildProgressCallbacks(
+  ctx: ActionContext,
+  forgeCtx: ForgeContext,
+  startMessage: string,
+): Promise<{
+  onProgress: (msg: string, opts?: { force?: boolean }) => Promise<void>;
+  onEvent?: ReturnType<typeof createStreamingProgress>['onEvent'];
+  sendPlanSummary: (summary?: string) => Promise<boolean>;
+  dispose: () => void;
+}> {
+  const fallback = {
+    onProgress: forgeCtx.onProgress,
+    onEvent: undefined as ReturnType<typeof createStreamingProgress>['onEvent'] | undefined,
+    sendPlanSummary: async (summary?: string) => {
+      if (!summary) return true;
+      try {
+        await forgeCtx.onProgress(summary, { force: true });
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    dispose: () => {},
+  };
+
+  try {
+    const channel = await ctx.client.channels.fetch(ctx.channelId);
+    const send = resolveSendFn(channel);
+    if (!send) return fallback;
+
+    const progressReply = await send({ content: startMessage, allowedMentions: NO_MENTIONS }) as {
+      edit?: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>;
+    };
+    if (!progressReply || typeof progressReply.edit !== 'function') return fallback;
+
+    const controller = createStreamingProgress(
+      progressReply as { edit: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown> },
+      forgeCtx.progressThrottleMs ?? 3000,
+      {
+        throwOnFatal: true,
+        onFatalError: (err) => {
+          forgeCtx.log?.warn({ err, channelId: ctx.channelId }, 'forge:action progress thread archived');
+        },
+      },
+    );
+    const enableToolAwareStreaming = forgeCtx.toolAwareStreaming ?? true;
+    return {
+      onProgress: async (msg: string, opts?: { force?: boolean }) => {
+        await controller.onProgress(msg, opts);
+      },
+      onEvent: enableToolAwareStreaming ? controller.onEvent : undefined,
+      sendPlanSummary: async (summary?: string) => {
+        if (!summary) return true;
+        try {
+          await send({ content: summary, allowedMentions: NO_MENTIONS });
+          return true;
+        } catch (err) {
+          if (isArchivedThreadError(err)) {
+            try {
+              await forgeCtx.onProgress(summary, { force: true });
+              return true;
+            } catch {
+              return false;
+            }
+          }
+          return false;
+        }
+      },
+      dispose: controller.dispose,
+    };
+  } catch (err) {
+    forgeCtx.log?.warn({ err, channelId: ctx.channelId }, 'forge:action progress channel unavailable');
+    return fallback;
+  }
+}
+
+function buildForgeWatchdogId(kind: 'create' | 'resume', ctx: ActionContext, suffix: string): string {
+  return `forge-action:${kind}:${ctx.channelId}:${ctx.messageId}:${suffix}`;
+}
+
+// ---------------------------------------------------------------------------
+// Executor
+// ---------------------------------------------------------------------------
+
+export async function executeForgeAction(
+  action: ForgeActionRequest,
+  ctx: ActionContext,
+  forgeCtx: ForgeContext,
+): Promise<DiscordActionResult> {
+  switch (action.type) {
+    case 'forgeCreate': {
+      if ((forgeCtx.depth ?? 0) >= 1) {
+        return { ok: false, error: 'forgeCreate blocked: recursion depth >= 1 (forge cannot spawn another forge)' };
+      }
+
+      if (!action.description) {
+        return { ok: false, error: 'forgeCreate requires a description' };
+      }
+
+      const existing = getActiveOrchestrator();
+      if (existing?.isRunning) {
+        const activeId = getActiveForgeId();
+        return {
+          ok: false,
+          error: `A forge is already running${activeId ? ` (${activeId})` : ''}. Cancel it first with forgeCancel.`,
+        };
+      }
+
+      const threadTask = await resolveLinkedTaskForThread(ctx, forgeCtx);
+      const progress = await buildProgressCallbacks(ctx, forgeCtx, `🛠️ Starting forge: ${action.description}`);
+      const orchestrator = forgeCtx.orchestratorFactory({
+        existingTaskId: threadTask.existingTaskId,
+        taskDescription: threadTask.taskDescription,
+      });
+      setActiveOrchestrator(orchestrator, [ctx.channelId, ctx.threadParentId]);
+      const watchdog = forgeCtx.longRunWatchdog;
+      const watchdogRunId = buildForgeWatchdogId('create', ctx, action.description.trim().slice(0, 64) || 'run');
+      if (watchdog) {
+        try {
+          await watchdog.start({
+            runId: watchdogRunId,
+            channelId: ctx.channelId,
+            messageId: ctx.messageId,
+            stillRunningDelayMs: forgeCtx.longRunStillRunningDelayMs,
+          });
+        } catch (err) {
+          forgeCtx.log?.warn({ err, runId: watchdogRunId }, 'forge:action:create watchdog start failed');
+        }
+      }
+
+      // Fire and forget — forge runs asynchronously with progress callbacks.
+      const release = await acquireWriterLock();
+      void orchestrator
+        .run(action.description, progress.onProgress, action.context, progress.onEvent)
+        .then(async (result) => {
+          let outcome: 'succeeded' | 'failed' = result.error ? 'failed' : 'succeeded';
+          const postedSummary = await progress.sendPlanSummary(result.planSummary);
+          if (!postedSummary) outcome = 'failed';
+          const detail = buildForgeCompletionWatchdogDetail(result, { summaryPosted: postedSummary });
+          if (watchdog) {
+            try {
+              await watchdog.complete(watchdogRunId, { outcome, detail });
+            } catch (err) {
+              forgeCtx.log?.warn({ err, runId: watchdogRunId }, 'forge:action:create watchdog complete failed');
+            }
+          }
+        })
+        .catch(async (err) => {
+          forgeCtx.log?.error({ err }, 'forge:action:create failed');
+          if (watchdog) {
+            try {
+              await watchdog.complete(watchdogRunId, {
+                outcome: 'failed',
+                detail: buildForgeCrashWatchdogDetail(err),
+              });
+            } catch (completeErr) {
+              forgeCtx.log?.warn({ err: completeErr, runId: watchdogRunId }, 'forge:action:create watchdog complete failed');
+            }
+          }
+        })
+        .finally(() => {
+          progress.dispose();
+          setActiveOrchestrator(null);
+          release();
+        });
+
+      return { ok: true, summary: `Forge started for: "${action.description}"` };
+    }
+
+    case 'forgeResume': {
+      if ((forgeCtx.depth ?? 0) >= 1) {
+        return { ok: false, error: 'forgeResume blocked: recursion depth >= 1 (forge cannot spawn another forge)' };
+      }
+
+      if (!action.planId) {
+        return { ok: false, error: 'forgeResume requires a planId' };
+      }
+
+      const existing = getActiveOrchestrator();
+      if (existing?.isRunning) {
+        const activeId = getActiveForgeId();
+        return {
+          ok: false,
+          error: `A forge is already running${activeId ? ` (${activeId})` : ''}. Cancel it first with forgeCancel.`,
+        };
+      }
+
+      const found = await findPlanFile(forgeCtx.plansDir, action.planId);
+      if (!found) {
+        return { ok: false, error: `Plan not found: ${action.planId}` };
+      }
+
+      if (shouldRouteForgeResumeToPlanRun(found.header.status)) {
+        if (!forgeCtx.planCtx) {
+          return {
+            ok: false,
+            error: `Plan ${found.header.planId} is ${found.header.status}, but planRun is not configured in this context.`,
+          };
+        }
+
+        const runResult = await executePlanAction(
+          { type: 'planRun', planId: found.header.planId },
+          ctx,
+          forgeCtx.planCtx,
+        );
+        return runResult.ok
+          ? { ok: true, summary: runResult.summary ?? `Plan run started for ${found.header.planId}.` }
+          : runResult;
+      }
+
+      const phaseGate = resolveForgePlanPhaseGate(found.header.planId, 'audit');
+      const turnGate = evaluateForgeTurnGate({
+        phase: 'audit',
+        researchComplete: phaseGate.researchComplete,
+        candidatePaths: phaseGate.candidatePaths,
+        allowlistPaths: phaseGate.allowlistPaths,
+        allowResearchReset: phaseGate.fallbackPolicy.onOutOfBounds === 're_research',
+      });
+      if (phaseGate.requiresFreshResearch || turnGate.status !== 'allow') {
+        return {
+          ok: false,
+          error: phaseGate.reason ?? turnGate.reason ?? `Forge resume for ${found.header.planId} requires fresh research before audit.`,
+        };
+      }
+
+      const progress = await buildProgressCallbacks(
+        ctx,
+        forgeCtx,
+        found.header.status === 'DRAFT' || found.header.status === 'REVIEW'
+          ? `Resuming forge review for **${found.header.planId}** from ${found.header.status} status...`
+          : `Resuming forge review for **${found.header.planId}**...`,
+      );
+      const orchestrator = forgeCtx.orchestratorFactory();
+      setActiveOrchestrator(orchestrator, [ctx.channelId, ctx.threadParentId]);
+      const watchdog = forgeCtx.longRunWatchdog;
+      const watchdogRunId = buildForgeWatchdogId('resume', ctx, found.header.planId);
+      if (watchdog) {
+        try {
+          await watchdog.start({
+            runId: watchdogRunId,
+            channelId: ctx.channelId,
+            messageId: ctx.messageId,
+            stillRunningDelayMs: forgeCtx.longRunStillRunningDelayMs,
+          });
+        } catch (err) {
+          forgeCtx.log?.warn({ err, runId: watchdogRunId, planId: found.header.planId }, 'forge:action:resume watchdog start failed');
+        }
+      }
+
+      const release = await acquireWriterLock();
+      void orchestrator
+        .resume(found.header.planId, found.filePath, found.header.title, progress.onProgress, progress.onEvent)
+        .then(async (result) => {
+          let outcome: 'succeeded' | 'failed' = result.error ? 'failed' : 'succeeded';
+          const postedSummary = await progress.sendPlanSummary(result.planSummary);
+          if (!postedSummary) outcome = 'failed';
+          const detail = buildForgeCompletionWatchdogDetail(result, { summaryPosted: postedSummary });
+          if (watchdog) {
+            try {
+              await watchdog.complete(watchdogRunId, { outcome, detail });
+            } catch (err) {
+              forgeCtx.log?.warn({ err, runId: watchdogRunId, planId: found.header.planId }, 'forge:action:resume watchdog complete failed');
+            }
+          }
+        })
+        .catch(async (err) => {
+          forgeCtx.log?.error({ err, planId: action.planId }, 'forge:action:resume failed');
+          if (watchdog) {
+            try {
+              await watchdog.complete(watchdogRunId, {
+                outcome: 'failed',
+                detail: buildForgeCrashWatchdogDetail(err, { resume: true, planId: found.header.planId }),
+              });
+            } catch (completeErr) {
+              forgeCtx.log?.warn({ err: completeErr, runId: watchdogRunId, planId: found.header.planId }, 'forge:action:resume watchdog complete failed');
+            }
+          }
+        })
+        .finally(() => {
+          progress.dispose();
+          setActiveOrchestrator(null);
+          release();
+        });
+
+      return { ok: true, summary: `Forge resumed for ${found.header.planId}: "${found.header.title}"` };
+    }
+
+    case 'forgeStatus': {
+      const orch = getActiveOrchestrator();
+      const runningPlanIds = getRunningPlanIds();
+      const planRunsSuffix = runningPlanIds.size > 0
+        ? ` Plan runs active: ${[...runningPlanIds].join(', ')}.`
+        : '';
+      if (orch?.isRunning) {
+        const activeId = getActiveForgeId();
+        return { ok: true, summary: `Forge is running${activeId ? `: ${activeId}` : ''}.${planRunsSuffix}` };
+      }
+      return { ok: true, summary: `No forge is currently running.${planRunsSuffix}` };
+    }
+
+    case 'forgeCancel': {
+      const orch = getActiveOrchestrator();
+      if (!orch?.isRunning) {
+        return { ok: false, error: 'No forge is currently running.' };
+      }
+      orch.requestCancel('forgeCancel action');
+      const activeId = getActiveForgeId();
+      return { ok: true, summary: `Cancel requested${activeId ? ` for ${activeId}` : ''}` };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Prompt section
+// ---------------------------------------------------------------------------
+
+export function forgeActionsPromptSection(): string {
+  return `### Forge (Plan Drafting + Audit)
+
+**forgeCreate** — Start a new forge run (drafts a plan, then audits/revises iteratively):
+\`\`\`
+<discord-action>{"type":"forgeCreate","description":"Add retry logic to webhook handler","context":"Optional extra context or requirements"}</discord-action>
+\`\`\`
+- \`description\` (required): What to plan for.
+- \`context\` (optional): Additional context appended to the plan.
+
+**forgeResume** — Continue an existing plan based on its current status:
+\`\`\`
+<discord-action>{"type":"forgeResume","planId":"plan-042"}</discord-action>
+\`\`\`
+- \`planId\` (required): The plan ID to resume.
+- DRAFT / REVIEW: re-enter the forge audit/revise loop.
+- APPROVED / IMPLEMENTING: route to \`planRun\` and continue implementation.
+
+**forgeStatus** — Check if a forge is currently running:
+\`\`\`
+<discord-action>{"type":"forgeStatus"}</discord-action>
+\`\`\`
+
+**forgeCancel** — Cancel a running forge:
+\`\`\`
+<discord-action>{"type":"forgeCancel"}</discord-action>
+\`\`\`
+
+#### Forge Guidelines
+- Only one forge can run at a time. Check status before starting a new one.
+- Forge runs are asynchronous — progress updates are posted to the channel.
+- Use forgeResume when you want DiscoClaw to pick up a plan again; the next step depends on the plan's status.
+- Re-audit with forgeResume after manual plan edits when the plan is still in DRAFT or REVIEW.
+- Forge phases are bounded: research/discovery completes before any final strict-output turn, and candidate file access stays inside the grounded allowlist unless forge explicitly re-enters research.`;
+}
