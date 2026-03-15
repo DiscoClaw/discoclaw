@@ -3,8 +3,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TaskData } from '../tasks/types.js';
+import type { RuntimeCapability } from '../runtime/types.js';
 import { OPENAI_TOOL_EXEC_CONTRACT } from '../runtime/openai-tool-exec.js';
-import { CODEX_RUNTIME_CAPABILITIES } from '../runtime/tool-capabilities.js';
+import { CODEX_RUNTIME_CAPABILITIES, resolveGroundedToolCapabilities } from '../runtime/tool-capabilities.js';
 
 import {
   ROOT_POLICY,
@@ -1094,6 +1095,31 @@ describe('resolveEffectiveTools audit logging', () => {
         runtimeId: 'codex',
         droppedTools: expect.arrayContaining(['Bash', 'WebSearch']),
       }),
+      expect.stringContaining('dropped unsupported tools'),
+    );
+  });
+
+  it('keeps grounded Codex tools when filtering uses richer internal capabilities', async () => {
+    const workspace = await tmpDir();
+    await fs.writeFile(path.join(workspace, 'PERMISSIONS.json'), '{"tier":"full"}');
+    const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const runtime = {
+      capabilities: new Set<RuntimeCapability>(['streaming_text', 'sessions']),
+      groundedCapabilities: new Set(CODEX_RUNTIME_CAPABILITIES),
+    };
+
+    const result = await resolveEffectiveTools({
+      workspaceCwd: workspace,
+      runtimeTools: ['Bash', 'Read', 'WebSearch'],
+      runtimeCapabilities: resolveGroundedToolCapabilities(runtime),
+      runtimeId: 'codex',
+      log,
+    });
+
+    expect(result.effectiveTools).toEqual(['Bash', 'Read', 'WebSearch']);
+    expect(result.runtimeCapabilityNote).toBeUndefined();
+    expect(log.warn).not.toHaveBeenCalledWith(
+      expect.anything(),
       expect.stringContaining('dropped unsupported tools'),
     );
   });

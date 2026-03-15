@@ -248,6 +248,11 @@ export type RuntimeInvokeParams = {
 export interface RuntimeAdapter {
   id: RuntimeId;
   capabilities: ReadonlySet<RuntimeCapability>;
+  /**
+   * Optional richer transport/grounded capability surface for internal tool
+   * resolution. When omitted, consumers should fall back to `capabilities`.
+   */
+  groundedCapabilities?: ReadonlySet<RuntimeCapability>;
   /** The model used when params.model is empty (adapter-default sentinel). */
   defaultModel?: string;
   invoke(params: RuntimeInvokeParams): AsyncIterable<EngineEvent>;

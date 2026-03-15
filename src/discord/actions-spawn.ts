@@ -10,6 +10,7 @@ import type { DiscordChannelContext } from './channel-context.js';
 import type { DeferScheduler } from './defer-scheduler.js';
 import type { DeferActionRequest } from './actions-defer.js';
 import type { ConcurrencyLimiter } from '../runtime/concurrency-limit.js';
+import { resolveGroundedToolCapabilities } from '../runtime/tool-capabilities.js';
 import { resolveChannel, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { splitDiscord } from './output-utils.js';
@@ -155,7 +156,7 @@ export async function executeSpawnAction(
         const toolsInfo = await resolveEffectiveTools({
           workspaceCwd: spawnCtx.workspaceCwd,
           runtimeTools: spawnCtx.runtimeTools,
-          runtimeCapabilities: spawnCtx.runtime.capabilities,
+          runtimeCapabilities: resolveGroundedToolCapabilities(spawnCtx.runtime),
           runtimeId: spawnCtx.runtime.id,
           log: spawnCtx.log,
         });

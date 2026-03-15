@@ -8,6 +8,7 @@ import {
   filterToolsByCapabilities,
   getCodexCapabilityContract,
   requiredCapabilityForTool,
+  resolveGroundedToolCapabilities,
 } from './tool-capabilities.js';
 
 const COVERED_RUNTIME_CONFIGS = [
@@ -114,5 +115,24 @@ describe('filterToolsByCapabilities', () => {
     );
     expect(result.tools).toEqual(['Read', 'Bash', 'WebSearch']);
     expect(result.dropped).toEqual([]);
+  });
+});
+
+describe('resolveGroundedToolCapabilities', () => {
+  it('prefers grounded capabilities when a runtime exposes a richer internal tool surface', () => {
+    const runtime = {
+      capabilities: new Set<RuntimeCapability>(['streaming_text', 'sessions']),
+      groundedCapabilities: new Set<RuntimeCapability>(CODEX_RUNTIME_CAPABILITIES),
+    };
+
+    expect(resolveGroundedToolCapabilities(runtime)).toBe(runtime.groundedCapabilities);
+  });
+
+  it('falls back to advertised capabilities when no grounded override exists', () => {
+    const runtime = {
+      capabilities: new Set<RuntimeCapability>(['streaming_text']),
+    };
+
+    expect(resolveGroundedToolCapabilities(runtime)).toBe(runtime.capabilities);
   });
 });

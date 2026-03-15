@@ -20,6 +20,7 @@ import type { VoiceContext } from './actions-voice.js';
 import type { SpawnContext } from './actions-spawn.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
+import { resolveGroundedToolCapabilities } from '../runtime/tool-capabilities.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
 import {
@@ -283,7 +284,7 @@ export function configureDeferredScheduler(
       const toolsInfo = await resolveEffectiveTools({
         workspaceCwd: opts.workspaceCwd,
         runtimeTools: opts.runtimeTools,
-        runtimeCapabilities: opts.runtime.capabilities,
+        runtimeCapabilities: resolveGroundedToolCapabilities(opts.runtime),
         runtimeId: opts.runtime.id,
         log: opts.log,
       });

@@ -1,4 +1,4 @@
-import type { RuntimeCapability } from './types.js';
+import type { RuntimeAdapter, RuntimeCapability } from './types.js';
 
 export type CodexCapabilityContract =
   | {
@@ -167,4 +167,10 @@ export function filterToolsByCapabilities(
   }
 
   return { tools: kept, dropped };
+}
+
+export function resolveGroundedToolCapabilities(
+  runtime: Pick<RuntimeAdapter, 'capabilities' | 'groundedCapabilities'>,
+): ReadonlySet<RuntimeCapability> {
+  return runtime.groundedCapabilities ?? runtime.capabilities;
 }
