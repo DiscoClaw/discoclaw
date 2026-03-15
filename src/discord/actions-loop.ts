@@ -34,6 +34,7 @@ import type { ForgeContext } from './actions-forge.js';
 import type { PlanContext } from './actions-plan.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
+import { resolveGroundedToolCapabilities } from '../runtime/tool-capabilities.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { resolveModel } from '../runtime/model-tiers.js';
@@ -441,7 +442,7 @@ async function buildLoopPrompt(
     const toolsInfo = await resolveEffectiveTools({
       workspaceCwd: opts.workspaceCwd,
       runtimeTools: opts.runtimeTools,
-      runtimeCapabilities: opts.runtime.capabilities,
+      runtimeCapabilities: resolveGroundedToolCapabilities(opts.runtime),
       runtimeId: opts.runtime.id,
       log: opts.log,
     });
@@ -492,7 +493,7 @@ async function handleLoopTick(
     const toolsInfo = await resolveEffectiveTools({
       workspaceCwd: opts.workspaceCwd,
       runtimeTools: opts.runtimeTools,
-      runtimeCapabilities: opts.runtime.capabilities,
+      runtimeCapabilities: resolveGroundedToolCapabilities(opts.runtime),
       runtimeId: opts.runtime.id,
       log: opts.log,
     });

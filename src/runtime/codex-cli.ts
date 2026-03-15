@@ -124,6 +124,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
     return {
       ...baseAdapter,
       capabilities: advertisedCapabilities,
+      groundedCapabilities: baseAdapter.capabilities,
       invoke(params) {
         return (async function* () {
           const normalizedParams = normalizeInvokeParams(params, opts);
@@ -180,6 +181,7 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
   return {
     ...baseAdapter,
     capabilities: createAdvertisedCodexCapabilities(nativeCapabilities),
+    groundedCapabilities: nativeCapabilities,
     invoke(params) {
       return (async function* () {
         const normalizedParams = normalizeInvokeParams(params, opts);

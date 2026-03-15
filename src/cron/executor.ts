@@ -26,6 +26,7 @@ import { ensureStatusMessage } from './discord-sync.js';
 import { globalMetrics } from '../observability/metrics.js';
 import { mapRuntimeErrorToUserMessage } from '../discord/user-errors.js';
 import { resolveModel } from '../runtime/model-tiers.js';
+import { resolveGroundedToolCapabilities } from '../runtime/tool-capabilities.js';
 import { buildCronPromptBody } from './cron-prompt.js';
 import { buildTieredDiscordActionsPromptSection } from '../discord/actions.js';
 import { handleJsonRouteOutput } from './json-router.js';
@@ -316,7 +317,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     const tools = await resolveEffectiveTools({
       workspaceCwd: ctx.cwd,
       runtimeTools: ctx.tools,
-      runtimeCapabilities: ctx.runtime.capabilities,
+      runtimeCapabilities: resolveGroundedToolCapabilities(ctx.runtime),
       runtimeId: ctx.runtime.id,
       log: ctx.log,
     });

@@ -1401,6 +1401,7 @@ function wrapWithReasoningEffort(
   return {
     id: rt.id,
     capabilities: rt.capabilities,
+    groundedCapabilities: rt.groundedCapabilities,
     invoke(params) {
       return rt.invoke({ ...params, reasoningEffort: params.reasoningEffort ?? effort });
     },
@@ -1419,6 +1420,7 @@ function wrapWithEventForwarding(
   return {
     id: rt.id,
     capabilities: rt.capabilities,
+    groundedCapabilities: rt.groundedCapabilities,
     invoke(params) {
       const seen = new WeakSet<object>();
       const forward = (evt: EngineEvent) => {
@@ -1608,6 +1610,7 @@ function wrapWithPlanPrefixGuard(
   return {
     id: rt.id,
     capabilities: rt.capabilities,
+    groundedCapabilities: rt.groundedCapabilities,
     invoke(params) {
       let prefixSatisfied = false;
       let leadingText = '';
@@ -1765,6 +1768,7 @@ function wrapWithGroundingOutputGuard(
   return {
     id: rt.id,
     capabilities: rt.capabilities,
+    groundedCapabilities: rt.groundedCapabilities,
     invoke(params) {
       let prefixSatisfied = false;
       let leadingText = '';

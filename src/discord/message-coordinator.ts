@@ -29,6 +29,7 @@ import type { SpawnContext } from './actions-spawn.js';
 import { autoImplementForgePlan } from './forge-auto-implement.js';
 import type { ForgeAutoImplementDeps } from './forge-auto-implement.js';
 import type { LoggerLike } from '../logging/logger-like.js';
+import { resolveGroundedToolCapabilities } from '../runtime/tool-capabilities.js';
 import { fetchMessageHistory } from './message-history.js';
 import {
   loadSummary,
@@ -1014,7 +1015,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           const liveTools = await resolveEffectiveTools({
             workspaceCwd: params.workspaceCwd,
             runtimeTools: params.runtimeTools,
-            runtimeCapabilities: params.runtime.capabilities,
+            runtimeCapabilities: resolveGroundedToolCapabilities(params.runtime),
             runtimeId: params.runtime.id,
             log: params.log,
           });
@@ -3076,7 +3077,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           const tools = await resolveEffectiveTools({
             workspaceCwd: params.workspaceCwd,
             runtimeTools: params.runtimeTools,
-            runtimeCapabilities: params.runtime.capabilities,
+            runtimeCapabilities: resolveGroundedToolCapabilities(params.runtime),
             runtimeId: params.runtime.id,
             log: params.log,
           });

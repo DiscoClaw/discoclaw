@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CODEX_RUNTIME_CAPABILITIES } from './tool-capabilities.js';
 import type { EngineEvent, RuntimeCapability } from './types.js';
 
 const { appServerInstances, CodexAppServerClientMock, mockExeca } = vi.hoisted(() => {
@@ -84,6 +85,20 @@ function expectAdvertisedCodexCapabilities(
   expect(capabilities.has('tools_web')).toBe(false);
   expect(capabilities.has('workspace_instructions')).toBe(false);
   expect(capabilities.has('mcp')).toBe(false);
+}
+
+function expectGroundedCodexCapabilities(
+  capabilities: ReadonlySet<RuntimeCapability> | undefined,
+  opts?: {
+    sessions?: boolean;
+    midTurnSteering?: boolean;
+  },
+): void {
+  expect(capabilities).toBeDefined();
+  const expected = CODEX_RUNTIME_CAPABILITIES.filter((capability) =>
+    opts?.sessions !== false || capability !== 'sessions');
+  if (opts?.midTurnSteering) expected.push('mid_turn_steering');
+  expect([...(capabilities ?? new Set())].sort()).toEqual([...expected].sort());
 }
 
 async function* eventStream(events: EngineEvent[], err?: unknown): AsyncIterable<EngineEvent> {
@@ -485,6 +500,7 @@ describe('Codex CLI runtime adapter', () => {
 
     expect(rt.id).toBe('codex');
     expectAdvertisedCodexCapabilities(rt.capabilities);
+    expectGroundedCodexCapabilities(rt.groundedCapabilities);
   });
 
   it('disableSessions removes sessions capability and forces ephemeral mode', async () => {
@@ -500,6 +516,7 @@ describe('Codex CLI runtime adapter', () => {
     });
 
     expectAdvertisedCodexCapabilities(rt.capabilities, { sessions: false });
+    expectGroundedCodexCapabilities(rt.groundedCapabilities, { sessions: false });
 
     await collectEvents(rt.invoke({
       prompt: 'Hi',
@@ -1585,6 +1602,7 @@ describe('Codex CLI runtime adapter', () => {
     });
 
     expectAdvertisedCodexCapabilities(rt.capabilities, { midTurnSteering: true });
+    expectGroundedCodexCapabilities(rt.groundedCapabilities, { midTurnSteering: true });
     expect(CodexAppServerClientMock).toHaveBeenCalledWith(expect.objectContaining({
       baseUrl: 'ws://127.0.0.1:4321',
     }));

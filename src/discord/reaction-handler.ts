@@ -23,6 +23,7 @@ import { downloadTextAttachments } from './file-download.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
 import { resolveModel } from '../runtime/model-tiers.js';
+import { resolveGroundedToolCapabilities } from '../runtime/tool-capabilities.js';
 import { adaptRuntimeEventText } from './runtime-event-text-adapter.js';
 import {
   RUNTIME_SIGNAL_SUPPRESSED_LINE,
@@ -512,7 +513,7 @@ function createReactionHandler(
           const tools = await resolveEffectiveTools({
             workspaceCwd: params.workspaceCwd,
             runtimeTools: params.runtimeTools,
-            runtimeCapabilities: params.runtime.capabilities,
+            runtimeCapabilities: resolveGroundedToolCapabilities(params.runtime),
             runtimeId: params.runtime.id,
             log: params.log,
           });
