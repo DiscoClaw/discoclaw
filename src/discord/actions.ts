@@ -828,6 +828,16 @@ Bot requires appropriate server-level role permissions (e.g. Manage Channels, Ma
 If "Missing Permissions" errors occur, tell the user to check **Server Settings → Roles** and enable the required permission on the ${displayName} bot's role.`;
 }
 
+function liveActionInventorySection(flags: ActionCategoryFlags): string {
+  const types = buildValidTypes(flags);
+  if (types.size === 0) return '';
+  const sorted = [...types].sort();
+  return `### Available action types this turn
+${sorted.join(', ')}
+
+Before refusing any Discord-managed resource request as manual-only or unsupported, check the list above. If the relevant action type is present (e.g. \`cronCreate\` for scheduling, \`channelCreate\` for channels, \`forumTagCreate\` for forum tags), prefer executing the action or gathering the required parameters over a manual-only refusal. This list is the source of truth for what you can do this turn.`;
+}
+
 function deferredSelfInvocationSection(): string {
   return `### Deferred self-invocation
 Use a <discord-action>{"type":"defer","channel":"general","delaySeconds":600,"prompt":"Check on the forge run"}</discord-action> block to schedule a one-shot follow-up run inside the requested channel without another user prompt. You must specify the channel by name or ID; delaySeconds is how long to wait (capped by DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS) and prompt becomes the user message when the deferred invocation runs. The scheduler enforces DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT pending jobs, respects the same channel permissions as this response, automatically posts the follow-up output, and allows nested defers up to the configured depth limit (DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH, default 4); once the limit is reached, \`defer\` is disabled for that run. If the task is recurring, use \`loopCreate\` instead of chaining repeated defers. If a guard rail rejects the request (too long, too many active defers, missing permissions, or the channel becomes invalid) the action fails with an explanatory message.
@@ -967,6 +977,12 @@ export function buildTieredDiscordActionsPromptSection(
     const deferSection = deferredSelfInvocationSection();
     sections.push(deferSection);
     sectionLogs.push({ section: 'defer', content: deferSection });
+  }
+
+  const inventory = liveActionInventorySection(flags);
+  if (inventory) {
+    sections.push(inventory);
+    sectionLogs.push({ section: 'liveInventory', content: inventory });
   }
 
   const selection: ActionSchemaSelection = {
