@@ -10,7 +10,7 @@ import { getGitHash } from '../version.js';
 import type { DashboardServer, DashboardServerOptions } from '../dashboard/server.js';
 import type { BootReportMcpStatus } from '../discord/status-channel.js';
 import type { DoctorContext, DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
-import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext } from '../health/config-doctor.js';
+import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext, updateEnvKey } from '../health/config-doctor.js';
 import {
   detectMcpServers,
   validateMcpEnvInterpolation,
@@ -77,6 +77,7 @@ export type DashboardSnapshot = {
   };
   mcpStatus: BootReportMcpStatus;
   mcpWarnings: number;
+  primaryRuntime: string;
 };
 
 export type DashboardIo = {
@@ -92,6 +93,7 @@ export type DashboardDeps = {
   loadDoctorContext: (opts?: InspectOptions) => Promise<DoctorContext>;
   saveModelConfig: (filePath: string, config: ModelConfig) => Promise<void>;
   saveOverrides: (filePath: string, overrides: RuntimeOverrides) => Promise<void>;
+  updateEnvKey: (envPath: string, key: string, value: string) => Promise<void>;
   runCommand: (cmd: string, args: string[]) => Promise<CommandResult>;
   getLocalVersion: () => string;
   isNpmManaged: () => Promise<boolean>;
@@ -135,6 +137,7 @@ function createDefaultDeps(): DashboardDeps {
     loadDoctorContext,
     saveModelConfig,
     saveOverrides,
+    updateEnvKey,
     runCommand(cmd: string, args: string[]) {
       return new Promise((resolve) => {
         execFile(cmd, args, { timeout: 15_000 }, (err, stdout, stderr) => {
@@ -432,6 +435,7 @@ export async function collectDashboardSnapshot(
     },
     mcpStatus: toBootReportMcpStatus(mcpDetectResult),
     mcpWarnings,
+    primaryRuntime: normalizeRuntimeName(ctx.env.PRIMARY_RUNTIME) ?? 'claude',
   };
 }
 

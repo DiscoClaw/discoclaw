@@ -2005,14 +2005,17 @@ describe('runNextPhase', () => {
     await fs.mkdir(projectDir, { recursive: true });
     await fs.mkdir(plansDir, { recursive: true });
 
-    // Init git in project dir
+    // Init git in project dir.
+    // Strip GIT_DIR / GIT_WORK_TREE so git discovers the repo from cwd,
+    // not from an inherited hook environment (e.g. pre-push sets GIT_DIR).
+    const gitEnv = { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined };
     try {
-      execSync('git init', { cwd: projectDir, stdio: 'pipe' });
-      execSync('git config user.email "test@test.com"', { cwd: projectDir, stdio: 'pipe' });
-      execSync('git config user.name "Test"', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git init', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
+      execSync('git config user.email "test@test.com"', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
+      execSync('git config user.name "Test"', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
       // Create initial commit
       await fs.writeFile(path.join(projectDir, 'README.md'), 'test');
-      execSync('git add . && git commit -m "init"', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git add . && git commit -m "init"', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
     } catch {
       // git not available — tests will still work for non-git paths
     }
@@ -2473,13 +2476,16 @@ describe('phase progress messages and nextPhase', () => {
     await fs.mkdir(projectDir, { recursive: true });
     await fs.mkdir(plansDir, { recursive: true });
 
-    // Init git in project dir
+    // Init git in project dir.
+    // Strip GIT_DIR / GIT_WORK_TREE so git discovers the repo from cwd,
+    // not from an inherited hook environment (e.g. pre-push sets GIT_DIR).
+    const gitEnv = { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined };
     try {
-      execSync('git init', { cwd: projectDir, stdio: 'pipe' });
-      execSync('git config user.email "test@test.com"', { cwd: projectDir, stdio: 'pipe' });
-      execSync('git config user.name "Test"', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git init', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
+      execSync('git config user.email "test@test.com"', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
+      execSync('git config user.name "Test"', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
       await fs.writeFile(path.join(projectDir, 'README.md'), 'test');
-      execSync('git add . && git commit -m "init"', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git add . && git commit -m "init"', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
     } catch {
       // git not available
     }
@@ -2852,13 +2858,16 @@ describe('runNextPhase audit verdict', () => {
     await fs.mkdir(projectDir, { recursive: true });
     await fs.mkdir(plansDir, { recursive: true });
 
-    // Init git in project dir
+    // Init git in project dir.
+    // Strip GIT_DIR / GIT_WORK_TREE so git discovers the repo from cwd,
+    // not from an inherited hook environment (e.g. pre-push sets GIT_DIR).
+    const gitEnv = { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined };
     try {
-      execSync('git init', { cwd: projectDir, stdio: 'pipe' });
-      execSync('git config user.email "test@test.com"', { cwd: projectDir, stdio: 'pipe' });
-      execSync('git config user.name "Test"', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git init', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
+      execSync('git config user.email "test@test.com"', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
+      execSync('git config user.name "Test"', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
       await fs.writeFile(path.join(projectDir, 'README.md'), 'test');
-      execSync('git add . && git commit -m "init"', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git add . && git commit -m "init"', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
     } catch {
       // git not available
     }
@@ -3061,13 +3070,16 @@ describe('runNextPhase audit fix loop', () => {
     await fs.mkdir(projectDir, { recursive: true });
     await fs.mkdir(plansDir, { recursive: true });
 
-    // Init git in project dir
+    // Init git in project dir.
+    // Strip GIT_DIR / GIT_WORK_TREE so git discovers the repo from cwd,
+    // not from an inherited hook environment (e.g. pre-push sets GIT_DIR).
+    const gitEnv = { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined };
     try {
-      execSync('git init', { cwd: projectDir, stdio: 'pipe' });
-      execSync('git config user.email "test@test.com"', { cwd: projectDir, stdio: 'pipe' });
-      execSync('git config user.name "Test"', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git init', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
+      execSync('git config user.email "test@test.com"', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
+      execSync('git config user.name "Test"', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
       await fs.writeFile(path.join(projectDir, 'README.md'), 'test');
-      execSync('git add . && git commit -m "init"', { cwd: projectDir, stdio: 'pipe' });
+      execSync('git add . && git commit -m "init"', { cwd: projectDir, env: gitEnv, stdio: 'pipe' });
     } catch {
       // git not available
     }
