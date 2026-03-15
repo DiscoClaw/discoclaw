@@ -355,10 +355,22 @@ describe('runTaskSync', () => {
   });
 
   it('archives threads for closed tasks in phase 4', async () => {
-    const { closeTaskThread } = await import('./thread-ops.js');
+    const { resolveTasksForum, closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-005', title: 'E', status: 'closed', labels: [], external_ref: 'discord:999' },
     ]);
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({
+          threads: new Map([
+            ['999', { id: '999', name: '\u{1F7E2} [005] E', archived: false }],
+          ]),
+        })),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+    (resolveTasksForum as any).mockResolvedValueOnce(mockForum);
 
     const result = await runTaskSync({
       client: makeClient(),
@@ -374,11 +386,23 @@ describe('runTaskSync', () => {
   });
 
   it('skips fully-closed task threads in phase 4', async () => {
-    const { closeTaskThread, isTaskThreadAlreadyClosed } = await import('./thread-ops.js');
+    const { resolveTasksForum, closeTaskThread, isTaskThreadAlreadyClosed } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-006', title: 'F', status: 'closed', labels: [], external_ref: 'discord:888' },
     ]);
     (isTaskThreadAlreadyClosed as any).mockResolvedValueOnce(true);
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({ threads: new Map() })),
+        fetchArchived: vi.fn(async () => ({
+          threads: new Map([
+            ['888', { id: '888', name: '\u2705 [006] F', archived: true }],
+          ]),
+        })),
+      },
+    };
+    (resolveTasksForum as any).mockResolvedValueOnce(mockForum);
 
     const result = await runTaskSync({
       client: makeClient(),
@@ -395,11 +419,23 @@ describe('runTaskSync', () => {
   });
 
   it('phase 4 uses isTaskThreadAlreadyClosed for full state check', async () => {
-    const { isTaskThreadAlreadyClosed, closeTaskThread } = await import('./thread-ops.js');
+    const { resolveTasksForum, isTaskThreadAlreadyClosed, closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-040', title: 'Closed task', status: 'closed', labels: [], external_ref: 'discord:400' },
     ]);
     (isTaskThreadAlreadyClosed as any).mockResolvedValueOnce(false);
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({
+          threads: new Map([
+            ['400', { id: '400', name: '\u{1F7E2} [040] Closed task', archived: false }],
+          ]),
+        })),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+    (resolveTasksForum as any).mockResolvedValueOnce(mockForum);
 
     await runTaskSync({
       client: makeClient(),
@@ -414,13 +450,25 @@ describe('runTaskSync', () => {
     expect(closeTaskThread).toHaveBeenCalled();
   });
 
-  it('phase 4 recovers archived thread with wrong name/tags', async () => {
-    const { isTaskThreadAlreadyClosed, closeTaskThread } = await import('./thread-ops.js');
+  it('phase 4 recovers active closed thread with wrong name/tags', async () => {
+    const { resolveTasksForum, isTaskThreadAlreadyClosed, closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-050', title: 'Stale name', status: 'closed', labels: [], external_ref: 'discord:500' },
     ]);
-    // Thread is archived but has wrong name — isTaskThreadAlreadyClosed returns false
+    // Thread is active and mismatched — isTaskThreadAlreadyClosed returns false.
     (isTaskThreadAlreadyClosed as any).mockResolvedValueOnce(false);
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({
+          threads: new Map([
+            ['500', { id: '500', name: '\u{1F7E2} [050] Old stale name', archived: false }],
+          ]),
+        })),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+    (resolveTasksForum as any).mockResolvedValueOnce(mockForum);
 
     const result = await runTaskSync({
       client: makeClient(),
@@ -800,9 +848,9 @@ describe('runTaskSync', () => {
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
-    // Phase 4 checks isTaskThreadAlreadyClosed → true (skip).
-    // Phase 5 also checks isTaskThreadAlreadyClosed for the archived thread → true (skip).
-    (isTaskThreadAlreadyClosed as any).mockResolvedValueOnce(true).mockResolvedValueOnce(true);
+    // Phase 4 skips archived threads based on the active-thread snapshot.
+    // Phase 5 checks the archived thread once and sees it is already closed.
+    (isTaskThreadAlreadyClosed as any).mockResolvedValueOnce(true);
 
     const mockForum = {
       threads: {
@@ -828,18 +876,19 @@ describe('runTaskSync', () => {
 
     // Thread is already fully reconciled — no work from Phase 5.
     expect(result.threadsReconciled).toBe(0);
-    // closeTaskThread should not be called (Phase 4 skipped, Phase 5 skipped via isTaskThreadAlreadyClosed).
+    // closeTaskThread should not be called (Phase 5 saw the archived thread was already closed).
     expect(closeTaskThread).not.toHaveBeenCalled();
+    expect(isTaskThreadAlreadyClosed).toHaveBeenCalledTimes(1);
   });
 
-  it('phase 5 reconciles stale archived thread for closed task via unarchive→edit→re-archive', async () => {
+  it('phase 5 reconciles stale archived thread for direct-mapped closed task via unarchive→edit→re-archive', async () => {
     const { resolveTasksForum, closeTaskThread, isTaskThreadAlreadyClosed } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
-    // Phase 4 checks isTaskThreadAlreadyClosed → true (skip Phase 4 archive).
-    // Phase 5 checks isTaskThreadAlreadyClosed → false (thread is stale, needs reconcile).
-    (isTaskThreadAlreadyClosed as any).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    // Phase 4 skips archived threads based on the active-thread snapshot.
+    // Phase 5 sees the archived thread is stale and repairs it.
+    (isTaskThreadAlreadyClosed as any).mockResolvedValueOnce(false);
 
     const mockForum = {
       threads: {
@@ -863,7 +912,6 @@ describe('runTaskSync', () => {
       throttleMs: 0,
     } as any);
 
-    // Phase 5 should have reconciled the stale archived thread.
     expect(result.threadsReconciled).toBe(1);
     expect(isTaskThreadAlreadyClosed).toHaveBeenCalledWith(expect.anything(), 'thread-100', expect.objectContaining({ id: 'ws-001' }), {});
     expect(closeTaskThread).toHaveBeenCalledWith(expect.anything(), 'thread-100', expect.objectContaining({ id: 'ws-001' }), {}, undefined);
@@ -978,10 +1026,22 @@ describe('runTaskSync', () => {
   });
 
   it('phase 4 defers close when in-flight reply is active for that thread', async () => {
-    const { closeTaskThread } = await import('./thread-ops.js');
+    const { resolveTasksForum, closeTaskThread } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-005', title: 'E', status: 'closed', labels: [], external_ref: 'discord:999' },
     ]);
+    const mockForum = {
+      threads: {
+        create: vi.fn(async () => ({ id: 'thread-new' })),
+        fetchActive: vi.fn(async () => ({
+          threads: new Map([
+            ['999', { id: '999', name: '\u{1F7E2} [005] E', archived: false }],
+          ]),
+        })),
+        fetchArchived: vi.fn(async () => ({ threads: new Map() })),
+      },
+    };
+    (resolveTasksForum as any).mockResolvedValueOnce(mockForum);
 
     const result = await runTaskSync({
       client: makeClient(),
@@ -991,6 +1051,7 @@ describe('runTaskSync', () => {
       store,
       throttleMs: 0,
       hasInFlightForChannel: () => true,
+      skipPhase5: true,
     } as any);
 
     expect(closeTaskThread).not.toHaveBeenCalled();
@@ -1034,13 +1095,14 @@ describe('runTaskSync', () => {
     expect(result.closesDeferred).toBeGreaterThanOrEqual(1);
   });
 
-  it('phase 5 defers close when in-flight reply is active for archived stale thread', async () => {
+  it('phase 5 defers close when in-flight reply is active for direct-mapped archived stale thread', async () => {
     const { resolveTasksForum, closeTaskThread, isTaskThreadAlreadyClosed } = await import('./thread-ops.js');
     const store = makeStore([
       { id: 'ws-001', title: 'Closed task', status: 'closed', labels: [], external_ref: 'discord:thread-100' },
     ]);
-    // Phase 4: already closed → skip (no hasInFlightForChannel call). Phase 5: stale → in-flight → defer.
-    (isTaskThreadAlreadyClosed as any).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    // Phase 4 skips archived threads based on the active-thread snapshot.
+    // Phase 5 sees the archived thread is stale, but defers because the channel is in-flight.
+    (isTaskThreadAlreadyClosed as any).mockResolvedValueOnce(false);
 
     const mockForum = {
       threads: {

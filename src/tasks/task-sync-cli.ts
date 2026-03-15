@@ -68,7 +68,7 @@ export async function runTaskSyncCliMain(): Promise<void> {
     ?? await resolveTaskDataLoadPath(dataDir, 'tasks.jsonl')
     ?? resolveTaskDataPath(dataDir, 'tasks.jsonl');
 
-  const throttleMs = parseArgInt(args, '--throttle-ms') ?? 250;
+  const throttleMs = parseArgInt(args, '--throttle-ms') ?? 0;
   const archivedLimit = parseArgInt(args, '--archived-limit') ?? 200;
 
   const { TaskStore: TaskStoreImpl } = await import('./store.js');
