@@ -126,6 +126,7 @@ function makeDashboardDeps(overrides: Partial<DashboardDeps> = {}): DashboardDep
     loadDoctorContext: vi.fn(async () => makeDoctorContext()),
     saveModelConfig: vi.fn(async () => undefined),
     saveOverrides: vi.fn(async () => undefined),
+    updateEnvKey: vi.fn(async () => undefined),
     runCommand: vi.fn(async () => ({
       stdout: 'Active: active (running)\n',
       stderr: '',
@@ -172,6 +173,7 @@ function makeSnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSnap
     },
     mcpStatus: { status: 'missing' },
     mcpWarnings: 0,
+    primaryRuntime: 'claude',
     ...overrides,
   };
 }
@@ -311,6 +313,7 @@ describe('collectDashboardSnapshot', () => {
         loadDoctorContext: vi.fn(async () => ctx),
         saveModelConfig: vi.fn(async () => undefined),
         saveOverrides: vi.fn(async () => undefined),
+        updateEnvKey: vi.fn(async () => undefined),
         runCommand: vi.fn(async () => ({
           stdout: '   Active: active (running) since today\n',
           stderr: '',
@@ -330,6 +333,7 @@ describe('collectDashboardSnapshot', () => {
     expect(snapshot.doctorSummary).toBe('1 findings (errors=1, warnings=0, info=0)');
     expect(snapshot.version).toBe('1.2.3');
     expect(snapshot.gitHash).toBe('abc1234');
+    expect(snapshot.primaryRuntime).toBe('claude');
     expect(snapshot.roles).toEqual([
       'chat',
       'plan-run',
@@ -378,6 +382,7 @@ describe('collectDashboardSnapshot', () => {
         loadDoctorContext,
         saveModelConfig: vi.fn(async () => undefined),
         saveOverrides: vi.fn(async () => undefined),
+        updateEnvKey: vi.fn(async () => undefined),
         runCommand: vi.fn(async () => ({
           stdout: '   Active: active (running) since today\n',
           stderr: '',

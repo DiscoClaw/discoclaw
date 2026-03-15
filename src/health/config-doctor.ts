@@ -66,7 +66,7 @@ export function formatCodexAppServerUrl(rawValue: string | undefined | null): st
   }
 }
 
-type EnvFileState = {
+export type EnvFileState = {
   exists: boolean;
   path: string;
   lines: string[];
@@ -246,7 +246,7 @@ function fileExists(filePath: string): boolean {
   return existsSync(filePath);
 }
 
-async function loadEnvFile(envPath: string): Promise<EnvFileState> {
+export async function loadEnvFile(envPath: string): Promise<EnvFileState> {
   try {
     const raw = await fs.readFile(envPath, 'utf-8');
     const lines = raw.split(/\r?\n/);
@@ -887,7 +887,7 @@ function commentMigratedEnvKey(lines: string[], key: string): string[] {
   });
 }
 
-function setEnvKey(lines: string[], key: string, value: string): string[] {
+export function setEnvKey(lines: string[], key: string, value: string): string[] {
   const nextLines = [...lines];
   const pattern = new RegExp(`^\\s*${key}=`);
   const lineIndex = nextLines.findIndex((line) => pattern.test(line));
@@ -903,7 +903,7 @@ function setEnvKey(lines: string[], key: string, value: string): string[] {
   return nextLines;
 }
 
-async function writeEnvLines(envPath: string, lines: string[]): Promise<void> {
+export async function writeEnvLines(envPath: string, lines: string[]): Promise<void> {
   const body = lines.join('\n');
   const normalized = body.endsWith('\n') ? body : `${body}\n`;
   const tmpPath = `${envPath}.tmp.${process.pid}`;
@@ -914,6 +914,12 @@ async function writeEnvLines(envPath: string, lines: string[]): Promise<void> {
     await fs.unlink(tmpPath).catch(() => undefined);
     throw err;
   }
+}
+
+export async function updateEnvKey(envPath: string, key: string, value: string): Promise<void> {
+  const envFile = await loadEnvFile(envPath);
+  const nextLines = setEnvKey(envFile.lines, key, value);
+  await writeEnvLines(envPath, nextLines);
 }
 
 async function writeJsonObject(filePath: string, value: Record<string, unknown>): Promise<void> {
