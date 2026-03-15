@@ -727,7 +727,7 @@ const ACTION_SCHEMA_KEYWORD_RULES: ActionSchemaKeywordRule[] = [
   { hit: 'forge', pattern: /\bforge\b/i, categories: ['forge', 'plan'] },
   { hit: 'cron', pattern: /\b(cron|schedule|scheduled|reminder|remind|later)\b/i, categories: ['crons', 'defer'] },
   { hit: 'loop', pattern: /\b(loop|repeat|repeating|interval)\b/i, categories: ['loop'] },
-  { hit: 'config', pattern: /\b(model|config|configure|setting)\b/i, categories: ['config'] },
+  { hit: 'config', pattern: /\b(model|config|configure|setting|doctor|diagnostic|workspace|bootstrap)\b/i, categories: ['config'] },
   { hit: 'imagegen', pattern: ACTION_SCHEMA_IMAGEGEN_RE, categories: ['imagegen'] },
   { hit: 'voice', pattern: /\b(voice|speak|mute|unmute)\b/i, categories: ['voice'] },
   { hit: 'moderation', pattern: /\b(moderat|ban|kick|timeout)\b/i, categories: ['moderation'] },
@@ -819,6 +819,7 @@ function discordActionsRulesSection(displayName: string): string {
 - Action blocks are stripped from displayed output; results appended automatically.
 - Actions ending in List, Show, Info, Status, or prefixed with fetch/read/search are query actions — results are sent back for follow-up analysis.
 - Include all needed actions in one response. Multiple same-type actions are supported and executed sequentially.
+- If you say you are starting work now, proceeding now, cleaning something up now, or taking the next pass in this response, include the concrete \`<discord-action>\` block(s) that actually begin that work. If you are not emitting an action block, say that you have not started yet.
 - Keep the continuation capsule current with a single \`<continuation-capsule>{"activeTaskId":"...","currentFocus":"...","nextStep":"...","blockedOn":"..."}</continuation-capsule>\` block whenever the active task, current focus, next step, or blocker changes.
 - Keep continuation capsules machine-readable only; do not mention them in user-facing prose.
 

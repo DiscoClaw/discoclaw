@@ -1,3 +1,4 @@
+import { inspectWorkspaceBootstrapWarningsSync } from '../workspace-bootstrap.js';
 import type { DiscordActionResult } from './actions.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { RuntimeRegistry } from '../runtime/registry.js';
@@ -15,18 +16,22 @@ import type { ModelRole } from '../model-config.js';
 export type ConfigActionRequest =
   | { type: 'modelSet'; role: ModelRole; model: string }
   | { type: 'modelReset'; role?: ModelRole }
-  | { type: 'modelShow' };
+  | { type: 'modelShow' }
+  | { type: 'workspaceWarnings' };
 
 const CONFIG_TYPE_MAP: Record<ConfigActionRequest['type'], true> = {
   modelSet: true,
   modelReset: true,
   modelShow: true,
+  workspaceWarnings: true,
 };
 export const CONFIG_ACTION_TYPES = new Set<string>(Object.keys(CONFIG_TYPE_MAP));
 
 export type ConfigContext = {
   /** The live botParams object — mutating fields takes effect next invocation. */
   botParams: ConfigMutableParams;
+  /** Workspace directory used for current-file inspection actions. */
+  workspaceCwd: string;
   /** The primary runtime, for resolveModel display. */
   runtime: RuntimeAdapter;
   /** Registry of all available runtime adapters. When set, modelSet chat can swap runtimes. */
@@ -500,6 +505,31 @@ export function executeConfigAction(
 
       return { ok: true, summary: lines.join('\n') };
     }
+
+    case 'workspaceWarnings': {
+      const warnings = inspectWorkspaceBootstrapWarningsSync(configCtx.workspaceCwd);
+      const observedAt = new Date().toISOString();
+      const lines = [
+        'Workspace warnings live check',
+        `source: live_check`,
+        `observedAt: ${observedAt}`,
+        `workspace: ${configCtx.workspaceCwd}`,
+      ];
+
+      if (warnings.length === 0) {
+        lines.push('No live bootstrap cleanup warnings detected for AGENTS.md, DISCOCLAW.md, or TOOLS.md.');
+      } else {
+        for (const warning of warnings) {
+          const markerNote = warning.matchedMarkers?.length
+            ? ` (matched markers: ${warning.matchedMarkers.join(', ')})`
+            : '';
+          lines.push(`[warn] ${warning.file}: ${warning.message}${markerNote}`);
+          lines.push(`recommendation: ${warning.recommendation}`);
+        }
+      }
+
+      return { ok: true, summary: lines.join('\n') };
+    }
   }
 }
 
@@ -514,6 +544,12 @@ export function configActionsPromptSection(): string {
 \`\`\`
 <discord-action>{"type":"modelShow"}</discord-action>
 \`\`\`
+
+**workspaceWarnings** — Live-check current workspace bootstrap cleanup warnings (AGENTS.md / DISCOCLAW.md / TOOLS.md):
+\`\`\`
+<discord-action>{"type":"workspaceWarnings"}</discord-action>
+\`\`\`
+- Use this when the user asks whether a workspace warning is still current, fixed, or safe to ignore. This returns the live file state for the configured workspace, not historical thread context.
 
 **modelSet** — Change the model for a role at runtime:
 \`\`\`

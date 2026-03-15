@@ -41,6 +41,7 @@ let handle: DashboardServer | null = null;
 function makeDoctorContext(overrides: Partial<DoctorContext> = {}): DoctorContext {
   return {
     cwd: '/repo',
+    workspaceCwd: '/repo/workspace',
     installMode: 'source',
     env: {
       DISCOCLAW_SERVICE_NAME: 'discoclaw-beta',

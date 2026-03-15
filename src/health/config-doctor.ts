@@ -5,6 +5,7 @@ import type { ModelConfig, ModelRole } from '../model-config.js';
 import { DEFAULTS as MODEL_DEFAULTS, saveModelConfig } from '../model-config.js';
 import type { RuntimeOverrides } from '../runtime-overrides.js';
 import { clearOverrides } from '../runtime-overrides.js';
+import { inspectWorkspaceBootstrapWarningsSync } from '../workspace-bootstrap.js';
 
 export type DoctorSeverity = 'info' | 'warn' | 'error';
 export type InstallMode = 'source' | 'npm-managed';
@@ -88,6 +89,7 @@ type ModelsFileState = {
 
 export type DoctorContext = {
   cwd: string;
+  workspaceCwd: string;
   installMode: InstallMode;
   env: EnvMap;
   explicitEnvKeys: Set<string>;
@@ -223,6 +225,21 @@ function resolvePath(cwd: string, maybeRelative: string | undefined, fallback: s
   const trimmed = trimValue(maybeRelative);
   if (!trimmed) return path.join(cwd, fallback);
   return path.isAbsolute(trimmed) ? trimmed : path.resolve(cwd, trimmed);
+}
+
+function resolveWorkspaceCwd(cwd: string, env: EnvMap): string {
+  const workspaceOverride = trimValue(env.WORKSPACE_CWD);
+  if (workspaceOverride) {
+    return path.isAbsolute(workspaceOverride) ? workspaceOverride : path.resolve(cwd, workspaceOverride);
+  }
+
+  const dataDir = trimValue(env.DISCOCLAW_DATA_DIR);
+  if (dataDir) {
+    const resolvedDataDir = path.isAbsolute(dataDir) ? dataDir : path.resolve(cwd, dataDir);
+    return path.join(resolvedDataDir, 'workspace');
+  }
+
+  return path.join(cwd, 'workspace');
 }
 
 function fileExists(filePath: string): boolean {
@@ -377,6 +394,7 @@ export async function loadDoctorContext(opts: InspectOptions = {}): Promise<Doct
     ...Object.keys(opts.env ?? {}),
   ]);
   const env: EnvMap = { ...envFile.values, ...(opts.env ?? {}) };
+  const workspaceCwd = resolveWorkspaceCwd(cwd, env);
 
   const dataDir = resolvePath(cwd, env.DISCOCLAW_DATA_DIR, 'data');
   const configPaths = {
@@ -394,6 +412,7 @@ export async function loadDoctorContext(opts: InspectOptions = {}): Promise<Doct
 
   return {
     cwd,
+    workspaceCwd,
     installMode: fileExists(path.join(cwd, '.git')) ? 'source' : 'npm-managed',
     env,
     explicitEnvKeys,
@@ -460,6 +479,22 @@ export function detectDeprecatedEnvVars(ctx: DoctorContext): DoctorFinding[] {
     });
   }
   return findings;
+}
+
+export function detectWorkspaceBootstrapWarnings(ctx: DoctorContext): DoctorFinding[] {
+  return inspectWorkspaceBootstrapWarningsSync(ctx.workspaceCwd).map((warning) => {
+    const markerNote = warning.matchedMarkers?.length
+      ? ` Matched markers: ${warning.matchedMarkers.join(', ')}.`
+      : '';
+
+    return {
+      id: warning.id,
+      severity: 'warn' as const,
+      message: `Workspace ${warning.file} warning in ${ctx.workspaceCwd}: ${warning.message}${markerNote}`,
+      recommendation: warning.recommendation,
+      autoFixable: false,
+    };
+  });
 }
 
 export function detectCodexAppServerStatus(ctx: DoctorContext): DoctorFinding[] {
@@ -822,6 +857,7 @@ export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> 
   const findings = [
     ...detectInvalidModelsFile(ctx),
     ...detectInstallDrift(ctx),
+    ...detectWorkspaceBootstrapWarnings(ctx),
     ...detectDeprecatedEnvVars(ctx),
     ...detectCodexAppServerStatus(ctx),
     ...await detectCodexAppServerReachability(ctx),

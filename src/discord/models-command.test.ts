@@ -112,6 +112,7 @@ describe('handleModelsCommand', () => {
       forgeDrafterModel: 'opus',
       forgeAuditorModel: 'sonnet',
     },
+    workspaceCwd: '/tmp/workspace',
     runtime: {
       id: 'claude-code',
       defaultModel: 'sonnet',
