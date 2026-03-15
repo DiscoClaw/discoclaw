@@ -316,7 +316,7 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
   // --- Live event listeners ---
   const forumId = forum.id;
   const reparseTimers = new Map<string, NodeJS.Timeout>();
-  const scheduleReparse = (thread: AnyThreadChannel, isNew: boolean) => {
+  const scheduleReparse = (thread: AnyThreadChannel) => {
     const key = String(thread.id ?? '');
     const existing = reparseTimers.get(key);
     if (existing) clearTimeout(existing);
@@ -324,7 +324,34 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
       reparseTimers.delete(key);
       void (async () => {
         try {
-          await loadThreadAsCron(thread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew, allowUserIds, statsStore });
+          // Capture existing record before reparse so we can preserve it on failure.
+          const existingRecord = statsStore?.getRecordByThreadId(thread.id);
+
+          const ok = await loadThreadAsCron(thread, guildId, scheduler, runtime, { cronModel, cwd, log, isNew: false, allowUserIds, statsStore });
+
+          if (!ok && existingRecord && statsStore) {
+            // Parse failed but local canonical record exists — mark drift instead of losing state.
+            log?.info({ threadId: thread.id, cronId: existingRecord.cronId }, 'cron:forum edit parse failed, marking projection drifted');
+            void statsStore.markProjectionDrifted(existingRecord.cronId).catch(() => {});
+
+            // Restore scheduler from canonical definition if loadThreadAsCron disabled it.
+            if (existingRecord.channel && existingRecord.prompt &&
+                (existingRecord.schedule || (existingRecord.triggerType && existingRecord.triggerType !== 'schedule'))) {
+              const def: ParsedCronDef = {
+                triggerType: existingRecord.triggerType ?? 'schedule',
+                schedule: existingRecord.schedule,
+                timezone: existingRecord.timezone ?? 'UTC',
+                channel: existingRecord.channel,
+                prompt: existingRecord.prompt,
+              };
+              try {
+                scheduler.register(thread.id, thread.id, guildId, thread.name, def, existingRecord.cronId);
+                if (existingRecord.disabled) scheduler.disable(thread.id);
+              } catch {
+                // Restoration failed — drift reconciliation will handle it.
+              }
+            }
+          }
         } catch (err) {
           log?.error?.({ err, threadId: key }, 'cron:forum reparse failed');
         }
@@ -367,9 +394,13 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
       log?.info({ threadId: thread.id, name: thread.name }, 'cron:forum threadDelete');
       scheduler.unregister(thread.id);
       opts.onCountChanged?.();
-      // Clean up stats.
+      // Mark projection missing instead of removing the local canonical record.
+      // The record survives so reconciliation can recreate the Discord thread.
       if (statsStore) {
-        void statsStore.removeByThreadId(thread.id).catch(() => {});
+        const record = statsStore.getRecordByThreadId(thread.id);
+        if (record) {
+          void statsStore.markProjectionMissing(record.cronId).catch(() => {});
+        }
       }
     } catch (err) {
       log?.error({ err, threadId: thread.id }, 'cron:forum threadDelete handler failed');
@@ -436,7 +467,7 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
       }
 
       log?.info({ threadId: thread.id, name: thread.name }, 'cron:forum starter message updated, re-parsing');
-      scheduleReparse(thread, false);
+      scheduleReparse(thread);
     } catch (err) {
       log?.error({ err }, 'cron:forum messageUpdate handler failed');
     }

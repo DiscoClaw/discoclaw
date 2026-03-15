@@ -479,7 +479,7 @@ describe('executeCronAction', () => {
   it('cronSync returns sync results', async () => {
     // Mock the dynamic import of runCronSync.
     vi.mock('../cron/cron-sync.js', () => ({
-      runCronSync: vi.fn(async () => ({ tagsApplied: 1, namesUpdated: 0, statusMessagesUpdated: 2, promptMessagesCreated: 0, orphansDetected: 0 })),
+      runCronSync: vi.fn(async () => ({ tagsApplied: 1, namesUpdated: 0, statusMessagesUpdated: 2, promptMessagesCreated: 0, orphansDetected: 0, projectionsRepaired: 0 })),
     }));
 
     const cronCtx = makeCronCtx();
@@ -547,7 +547,7 @@ describe('executeCronAction', () => {
 
   it('cronSync uses coordinator when present and returns result summary', async () => {
     const coordinator = {
-      sync: vi.fn(async () => ({ tagsApplied: 2, namesUpdated: 1, statusMessagesUpdated: 3, promptMessagesCreated: 0, orphansDetected: 0 })),
+      sync: vi.fn(async () => ({ tagsApplied: 2, namesUpdated: 1, statusMessagesUpdated: 3, promptMessagesCreated: 0, orphansDetected: 0, projectionsRepaired: 0 })),
     };
     const cronCtx = makeCronCtx({ syncCoordinator: coordinator as any });
     const result = await executeCronAction({ type: 'cronSync' }, makeActionCtx(), cronCtx);
@@ -570,7 +570,7 @@ describe('executeCronAction', () => {
 
   it('cronSync fallback when coordinator absent', async () => {
     vi.mock('../cron/cron-sync.js', () => ({
-      runCronSync: vi.fn(async () => ({ tagsApplied: 1, namesUpdated: 0, statusMessagesUpdated: 2, promptMessagesCreated: 0, orphansDetected: 0 })),
+      runCronSync: vi.fn(async () => ({ tagsApplied: 1, namesUpdated: 0, statusMessagesUpdated: 2, promptMessagesCreated: 0, orphansDetected: 0, projectionsRepaired: 0 })),
     }));
 
     const cronCtx = makeCronCtx();
