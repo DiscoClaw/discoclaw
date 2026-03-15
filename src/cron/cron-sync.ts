@@ -2,8 +2,9 @@ import { EmbedBuilder } from 'discord.js';
 import type { Client, ThreadChannel } from 'discord.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
-import { CADENCE_TAGS } from './run-stats.js';
+import { CADENCE_TAGS, computeDefinitionHash } from './run-stats.js';
 import type { CronRunStats } from './run-stats.js';
+import type { ParsedCronDef } from './types.js';
 import type { CronScheduler } from './scheduler.js';
 import { detectCadence } from './cadence.js';
 import { autoTagCron, classifyCronModel } from './auto-tag.js';
@@ -34,6 +35,7 @@ export type CronSyncResult = {
   statusMessagesUpdated: number;
   promptMessagesCreated: number;
   orphansDetected: number;
+  projectionsRepaired: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -62,7 +64,7 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
   const forum = await resolveForumChannel(client, forumId);
   if (!forum) {
     log?.warn({ forumId }, 'cron-sync: forum not found');
-    return { tagsApplied: 0, namesUpdated: 0, statusMessagesUpdated: 0, promptMessagesCreated: 0, orphansDetected: 0 };
+    return { tagsApplied: 0, namesUpdated: 0, statusMessagesUpdated: 0, promptMessagesCreated: 0, orphansDetected: 0, projectionsRepaired: 0 };
   }
 
   const tagMap = opts.tagMap;
@@ -73,6 +75,7 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
   let statusMessagesUpdated = 0;
   let promptMessagesCreated = 0;
   let orphansDetected = 0;
+  let projectionsRepaired = 0;
 
   type EditableCronThread = {
     id: string;
@@ -238,6 +241,16 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
     try {
       await ensureStatusMessage(client, fullJob.threadId, fullJob.cronId, record, statsStore, { log });
       statusMessagesUpdated++;
+
+      // Update projection hash after successful status message sync.
+      const currentHash = computeDefinitionHash(record);
+      if (record.projectionHash !== currentHash || record.projectionStatus !== 'synced') {
+        await statsStore.upsertRecord(fullJob.cronId, fullJob.threadId, {
+          projectionStatus: 'synced',
+          projectionSyncedAt: new Date().toISOString(),
+          projectionHash: currentHash,
+        });
+      }
     } catch (err) {
       log?.warn({ err, jobId: job.id }, 'cron-sync:phase3 status message failed');
     }
@@ -299,6 +312,107 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
     }
   }
 
-  log?.info({ tagsApplied, namesUpdated, statusMessagesUpdated, promptMessagesCreated, orphansDetected }, 'cron-sync: complete');
-  return { tagsApplied, namesUpdated, statusMessagesUpdated, promptMessagesCreated, orphansDetected };
+  // Phase 5: Projection reconciliation — repair missing/drifted/stale Discord projections
+  // from canonical local state. This ensures local records are the source of truth.
+  const allRecords = statsStore.getCanonicalDefinitions();
+  for (const [cronId, record] of Object.entries(allRecords)) {
+    const currentHash = computeDefinitionHash(record);
+    const status = record.projectionStatus;
+
+    const needsReconciliation =
+      status === 'missing' ||
+      status === 'drifted' ||
+      status === 'pending-resync' ||
+      (record.projectionHash !== undefined && record.projectionHash !== currentHash);
+
+    if (!needsReconciliation) continue;
+
+    if (status === 'missing') {
+      // Thread was deleted — recreate from canonical definition.
+      if (!record.channel || !record.prompt) continue;
+
+      try {
+        const baseName = record.prompt.slice(0, 50).replace(/\n/g, ' ').trim() || cronId;
+        const cadence = record.cadence ?? null;
+        const threadName = buildCronThreadName(baseName, cadence);
+
+        const starterContent = [
+          `**Schedule:** \`${record.schedule ?? 'N/A'}\``,
+          `**Timezone:** ${record.timezone ?? 'UTC'}`,
+          `**Channel:** ${record.channel}`,
+          `**Prompt:** ${record.prompt}`,
+          `\n[cronId:${cronId}]`,
+        ].join('\n');
+
+        const newThread = await forum.threads.create({
+          name: threadName,
+          message: { content: starterContent },
+        });
+
+        // Update the record with the new thread ID and mark synced.
+        await statsStore.upsertRecord(cronId, newThread.id, {
+          projectionStatus: 'synced',
+          projectionSyncedAt: new Date().toISOString(),
+          projectionHash: currentHash,
+          statusMessageId: undefined,
+          promptMessageId: undefined,
+        });
+
+        // Re-register in scheduler from canonical definition.
+        // Clean up any stale scheduler entry first (e.g., from canonical orphan
+        // recovery at boot or threadDelete resilience — the cron may still be
+        // registered under the old/deleted thread ID).
+        const def: ParsedCronDef = {
+          triggerType: record.triggerType ?? 'schedule',
+          schedule: record.schedule,
+          timezone: record.timezone ?? 'UTC',
+          channel: record.channel,
+          prompt: record.prompt,
+        };
+        try {
+          const staleJob = scheduler.getJobByCronId(cronId);
+          if (staleJob && staleJob.id !== newThread.id) {
+            scheduler.unregister(staleJob.id);
+          }
+          scheduler.register(newThread.id, newThread.id, forum.guildId, threadName, def, cronId);
+          if (record.disabled) scheduler.disable(newThread.id);
+        } catch {
+          // Registration failed — will retry next sync cycle.
+        }
+
+        projectionsRepaired++;
+        log?.info({ cronId, newThreadId: newThread.id }, 'cron-sync:phase5 recreated missing projection');
+      } catch (err) {
+        log?.warn({ err, cronId }, 'cron-sync:phase5 failed to recreate missing projection');
+      }
+      await sleep(throttleMs);
+    } else {
+      // Drifted, pending-resync, or hash mismatch — update status message and mark synced.
+      // The status message content was already refreshed in Phase 3 for scheduler-registered
+      // jobs; for any remaining records, ensure the projection metadata is up to date.
+      try {
+        const liveRecord = statsStore.getRecord(cronId);
+        if (liveRecord) {
+          try {
+            await ensureStatusMessage(client, liveRecord.threadId, cronId, liveRecord, statsStore, { log });
+          } catch {
+            // Thread may not exist; status message update is best-effort.
+          }
+
+          await statsStore.upsertRecord(cronId, liveRecord.threadId, {
+            projectionStatus: 'synced',
+            projectionSyncedAt: new Date().toISOString(),
+            projectionHash: currentHash,
+          });
+        }
+        projectionsRepaired++;
+      } catch (err) {
+        log?.warn({ err, cronId }, 'cron-sync:phase5 failed to reconcile drifted projection');
+      }
+      await sleep(throttleMs);
+    }
+  }
+
+  log?.info({ tagsApplied, namesUpdated, statusMessagesUpdated, promptMessagesCreated, orphansDetected, projectionsRepaired }, 'cron-sync: complete');
+  return { tagsApplied, namesUpdated, statusMessagesUpdated, promptMessagesCreated, orphansDetected, projectionsRepaired };
 }

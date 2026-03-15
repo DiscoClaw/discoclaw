@@ -56,17 +56,19 @@ export async function healInterruptedCronRuns(
 }
 
 /**
- * Scenario 2: Remove stale cron run-stats records for threads that no longer exist.
+ * Scenario 2: Mark cron projections missing when their Discord threads no longer exist.
  *
  * Iterates all records in the persistent stats store. For each record, attempts
  * to fetch the Discord thread. If the thread is gone (null return or Discord
- * error code 10003 / HTTP 404), removes the record via `statsStore.removeByThreadId()`
- * and logs a structured warning.
+ * error code 10003 / HTTP 404), marks the record's projection as `missing` via
+ * `statsStore.markProjectionMissing()` so reconciliation can recreate the thread
+ * later. The canonical cron record is preserved — local persistence is the source
+ * of truth; Discord threads are a synchronized projection.
  *
  * Non-404 errors (network failures, rate-limits, etc.) are treated as transient:
  * the record is preserved and a fetch-error warning is logged instead.
  *
- * All remove-path errors are caught and logged (fail-open) to prevent healing
+ * All mark-path errors are caught and logged (fail-open) to prevent healing
  * from becoming a startup crash path.
  */
 export async function healStaleCronRecords(
@@ -101,18 +103,75 @@ export async function healStaleCronRecords(
     if (!threadGone) continue;
 
     try {
-      await statsStore.removeByThreadId(threadId);
+      await statsStore.markProjectionMissing(cronId);
       log?.warn(
         { cronId, threadId },
-        'startup:heal:cron removed stale stats record for deleted thread',
+        'startup:heal:cron marked projection missing for deleted thread (record preserved)',
       );
     } catch (err: unknown) {
       log?.warn(
         { cronId, threadId, err: err instanceof Error ? err.message : String(err) },
-        'startup:heal:cron failed to remove stale stats record — continuing',
+        'startup:heal:cron failed to mark projection missing — continuing',
       );
     }
   }
+}
+
+/**
+ * Scenario 2b: Validate canonical cron store integrity.
+ *
+ * Iterates all records in the stats store and classifies each as either
+ * "recoverable" (has complete definition fields so it can be registered in
+ * the scheduler and execute without a Discord thread) or "incomplete"
+ * (missing definition fields — unrecoverable if the thread is also lost).
+ *
+ * This is informational: it does not mutate state. It runs at startup so
+ * operators get early visibility into any records that would be lost if their
+ * Discord projection disappears. Incomplete records are logged individually
+ * as warnings so they can be addressed (e.g., by opening the thread and
+ * triggering a re-parse).
+ *
+ * Never throws; all errors are caught and logged.
+ */
+export async function validateCanonicalCronIntegrity(
+  statsStore: CronRunStats,
+  log?: LoggerLike,
+): Promise<{ total: number; recoverable: number; incomplete: number }> {
+  const result = { total: 0, recoverable: 0, incomplete: 0 };
+  try {
+    const jobs = Object.values(statsStore.getStore().jobs);
+    result.total = jobs.length;
+
+    for (const record of jobs) {
+      const effectiveTriggerType = record.triggerType ?? 'schedule';
+      const hasDefinition =
+        Boolean(record.channel) &&
+        Boolean(record.prompt) &&
+        (effectiveTriggerType !== 'schedule' || Boolean(record.schedule));
+
+      if (hasDefinition) {
+        result.recoverable++;
+      } else {
+        result.incomplete++;
+        log?.warn(
+          { cronId: record.cronId, threadId: record.threadId },
+          'startup:heal:cron canonical record missing definition fields (unrecoverable without thread)',
+        );
+      }
+    }
+    if (result.total > 0) {
+      log?.info(
+        { total: result.total, recoverable: result.recoverable, incomplete: result.incomplete },
+        'startup:heal:cron canonical store integrity validated',
+      );
+    }
+  } catch (err: unknown) {
+    log?.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      'startup:heal:cron integrity check failed — continuing',
+    );
+  }
+  return result;
 }
 
 /**

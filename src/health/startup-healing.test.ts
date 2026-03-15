@@ -28,6 +28,7 @@ function makeMockStatsStore(jobs: Record<string, { cronId: string; threadId: str
   return {
     getStore: () => store,
     removeByThreadId: vi.fn().mockResolvedValue(true),
+    markProjectionMissing: vi.fn().mockResolvedValue(true),
     sweepInterrupted: vi.fn().mockResolvedValue([]),
   } as unknown as CronRunStats;
 }
@@ -108,7 +109,7 @@ describe('healInterruptedCronRuns', () => {
 // ---------------------------------------------------------------------------
 
 describe('healStaleCronRecords', () => {
-  it('removes stale record when channels.fetch returns null, and logs warning', async () => {
+  it('marks projection missing when channels.fetch returns null, and logs warning', async () => {
     const log = makeMockLog();
     const statsStore = makeMockStatsStore({
       'cron-abc': { cronId: 'cron-abc', threadId: 'thread-dead' },
@@ -117,14 +118,15 @@ describe('healStaleCronRecords', () => {
 
     await healStaleCronRecords(statsStore, client, log);
 
-    expect(statsStore.removeByThreadId).toHaveBeenCalledWith('thread-dead');
+    expect(statsStore.markProjectionMissing).toHaveBeenCalledWith('cron-abc');
+    expect(statsStore.removeByThreadId).not.toHaveBeenCalled();
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ cronId: 'cron-abc', threadId: 'thread-dead' }),
-      expect.stringContaining('stale'),
+      expect.stringContaining('projection missing'),
     );
   });
 
-  it('removes stale record when channels.fetch throws Discord error code 10003', async () => {
+  it('marks projection missing when channels.fetch throws Discord error code 10003', async () => {
     const log = makeMockLog();
     const statsStore = makeMockStatsStore({
       'cron-abc': { cronId: 'cron-abc', threadId: 'thread-gone' },
@@ -134,14 +136,15 @@ describe('healStaleCronRecords', () => {
 
     await healStaleCronRecords(statsStore, client, log);
 
-    expect(statsStore.removeByThreadId).toHaveBeenCalledWith('thread-gone');
+    expect(statsStore.markProjectionMissing).toHaveBeenCalledWith('cron-abc');
+    expect(statsStore.removeByThreadId).not.toHaveBeenCalled();
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ cronId: 'cron-abc', threadId: 'thread-gone' }),
-      expect.stringContaining('stale'),
+      expect.stringContaining('projection missing'),
     );
   });
 
-  it('removes stale record when channels.fetch throws with HTTP status 404', async () => {
+  it('marks projection missing when channels.fetch throws with HTTP status 404', async () => {
     const log = makeMockLog();
     const statsStore = makeMockStatsStore({
       'cron-abc': { cronId: 'cron-abc', threadId: 'thread-404' },
@@ -151,7 +154,8 @@ describe('healStaleCronRecords', () => {
 
     await healStaleCronRecords(statsStore, client, log);
 
-    expect(statsStore.removeByThreadId).toHaveBeenCalledWith('thread-404');
+    expect(statsStore.markProjectionMissing).toHaveBeenCalledWith('cron-abc');
+    expect(statsStore.removeByThreadId).not.toHaveBeenCalled();
   });
 
   it('skips the record and logs a fetch-error warning for non-404 network errors', async () => {
@@ -164,6 +168,7 @@ describe('healStaleCronRecords', () => {
 
     await healStaleCronRecords(statsStore, client, log);
 
+    expect(statsStore.markProjectionMissing).not.toHaveBeenCalled();
     expect(statsStore.removeByThreadId).not.toHaveBeenCalled();
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ cronId: 'cron-abc', threadId: 'thread-1' }),
@@ -171,7 +176,7 @@ describe('healStaleCronRecords', () => {
     );
   });
 
-  it('preserves the live record when one record is stale and one is live', async () => {
+  it('only marks stale record when one record is stale and one is live', async () => {
     const log = makeMockLog();
     const statsStore = makeMockStatsStore({
       'cron-stale': { cronId: 'cron-stale', threadId: 'thread-dead' },
@@ -183,17 +188,17 @@ describe('healStaleCronRecords', () => {
 
     await healStaleCronRecords(statsStore, client, log);
 
-    expect(statsStore.removeByThreadId).toHaveBeenCalledTimes(1);
-    expect(statsStore.removeByThreadId).toHaveBeenCalledWith('thread-dead');
-    expect(statsStore.removeByThreadId).not.toHaveBeenCalledWith('thread-alive');
+    expect(statsStore.markProjectionMissing).toHaveBeenCalledTimes(1);
+    expect(statsStore.markProjectionMissing).toHaveBeenCalledWith('cron-stale');
+    expect(statsStore.removeByThreadId).not.toHaveBeenCalled();
   });
 
-  it('logs and continues (fail-open) when removeByThreadId throws', async () => {
+  it('logs and continues (fail-open) when markProjectionMissing throws', async () => {
     const log = makeMockLog();
     const statsStore = makeMockStatsStore({
       'cron-abc': { cronId: 'cron-abc', threadId: 'thread-dead' },
     });
-    (statsStore.removeByThreadId as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+    (statsStore.markProjectionMissing as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new Error('write error'),
     );
     const client = makeMockClient(() => Promise.resolve(null));
@@ -201,7 +206,7 @@ describe('healStaleCronRecords', () => {
     await expect(healStaleCronRecords(statsStore, client, log)).resolves.not.toThrow();
     expect(log.warn).toHaveBeenCalledWith(
       expect.objectContaining({ cronId: 'cron-abc', threadId: 'thread-dead' }),
-      expect.stringContaining('failed to remove'),
+      expect.stringContaining('failed to mark projection missing'),
     );
   });
 
@@ -211,6 +216,7 @@ describe('healStaleCronRecords', () => {
     const client = makeMockClient();
 
     await expect(healStaleCronRecords(statsStore, client, log)).resolves.not.toThrow();
+    expect(statsStore.markProjectionMissing).not.toHaveBeenCalled();
     expect(statsStore.removeByThreadId).not.toHaveBeenCalled();
     expect(log.warn).not.toHaveBeenCalled();
   });

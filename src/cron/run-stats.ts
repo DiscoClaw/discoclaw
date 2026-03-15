@@ -38,15 +38,19 @@ export type CronRunRecord = {
   channel?: string;
   prompt?: string;
   authorId?: string;
+  // Projection metadata — tracks Discord thread/message sync state against canonical local data.
+  projectionStatus?: 'synced' | 'missing' | 'drifted' | 'pending-resync';
+  projectionSyncedAt?: string;   // ISO timestamp of last successful projection sync
+  projectionHash?: string;       // hash of canonical definition fields at last sync
 };
 
 export type CronRunStatsStore = {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
   updatedAt: number;
   jobs: Record<string, CronRunRecord>;
 };
 
-export const CURRENT_VERSION = 10 as const;
+export const CURRENT_VERSION = 11 as const;
 
 // ---------------------------------------------------------------------------
 // Stable Cron ID generation
@@ -59,6 +63,22 @@ export function generateCronId(): string {
 export function parseCronIdFromContent(content: string): string | null {
   const match = content.match(/\[cronId:(cron-[a-f0-9]+)\]/);
   return match ? match[1] : null;
+}
+
+// ---------------------------------------------------------------------------
+// Definition hash — stable fingerprint of canonical definition fields
+// ---------------------------------------------------------------------------
+
+export function computeDefinitionHash(record: CronRunRecord): string {
+  const payload = JSON.stringify({
+    schedule: record.schedule ?? null,
+    timezone: record.timezone ?? null,
+    channel: record.channel ?? null,
+    prompt: record.prompt ?? null,
+    triggerType: record.triggerType ?? 'schedule',
+    disabled: record.disabled,
+  });
+  return crypto.createHash('sha256').update(payload).digest('hex').slice(0, 16);
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +330,54 @@ export class CronRunStats {
     return removed;
   }
 
+  async markProjectionMissing(cronId: string): Promise<boolean> {
+    let found = false;
+    await this.mutex.run(async () => {
+      const rec = this.store.jobs[cronId];
+      if (!rec) return;
+      rec.projectionStatus = 'missing';
+      found = true;
+      this.store.updatedAt = Date.now();
+      await this.flush();
+    });
+    return found;
+  }
+
+  async markProjectionDrifted(cronId: string): Promise<boolean> {
+    let found = false;
+    await this.mutex.run(async () => {
+      const rec = this.store.jobs[cronId];
+      if (!rec) return;
+      rec.projectionStatus = 'drifted';
+      found = true;
+      this.store.updatedAt = Date.now();
+      await this.flush();
+    });
+    return found;
+  }
+
+  async queueResync(cronId: string): Promise<boolean> {
+    let found = false;
+    await this.mutex.run(async () => {
+      const rec = this.store.jobs[cronId];
+      if (!rec) return;
+      rec.projectionStatus = 'pending-resync';
+      found = true;
+      this.store.updatedAt = Date.now();
+      await this.flush();
+    });
+    return found;
+  }
+
+  /** Return a shallow snapshot of all canonical cron records without removing any. */
+  getCanonicalDefinitions(): Record<string, CronRunRecord> {
+    const snapshot: Record<string, CronRunRecord> = {};
+    for (const [cronId, rec] of Object.entries(this.store.jobs)) {
+      snapshot[cronId] = { ...rec };
+    }
+    return snapshot;
+  }
+
   private async flush(): Promise<void> {
     const dir = path.dirname(this.filePath);
     await fs.mkdir(dir, { recursive: true });
@@ -389,6 +457,10 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
   // Migrate v9 → v10: no-op — new field (chain) is optional and defaults to absent.
   if (store.version === 9) {
     store.version = 10;
+  }
+  // Migrate v10 → v11: no-op — new projection metadata fields (projectionStatus, projectionSyncedAt, projectionHash) are optional.
+  if (store.version === 10) {
+    store.version = 11;
   }
   return new CronRunStats(store, filePath);
 }

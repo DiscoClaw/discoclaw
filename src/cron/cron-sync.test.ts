@@ -52,6 +52,14 @@ function makeStatsStore(records: CronRunRecord[]): CronRunStats {
     recordRun: vi.fn(async () => {}),
     removeRecord: vi.fn(async () => true),
     removeByThreadId: vi.fn(async () => true),
+    markProjectionMissing: vi.fn(async () => true),
+    markProjectionDrifted: vi.fn(async () => true),
+    queueResync: vi.fn(async () => true),
+    getCanonicalDefinitions: vi.fn(() => {
+      const snapshot: Record<string, CronRunRecord> = {};
+      for (const [id, rec] of Object.entries(store)) snapshot[id] = { ...rec };
+      return snapshot;
+    }),
   } as unknown as CronRunStats;
 }
 
@@ -63,6 +71,14 @@ function makeScheduler(jobs: Array<{ id: string; threadId: string; cronId: strin
       if (!j) return undefined;
       return { id: j.id, cronId: j.cronId, threadId: j.threadId, guildId: 'g1', name: j.name, def: { schedule: j.schedule, timezone: 'UTC', channel: 'general', prompt: j.prompt }, cron: null, running: false };
     },
+    getJobByCronId: (cronId: string) => {
+      const j = jobs.find((jj) => jj.cronId === cronId);
+      if (!j) return undefined;
+      return { id: j.id, cronId: j.cronId, threadId: j.threadId, guildId: 'g1', name: j.name, def: { schedule: j.schedule, timezone: 'UTC', channel: 'general', prompt: j.prompt }, cron: null, running: false };
+    },
+    register: vi.fn(),
+    unregister: vi.fn(),
+    disable: vi.fn(),
   } as unknown as CronScheduler;
 }
 
