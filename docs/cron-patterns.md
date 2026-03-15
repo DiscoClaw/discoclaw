@@ -579,7 +579,7 @@ A daily job that checks for stale PRs and creates tasks:
   "channel": "dev",
   "model": "capable",
   "allowedActions": ["taskCreate", "sendMessage"],
-  "prompt": "Run `gh pr list --repo owner/repo --json number,title,updatedAt,author --search 'is:open sort:updated-asc'` to get open PRs.\n\nFor each PR not updated in the last 3 days:\n1. Create a task with title 'Review stale PR #N: <title>' and tag 'pr-review'\n2. Post a reminder to the #dev channel mentioning the PR number, author, and days since last update\n\nIf all PRs are recently active, respond with HEARTBEAT_OK."
+  "prompt": "Run `gh pr list --repo owner/repo --json number,title,updatedAt,author --search 'is:open sort:updated-asc'` to get open PRs.\n\nFor each PR not updated in the last 3 days, emit:\n1. One `taskCreate` action with title 'Review stale PR #N: <title>' and tag 'pr-review'\n2. One `sendMessage` action to the #dev channel mentioning the PR number, author, and days since last update\n\nIf all PRs are recently active, respond with HEARTBEAT_OK."
 }
 ```
 
@@ -603,7 +603,7 @@ Post the same update to multiple channels without JSON routing:
   "timezone": "America/New_York",
   "channel": "general",
   "allowedActions": ["sendMessage"],
-  "prompt": "It's Monday morning. Send a standup reminder to #engineering and #design:\n\n\"Weekly standup reminder: post your updates in this channel by EOD.\"\n\nAlso post a summary to #general noting that standup reminders have been sent."
+  "prompt": "It's Monday morning. Emit separate `sendMessage` actions for #engineering and #design with this reminder:\n\n\"Weekly standup reminder: post your updates in this channel by EOD.\"\n\nAlso emit a `sendMessage` action to #general noting that standup reminders have been sent."
 }
 ```
 
@@ -617,7 +617,7 @@ Post the same update to multiple channels without JSON routing:
 
 - **Cron jobs can never emit cron actions.** This is a hard-coded safety rail — a cron job cannot create, modify, or delete other cron jobs, regardless of `allowedActions`.
 - **Use `allowedActions` for least privilege.** Don't give a reminder cron access to `channelDelete`. Restrict to only the action types the job needs.
-- **Action batching limits apply.** The system processes one action per type per response. If the AI tries to create 5 tasks, only the first fires. For bulk operations, use the `sendMessage` action to post a summary instead.
+- **Multiple same-type actions are supported.** A single response can emit more than one `taskCreate` or `sendMessage` action when the prompt calls for it. Keep the prompt explicit about each action you want; malformed or disallowed actions are still ignored.
 - **Actions execute with the bot's Discord permissions.** If the bot can't post in a channel, the action fails silently.
 
 ---
