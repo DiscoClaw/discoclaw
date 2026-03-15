@@ -2645,8 +2645,8 @@ _Filled in during/after implementation._
     expect(supervisors[1]).toEqual(expect.objectContaining({
       limits: expect.objectContaining({ maxCycles: 1, maxRetries: 0 }),
     }));
-    expect(nativeBypassSeen[0]).toBeUndefined();
-    expect(nativeBypassSeen[1]).toBeUndefined();
+    expect(nativeBypassSeen[0]).toBe(true);
+    expect(nativeBypassSeen[1]).toBe(true);
     expect(prompts[1]).toContain('repo-relative file paths');
     expect(prompts[2]).toContain('## Grounded Repo Inputs');
     expect(toolsSeen[2]).toEqual([]);
@@ -2654,7 +2654,7 @@ _Filled in during/after implementation._
     expect(nativeBypassSeen[2]).toBe(true);
     expect(sessionKeys[2]).toBe(sessionKeys[0]);
     expect(sessionKeys[3]).toMatch(/^forge:plan-\d+:test-model:auditor$/);
-    expect(nativeBypassSeen[3]).toBeUndefined();
+    expect(nativeBypassSeen[3]).toBe(true);
     expect(progress.some((p) => p.includes('retrying'))).toBe(true);
   });
 
@@ -3609,7 +3609,7 @@ function makeCaptureRuntime(responses: string[]): {
 }
 
 describe('Forge session keys', () => {
-  it('uses a two-stage native Codex draft flow with shared drafter session state', async () => {
+  it('uses a two-stage Codex draft flow with shared drafter session state', async () => {
     const tmpDir = await makeTmpDir();
     await seedCodexCandidateFiles(tmpDir);
     await seedCodexNativeWriteContextFiles(tmpDir);
@@ -3671,14 +3671,14 @@ describe('Forge session keys', () => {
     expect(invocations[1]!.sessionKey).toBe(invocations[0]!.sessionKey);
     expect(invocations[2]!.sessionKey).toContain(':auditor');
     expect(invocations[2]!.sessionKey).not.toBe(invocations[0]!.sessionKey);
-    expect(invocations[0]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[0]!.disableNativeAppServer).toBe(true);
     expect(invocations[1]!.disableNativeAppServer).toBe(true);
-    expect(invocations[2]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[2]!.disableNativeAppServer).toBe(true);
     expect(invocations[0]!.systemPrompt).toBeUndefined();
     expect(invocations[1]!.systemPrompt).toBeUndefined();
   });
 
-  it('routes codex-like wrapped runtimes by forge phase', async () => {
+  it('routes codex-like wrapped runtimes onto CLI for every forge phase', async () => {
     const tmpDir = await makeTmpDir();
     await seedCodexCandidateFiles(tmpDir);
     await seedCodexNativeWriteContextFiles(tmpDir);
@@ -3735,9 +3735,9 @@ describe('Forge session keys', () => {
     }
     expect(invocations[1]!.prompt).toContain('## Grounded Repo Inputs');
     expect(invocations[2]!.sessionKey).toContain(':auditor');
-    expect(invocations[0]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[0]!.disableNativeAppServer).toBe(true);
     expect(invocations[1]!.disableNativeAppServer).toBe(true);
-    expect(invocations[2]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[2]!.disableNativeAppServer).toBe(true);
     expect(invocations[0]!.systemPrompt).toBeUndefined();
     expect(invocations[1]!.systemPrompt).toBeUndefined();
   });
@@ -3807,8 +3807,8 @@ describe('Forge session keys', () => {
     expect(result.error).toBeUndefined();
     expect(invocations).toHaveLength(3);
     expect(invocations[0]!.disableNativeAppServer).toBe(true);
-    expect(invocations[1]!.disableNativeAppServer).toBeUndefined();
-    expect(invocations[2]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[1]!.disableNativeAppServer).toBe(true);
+    expect(invocations[2]!.disableNativeAppServer).toBe(true);
   });
 
   it('prioritizes src candidates ahead of noisy script and env files for Codex draft grounding', async () => {
@@ -3861,7 +3861,7 @@ describe('Forge session keys', () => {
     }
   });
 
-  it('uses a two-stage native Codex revision flow with shared drafter session state', async () => {
+  it('uses a two-stage Codex revision flow with shared drafter session state', async () => {
     const tmpDir = await makeTmpDir();
     await seedCodexCandidateFiles(tmpDir);
     await seedCodexNativeWriteContextFiles(tmpDir);
@@ -3926,17 +3926,17 @@ describe('Forge session keys', () => {
     expect(invocations[4]!.prompt).not.toContain('codex native compound lesson');
     expect(invocations[4]!.tools).toEqual([]);
     expect(invocations[4]!.addDirs).toBeUndefined();
-    expect(invocations[0]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[0]!.disableNativeAppServer).toBe(true);
     expect(invocations[1]!.disableNativeAppServer).toBe(true);
-    expect(invocations[2]!.disableNativeAppServer).toBeUndefined();
-    expect(invocations[3]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[2]!.disableNativeAppServer).toBe(true);
+    expect(invocations[3]!.disableNativeAppServer).toBe(true);
     expect(invocations[4]!.disableNativeAppServer).toBe(true);
-    expect(invocations[5]!.disableNativeAppServer).toBeUndefined();
+    expect(invocations[5]!.disableNativeAppServer).toBe(true);
     expect(invocations[3]!.systemPrompt).toBeUndefined();
     expect(invocations[4]!.systemPrompt).toBeUndefined();
   });
 
-  it('steers native Codex grounding turns back to path-only output when they start narrating', async () => {
+  it('steers Codex grounding turns back to path-only output when they start narrating', async () => {
     const tmpDir = await makeTmpDir();
     await seedCodexCandidateFiles(tmpDir);
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nBuild the thing.\n\n## Scope\n\nIn scope: everything.\n\n## Changes\n\n### File-by-file breakdown\n\n- \`src/discord/forge-commands.ts\` — add two-stage native draft orchestration.\n- \`src/runtime/codex-app-server.ts\` — confirm native turn behavior.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Unit tests.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;

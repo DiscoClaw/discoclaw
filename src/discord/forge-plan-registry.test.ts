@@ -293,7 +293,7 @@ describe('stored forge plan metadata', () => {
     const gate = resolveForgePlanPhaseGate('plan-legacy-draft', 'draft_artifact');
     expect(gate.requiresFreshResearch).toBe(true);
     expect(gate.nextPhase).toBe('draft_research');
-    expect(gate.route).toBe('native');
+    expect(gate.route).toBe('cli');
     expect(gate.reason).toContain('Re-enter draft_research');
   });
 
@@ -318,7 +318,7 @@ describe('stored forge plan metadata', () => {
 
     const gate = resolveForgePlanPhaseGate('plan-legacy-revision', 'revision_artifact');
     expect(gate.nextPhase).toBe('revision_research');
-    expect(gate.route).toBe('native');
+    expect(gate.route).toBe('cli');
     expect(gate.allowlistPaths).toEqual(['src/discord/forge-plan-registry.ts']);
   });
 
@@ -372,7 +372,7 @@ describe('stored forge plan metadata', () => {
     const gate = resolveForgePlanPhaseGate('plan-missing', 'revision_artifact');
     expect(gate.requiresFreshResearch).toBe(true);
     expect(gate.nextPhase).toBe('revision_research');
-    expect(gate.route).toBe('native');
+    expect(gate.route).toBe('cli');
   });
 
   it('treats audit as a final bounded phase when metadata is missing', () => {
@@ -380,7 +380,7 @@ describe('stored forge plan metadata', () => {
 
     expect(gate.requiresFreshResearch).toBe(true);
     expect(gate.nextPhase).toBe('revision_research');
-    expect(gate.route).toBe('native');
+    expect(gate.route).toBe('cli');
     expect(gate.reason).toContain('Re-enter revision_research');
   });
 
@@ -455,8 +455,8 @@ describe('getForgeStatusSummary', () => {
 
 describe('resolveForgeTurnRoute', () => {
   it('routes by explicit forge phase', () => {
-    expect(resolveForgeTurnRoute('draft_research')).toBe('native');
-    expect(resolveForgeTurnRoute('audit')).toBe('hybrid');
+    expect(resolveForgeTurnRoute('draft_research')).toBe('cli');
+    expect(resolveForgeTurnRoute('audit')).toBe('cli');
     expect(resolveForgeTurnRoute('revision_artifact')).toBe('cli');
   });
 });

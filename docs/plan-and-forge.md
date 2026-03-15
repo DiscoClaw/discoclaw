@@ -65,7 +65,7 @@ Full regeneration remains available and resets all phase statuses to `pending`. 
 
 **`!forge`** automates plan creation by orchestrating AI agents in a draft → audit → revise loop, producing a reviewed plan ready for human approval.
 
-Runtime note: forge runtime overrides such as `FORGE_DRAFTER_RUNTIME=codex` or `FORGE_AUDITOR_RUNTIME=codex` choose the Codex adapter for those phases, but forge currently forces Codex phases onto `codex exec` by default instead of the native app-server path. Native Codex can still be used for other eligible turn shapes outside forge, and future targeted forge experiments may re-enable it per phase once a given shape is proven reliable.
+Runtime note: forge runtime overrides such as `FORGE_DRAFTER_RUNTIME=codex` or `FORGE_AUDITOR_RUNTIME=codex` choose the Codex adapter for those phases, but forge forces Codex phases onto `codex exec` instead of the native app-server path because the CLI route has been materially more reliable for forge.
 
 Prompt-shaping note: across runtimes, forge is more reliable when open-ended research and final strict-output artifact writing are treated as separate steps. Use bounded discovery inputs where possible, and avoid asking a single turn to both roam the repo and emit the final durable plan unless that adapter has already proven it can do that shape reliably.
 
