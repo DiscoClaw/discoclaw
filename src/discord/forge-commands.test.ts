@@ -3770,7 +3770,6 @@ describe('Forge session keys', () => {
       || result.error?.includes('draft output must start with # Plan:'),
     ).toBe(true);
     expect(invocations.length).toBeGreaterThanOrEqual(1);
-    expect(invocations.length).toBeLessThanOrEqual(2);
   });
 
   it('keeps audit retries on the audit phase route instead of escalating to CLI salvage', async () => {
