@@ -9,7 +9,7 @@ import type { CronScheduler } from '../cron/scheduler.js';
 import type { CronExecutorContext } from '../cron/executor.js';
 import type { DeferScheduler } from './defer-scheduler.js';
 import type { DeferActionRequest } from './actions-defer.js';
-import { CADENCE_TAGS, generateCronId } from '../cron/run-stats.js';
+import { CADENCE_TAGS, generateCronId, computeDefinitionHash } from '../cron/run-stats.js';
 import { detectCadence } from '../cron/cadence.js';
 import type { ForumCountSync } from './forum-count-sync.js';
 import { autoTagCron, classifyCronModel } from '../cron/auto-tag.js';
@@ -48,7 +48,8 @@ export type CronActionRequest =
   | { type: 'cronDelete'; cronId: string }
   | { type: 'cronTrigger'; cronId: string; force?: boolean }
   | { type: 'cronSync' }
-  | { type: 'cronTagMapReload' };
+  | { type: 'cronTagMapReload' }
+  | { type: 'cronExport' };
 
 const CRON_TYPE_MAP: Record<CronActionRequest['type'], true> = {
   cronCreate: true,
@@ -61,6 +62,7 @@ const CRON_TYPE_MAP: Record<CronActionRequest['type'], true> = {
   cronTrigger: true,
   cronSync: true,
   cronTagMapReload: true,
+  cronExport: true,
 };
 export const CRON_ACTION_TYPES = new Set<string>(Object.keys(CRON_TYPE_MAP));
 
@@ -251,12 +253,6 @@ export async function executeCronAction(
         }
       }
 
-      // Create forum thread.
-      const forum = await resolveForumChannel(cronCtx.client, cronCtx.forumId);
-      if (!forum) {
-        return { ok: false, error: 'Cron forum channel not found' };
-      }
-
       // Reload shared cache from disk (best-effort; failure keeps cached)
       await reloadCronTagMapInPlace(cronCtx.tagMapPath, cronCtx.tagMap).catch((err) => {
         cronCtx.log?.warn({ err, tagMapPath: cronCtx.tagMapPath }, 'cron:action tag-map reload failed; using cached');
@@ -298,45 +294,11 @@ export async function executeCronAction(
         return { ok: false, error: `Invalid routingMode "${action.routingMode}": must be "json"` };
       }
 
-      // Resolve tag IDs for forum.
-      const allTagNames = [...purposeTags, cadence];
-      const appliedTagIds = allTagNames.map((t) => tagMap[t]).filter(Boolean);
-      const uniqueTagIds = [...new Set(appliedTagIds)].slice(0, 5);
-
-      const threadName = buildCronThreadName(action.name, cadence);
-      const starterContent = buildStarterContent(action.schedule, timezone, action.channel, action.prompt);
-
-      let thread;
-      try {
-        thread = await forum.threads.create({
-          name: threadName,
-          message: {
-            content: starterContent.slice(0, 2000),
-            allowedMentions: { parse: [] },
-          },
-          appliedTags: uniqueTagIds,
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return { ok: false, error: `Failed to create forum thread: ${msg}` };
-      }
-
-      // Mark thread as pending so the threadCreate listener skips it.
-      cronCtx.pendingThreadIds.add(thread.id);
-
-      // Register with scheduler, then clear the pending marker.
-      try {
-        cronCtx.scheduler.register(thread.id, thread.id, ctx.guild.id, action.name, def, cronId);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        return { ok: false, error: `Invalid cron definition: ${msg}` };
-      } finally {
-        cronCtx.pendingThreadIds.delete(thread.id);
-      }
-
-      // Save stats. On create, set the classified model but don't set modelOverride —
+      // --- Canonical local write FIRST (commit point) ---
+      // Save stats with cronId as placeholder threadId; real threadId set after projection.
+      // On create, set the classified model but don't set modelOverride —
       // override is only for explicit user changes via cronUpdate.
-      const record = await cronCtx.statsStore.upsertRecord(cronId, thread.id, {
+      const canonicalRecord = await cronCtx.statsStore.upsertRecord(cronId, cronId, {
         cadence,
         purposeTags,
         model,
@@ -345,31 +307,81 @@ export async function executeCronAction(
         channel: action.channel,
         prompt: action.prompt,
         authorId: ctx.requesterId,
+        projectionStatus: 'pending-resync' as const,
         ...(action.routingMode ? { routingMode: action.routingMode } : {}),
         ...(parsedAllowedActions !== undefined && { allowedActions: parsedAllowedActions }),
         ...(parsedChain !== undefined && { chain: parsedChain }),
       });
+      const defHash = computeDefinitionHash(canonicalRecord);
 
-      // Create status message.
+      // --- Discord projection sync (best-effort) ---
+      let projectionNote = '';
       try {
-        await ensureStatusMessage(cronCtx.client, thread.id, cronId, record, cronCtx.statsStore, { log: cronCtx.log });
-      } catch {}
+        const forum = await resolveForumChannel(cronCtx.client, cronCtx.forumId);
+        if (!forum) {
+          throw new Error('Cron forum channel not found');
+        }
 
-      // Post pinned prompt message (embed) so the full prompt is always retrievable.
-      try {
-        const embed = new EmbedBuilder()
-          .setTitle('\uD83D\uDCCB Cron Prompt')
-          .setDescription(action.prompt.slice(0, 4096))
-          .setColor(0x5865F2);
-        const promptMsg = await thread.send({ embeds: [embed], allowedMentions: { parse: [] } });
-        try { await promptMsg.pin(); } catch { /* non-fatal */ }
-        await cronCtx.statsStore.upsertRecord(cronId, thread.id, { promptMessageId: promptMsg.id });
+        // Resolve tag IDs for forum.
+        const allTagNames = [...purposeTags, cadence];
+        const appliedTagIds = allTagNames.map((t) => tagMap[t]).filter(Boolean);
+        const uniqueTagIds = [...new Set(appliedTagIds)].slice(0, 5);
+
+        const threadName = buildCronThreadName(action.name, cadence);
+        const starterContent = buildStarterContent(action.schedule, timezone, action.channel, action.prompt);
+
+        const thread = await forum.threads.create({
+          name: threadName,
+          message: {
+            content: starterContent.slice(0, 2000),
+            allowedMentions: { parse: [] },
+          },
+          appliedTags: uniqueTagIds,
+        });
+
+        // Mark thread as pending so the threadCreate listener skips it.
+        cronCtx.pendingThreadIds.add(thread.id);
+
+        // Register with scheduler, then clear the pending marker.
+        try {
+          cronCtx.scheduler.register(thread.id, thread.id, ctx.guild.id, action.name, def, cronId);
+        } finally {
+          cronCtx.pendingThreadIds.delete(thread.id);
+        }
+
+        // Update record with real threadId and mark projection synced.
+        const record = await cronCtx.statsStore.upsertRecord(cronId, thread.id, {
+          projectionStatus: 'synced' as const,
+          projectionSyncedAt: new Date().toISOString(),
+          projectionHash: defHash,
+        });
+
+        // Create status message.
+        try {
+          await ensureStatusMessage(cronCtx.client, thread.id, cronId, record, cronCtx.statsStore, { log: cronCtx.log });
+        } catch {}
+
+        // Post pinned prompt message (embed) so the full prompt is always retrievable.
+        try {
+          const embed = new EmbedBuilder()
+            .setTitle('\uD83D\uDCCB Cron Prompt')
+            .setDescription(action.prompt.slice(0, 4096))
+            .setColor(0x5865F2);
+          const promptMsg = await thread.send({ embeds: [embed], allowedMentions: { parse: [] } });
+          try { await promptMsg.pin(); } catch { /* non-fatal */ }
+          await cronCtx.statsStore.upsertRecord(cronId, thread.id, { promptMessageId: promptMsg.id });
+        } catch (err) {
+          cronCtx.log?.warn({ err, cronId }, 'cron:action:create prompt message failed');
+        }
+
+        cronCtx.forumCountSync?.requestUpdate();
       } catch (err) {
-        cronCtx.log?.warn({ err, cronId }, 'cron:action:create prompt message failed');
+        const msg = err instanceof Error ? err.message : String(err);
+        projectionNote = ` (projection: pending — ${msg})`;
+        cronCtx.log?.warn({ err, cronId }, 'cron:action:create Discord projection failed; local record committed');
       }
 
-      cronCtx.forumCountSync?.requestUpdate();
-      return { ok: true, summary: `Cron "${action.name}" created (${cronId}), schedule: ${action.schedule}, model: ${model}${action.routingMode ? `, routing: ${action.routingMode}` : ''}${parsedChain ? `, chain: ${parsedChain.join(', ')}` : ''}` };
+      return { ok: true, summary: `Cron "${action.name}" created (${cronId}), schedule: ${action.schedule}, model: ${model}${action.routingMode ? `, routing: ${action.routingMode}` : ''}${parsedChain ? `, chain: ${parsedChain.join(', ')}` : ''}${projectionNote}` };
     }
 
     case 'cronUpdate': {
@@ -382,10 +394,8 @@ export async function executeCronAction(
         return { ok: false, error: `Cron "${action.cronId}" not found` };
       }
 
+      // Scheduler job may be absent if projection is missing; updates proceed against canonical local record.
       const job = cronCtx.scheduler.getJob(record.threadId);
-      if (!job) {
-        return { ok: false, error: `Cron "${action.cronId}" not registered in scheduler` };
-      }
 
       const updates: Partial<typeof record> = {};
       const changes: string[] = [];
@@ -471,11 +481,12 @@ export async function executeCronAction(
       }
 
       // Definition changes (schedule, timezone, channel, prompt).
-      const newSchedule = action.schedule ?? job.def.schedule ?? '';
-      const newTimezone = action.timezone ?? job.def.timezone;
-      const newChannel = action.channel ?? job.def.channel;
-      const newPrompt = action.prompt ?? job.def.prompt;
-      const newDef = { triggerType: job.def.triggerType, schedule: newSchedule, timezone: newTimezone, channel: newChannel, prompt: newPrompt };
+      // Use canonical record as primary source, scheduler as fallback.
+      const newSchedule = action.schedule ?? record.schedule ?? job?.def.schedule ?? '';
+      const newTimezone = action.timezone ?? record.timezone ?? job?.def.timezone ?? getDefaultTimezone();
+      const newChannel = action.channel ?? record.channel ?? job?.def.channel ?? '';
+      const newPrompt = action.prompt ?? record.prompt ?? job?.def.prompt ?? '';
+      const newDef = { triggerType: record.triggerType ?? job?.def.triggerType ?? ('schedule' as const), schedule: newSchedule, timezone: newTimezone, channel: newChannel, prompt: newPrompt };
 
       const defChanged = action.schedule !== undefined || action.timezone !== undefined || action.channel !== undefined || action.prompt !== undefined;
 
@@ -494,7 +505,39 @@ export async function executeCronAction(
         if (action.channel !== undefined) changes.push(`channel → ${action.channel}`);
         if (action.prompt !== undefined) changes.push(`prompt updated`);
 
-        // Try to edit the thread's starter message (works for bot-created threads).
+        // Persist updated definition fields.
+        updates.schedule = newSchedule;
+        updates.timezone = newTimezone;
+        updates.channel = newChannel;
+        updates.prompt = newPrompt;
+      }
+
+      if (action.prompt !== undefined && action.state === undefined && Object.keys(record.state ?? {}).length > 0) {
+        warnings.push('prompt updated but existing persistent state was kept; clear stale state with state: "{}" if it no longer applies');
+      }
+
+      // --- Canonical local write FIRST (commit point) ---
+      await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, updates);
+
+      // --- Scheduler re-registration (local, not Discord) ---
+      if (defChanged) {
+        if (job) {
+          try {
+            cronCtx.scheduler.register(record.threadId, record.threadId, job.guildId, job.name, newDef, action.cronId);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            warnings.push(`scheduler re-registration failed: ${msg}`);
+          }
+        } else {
+          warnings.push('not in scheduler — definition updated locally only');
+        }
+      }
+
+      // --- Discord projection sync (best-effort) ---
+      let discordSyncOk = true;
+
+      // Try to edit the thread's starter message (works for bot-created threads).
+      if (defChanged) {
         const thread = cronCtx.client.channels.cache.get(record.threadId);
         if (thread && thread.isThread()) {
           try {
@@ -509,30 +552,11 @@ export async function executeCronAction(
               await thread.send({ content: note, allowedMentions: { parse: [] } });
             }
           } catch (err) {
+            discordSyncOk = false;
             cronCtx.log?.warn({ err, cronId: action.cronId }, 'cron:action:update edit failed');
           }
         }
-
-        // Reload scheduler.
-        try {
-          cronCtx.scheduler.register(record.threadId, record.threadId, job.guildId, job.name, newDef, action.cronId);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return { ok: false, error: `Invalid cron definition: ${msg}` };
-        }
-
-        // Persist updated definition fields.
-        updates.schedule = newSchedule;
-        updates.timezone = newTimezone;
-        updates.channel = newChannel;
-        updates.prompt = newPrompt;
       }
-
-      if (action.prompt !== undefined && action.state === undefined && Object.keys(record.state ?? {}).length > 0) {
-        warnings.push('prompt updated but existing persistent state was kept; clear stale state with state: "{}" if it no longer applies');
-      }
-
-      await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, updates);
 
       // Update status message.
       try {
@@ -540,7 +564,9 @@ export async function executeCronAction(
         if (updatedRecord) {
           await ensureStatusMessage(cronCtx.client, record.threadId, action.cronId, updatedRecord, cronCtx.statsStore, { log: cronCtx.log });
         }
-      } catch {}
+      } catch {
+        discordSyncOk = false;
+      }
 
       // Update or create the pinned prompt message when prompt changes.
       if (action.prompt !== undefined) {
@@ -575,6 +601,7 @@ export async function executeCronAction(
             }
           }
         } catch (err) {
+          discordSyncOk = false;
           cronCtx.log?.warn({ err, cronId: action.cronId }, 'cron:action:update prompt message failed');
         }
       }
@@ -604,31 +631,48 @@ export async function executeCronAction(
               }
             }
           }
-        } catch {}
+        } catch {
+          discordSyncOk = false;
+        }
       }
 
-      const summary = `Cron ${action.cronId} updated: ${changes.join(', ') || 'no changes'}`;
+      // Update projection status based on Discord sync outcome.
+      try {
+        const defRecord = cronCtx.statsStore.getRecord(action.cronId);
+        if (defRecord) {
+          await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, {
+            projectionStatus: discordSyncOk ? ('synced' as const) : ('drifted' as const),
+            ...(discordSyncOk ? { projectionSyncedAt: new Date().toISOString(), projectionHash: computeDefinitionHash(defRecord) } : {}),
+          });
+        }
+      } catch { /* projection status update is best-effort */ }
+
+      const projectionNote = discordSyncOk ? '' : ' (projection: drifted)';
+      const summary = `Cron ${action.cronId} updated: ${changes.join(', ') || 'no changes'}${projectionNote}`;
       return { ok: true, summary: warnings.length > 0 ? `${summary}. Warning: ${warnings.join('; ')}` : summary };
     }
 
     case 'cronList': {
-      const jobs = cronCtx.scheduler.listJobs();
-      if (jobs.length === 0) {
+      // Read from canonical local store (source of truth), enrich with scheduler runtime data.
+      const allRecords = cronCtx.statsStore.getCanonicalDefinitions();
+      const entries = Object.entries(allRecords);
+      if (entries.length === 0) {
         return { ok: true, summary: 'No cron jobs registered.' };
       }
 
-      const lines = jobs.map((j) => {
-        const fullJob = cronCtx.scheduler.getJob(j.id);
-        const record = fullJob?.cronId ? cronCtx.statsStore.getRecord(fullJob.cronId) : undefined;
-        const status = record?.disabled ? 'paused' : (record?.lastRunStatus ?? 'pending');
-        const displayStatus = fullJob?.running ? `${status} \uD83D\uDD04` : status;
-        const model = record?.modelOverride ?? record?.model ?? '?';
-        const runs = record?.runCount ?? 0;
-        const tags = record?.purposeTags?.join(', ') || '';
-        const nextRun = j.nextRun ? `<t:${Math.floor(j.nextRun.getTime() / 1000)}:R>` : 'N/A';
-        const cronId = fullJob?.cronId ?? '?';
-        const chained = record?.chain && record.chain.length > 0 ? ' | chained' : '';
-        return `\`${cronId}\` **${j.name}** | \`${j.schedule}\` | ${displayStatus} | ${model} | ${runs} runs | next: ${nextRun}${tags ? ` | ${tags}` : ''}${chained}`;
+      const lines = entries.map(([cronId, rec]) => {
+        const job = cronCtx.scheduler.getJob(rec.threadId);
+        const name = job?.name ?? cronId;
+        const schedule = rec.schedule ?? job?.def.schedule ?? '?';
+        const status = rec.disabled ? 'paused' : (rec.lastRunStatus ?? 'pending');
+        const displayStatus = job?.running ? `${status} \uD83D\uDD04` : status;
+        const model = rec.modelOverride ?? rec.model ?? '?';
+        const runs = rec.runCount ?? 0;
+        const tags = rec.purposeTags?.join(', ') || '';
+        const nextRun = job?.cron?.nextRun() ? `<t:${Math.floor(job.cron.nextRun()!.getTime() / 1000)}:R>` : 'N/A';
+        const chained = rec.chain && rec.chain.length > 0 ? ' | chained' : '';
+        const projection = rec.projectionStatus && rec.projectionStatus !== 'synced' ? ` | proj:${rec.projectionStatus}` : '';
+        return `\`${cronId}\` **${name}** | \`${schedule}\` | ${displayStatus} | ${model} | ${runs} runs | next: ${nextRun}${tags ? ` | ${tags}` : ''}${chained}${projection}`;
       });
       return { ok: true, summary: lines.join('\n') };
     }
@@ -647,11 +691,14 @@ export async function executeCronAction(
       const lines: string[] = [];
       lines.push(`**Cron: ${job?.name ?? 'Unknown'}** (\`${action.cronId}\`)`);
       lines.push(`Thread: ${record.threadId}`);
-      if (job) {
-        lines.push(`Schedule: \`${job.def.schedule}\` (${job.def.timezone})`);
-        const nextRun = job.cron?.nextRun() ?? null;
-        lines.push(`Next run: ${nextRun ? `<t:${Math.floor(nextRun.getTime() / 1000)}:F>` : 'N/A'}`);
+      // Schedule from canonical record, falling back to scheduler.
+      const schedule = record.schedule ?? job?.def.schedule;
+      const tz = record.timezone ?? job?.def.timezone;
+      if (schedule) {
+        lines.push(`Schedule: \`${schedule}\` (${tz ?? 'N/A'})`);
       }
+      const nextRun = job?.cron?.nextRun() ?? null;
+      lines.push(`Next run: ${nextRun ? `<t:${Math.floor(nextRun.getTime() / 1000)}:F>` : 'N/A'}`);
       lines.push(`Status: ${record.disabled ? 'paused' : 'active'}`);
       if (job?.running) {
         lines.push(`Runtime: \uD83D\uDD04 running`);
@@ -677,6 +724,10 @@ export async function executeCronAction(
         const stateJson = JSON.stringify(record.state);
         lines.push(`State: ${stateJson.length > 500 ? stateJson.slice(0, 500) + '... (truncated)' : stateJson}`);
       }
+      // Surface projection status so operators see sync state.
+      if (record.projectionStatus && record.projectionStatus !== 'synced') {
+        lines.push(`Projection: ${record.projectionStatus}`);
+      }
       // Return full prompt text — prefer the persisted record prompt (always full),
       // falling back to the scheduler def (also full).
       const promptText = record.prompt ?? job?.def.prompt;
@@ -697,14 +748,14 @@ export async function executeCronAction(
         return { ok: false, error: `Cron "${action.cronId}" not found` };
       }
 
-      const disabled = cronCtx.scheduler.disable(record.threadId);
-      if (!disabled) {
-        return { ok: false, error: `Cron "${action.cronId}" not registered in scheduler` };
-      }
-      const canceled = requestRunningJobCancel(cronCtx, record.threadId, action.cronId);
+      // --- Canonical local write FIRST (commit point) ---
       await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, { disabled: true });
 
-      // Post notification.
+      // --- Scheduler disable (best-effort — job may not be registered if projection is missing) ---
+      const disabled = cronCtx.scheduler.disable(record.threadId);
+      const canceled = disabled ? requestRunningJobCancel(cronCtx, record.threadId, action.cronId) : false;
+
+      // --- Discord notification (best-effort) ---
       try {
         const thread = cronCtx.client.channels.cache.get(record.threadId);
         if (thread && thread.isThread()) {
@@ -715,7 +766,10 @@ export async function executeCronAction(
         }
       } catch {}
 
-      return { ok: true, summary: canceled ? `Cron ${action.cronId} paused (active run cancel requested)` : `Cron ${action.cronId} paused` };
+      const notes: string[] = [];
+      if (canceled) notes.push('active run cancel requested');
+      if (!disabled) notes.push('not in scheduler — projection may need resync');
+      return { ok: true, summary: `Cron ${action.cronId} paused${notes.length > 0 ? ` (${notes.join('; ')})` : ''}` };
     }
 
     case 'cronResume': {
@@ -728,13 +782,13 @@ export async function executeCronAction(
         return { ok: false, error: `Cron "${action.cronId}" not found` };
       }
 
-      const enabled = cronCtx.scheduler.enable(record.threadId);
-      if (!enabled) {
-        return { ok: false, error: `Cron "${action.cronId}" not registered in scheduler` };
-      }
+      // --- Canonical local write FIRST (commit point) ---
       await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, { disabled: false });
 
-      // Post notification.
+      // --- Scheduler enable (best-effort — job may not be registered if projection is missing) ---
+      const enabled = cronCtx.scheduler.enable(record.threadId);
+
+      // --- Discord notification (best-effort) ---
       try {
         const thread = cronCtx.client.channels.cache.get(record.threadId);
         if (thread && thread.isThread()) {
@@ -745,7 +799,8 @@ export async function executeCronAction(
         }
       } catch {}
 
-      return { ok: true, summary: `Cron ${action.cronId} resumed` };
+      const note = !enabled ? ' (not in scheduler — projection may need resync)' : '';
+      return { ok: true, summary: `Cron ${action.cronId} resumed${note}` };
     }
 
     case 'cronDelete': {
@@ -758,12 +813,13 @@ export async function executeCronAction(
         return { ok: false, error: `Cron "${action.cronId}" not found` };
       }
 
+      // --- Canonical local remove FIRST (commit point) ---
       const canceled = requestRunningJobCancel(cronCtx, record.threadId, action.cronId);
       cronCtx.scheduler.unregister(record.threadId);
       await cronCtx.statsStore.removeRecord(action.cronId);
       cronCtx.forumCountSync?.requestUpdate();
 
-      // Archive the thread.
+      // --- Discord projection cleanup (best-effort) ---
       const thread = cronCtx.client.channels.cache.get(record.threadId);
       if (thread && thread.isThread()) {
         const threadOps = thread as CronThreadOps;
@@ -886,6 +942,35 @@ export async function executeCronAction(
       }
     }
 
+    case 'cronExport': {
+      // Operator-facing export backed only by canonical local state — no Discord dependency.
+      const defs = cronCtx.statsStore.getCanonicalDefinitions();
+      const entries = Object.entries(defs);
+      if (entries.length === 0) {
+        return { ok: true, summary: 'No cron jobs to export.' };
+      }
+      const exported = entries.map(([cronId, rec]) => ({
+        cronId,
+        schedule: rec.schedule ?? null,
+        timezone: rec.timezone ?? null,
+        channel: rec.channel ?? null,
+        prompt: rec.prompt ?? null,
+        disabled: rec.disabled,
+        model: rec.modelOverride ?? rec.model ?? null,
+        cadence: rec.cadence ?? null,
+        purposeTags: rec.purposeTags,
+        triggerType: rec.triggerType ?? 'schedule',
+        routingMode: rec.routingMode ?? null,
+        allowedActions: rec.allowedActions ?? null,
+        chain: rec.chain ?? null,
+        projectionStatus: rec.projectionStatus ?? null,
+        runCount: rec.runCount,
+        lastRunStatus: rec.lastRunStatus ?? null,
+        lastRunAt: rec.lastRunAt ?? null,
+      }));
+      return { ok: true, summary: `**Cron Export** (${entries.length} jobs, local store)\n\`\`\`json\n${JSON.stringify(exported, null, 2)}\n\`\`\`` };
+    }
+
     case 'cronTagMapReload': {
       const oldCount = Object.keys(cronCtx.tagMap).length;
       try {
@@ -981,6 +1066,12 @@ Note: \`force\` overrides are disabled in Discord actions.
 \`\`\`
 <discord-action>{"type":"cronSync"}</discord-action>
 \`\`\`
+
+**cronExport** — Export all cron definitions from local store (no Discord dependency):
+\`\`\`
+<discord-action>{"type":"cronExport"}</discord-action>
+\`\`\`
+Returns a JSON snapshot of all canonical cron definitions with schedule, prompt, model, projection status, and run history. Backed only by local state — works even if Discord is unreachable.
 
 **cronTagMapReload** — Reload tag map from disk and optionally trigger sync:
 \`\`\`

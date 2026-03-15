@@ -52,6 +52,11 @@ function makeStatsStore(records: CronRunRecord[]): CronRunStats {
     recordRun: vi.fn(async () => {}),
     removeRecord: vi.fn(async (cronId: string) => { delete store[cronId]; return true; }),
     removeByThreadId: vi.fn(async () => true),
+    getCanonicalDefinitions: () => {
+      const snapshot: Record<string, CronRunRecord> = {};
+      for (const [id, rec] of Object.entries(store)) snapshot[id] = { ...rec };
+      return snapshot;
+    },
   } as unknown as CronRunStats;
 }
 
@@ -165,7 +170,7 @@ describe('executeCronAction', () => {
   });
 
   it('cronList returns empty message when no jobs', async () => {
-    const cronCtx = makeCronCtx({ scheduler: makeScheduler([]) });
+    const cronCtx = makeCronCtx({ scheduler: makeScheduler([]), statsStore: makeStatsStore([]) });
     const result = await executeCronAction({ type: 'cronList' }, makeActionCtx(), cronCtx);
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.summary).toContain('No cron jobs');
@@ -195,11 +200,11 @@ describe('executeCronAction', () => {
     expect(cronCtx.scheduler.disable).toHaveBeenCalledWith('thread-1');
   });
 
-  it('cronPause returns error when scheduler job is missing', async () => {
+  it('cronPause succeeds when scheduler job is missing (local-first)', async () => {
     const cronCtx = makeCronCtx({ scheduler: makeScheduler([]) });
     const result = await executeCronAction({ type: 'cronPause', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain('not registered in scheduler');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.summary).toContain('not in scheduler');
   });
 
   it('cronResume enables the job', async () => {
@@ -209,11 +214,11 @@ describe('executeCronAction', () => {
     expect(cronCtx.scheduler.enable).toHaveBeenCalledWith('thread-1');
   });
 
-  it('cronResume returns error when scheduler job is missing', async () => {
+  it('cronResume succeeds when scheduler job is missing (local-first)', async () => {
     const cronCtx = makeCronCtx({ scheduler: makeScheduler([]) });
     const result = await executeCronAction({ type: 'cronResume', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain('not registered in scheduler');
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.summary).toContain('not in scheduler');
   });
 
   it('cronDelete unregisters and archives', async () => {
@@ -491,7 +496,7 @@ describe('executeCronAction', () => {
     }
   });
 
-  it('cronCreate returns error when thread creation fails', async () => {
+  it('cronCreate succeeds with projection note when thread creation fails (local-first)', async () => {
     const forum = {
       id: 'forum-1',
       type: 15,
@@ -512,8 +517,11 @@ describe('executeCronAction', () => {
       makeActionCtx(),
       cronCtx,
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain('Missing Permissions');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('projection: pending');
+      expect(result.summary).toContain('Missing Permissions');
+    }
   });
 
   it('cronTrigger force is rejected in Discord actions', async () => {
@@ -675,6 +683,28 @@ describe('executeCronAction', () => {
 
   it('CRON_ACTION_TYPES includes cronTagMapReload', () => {
     expect(CRON_ACTION_TYPES.has('cronTagMapReload')).toBe(true);
+  });
+
+  it('CRON_ACTION_TYPES includes cronExport', () => {
+    expect(CRON_ACTION_TYPES.has('cronExport')).toBe(true);
+  });
+
+  it('cronExport returns all canonical definitions from local store', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronExport' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('Cron Export');
+      expect(result.summary).toContain('1 jobs');
+      expect(result.summary).toContain('cron-test0001');
+    }
+  });
+
+  it('cronExport returns empty message when no jobs', async () => {
+    const cronCtx = makeCronCtx({ statsStore: makeStatsStore([]) });
+    const result = await executeCronAction({ type: 'cronExport' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.summary).toContain('No cron jobs to export');
   });
 
   it('cronCreate with routingMode "json" persists it', async () => {
