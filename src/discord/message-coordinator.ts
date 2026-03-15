@@ -80,7 +80,7 @@ import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
 import { TaskStore } from '../tasks/store.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './shortterm-memory.js';
-import { editThenSendChunks, shouldSuppressFollowUp, appendUnavailableActionTypesNotice, appendParseFailureNotice, buildFailureRetryPlaceholder } from './output-common.js';
+import { editThenSendChunks, editThenSendChunksWithPrefix, shouldSuppressFollowUp, appendUnavailableActionTypesNotice, appendParseFailureNotice, buildFailureRetryPlaceholder } from './output-common.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import { resolveReplyReference } from './reply-reference.js';
 import type { MessageWithReference } from './reply-reference.js';
@@ -121,7 +121,14 @@ import { resolveModel, resolveReasoningEffort } from '../runtime/model-tiers.js'
 import { getDefaultTimezone } from '../cron/default-timezone.js';
 import type { AttachmentLike } from './image-download.js';
 import { DiscordTransportClient } from './transport-client.js';
-import type { LongRunWatchdog } from './long-run-watchdog.js';
+import {
+  type LongRunWatchdog,
+  type LongRunWatchdogRun,
+  DISCORD_ACTION_FOLLOW_UP_RUN_KIND,
+  buildDiscordActionFollowUpLifecycleLine,
+  isDiscordActionFollowUpRun,
+  resolveDiscordActionFollowUpTerminalState,
+} from './long-run-watchdog.js';
 import { adaptPlanRunEventText, adaptRuntimeEventText } from './runtime-event-text-adapter.js';
 import { createPhaseStatusHeartbeatController, resolvePlanHeaderHeartbeatPolicy } from './phase-status-heartbeat.js';
 import {
@@ -466,6 +473,12 @@ function errorMessage(err: unknown): string {
 
 type LongRunOutcome = 'succeeded' | 'failed';
 type LongRunWatchdogLike = Pick<LongRunWatchdog, 'start' | 'complete' | 'startupSweep'>;
+type FollowUpTerminalState = 'completed' | 'failed' | 'completed after delay';
+type PendingActionFollowUp = {
+  token: string;
+  runId: string;
+  placeholderText: string;
+};
 
 function buildWatchdogRunId(
   scope: string,
@@ -483,23 +496,29 @@ async function startWatchdogRun(opts: {
   channelId: string;
   messageId: string;
   sessionKey?: string;
+  runKind?: 'default' | 'discord-action-followup';
+  correlationToken?: string | null;
   stillRunningDelayMs?: number;
   notifyOnCompletion?: boolean;
   log?: LoggerLike;
   flow: string;
-}): Promise<void> {
-  if (!opts.watchdog) return;
+}): Promise<boolean> {
+  if (!opts.watchdog) return false;
   try {
     await opts.watchdog.start({
       runId: opts.runId,
       channelId: opts.channelId,
       messageId: opts.messageId,
       sessionKey: opts.sessionKey,
+      runKind: opts.runKind,
+      correlationToken: opts.correlationToken,
       stillRunningDelayMs: opts.stillRunningDelayMs,
       notifyOnCompletion: opts.notifyOnCompletion,
     });
+    return true;
   } catch (err) {
     opts.log?.warn({ err, runId: opts.runId }, `${opts.flow}: watchdog start failed`);
+    return false;
   }
 }
 
@@ -510,13 +529,31 @@ async function completeWatchdogRun(opts: {
   detail?: string;
   log?: LoggerLike;
   flow: string;
-}): Promise<void> {
-  if (!opts.watchdog || !opts.runId) return;
+}): Promise<LongRunWatchdogRun | null> {
+  if (!opts.watchdog || !opts.runId) return null;
   try {
-    await opts.watchdog.complete(opts.runId, { outcome: opts.outcome, detail: opts.detail });
+    return await opts.watchdog.complete(opts.runId, { outcome: opts.outcome, detail: opts.detail });
   } catch (err) {
     opts.log?.warn({ err, runId: opts.runId, outcome: opts.outcome }, `${opts.flow}: watchdog complete failed`);
+    return null;
   }
+}
+
+function buildFollowUpToken(): string {
+  return randomUUID().slice(0, 6);
+}
+
+function buildFollowUpLifecycleLine(
+  token: string,
+  state: 'pending' | 'stalled' | FollowUpTerminalState,
+): string {
+  return buildDiscordActionFollowUpLifecycleLine(token, state);
+}
+
+function appendFollowUpLifecycleLine(text: string, token: string, state: 'pending' | FollowUpTerminalState): string {
+  const line = buildFollowUpLifecycleLine(token, state);
+  const base = closeFenceIfOpen(String(text ?? '').trimEnd());
+  return base ? `${base}\n\n${line}` : line;
 }
 
 function toSendTarget(candidate: unknown): SendTarget | null {
@@ -3199,8 +3236,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           let currentPrompt = prompt;
           let followUpDepth = 0;
-          let pendingFollowUpPlaceholder: string | null = null;
-          let isFailureFollowUp = false;
+          let pendingFollowUp: PendingActionFollowUp | null = null;
           effectiveContinuationCapsule = existingContinuationCapsule;
           const traceId = `message_${randomUUID()}`;
           let traceOutcome = 'success';
@@ -3242,19 +3278,76 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 useNativeTextFallback: runtimeSupportsNativeThinkingStream(params.runtime.id),
               });
               hadTextFinal = false;
+              let currentFollowUpToken: string | null = null;
+              let currentFollowUpRunId: string | null = null;
 
               // On follow-up iterations, send a new placeholder message.
               if (followUpDepth > 0) {
+                const plannedFollowUp = pendingFollowUp;
+                if (!plannedFollowUp) break;
+                const previousReply = reply;
                 dispose();
                 abortDispose();
-                const followUpPlaceholderContent = pendingFollowUpPlaceholder ?? formatBoldLabel('(following up...)');
-                reply = await msg.channel.send({ content: followUpPlaceholderContent, allowedMentions: NO_MENTIONS });
+                try {
+                  reply = await msg.channel.send({
+                    content: plannedFollowUp.placeholderText,
+                    allowedMentions: NO_MENTIONS,
+                  });
+                } catch (err) {
+                  params.log?.warn({ err, sessionKey, followUpDepth, token: plannedFollowUp.token }, 'followup:placeholder-send failed');
+                  try {
+                    await msg.reply({
+                      content:
+                        `${buildFollowUpLifecycleLine(plannedFollowUp.token, 'failed')}\n` +
+                        'Could not post the follow-up placeholder.',
+                      allowedMentions: NO_MENTIONS,
+                    });
+                  } catch (replyErr) {
+                    params.log?.warn(
+                      { err: replyErr, sessionKey, followUpDepth, token: plannedFollowUp.token },
+                      'followup:placeholder-failure-note failed',
+                    );
+                  }
+                  reply = previousReply;
+                  break;
+                }
                 dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}:followup-${followUpDepth}`);
                 ({ signal: abortSignal, dispose: abortDispose } = registerAbort(reply.id));
                 reactPromise = reply.react?.('🛑')?.catch(() => null);
                 if (reactPromise) setStopReaction(msg.channelId, reply.id, reactPromise);
                 stopReactionRemoved = false;
                 replyFinalized = false;
+                currentFollowUpToken = plannedFollowUp.token;
+                currentFollowUpRunId = plannedFollowUp.runId;
+                const followUpWatchdogStarted = longRunWatchdog
+                  ? await startWatchdogRun({
+                    watchdog: longRunWatchdog,
+                    runId: plannedFollowUp.runId,
+                    channelId: msg.channelId,
+                    messageId: reply.id,
+                    sessionKey,
+                    runKind: DISCORD_ACTION_FOLLOW_UP_RUN_KIND,
+                    correlationToken: plannedFollowUp.token,
+                    stillRunningDelayMs: params.longRunStillRunningDelayMs,
+                    notifyOnCompletion: false,
+                    log: params.log,
+                    flow: 'message:followup',
+                  })
+                  : true;
+                if (!followUpWatchdogStarted) {
+                  try {
+                    await reply.edit({
+                      content:
+                        `${buildFollowUpLifecycleLine(plannedFollowUp.token, 'failed')}\n` +
+                        'Could not start follow-up lifecycle tracking.',
+                      allowedMentions: NO_MENTIONS,
+                    });
+                    replyFinalized = true;
+                  } catch {
+                    try { await reply.delete(); } catch { /* best-effort cleanup */ }
+                  }
+                  break;
+                }
                 params.log?.info({ sessionKey, followUpDepth }, 'followup:start');
               }
 
@@ -3803,10 +3896,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     && strippedUnrecognizedTypes.length === 0
                     && parseFailuresCount === 0
                   ) {
-                    try { await reply.delete(); } catch { /* ignore */ }
-                    replyFinalized = true;
-                    params.log?.info({ sessionKey }, 'discord:reply suppressed (actions-only, no display text)');
-                    break;
+                    if (followUpDepth > 0 && currentFollowUpToken) {
+                      processedText = '';
+                      params.log?.info({ sessionKey, followUpDepth }, 'followup:lifecycle-only terminal state');
+                    } else {
+                      try { await reply.delete(); } catch { /* ignore */ }
+                      replyFinalized = true;
+                      params.log?.info({ sessionKey }, 'discord:reply suppressed (actions-only, no display text)');
+                      break;
+                    }
                   }
                   if (statusRef?.current) {
                     for (let i = 0; i < actionResults.length; i++) {
@@ -3831,17 +3929,23 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
               processedText = appendParseFailureNotice(processedText, parseFailuresCount);
 
+              const shouldQueueFollowUp =
+                followUpDepth < params.actionFollowupDepth
+                && actions.length > 0
+                && shouldTriggerFollowUp(actions, actionResults);
+              const suppressFollowUpContent =
+                followUpDepth > 0
+                && shouldSuppressFollowUp(processedText, actions.length, collectedImages.length, strippedUnrecognizedTypes.length);
+
               // Suppression: if a follow-up response is trivially short and has no further
               // actions, suppress it to avoid posting empty messages like "Got it."
               // Skip suppression when images are present, or when unrecognized action blocks
               // were stripped (the AI tried to act — the user must see "(no output)").
               if (followUpDepth > 0) {
-                if (shouldSuppressFollowUp(processedText, actions.length, collectedImages.length, strippedUnrecognizedTypes.length)) {
+                if (suppressFollowUpContent) {
                   const stripped = processedText.replace(/\s+/g, ' ').trim();
-                  try { await reply.delete(); } catch { /* ignore */ }
-                  replyFinalized = true;
+                  processedText = '';
                   params.log?.info({ sessionKey, followUpDepth, chars: stripped.length }, 'followup:suppressed');
-                  break;
                 } else if (strippedUnrecognizedTypes.length > 0 && actions.length === 0 && collectedImages.length === 0) {
                   params.log?.info({ sessionKey, followUpDepth, types: strippedUnrecognizedTypes }, 'followup:suppression-bypassed');
                 }
@@ -3849,9 +3953,70 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 params.log?.info({ sessionKey, types: strippedUnrecognizedTypes }, 'discord:unrecognized-action-types-stripped');
               }
 
+              const followUpPlaceholderLines: string[] = [];
+              if (currentFollowUpToken) {
+                const followUpOutcome: LongRunOutcome = (invokeHadError || abortSignal.aborted || isShuttingDown())
+                  ? 'failed'
+                  : 'succeeded';
+                const completedRun = await completeWatchdogRun({
+                  watchdog: longRunWatchdog,
+                  runId: currentFollowUpRunId,
+                  outcome: followUpOutcome,
+                  log: params.log,
+                  flow: 'message:followup',
+                });
+                const terminalState: FollowUpTerminalState = completedRun && isDiscordActionFollowUpRun(completedRun)
+                  ? resolveDiscordActionFollowUpTerminalState(completedRun)
+                  : (followUpOutcome === 'failed' ? 'failed' : 'completed');
+                followUpPlaceholderLines.push(buildFollowUpLifecycleLine(currentFollowUpToken, terminalState));
+              }
+
+              let nextFollowUp: PendingActionFollowUp | null = null;
+              if (shouldQueueFollowUp) {
+                const token = buildFollowUpToken();
+                const failureRetryPlaceholder = buildFailureRetryPlaceholder(actions, actionResults);
+                const followUpLines = buildAllResultLines(actionResults);
+                const followUpSuffix = failureRetryPlaceholder
+                  ? `One or more actions failed. If you retry, explicitly tell the user what failed and whether the retry succeeded or failed. Do not announce success before the action confirms it.`
+                  : `Continue your analysis based on these results. If you need additional information, you may emit further query actions.`;
+                currentPrompt =
+                  `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
+                  followUpLines.join('\n') +
+                  `\n\n${followUpSuffix}`;
+                const followUpActionSection = buildTieredDiscordActionsPromptSection(
+                  actionFlags,
+                  params.botDisplayName,
+                );
+                currentPrompt += '\n\n---\n' + followUpActionSection.prompt;
+                const pendingLine = buildFollowUpLifecycleLine(token, 'pending');
+                nextFollowUp = {
+                  token,
+                  runId: buildWatchdogRunId('discord-action-followup', sessionKey, msg.id, followUpDepth + 1, token),
+                  placeholderText: failureRetryPlaceholder
+                    ? `${pendingLine}\n${failureRetryPlaceholder}`
+                    : pendingLine,
+                };
+                if (followUpDepth > 0 && currentFollowUpToken) {
+                  followUpPlaceholderLines.push(pendingLine);
+                } else {
+                  processedText = appendFollowUpLifecycleLine(processedText, token, 'pending');
+                }
+              }
+              pendingFollowUp = nextFollowUp;
+
               if (!isShuttingDown()) {
                 try {
-                  await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
+                  if (currentFollowUpToken) {
+                    await editThenSendChunksWithPrefix(
+                      reply,
+                      msg.channel,
+                      followUpPlaceholderLines.join('\n'),
+                      processedText,
+                      collectedImages,
+                    );
+                  } else {
+                    await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
+                  }
                   replyFinalized = true;
                 } catch (editErr) {
                   // Thread archived by a taskClose action — the close summary was already
@@ -3870,26 +4035,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
 
               // -- auto-follow-up check --
-              if (followUpDepth >= params.actionFollowupDepth) break;
-              if (actions.length === 0) break;
-              if (!shouldTriggerFollowUp(actions, actionResults)) break;
-
-              // Build follow-up prompt with action results.
-              pendingFollowUpPlaceholder = buildFailureRetryPlaceholder(actions, actionResults);
-              isFailureFollowUp = pendingFollowUpPlaceholder !== null;
-              const followUpLines = buildAllResultLines(actionResults);
-              const followUpSuffix = isFailureFollowUp
-                ? `One or more actions failed. If you retry, explicitly tell the user what failed and whether the retry succeeded or failed. Do not announce success before the action confirms it.`
-                : `Continue your analysis based on these results. If you need additional information, you may emit further query actions.`;
-              currentPrompt =
-                `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
-                followUpLines.join('\n') +
-                `\n\n${followUpSuffix}`;
-              const followUpActionSection = buildTieredDiscordActionsPromptSection(
-                actionFlags,
-                params.botDisplayName,
-              );
-              currentPrompt += '\n\n---\n' + followUpActionSection.prompt;
+              if (!pendingFollowUp) break;
               followUpDepth++;
           }
           } catch (traceErr) {

@@ -33,7 +33,13 @@ import { configureDeferredScheduler, type ConfigureDeferredSchedulerOpts } from 
 import { configureLoopScheduler } from './discord/actions-loop.js';
 import { startDiscordBot, getActiveForgeId } from './discord.js';
 import { toBootReportMcpStatus, type StatusPoster } from './discord/status-channel.js';
-import { LongRunWatchdog, type LongRunWatchdogRun } from './discord/long-run-watchdog.js';
+import {
+  LongRunWatchdog,
+  type LongRunWatchdogRun,
+  DISCORD_ACTION_FOLLOW_UP_RUN_KIND,
+  buildDiscordActionFollowUpLifecycleLine,
+  isDiscordActionFollowUpRun,
+} from './discord/long-run-watchdog.js';
 import { buildLongRunFinalNotice, postLongRunWatchdogNoticeToChannel } from './discord/long-run-watchdog-notice.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
@@ -412,6 +418,7 @@ const forgeProgressThrottleMs = cfg.forgeProgressThrottleMs;
 const forgeAutoImplement = cfg.forgeAutoImplement;
 const completionNotifyEnabled = cfg.completionNotifyEnabled;
 const completionNotifyThresholdMs = cfg.completionNotifyThresholdMs;
+const actionFollowupTimeoutMs = Math.max(1, cfg.actionFollowupTimeoutMs);
 const summaryToDurableEnabled = cfg.summaryToDurableEnabled;
 const durableSupersessionShadow = cfg.durableSupersessionShadow;
 const shortTermMemoryEnabled = cfg.shortTermMemoryEnabled;
@@ -495,15 +502,38 @@ async function postLongRunWatchdogNotice(run: Pick<LongRunWatchdogRun, 'runId' |
   });
 }
 
+async function postDiscordActionFollowUpLifecycleNotice(
+  run: Pick<LongRunWatchdogRun, 'runId' | 'channelId' | 'messageId' | 'correlationToken'>,
+  state: 'stalled' | 'failed',
+): Promise<void> {
+  if (!run.correlationToken) {
+    throw new Error(`Missing correlation token for Discord action follow-up run ${run.runId}`);
+  }
+  await postLongRunWatchdogNotice(
+    run,
+    buildDiscordActionFollowUpLifecycleLine(run.correlationToken, state),
+  );
+}
+
 const messageCoordinatorWatchdog = completionNotifyEnabled
   ? (() => {
     const watchdog = new LongRunWatchdog({
       dataFilePath: longRunWatchdogDataPath,
       stillRunningDelayMs: longRunStillRunningDelayMs,
-      postStillRunning: async () => {
-        // No-op: streaming preview heartbeats make a separate "Still running" message redundant.
+      postStillRunning: async (run) => {
+        if (!isDiscordActionFollowUpRun(run)) {
+          // Streaming preview heartbeats make a separate "Still running" message redundant.
+          return;
+        }
+        await postDiscordActionFollowUpLifecycleNotice(run, 'stalled');
       },
       postFinal: async (run, meta) => {
+        if (isDiscordActionFollowUpRun(run)) {
+          if (run.completion === 'interrupted') {
+            await postDiscordActionFollowUpLifecycleNotice(run, 'failed');
+          }
+          return;
+        }
         await postLongRunWatchdogNotice(run, buildLongRunFinalNotice({
           completion: run.completion,
           completionDetail: run.completionDetail,
@@ -514,7 +544,12 @@ const messageCoordinatorWatchdog = completionNotifyEnabled
     });
     longRunWatchdog = watchdog;
     return {
-      start: watchdog.start.bind(watchdog),
+      start: (input: Parameters<LongRunWatchdog['start']>[0]) => watchdog.start({
+        ...input,
+        stillRunningDelayMs: input.runKind === DISCORD_ACTION_FOLLOW_UP_RUN_KIND
+          ? actionFollowupTimeoutMs
+          : input.stillRunningDelayMs,
+      }),
       complete: watchdog.complete.bind(watchdog),
       // Startup sweep is intentionally run after Discord connect from index.ts.
       startupSweep: async () => ({ ...emptyLongRunSweepResult }),

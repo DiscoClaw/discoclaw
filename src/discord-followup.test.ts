@@ -422,12 +422,13 @@ describe('auto-follow-up for query actions', () => {
     const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
     await handler(msg);
 
-    // Should invoke twice (initial + follow-up), but the follow-up message should be deleted.
+    // Should invoke twice (initial + follow-up), and the follow-up placeholder should
+    // remain visible with an explicit terminal lifecycle state.
     expect(runtime.invoke).toHaveBeenCalledTimes(2);
-    // The follow-up placeholder is created via channel.send, and should have delete() called.
     const sendResult = await msg.channel.send.mock.results[0]?.value;
     if (sendResult) {
-      expect(sendResult.delete).toHaveBeenCalled();
+      expect(sendResult.delete).not.toHaveBeenCalled();
+      expect(replyEditContents(sendResult).some((content) => content.includes('Auto-follow-up') && content.includes('completed'))).toBe(true);
     }
   });
 
@@ -766,7 +767,7 @@ describe('auto-follow-up for query actions', () => {
     expect(content).not.toContain('Imagegen subsystem not configured');
   });
 
-  it('query-success follow-up placeholder is generic (following up...)', async () => {
+  it('query-success follow-up placeholder uses the explicit pending lifecycle copy', async () => {
     let callCount = 0;
     const runtime = {
       invoke: vi.fn(async function* () {
@@ -787,8 +788,8 @@ describe('auto-follow-up for query actions', () => {
     const sendArg = (msg.channel.send.mock.calls as any[][])[0]?.[0];
     expect(sendArg).toBeDefined();
     const content = typeof sendArg === 'string' ? sendArg : sendArg?.content ?? '';
-    // Query-success follow-ups use the generic "(following up...)" placeholder.
-    expect(content).toContain('following up');
+    expect(content).toContain('Auto-follow-up');
+    expect(content).toContain('pending');
   });
 
   it('failure follow-up prompt includes explicit retry instruction text', async () => {

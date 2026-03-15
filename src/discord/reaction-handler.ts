@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { MessageReaction, PartialMessageReaction, User, PartialUser, TextBasedChannel } from 'discord.js';
 import type { ImageData, EngineEvent } from '../runtime/types.js';
 import type { BotParams, StatusRef } from '../discord.js';
@@ -14,8 +15,14 @@ import { tryResolveReactionPrompt } from './reaction-prompts.js';
 import { tryAbort, isActivelyStreaming } from './abort-registry.js';
 import { getActiveOrchestrator, getActiveForgeChannelId } from './forge-plan-registry.js';
 import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools, buildPromptPreamble, buildOpenTasksSection, buildPromptSectionEstimates } from './prompt-common.js';
-import { editThenSendChunks, appendUnavailableActionTypesNotice, appendParseFailureNotice } from './output-common.js';
-import { formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
+import {
+  buildFailureRetryPlaceholder,
+  editThenSendChunks,
+  editThenSendChunksWithPrefix,
+  appendUnavailableActionTypesNotice,
+  appendParseFailureNotice,
+} from './output-common.js';
+import { closeFenceIfOpen, formatBoldLabel, thinkingLabel, selectStreamingOutput } from './output-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
@@ -31,8 +38,19 @@ import {
   runtimeSupportsNativeThinkingStream,
 } from './runtime-signal-budget.js';
 import { buildRunStateGuidance } from './run-state-guidance.js';
+import {
+  DISCORD_ACTION_FOLLOW_UP_RUN_KIND,
+  buildDiscordActionFollowUpLifecycleLine,
+  isDiscordActionFollowUpRun,
+  resolveDiscordActionFollowUpTerminalState,
+} from './long-run-watchdog.js';
 
 type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
+type PendingActionFollowUp = {
+  token: string;
+  runId: string;
+  placeholderText: string;
+};
 const STREAM_STALL_PROGRESS_UPDATE_MS = 30_000;
 const STREAMING_EDIT_TIMEOUT_MS = 4_000;
 const STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD = 3;
@@ -48,6 +66,27 @@ async function waitForEditOrTimeout(editOp: Promise<unknown>, timeoutMs: number)
   ]);
   if (timer) clearTimeout(timer);
   return completed;
+}
+
+function buildFollowUpToken(): string {
+  return randomUUID().slice(0, 6);
+}
+
+function buildFollowUpLifecycleLine(
+  token: string,
+  state: 'pending' | 'stalled' | 'completed' | 'failed' | 'completed after delay',
+): string {
+  return buildDiscordActionFollowUpLifecycleLine(token, state);
+}
+
+function appendFollowUpLifecycleLine(
+  text: string,
+  token: string,
+  state: 'pending' | 'completed' | 'failed' | 'completed after delay',
+): string {
+  const line = buildFollowUpLifecycleLine(token, state);
+  const base = closeFenceIfOpen(String(text ?? '').trimEnd());
+  return base ? `${base}\n\n${line}` : line;
 }
 
 export type ReactionMode = 'add' | 'remove';
@@ -564,18 +603,73 @@ function createReactionHandler(
           let replyFinalized = false;
           let followUpDepth = 0;
           let currentPrompt = prompt;
+          let pendingFollowUp: PendingActionFollowUp | null = null;
           try {
 
           // -- auto-follow-up loop --
           while (true) {
+          let currentFollowUpToken: string | null = null;
+          let currentFollowUpRunId: string | null = null;
           if (followUpDepth > 0) {
+            const plannedFollowUp = pendingFollowUp;
+            if (!plannedFollowUp) break;
             dispose();
-            reply = await replyableMessage.reply({
-              content: formatBoldLabel('(following up...)'),
-              allowedMentions: NO_MENTIONS,
-            });
+            try {
+              reply = await replyableMessage.reply({
+                content: plannedFollowUp.placeholderText,
+                allowedMentions: NO_MENTIONS,
+              });
+            } catch (err) {
+              params.log?.warn({ err, sessionKey, followUpDepth, token: plannedFollowUp.token }, `${logPrefix}:followup placeholder-send failed`);
+              try {
+                await replyableMessage.reply({
+                  content:
+                    `${buildFollowUpLifecycleLine(plannedFollowUp.token, 'failed')}\n` +
+                    'Could not post the follow-up placeholder.',
+                  allowedMentions: NO_MENTIONS,
+                });
+              } catch (replyErr) {
+                params.log?.warn(
+                  { err: replyErr, sessionKey, followUpDepth, token: plannedFollowUp.token },
+                  `${logPrefix}:followup placeholder-failure-note failed`,
+                );
+              }
+              break;
+            }
             dispose = registerInFlightReply(reply!, reaction.message.channelId, reply.id, `${logPrefix}:${reaction.message.channelId}:followup-${followUpDepth}`);
             replyFinalized = false;
+            currentFollowUpToken = plannedFollowUp.token;
+            currentFollowUpRunId = plannedFollowUp.runId;
+            const followUpWatchdogStarted = params.longRunWatchdog
+              ? await params.longRunWatchdog.start({
+                runId: plannedFollowUp.runId,
+                channelId: reaction.message.channelId,
+                messageId: reply.id,
+                sessionKey,
+                runKind: DISCORD_ACTION_FOLLOW_UP_RUN_KIND,
+                correlationToken: plannedFollowUp.token,
+                stillRunningDelayMs: params.longRunStillRunningDelayMs,
+                notifyOnCompletion: false,
+              }).then(() => true, async (err) => {
+                params.log?.warn(
+                  { err, sessionKey, followUpDepth, token: plannedFollowUp.token, runId: plannedFollowUp.runId },
+                  `${logPrefix}:followup watchdog start failed`,
+                );
+                try {
+                  await reply?.edit({
+                    content:
+                      `${buildFollowUpLifecycleLine(plannedFollowUp.token, 'failed')}\n` +
+                      'Could not start follow-up lifecycle tracking.',
+                    allowedMentions: NO_MENTIONS,
+                  });
+                  replyFinalized = true;
+                } catch {
+                  try { await reply?.delete?.(); } catch { /* best-effort cleanup */ }
+                }
+                return false;
+              })
+              : true;
+            if (!followUpWatchdogStarted) break;
           }
 
           // Streaming pattern (matches discord.ts flat mode).
@@ -855,8 +949,6 @@ function createReactionHandler(
                 statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
                 finalText = mapRuntimeErrorToUserMessage(evt.message);
                 await maybeEdit(true);
-                replyFinalized = true;
-                return;
               }
             }
           } finally {
@@ -864,8 +956,8 @@ function createReactionHandler(
             try { await streamEditQueue; } catch { /* ignore */ }
             streamEditQueue = Promise.resolve();
           }
-          metrics.recordInvokeResult('reaction', Date.now() - t0, true);
-          params.log?.info({ flow: 'reaction', sessionKey, ms: Date.now() - t0, ok: true }, 'obs.invoke.end');
+          metrics.recordInvokeResult('reaction', Date.now() - t0, !invokeError, invokeError ?? undefined);
+          params.log?.info({ flow: 'reaction', sessionKey, ms: Date.now() - t0, ok: !invokeError }, 'obs.invoke.end');
 
           let processedText = finalText || deltaText || (collectedImages.length > 0 ? '' : '(no output)');
 
@@ -942,10 +1034,15 @@ function createReactionHandler(
                 && strippedUnrecognizedTypes.length === 0
                 && parseFailuresCount === 0
               ) {
-                try { await reply?.delete?.(); } catch { /* ignore */ }
-                replyFinalized = true;
-                params.log?.info({ sessionKey }, `${logPrefix}:reply suppressed (actions-only, no display text)`);
-                return;
+                if (followUpDepth > 0 && currentFollowUpToken) {
+                  processedText = '';
+                  params.log?.info({ sessionKey, followUpDepth }, `${logPrefix}:followup lifecycle-only terminal state`);
+                } else {
+                  try { await reply?.delete?.(); } catch { /* ignore */ }
+                  replyFinalized = true;
+                  params.log?.info({ sessionKey }, `${logPrefix}:reply suppressed (actions-only, no display text)`);
+                  return;
+                }
               }
 
               if (statusRef?.current) {
@@ -963,28 +1060,88 @@ function createReactionHandler(
           processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
           processedText = appendParseFailureNotice(processedText, parseFailuresCount);
 
+          const shouldQueueFollowUp =
+            followUpDepth < params.actionFollowupDepth
+            && parsedActions.length > 0
+            && shouldTriggerFollowUp(parsedActions, actionResults);
+
           // Suppress empty responses and the HEARTBEAT_OK sentinel — delete placeholder and bail.
           const strippedText = processedText.replace(/\s+/g, ' ').trim();
           const isSuppressible = strippedText.length === 0 || strippedText === 'HEARTBEAT_OK' || strippedText === '(no output)';
           if (parsedActionCount === 0 && collectedImages.length === 0 && isSuppressible) {
-            params.log?.info({ sessionKey, chars: strippedText.length }, `${logPrefix}:trivial response suppressed`);
-            try {
-              await reply?.delete?.();
-              replyFinalized = true;
-            } catch (delErr) {
-              params.log?.warn({ sessionKey, err: delErr }, `${logPrefix}:placeholder delete failed`);
+            if (followUpDepth > 0 && currentFollowUpToken) {
+              processedText = '';
+              params.log?.info({ sessionKey, followUpDepth, chars: strippedText.length }, `${logPrefix}:followup suppressed to lifecycle-only state`);
+            } else {
+              params.log?.info({ sessionKey, chars: strippedText.length }, `${logPrefix}:trivial response suppressed`);
+              try {
+                await reply?.delete?.();
+                replyFinalized = true;
+              } catch (delErr) {
+                params.log?.warn({ sessionKey, err: delErr }, `${logPrefix}:placeholder delete failed`);
+              }
+              return;
             }
-            return;
           }
+
+          const followUpPlaceholderLines: string[] = [];
+          if (currentFollowUpToken) {
+            const completedRun = await params.longRunWatchdog?.complete(currentFollowUpRunId!, {
+              outcome: invokeError ? 'failed' : 'succeeded',
+            }) ?? null;
+            const terminalState =
+              completedRun && isDiscordActionFollowUpRun(completedRun)
+                ? resolveDiscordActionFollowUpTerminalState(completedRun)
+                : (invokeError ? 'failed' : 'completed');
+            followUpPlaceholderLines.push(buildFollowUpLifecycleLine(currentFollowUpToken, terminalState));
+          }
+
+          let nextFollowUp: PendingActionFollowUp | null = null;
+          if (shouldQueueFollowUp) {
+            const token = buildFollowUpToken();
+            const followUpLines = buildAllResultLines(actionResults);
+            const failureRetryPlaceholder = buildFailureRetryPlaceholder(parsedActions, actionResults);
+            const followUpSuffix = failureRetryPlaceholder
+              ? `One or more actions failed. If you retry, explicitly tell the user what failed and whether the retry succeeded or failed. Do not announce success before the action confirms it.`
+              : `Continue your analysis based on these results. If you need additional information, you may emit further query actions.`;
+            currentPrompt =
+              `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
+              followUpLines.join('\n') +
+              `\n\n${followUpSuffix}`;
+            const pendingLine = buildFollowUpLifecycleLine(token, 'pending');
+            nextFollowUp = {
+              token,
+              runId: `discord-action-followup:${encodeURIComponent(sessionKey)}:${encodeURIComponent(msg.id)}:${followUpDepth + 1}:${token}`,
+              placeholderText: failureRetryPlaceholder
+                ? `${pendingLine}\n${failureRetryPlaceholder}`
+                : pendingLine,
+            };
+            if (followUpDepth > 0 && currentFollowUpToken) {
+              followUpPlaceholderLines.push(pendingLine);
+            } else {
+              processedText = appendFollowUpLifecycleLine(processedText, token, 'pending');
+            }
+          }
+          pendingFollowUp = nextFollowUp;
 
           if (!isShuttingDown()) {
             try {
-              await editThenSendChunks(
-                reply!,
-                msg.channel as unknown as { send: (opts: { content: string; allowedMentions: unknown; files?: unknown[] }) => Promise<unknown> },
-                processedText,
-                collectedImages,
-              );
+              if (currentFollowUpToken) {
+                await editThenSendChunksWithPrefix(
+                  reply!,
+                  msg.channel as unknown as { send: (opts: { content: string; allowedMentions: unknown; files?: unknown[] }) => Promise<unknown> },
+                  followUpPlaceholderLines.join('\n'),
+                  processedText,
+                  collectedImages,
+                );
+              } else {
+                await editThenSendChunks(
+                  reply!,
+                  msg.channel as unknown as { send: (opts: { content: string; allowedMentions: unknown; files?: unknown[] }) => Promise<unknown> },
+                  processedText,
+                  collectedImages,
+                );
+              }
               replyFinalized = true;
             } catch (editErr) {
               if (errorCode(editErr) === 50083) {
@@ -1000,16 +1157,7 @@ function createReactionHandler(
           }
 
           // -- auto-follow-up check --
-          if (followUpDepth >= params.actionFollowupDepth) break;
-          if (parsedActions.length === 0) break;
-          if (!shouldTriggerFollowUp(parsedActions, actionResults)) break;
-
-          // Build follow-up prompt with action results.
-          const followUpLines = buildAllResultLines(actionResults);
-          currentPrompt =
-            `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
-            followUpLines.join('\n') +
-            `\n\nContinue your analysis based on these results. If you need additional information, you may emit further query actions.`;
+          if (!pendingFollowUp) break;
           followUpDepth++;
 
           } // end while (true)

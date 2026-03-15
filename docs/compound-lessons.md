@@ -72,6 +72,13 @@ Format notes:
 
 ## Lessons
 
+### 2026-03-14 - Give Discord auto-follow-up turns explicit lifecycle ownership
+Tags: #discord #workflow #task
+Lesson: Interactive Discord action auto-follow-up turns must attach to a concrete placeholder message with a user-visible lifecycle instead of starting silently in the background. Post the placeholder first, start the single watchdog against that Discord message before launching the follow-up runtime turn, and let that watchdog own timeout/dedupe plus terminal state updates such as `pending`, `stalled`, `completed`, `failed`, and `completed after delay`.
+Source: task/chat context - interactive action follow-up chains could go silent when runtime execution started before placeholder posting and watchdog ownership were established
+Applied: docs/compound-lessons.md
+Status: active
+
 ### 2026-03-14 - Separate research from final artifact turns
 Tags: #forge #workflow #prompting
 Lesson: For plan- and artifact-producing flows, separate open-ended research from the final strict-output turn whenever possible. Bounded inputs and fixed candidate sets are more reliable than asking one turn to both discover context and emit the final durable artifact, and this guidance should be treated as cross-runtime default shaping unless an adapter proves it can handle the combined turn robustly.
