@@ -80,14 +80,16 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
 ## Codex CLI Runtime
 
 - Adapter: `src/runtime/codex-cli.ts` (thin wrapper around `cli-adapter.ts` + `strategies/codex-strategy.ts`)
-- Primary transport:
-  - The preferred Codex path is now the **app-server-native invoke path**. For eligible turns, DiscoClaw uses the Codex app-server websocket as the main transport for `thread/start`, `turn/start`, streaming output, `turn/steer`, and `turn/interrupt`.
-  - This replaces the old `codex exec` + side-channel steering design where the CLI subprocess owned the turn lifecycle and the websocket was only used after best-effort JSONL lifecycle discovery.
+- Default transport:
+  - The default Codex path is `codex exec` / `codex exec resume`.
+  - DiscoClaw currently prefers the CLI route for reliability, especially in forge flows.
+- Optional native transport:
+  - When explicitly enabled, DiscoClaw can use the Codex app-server websocket for `thread/start`, `turn/start`, streaming output, `turn/steer`, and `turn/interrupt`.
   - The native path still uses Codex's local app-server auth/session state, so no public API key is required.
 - Activation and fallback:
   - Native invoke is opt-in via `CODEX_APP_SERVER_NATIVE=1`.
   - Native invoke also requires `CODEX_APP_SERVER_URL` to point at a reachable websocket endpoint.
-  - If the native flag is off, the URL is unset, or the turn hits an images / non-default `cwd` bypass gate, DiscoClaw uses the legacy `codex exec` / `codex exec resume` transport instead.
+  - If the native flag is off, the URL is unset, or the turn hits an images / non-default `cwd` bypass gate, DiscoClaw uses the `codex exec` / `codex exec resume` transport instead.
   - If native invoke is selected but the websocket connection cannot be established, DiscoClaw falls back to `codex exec` for that turn rather than failing closed.
 - Env vars:
   | Var | Default | Purpose |
@@ -115,9 +117,9 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
   - Successful steering sends `turn/steer` with `threadId` plus `expectedTurnId`; if the server returns a replacement `turnId`, the runtime updates its active-turn pointer.
   - `interrupt(sessionKey)` is also best-effort and sends `turn/interrupt` with the active `threadId` + `turnId`, then clears local active-turn state.
 - Tradeoffs vs `codex exec`:
-  - Native invoke is better when reliable live control matters: it owns thread/turn lifecycle directly, exposes the active `turnId`, and avoids the fragile CLI JSONL side-channel.
-  - `codex exec` remains the compatibility path for turns that need unsupported invocation shapes or when the app-server is unavailable.
-  - Keeping both paths preserves local Codex auth and session behavior while letting DiscoClaw incrementally move traffic onto the app-server transport.
+  - Native invoke is useful when live control matters: it owns thread/turn lifecycle directly, exposes the active `turnId`, and supports steer/interrupt semantics.
+  - `codex exec` remains the default and preferred path for general reliability, plus any turns that need unsupported invocation shapes or when the app-server is unavailable.
+  - Keeping both paths preserves local Codex auth and session behavior without forcing the app-server path on day-to-day usage.
 
 ## Gemini CLI Runtime
 
