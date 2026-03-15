@@ -107,6 +107,13 @@ Source: task thread ws-1211 - email cron carried stale seen_ids state after prom
 Applied: docs/compound-lessons.md
 Status: active
 
+### 2026-03-15 - Local cron persistence is canonical; Discord threads are a projection
+Tags: #cron #discord #architecture #state
+Lesson: `CronRunStats` local persistence is the single canonical source of truth for automation existence, schedule, and run history. Discord cron threads are a synchronized projection and operator-facing UI, not the authority. Discord thread deletion, Discord outages, or startup healing that re-creates threads must never imply that the canonical automation was deleted or should be removed. Reconciliation flows must treat the local store as authoritative and rebuild the Discord projection from it, never the reverse.
+Source: task/chat context - cron lifecycle work (ws-1235 follow-up) exposed that thread loss during restart healing or Discord-side deletion could be misread as automation removal if Discord state were treated as canonical
+Applied: docs/compound-lessons.md
+Status: active
+
 ### 2026-03-10 - Keep interactive Discord trigger context in sync
 Tags: #workflow #task #discord
 Lesson: Interactive Discord trigger paths, including the message handler and reaction handler, must hydrate equivalent conversational context, including nearby channel history. When adding or changing an interactive trigger path, audit it against the main message handler's context-gathering steps so the AI does not ask for information that is already present in-channel; cron and webhook paths are non-interactive and exempt from this invariant.
