@@ -1,3 +1,4 @@
+import { existsSync, readFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -40,13 +41,86 @@ const IDENTITY_TEMPLATE_MARKER = '*(pick something you like)*';
 const STALE_TOOLS_MARKER_HEADING = '## Discord Action Types';
 const STALE_TOOLS_MARKER_SUBHEADING = '### Forge Actions';
 
+const LEGACY_AGENTS_WARNING_MESSAGE =
+  'legacy AGENTS.md system sections detected — this can conflict with runtime default instructions.';
+const LEGACY_AGENTS_WARNING_RECOMMENDATION =
+  'Keep personal rules in AGENTS.md and remove migrated system sections.';
+const LEGACY_DISCOCLAW_WARNING_MESSAGE =
+  'legacy DISCOCLAW.md detected — file is no longer managed and was left untouched.';
+const LEGACY_DISCOCLAW_WARNING_RECOMMENDATION =
+  'Default instructions are injected at runtime; keep user overrides in AGENTS.md.';
+const LEGACY_TOOLS_WARNING_MESSAGE =
+  'legacy TOOLS.md system sections detected — file is user-owned and was left untouched.';
+const LEGACY_TOOLS_WARNING_RECOMMENDATION =
+  'If this is an unmodified scaffold copy, delete or replace it manually so tracked TOOLS.md can be the primary source.';
+
 type BootstrapLog = {
   info: (obj: Record<string, unknown>, msg: string) => void;
   warn: (obj: Record<string, unknown>, msg: string) => void;
 };
 
+export type WorkspaceBootstrapWarning = {
+  id: 'workspace-bootstrap:legacy-agents-system-sections' | 'workspace-bootstrap:legacy-discoclaw' | 'workspace-bootstrap:legacy-tools-system-sections';
+  file: 'AGENTS.md' | 'DISCOCLAW.md' | 'TOOLS.md';
+  message: string;
+  recommendation: string;
+  matchedMarkers?: string[];
+};
+
 function findLegacyAgentsMarkers(content: string): string[] {
   return LEGACY_AGENTS_MARKERS.filter((marker) => content.includes(marker));
+}
+
+export function inspectWorkspaceBootstrapWarningsSync(workspaceCwd: string): WorkspaceBootstrapWarning[] {
+  const warnings: WorkspaceBootstrapWarning[] = [];
+
+  const legacyDiscoclawPath = path.join(workspaceCwd, 'DISCOCLAW.md');
+  if (existsSync(legacyDiscoclawPath)) {
+    warnings.push({
+      id: 'workspace-bootstrap:legacy-discoclaw',
+      file: 'DISCOCLAW.md',
+      message: LEGACY_DISCOCLAW_WARNING_MESSAGE,
+      recommendation: LEGACY_DISCOCLAW_WARNING_RECOMMENDATION,
+    });
+  }
+
+  const agentsPath = path.join(workspaceCwd, 'AGENTS.md');
+  if (existsSync(agentsPath)) {
+    try {
+      const content = readFileSync(agentsPath, 'utf-8');
+      const matchedMarkers = findLegacyAgentsMarkers(content);
+      if (matchedMarkers.length >= LEGACY_AGENTS_MIN_MARKER_HITS) {
+        warnings.push({
+          id: 'workspace-bootstrap:legacy-agents-system-sections',
+          file: 'AGENTS.md',
+          message: LEGACY_AGENTS_WARNING_MESSAGE,
+          recommendation: LEGACY_AGENTS_WARNING_RECOMMENDATION,
+          matchedMarkers,
+        });
+      }
+    } catch {
+      // Ignore sync inspection read failures; bootstrap startup uses the async path.
+    }
+  }
+
+  const toolsPath = path.join(workspaceCwd, 'TOOLS.md');
+  if (existsSync(toolsPath)) {
+    try {
+      const content = readFileSync(toolsPath, 'utf-8');
+      if (content.includes(STALE_TOOLS_MARKER_HEADING) && content.includes(STALE_TOOLS_MARKER_SUBHEADING)) {
+        warnings.push({
+          id: 'workspace-bootstrap:legacy-tools-system-sections',
+          file: 'TOOLS.md',
+          message: LEGACY_TOOLS_WARNING_MESSAGE,
+          recommendation: LEGACY_TOOLS_WARNING_RECOMMENDATION,
+        });
+      }
+    } catch {
+      // Ignore sync inspection read failures; bootstrap startup uses the async path.
+    }
+  }
+
+  return warnings;
 }
 
 async function warnIfLegacyAgentsContainsSystemInstructions(
@@ -67,8 +141,7 @@ async function warnIfLegacyAgentsContainsSystemInstructions(
 
   log?.warn(
     { workspaceCwd, matchedMarkers },
-    'workspace:bootstrap legacy AGENTS.md system sections detected — this can conflict with runtime default instructions. ' +
-      'Keep personal rules in AGENTS.md and remove migrated system sections.',
+    `workspace:bootstrap ${LEGACY_AGENTS_WARNING_MESSAGE} ${LEGACY_AGENTS_WARNING_RECOMMENDATION}`,
   );
 }
 
@@ -83,8 +156,7 @@ async function warnIfLegacyDiscoclawPresent(workspaceCwd: string, log?: Bootstra
 
   log?.warn(
     { workspaceCwd, file: 'DISCOCLAW.md' },
-    'workspace:bootstrap legacy DISCOCLAW.md detected — file is no longer managed and was left untouched. ' +
-      'Default instructions are injected at runtime; keep user overrides in AGENTS.md.',
+    `workspace:bootstrap ${LEGACY_DISCOCLAW_WARNING_MESSAGE} ${LEGACY_DISCOCLAW_WARNING_RECOMMENDATION}`,
   );
 }
 
@@ -111,8 +183,7 @@ async function warnIfLegacyToolsContainsSystemInstructions(
 
   log?.warn(
     { workspaceCwd, file: 'TOOLS.md' },
-    'workspace:bootstrap legacy TOOLS.md system sections detected — file is user-owned and was left untouched. ' +
-      'If this is an unmodified scaffold copy, delete or replace it manually so tracked TOOLS.md can be the primary source.',
+    `workspace:bootstrap ${LEGACY_TOOLS_WARNING_MESSAGE} ${LEGACY_TOOLS_WARNING_RECOMMENDATION}`,
   );
 }
 

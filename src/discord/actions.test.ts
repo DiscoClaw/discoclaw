@@ -384,6 +384,15 @@ describe('parseDiscordActions', () => {
   });
 });
 
+describe('buildTieredDiscordActionsPromptSection', () => {
+  it('tells the model not to promise work without emitting an action block', () => {
+    const prompt = buildTieredDiscordActionsPromptSection(ALL_FLAGS, 'Weston').prompt;
+
+    expect(prompt).toContain('include the concrete `<discord-action>` block(s) that actually begin that work');
+    expect(prompt).toContain('If you are not emitting an action block, say that you have not started yet');
+  });
+});
+
 describe('withoutRequesterGatedActionFlags', () => {
   it('disables requester-gated Discord categories and preserves internal ones', () => {
     expect(withoutRequesterGatedActionFlags({
@@ -1167,6 +1176,19 @@ describe('buildTieredDiscordActionsPromptSection', () => {
     expect(selection.prompt).not.toContain('### Cron Scheduled Tasks');
     expect(selection.prompt).not.toContain('### Deferred self-invocation');
   });
+
+  it('routes workspace and doctor warning language into the config category', () => {
+    const selection = buildTieredDiscordActionsPromptSection(TIER_FLAGS, 'ClawBot', {
+      channelName: 'general',
+      channelContextPath: null,
+      isThread: false,
+      userText: 'Can you check whether that workspace bootstrap warning is still current with doctor?',
+    });
+
+    expect(selection.keywordHits).toContain('config');
+    expect(selection.includedCategories).toContain('config');
+    expect(selection.prompt).toContain('workspaceWarnings');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1177,6 +1199,14 @@ describe('shouldTriggerFollowUp (voice)', () => {
   it('returns true when voiceStatus succeeds', () => {
     const result = shouldTriggerFollowUp(
       [{ type: 'voiceStatus' }],
+      [{ ok: true }],
+    );
+    expect(result).toBe(true);
+  });
+
+  it('returns true when workspaceWarnings succeeds', () => {
+    const result = shouldTriggerFollowUp(
+      [{ type: 'workspaceWarnings' }],
       [{ ok: true }],
     );
     expect(result).toBe(true);

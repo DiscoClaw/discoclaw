@@ -29,6 +29,7 @@ export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   'memoryShow',
   // Config
   'modelShow',
+  'workspaceWarnings',
   // Forge
   'forgeStatus',
   // Voice

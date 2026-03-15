@@ -1671,6 +1671,7 @@ if (taskCtx) {
     // botParams is read by reference, so mutations here take effect on next invocation.
     botParams.configCtx = {
       botParams,
+      workspaceCwd,
       runtime: limitedRuntime,
       runtimeRegistry,
       runtimeName: primaryRuntimeName,

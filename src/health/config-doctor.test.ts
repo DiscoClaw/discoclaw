@@ -12,6 +12,7 @@ import {
   detectInvalidModelsFile,
   detectInstallDrift,
   detectMissingSecrets,
+  detectWorkspaceBootstrapWarnings,
   detectStaleRuntimeAndModelOverrides,
   deriveCodexAppServerBootReportState,
   getCodexAppServerStatus,
@@ -82,6 +83,33 @@ describe('detectDeprecatedEnvVars', () => {
       findings.find((finding) => finding.id === 'deprecated-env:DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL')
         ?.autoFixable,
     ).toBe(true);
+  });
+});
+
+describe('detectWorkspaceBootstrapWarnings', () => {
+  it('flags live legacy workspace bootstrap files and sections', async () => {
+    const cwd = await makeTempInstall('doctor-workspace-bootstrap');
+    const workspace = path.join(cwd, 'workspace');
+    await fs.mkdir(workspace, { recursive: true });
+    await fs.writeFile(
+      path.join(workspace, 'AGENTS.md'),
+      [
+        '# AGENTS',
+        '## Rebuild & Restart Workflow',
+        '## Releasing to npm',
+      ].join('\n'),
+      'utf-8',
+    );
+    await fs.writeFile(path.join(workspace, 'DISCOCLAW.md'), '# legacy\n', 'utf-8');
+
+    const ctx = await loadDoctorContext({ cwd });
+    const findings = detectWorkspaceBootstrapWarnings(ctx);
+
+    expect(findings.map((finding) => finding.id)).toEqual([
+      'workspace-bootstrap:legacy-discoclaw',
+      'workspace-bootstrap:legacy-agents-system-sections',
+    ]);
+    expect(findings[1]?.message).toContain('Matched markers: ## Rebuild & Restart Workflow, ## Releasing to npm');
   });
 });
 

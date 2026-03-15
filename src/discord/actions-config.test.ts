@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { CONFIG_ACTION_TYPES, executeConfigAction, configActionsPromptSection } from './actions-config.js';
 import type { ConfigActionRequest, ConfigContext, ConfigMutableParams } from './actions-config.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
@@ -54,22 +57,30 @@ function makeBotParams(overrides?: Partial<ConfigMutableParams>): ConfigMutableP
 function makeCtx(overrides?: Partial<ConfigMutableParams>): ConfigContext {
   return {
     botParams: makeBotParams(overrides),
+    workspaceCwd: '/tmp/workspace',
     runtime: stubRuntime,
     runtimeRegistry: makeRegistry(),
     runtimeName: 'claude_code',
   };
 }
 
+const tempDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
+});
+
 // ---------------------------------------------------------------------------
 // CONFIG_ACTION_TYPES
 // ---------------------------------------------------------------------------
 
 describe('CONFIG_ACTION_TYPES', () => {
-  it('includes modelSet and modelShow', () => {
+  it('includes modelSet, modelShow, modelReset, and workspaceWarnings', () => {
     expect(CONFIG_ACTION_TYPES.has('modelSet')).toBe(true);
     expect(CONFIG_ACTION_TYPES.has('modelShow')).toBe(true);
     expect(CONFIG_ACTION_TYPES.has('modelReset')).toBe(true);
-    expect(CONFIG_ACTION_TYPES.size).toBe(3);
+    expect(CONFIG_ACTION_TYPES.has('workspaceWarnings')).toBe(true);
+    expect(CONFIG_ACTION_TYPES.size).toBe(4);
   });
 });
 
@@ -193,6 +204,7 @@ describe('modelShow', () => {
     };
     const ctx: ConfigContext = {
       botParams: makeBotParams({ runtimeModel: '', summaryModel: '' }),
+      workspaceCwd: '/tmp/workspace',
       runtime: codexRuntime,
       runtimeRegistry: makeRegistry(),
       runtimeName: 'codex',
@@ -212,6 +224,7 @@ describe('modelShow', () => {
     };
     const ctx: ConfigContext = {
       botParams: makeBotParams({ runtimeModel: '', summaryModel: '' }),
+      workspaceCwd: '/tmp/workspace',
       runtime: codexRuntime,
       runtimeRegistry: makeRegistry(),
       runtimeName: 'codex',
@@ -804,6 +817,46 @@ describe('modelShow voice runtime display', () => {
   });
 });
 
+describe('workspaceWarnings', () => {
+  it('reports a clean live workspace state when no legacy files or markers are present', async () => {
+    const workspaceCwd = await fs.mkdtemp(path.join(os.tmpdir(), 'workspace-warnings-clean-'));
+    tempDirs.push(workspaceCwd);
+    await fs.writeFile(path.join(workspaceCwd, 'AGENTS.md'), '# clean\n', 'utf-8');
+
+    const result = executeConfigAction({ type: 'workspaceWarnings' }, { ...makeCtx(), workspaceCwd });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).toContain('Workspace warnings live check');
+    expect(result.summary).toContain('source: live_check');
+    expect(result.summary).toContain(`workspace: ${workspaceCwd}`);
+    expect(result.summary).toContain('No live bootstrap cleanup warnings detected');
+  });
+
+  it('reports current legacy AGENTS and DISCOCLAW warnings from the live workspace', async () => {
+    const workspaceCwd = await fs.mkdtemp(path.join(os.tmpdir(), 'workspace-warnings-legacy-'));
+    tempDirs.push(workspaceCwd);
+    await fs.writeFile(
+      path.join(workspaceCwd, 'AGENTS.md'),
+      [
+        '# AGENTS',
+        '## Rebuild & Restart Workflow',
+        '## Releasing to npm',
+      ].join('\n'),
+      'utf-8',
+    );
+    await fs.writeFile(path.join(workspaceCwd, 'DISCOCLAW.md'), '# legacy\n', 'utf-8');
+
+    const result = executeConfigAction({ type: 'workspaceWarnings' }, { ...makeCtx(), workspaceCwd });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.summary).toContain('[warn] AGENTS.md: legacy AGENTS.md system sections detected');
+    expect(result.summary).toContain('matched markers: ## Rebuild & Restart Workflow, ## Releasing to npm');
+    expect(result.summary).toContain('[warn] DISCOCLAW.md: legacy DISCOCLAW.md detected');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // configActionsPromptSection
 // ---------------------------------------------------------------------------
@@ -813,6 +866,7 @@ describe('configActionsPromptSection', () => {
     const section = configActionsPromptSection();
     expect(section).toContain('modelShow');
     expect(section).toContain('modelSet');
+    expect(section).toContain('workspaceWarnings');
     expect(section).toContain('role');
     expect(section).toContain('chat');
     expect(section).toContain('fast');
