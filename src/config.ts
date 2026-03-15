@@ -99,6 +99,7 @@ export type DiscoclawConfig = {
 
   completionNotifyEnabled: boolean;
   completionNotifyThresholdMs: number;
+  actionFollowupTimeoutMs: number;
 
   // OpenAI-compat adapter config
   openaiApiKey?: string;
@@ -834,6 +835,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
       completionNotifyEnabled: parseBoolean(env, 'DISCOCLAW_COMPLETION_NOTIFY', true),
       completionNotifyThresholdMs: parseNonNegativeInt(env, 'DISCOCLAW_COMPLETION_NOTIFY_THRESHOLD_MS', 30000),
+      actionFollowupTimeoutMs: parseNonNegativeInt(env, 'DISCOCLAW_ACTION_FOLLOWUP_TIMEOUT_MS', 30000),
 
       openaiApiKey,
       openaiBaseUrl,
