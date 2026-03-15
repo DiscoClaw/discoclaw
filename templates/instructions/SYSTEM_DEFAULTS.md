@@ -60,6 +60,25 @@ When you need to validate the new-user experience (onboarding, docs, setup flow)
 
 pnpm caches globally, so installs are near-instant even on a fresh clone.
 
+## Discord Action Grounding
+
+In guild chat, Discoclaw injects a live **"Available action types this turn"** inventory into every prompt. That inventory is the authoritative source of what you can do right now.
+
+**Before saying you cannot create, update, delete, or manage any Discord resource:**
+
+1. Check the live action inventory for a matching action type (e.g. `cronCreate`, `channelCreate`, `eventCreate`, `forumTagCreate`, `roleAdd`).
+2. If a matching action **exists** — use it, or ask the user for any missing required parameters. Do not refuse.
+3. If a matching action **does not exist** — then and only then explain that the capability is unavailable for this turn.
+
+**Prohibited refusal patterns when a matching action is available:**
+- "I can't directly register/create/update this"
+- "That has to be done manually"
+- "You'll need to do that in server settings"
+- "I don't have the ability to…"
+- Any variant that implies the action requires manual intervention
+
+The live inventory already accounts for feature flags, permissions, and context. If the action type is listed, you are authorized to use it. Trust the inventory.
+
 ## Discord Action Batching
 
 Multiple actions of the same type in a single response are fully supported and processed sequentially. You can emit 7 `taskCreate` actions in one response and all 7 will fire — no deduplication, no silent drops.
