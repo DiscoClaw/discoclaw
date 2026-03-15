@@ -224,7 +224,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 
 ## 16. Cold Storage (`src/cold-storage/`)
 
-Semantic search over conversation history. SQLite + sqlite-vec for vector storage, FTS5 for keyword search, Reciprocal Rank Fusion for hybrid retrieval. Standalone, fully testable modules — not yet wired into the live message path.
+Semantic search over conversation history. SQLite + sqlite-vec for vector storage, FTS5 for keyword search, Reciprocal Rank Fusion for hybrid retrieval. Wired into the live message path: when enabled (`DISCOCLAW_COLD_STORAGE_ENABLED=1` + embedding API key), cold storage is searched at prompt assembly time and results are injected as a prompt section.
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
