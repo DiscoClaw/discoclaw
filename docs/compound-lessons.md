@@ -114,6 +114,13 @@ Source: task/chat context - cron lifecycle work (ws-1235 follow-up) exposed that
 Applied: docs/compound-lessons.md
 Status: active
 
+### 2026-03-15 - Classify capability refusals as code-path vs prompt-behavior bugs
+Tags: #prompting #discord #workflow
+Lesson: When the AI refuses a capability the user expects, first classify the bug: (a) code-path availability — the action was never injected into the turn's action inventory, so the AI correctly reported it unavailable; or (b) prompt-behavior — the action was present in the per-turn inventory but the AI refused anyway, treating a live capability as manual-only. Category (a) is fixed by ensuring the action surfaces in the guild-chat prompt's action list for eligible turns. Category (b) is fixed by grounding the AI's capability statements in the actual action inventory injected for that turn, not in stale training-data assumptions about what is or is not available. Always check the live action inventory before assuming either cause.
+Source: task/chat context - `cronCreate` was present in the per-turn Discord action inventory but Weston still answered as if cron creation were manual-only, revealing that the refusal was a prompt-behavior problem, not a missing code path
+Applied: docs/compound-lessons.md
+Status: active
+
 ### 2026-03-10 - Keep interactive Discord trigger context in sync
 Tags: #workflow #task #discord
 Lesson: Interactive Discord trigger paths, including the message handler and reaction handler, must hydrate equivalent conversational context, including nearby channel history. When adding or changing an interactive trigger path, audit it against the main message handler's context-gathering steps so the AI does not ask for information that is already present in-channel; cron and webhook paths are non-interactive and exempt from this invariant.

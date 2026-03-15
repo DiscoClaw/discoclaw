@@ -1189,6 +1189,70 @@ describe('buildTieredDiscordActionsPromptSection', () => {
     expect(selection.includedCategories).toContain('config');
     expect(selection.prompt).toContain('workspaceWarnings');
   });
+
+  it('includes live action inventory with cron types and check-before-refusing instruction when crons enabled', () => {
+    const selection = buildTieredDiscordActionsPromptSection(TIER_FLAGS, 'ClawBot', {
+      channelName: 'general',
+      channelContextPath: null,
+      isThread: false,
+      userText: 'set up a cron reminder for 9am',
+    });
+
+    expect(selection.includedCategories).toContain('crons');
+    expect(selection.prompt).toContain('### Cron Scheduled Tasks');
+    expect(selection.prompt).toContain('### Available action types this turn');
+    expect(selection.prompt).toContain('cronCreate');
+    expect(selection.prompt).toContain('cronList');
+    expect(selection.prompt).toMatch(/Before refusing any Discord-managed resource request/);
+    expect(selection.prompt).toMatch(/source of truth for what you can do this turn/);
+  });
+
+  it('includes live action inventory with channel types when channels enabled', () => {
+    const selection = buildTieredDiscordActionsPromptSection(TIER_FLAGS, 'ClawBot', {
+      channelName: 'general',
+      channelContextPath: null,
+      isThread: false,
+      userText: 'hello',
+    });
+
+    expect(selection.includedCategories).toContain('channels');
+    expect(selection.prompt).toContain('### Available action types this turn');
+    expect(selection.prompt).toContain('channelCreate');
+    expect(selection.prompt).toContain('channelList');
+    expect(selection.prompt).toContain('forumTagCreate');
+    expect(selection.prompt).toMatch(/Before refusing any Discord-managed resource request/);
+  });
+
+  it('includes live action inventory with guild event types when guild keyword-triggered', () => {
+    const selection = buildTieredDiscordActionsPromptSection(TIER_FLAGS, 'ClawBot', {
+      channelName: 'general',
+      channelContextPath: null,
+      isThread: false,
+      userText: 'list the server events',
+    });
+
+    expect(selection.includedCategories).toContain('guild');
+    expect(selection.prompt).toContain('### Available action types this turn');
+    expect(selection.prompt).toContain('eventCreate');
+    expect(selection.prompt).toContain('roleAdd');
+    expect(selection.prompt).toMatch(/Before refusing any Discord-managed resource request/);
+  });
+
+  it('omits live inventory section when no flags are enabled', () => {
+    const noFlags: ActionCategoryFlags = {
+      channels: false, messaging: false, guild: false, moderation: false,
+      polls: false, tasks: false, crons: false, botProfile: false,
+      forge: false, plan: false, memory: false, config: false, defer: false,
+    };
+    const selection = buildTieredDiscordActionsPromptSection(noFlags, 'ClawBot', {
+      channelName: 'general',
+      channelContextPath: null,
+      isThread: false,
+      userText: 'hello',
+    });
+
+    expect(selection.prompt).not.toContain('### Available action types this turn');
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -1002,6 +1002,12 @@ export async function executeCronAction(
 export function cronActionsPromptSection(): string {
   return `### Cron Scheduled Tasks
 
+You can directly create, update, and manage cron-scheduled tasks using the actions below.
+When a user asks you to "create a cron," "set up a recurring task," "schedule something,"
+"register an automation," or any similar phrasing, use \`cronCreate\` (or \`cronUpdate\` for
+changes to existing jobs). These are live capabilities you execute right now — do not tell
+the user to set them up manually or that you cannot do this.
+
 **cronCreate** — Create a new scheduled task:
 \`\`\`
 <discord-action>{"type":"cronCreate","name":"Morning Report","schedule":"0 7 * * 1-5","timezone":"America/Los_Angeles","channel":"general","prompt":"Generate a brief morning status update","model":"fast"}</discord-action>
