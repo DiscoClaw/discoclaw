@@ -1,0 +1,29 @@
+event: obs.supervisor.bail
+level: warn
+gated_by: DISCOCLAW_GLOBAL_SUPERVISOR_ENABLED=1
+source: src/index.ts (withSupervisorAuditLogs)
+emitted_when: a runtime error event parses as GlobalSupervisorBailHandoff
+
+description:
+- Structured bail handoff emitted when the global supervisor stops retrying.
+- This event captures reason, limits, and failure classification for escalation.
+
+fields:
+- runtimeName: string
+- source: "global_supervisor"
+- reason: "non_retryable_failure" | "deterministic_retry_blocked" | "max_cycles_exceeded" | "max_retries_exceeded" | "max_wall_time_exceeded" | "max_events_exceeded"
+- cycle: number
+- retriesUsed: number
+- escalationLevel: number
+- failureKind: "transient_error" | "hard_error" | "runtime_error" | "aborted" | "missing_done" | "exception" | "event_limit"
+- retryable: boolean
+- signature: string
+- lastError: string | null
+- limits.maxCycles: number
+- limits.maxRetries: number
+- limits.maxEscalationLevel: number
+- limits.maxTotalEvents: number
+- limits.maxWallTimeMs: number
+
+example:
+{"runtimeName":"claude","source":"global_supervisor","reason":"deterministic_retry_blocked","cycle":2,"retriesUsed":1,"escalationLevel":1,"failureKind":"runtime_error","retryable":true,"signature":"runtime_error:tool error","lastError":"tool error","limits":{"maxCycles":3,"maxRetries":2,"maxEscalationLevel":2,"maxTotalEvents":5000,"maxWallTimeMs":0}}

@@ -1,0 +1,2851 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
+import { ChannelType } from 'discord.js';
+import { createReactionAddHandler, createReactionRemoveHandler } from './reaction-handler.js';
+import type { EngineEvent, RuntimeAdapter } from '../runtime/types.js';
+import type { BotParams, StatusRef } from '../discord.js';
+import { inFlightReplyCount, _resetForTest as resetInFlight } from './inflight-replies.js';
+import * as reactionPrompts from './reaction-prompts.js';
+import * as discordActions from './actions.js';
+import * as abortRegistry from './abort-registry.js';
+import * as forgePlanRegistry from './forge-plan-registry.js';
+import { RUNTIME_SIGNAL_SUPPRESSED_LINE } from './runtime-signal-budget.js';
+
+const STREAM_SANITIZE_FLAG = 'DISCOCLAW_DISABLE_STREAM_SANITIZATION';
+const priorStreamSanitizeFlag = process.env[STREAM_SANITIZE_FLAG];
+
+beforeEach(() => {
+  delete process.env[STREAM_SANITIZE_FLAG];
+});
+
+afterEach(() => {
+  if (priorStreamSanitizeFlag === undefined) {
+    delete process.env[STREAM_SANITIZE_FLAG];
+  } else {
+    process.env[STREAM_SANITIZE_FLAG] = priorStreamSanitizeFlag;
+  }
+  forgePlanRegistry._resetForTest();
+});
+
+function makeMockRuntime(response: string): RuntimeAdapter {
+  return {
+    id: 'claude_code',
+    capabilities: new Set(['streaming_text']),
+    async *invoke(): AsyncIterable<EngineEvent> {
+      yield { type: 'text_final', text: response };
+      yield { type: 'done' };
+    },
+  };
+}
+
+function makeMockRuntimeError(message: string): RuntimeAdapter {
+  return {
+    id: 'claude_code',
+    capabilities: new Set(['streaming_text']),
+    async *invoke(): AsyncIterable<EngineEvent> {
+      yield { type: 'error', message };
+      yield { type: 'done' };
+    },
+  };
+}
+
+function mockLog() {
+  return { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+}
+
+function mockReplyObject() {
+  return { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+}
+
+function mockMessage(overrides?: Record<string, any>) {
+  const replyObj = mockReplyObject();
+  const requester = {
+    id: 'user-1',
+    permissions: {
+      has: vi.fn(() => true),
+    },
+    roles: {
+      highest: { position: 100 },
+    },
+  };
+  const defaultChannel = {
+    id: 'ch-1',
+    name: 'general',
+    type: ChannelType.GuildText,
+    permissionsFor: vi.fn(() => ({
+      has: vi.fn(() => true),
+    })),
+    isThread: () => false,
+    send: vi.fn().mockResolvedValue(undefined),
+  };
+  return {
+    id: 'msg-1',
+    content: 'Hello world',
+    channelId: 'ch-1',
+    guildId: 'guild-1',
+    createdTimestamp: Date.now(),
+    partial: false,
+    author: {
+      id: 'author-1',
+      username: 'Alice',
+      displayName: 'Alice',
+    },
+    client: {
+      user: { id: 'bot-1' },
+    },
+    guild: {
+      members: {
+        fetch: vi.fn(async (userId: string) => ({
+          ...(userId === 'user-1'
+            ? requester
+            : {
+              id: userId,
+              displayName: `user-${userId}`,
+              roles: { highest: { position: 1 } },
+            }),
+        })),
+      },
+      channels: {
+        cache: {
+          get: vi.fn((id: string) => (id === defaultChannel.id ? defaultChannel : undefined)),
+          find: vi.fn((pred: (ch: any) => boolean) => (pred(defaultChannel) ? defaultChannel : undefined)),
+          values: vi.fn(() => [defaultChannel].values()),
+        },
+      },
+    },
+    channel: defaultChannel,
+    attachments: { size: 0, values: () => [] },
+    embeds: [],
+    reply: vi.fn().mockResolvedValue(replyObj),
+    _replyObj: replyObj,
+    fetch: vi.fn(),
+    ...overrides,
+  };
+}
+
+function mockReaction(overrides?: Record<string, any>) {
+  return {
+    partial: false,
+    emoji: { name: '👀' },
+    message: mockMessage(),
+    fetch: vi.fn(),
+    ...overrides,
+  };
+}
+
+function mockUser(overrides?: Record<string, any>) {
+  return {
+    id: 'user-1',
+    username: 'David',
+    displayName: 'David',
+    partial: false,
+    ...overrides,
+  };
+}
+
+function mockQueue() {
+  return {
+    run: vi.fn(async (_key: string, fn: () => Promise<any>) => fn()),
+  } as any;
+}
+
+function makeParams(overrides?: Partial<Omit<BotParams, 'token'>>): Omit<BotParams, 'token'> {
+  return {
+    allowUserIds: new Set(['user-1']),
+    allowBotIds: new Set<string>(),
+    botMessageMemoryWriteEnabled: false,
+    allowChannelIds: undefined,
+    botDisplayName: 'TestBot',
+    log: mockLog(),
+    discordChannelContext: undefined,
+    requireChannelContext: false,
+    autoIndexChannelContext: false,
+    autoJoinThreads: false,
+    useRuntimeSessions: false,
+    runtime: makeMockRuntime('Reaction response!'),
+    sessionManager: { getOrCreate: vi.fn().mockResolvedValue('session-1') } as any,
+    workspaceCwd: '/tmp/workspace',
+    projectCwd: '/tmp',
+    groupsDir: '/tmp/groups',
+    useGroupDirCwd: false,
+    runtimeModel: 'opus',
+    runtimeTools: ['Bash', 'Read'],
+    runtimeTimeoutMs: 30_000,
+    discordActionsEnabled: false,
+    discordActionsChannels: false,
+    discordActionsMessaging: false,
+    discordActionsGuild: false,
+    discordActionsModeration: false,
+    discordActionsPolls: false,
+    discordActionsTasks: false,
+    discordActionsCrons: false,
+    discordActionsBotProfile: false,
+    messageHistoryBudget: 0,
+    summaryEnabled: false,
+    summaryModel: 'haiku',
+    summaryMaxChars: 2000,
+    summaryEveryNTurns: 5,
+    summaryDataDir: '/tmp/summary',
+    summaryToDurableEnabled: false,
+    shortTermMemoryEnabled: false,
+    shortTermDataDir: '/tmp/shortterm',
+    shortTermMaxEntries: 20,
+    shortTermMaxAgeMs: 21600000,
+    shortTermInjectMaxChars: 1000,
+    durableMemoryEnabled: false,
+    durableDataDir: '/tmp/durable',
+    durableInjectMaxChars: 2000,
+    durableMaxItems: 200,
+    memoryCommandsEnabled: false,
+    statusChannel: undefined,
+    toolAwareStreaming: false,
+    actionFollowupDepth: 0,
+    reactionHandlerEnabled: true,
+    reactionRemoveHandlerEnabled: false,
+    reactionMaxAgeMs: 24 * 60 * 60 * 1000,
+    streamStallWarningMs: 0,
+    ...overrides,
+  };
+}
+
+describe('createReactionAddHandler', () => {
+  it('ignores self-reactions (bot reacting to its own)', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction();
+    // User ID matches bot ID.
+    const user = mockUser({ id: 'bot-1' });
+    await handler(reaction as any, user as any);
+
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('ignores non-allowlisted users', async () => {
+    const params = makeParams({ allowUserIds: new Set(['other-user']) });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('ignores reactions in non-allowed channels', async () => {
+    const params = makeParams({ allowChannelIds: new Set(['other-channel']) });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('ignores DM reactions (guildId null)', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction({
+      message: mockMessage({ guildId: null }),
+    });
+    await handler(reaction as any, mockUser() as any);
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('ignores stale messages older than reactionMaxAgeMs', async () => {
+    const params = makeParams({ reactionMaxAgeMs: 1000 });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction({
+      message: mockMessage({ createdTimestamp: Date.now() - 5000 }),
+    });
+    await handler(reaction as any, mockUser() as any);
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('happy path — allowlisted user reacts, runtime responds, reply posted', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(queue.run).toHaveBeenCalledOnce();
+    // Immediate placeholder reply.
+    expect(reaction.message.reply).toHaveBeenCalledOnce();
+    expect(reaction.message.reply.mock.calls[0][0].content).toMatch(/Thinking/);
+    // Final output via edit on the reply object.
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    expect(lastEditCall[0].content).toContain('Reaction response!');
+  });
+
+  it('passes requesterId into reaction action context', async () => {
+    const executeSpy = vi.spyOn(discordActions, 'executeDiscordActions').mockResolvedValue([
+      { ok: true, summary: 'Listed channels' },
+    ]);
+    const params = makeParams({
+      runtime: makeMockRuntime('<discord-action>{"type":"channelList"}</discord-action>'),
+      discordActionsEnabled: true,
+      discordActionsChannels: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    try {
+      await handler(mockReaction() as any, mockUser() as any);
+      expect(executeSpy).toHaveBeenCalledTimes(1);
+      expect(executeSpy.mock.calls[0]?.[1]).toEqual(
+        expect.objectContaining({ requesterId: 'user-1' }),
+      );
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('prompt includes emoji name, original message content, reacting user, and channel label', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction({ emoji: { name: '🔥' } });
+    reaction.message.content = 'Some important message';
+    reaction.message.channel.name = 'dev-chat';
+    await handler(reaction as any, mockUser({ username: 'Bob', displayName: 'Bob' }) as any);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('🔥');
+    expect(prompt).toContain('Some important message');
+    expect(prompt).toContain('Bob');
+    expect(prompt).toContain('#');
+
+    // Boundary instruction appears before the reaction event line.
+    const boundaryIdx = prompt.indexOf('internal system context');
+    const reactionIdx = prompt.indexOf('Reaction event:');
+    expect(boundaryIdx).toBeGreaterThan(-1);
+    expect(boundaryIdx).toBeLessThan(reactionIdx);
+  });
+
+  it('includes recent channel history in the reaction prompt', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const fetchHistory = vi.fn(async (options?: { before?: string; limit?: number }) => {
+      if (options?.before === 'msg-2') {
+        return new Map([
+          ['prior-1', {
+            id: 'prior-1',
+            content: 'Shopping list:\n- apples\n- oat milk\n- coffee',
+            author: { username: 'Alice', displayName: 'Alice', bot: false },
+          }],
+        ]);
+      }
+      return new Map([
+        ['later-3', {
+          id: 'later-3',
+          content: 'And prioritize the apples first.',
+          author: { username: 'Bob', displayName: 'Bob', bot: false },
+        }],
+      ]);
+    });
+    const params = makeParams({ runtime, messageHistoryBudget: 500 });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction({
+      message: mockMessage({
+        id: 'msg-2',
+        content: 'Can you summarize that?',
+        channel: {
+          id: 'ch-1',
+          name: 'dev-chat',
+          type: ChannelType.GuildText,
+          permissionsFor: vi.fn(() => ({
+            has: vi.fn(() => true),
+          })),
+          isThread: () => false,
+          send: vi.fn().mockResolvedValue(undefined),
+          messages: { fetch: fetchHistory },
+        },
+      }),
+    });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(fetchHistory).toHaveBeenCalledWith({ before: 'msg-2', limit: 10 });
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt: string = invokeSpy.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain('Shopping list:\n- apples\n- oat milk\n- coffee');
+    expect(prompt).not.toContain('And prioritize the apples first.');
+    expect(prompt.match(/Can you summarize that\?/g)).toHaveLength(1);
+  });
+
+  it('injects tiered Discord action schema using reaction content and channel metadata', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+      discordActionsChannels: true,
+      discordActionsTasks: true,
+      discordActionsMemory: true,
+      discordActionsGuild: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction({
+      message: mockMessage({
+        content: 'Please remember this note.',
+        channel: {
+          id: 'ch-1',
+          name: 'task-board',
+          isThread: () => false,
+          send: vi.fn().mockResolvedValue(undefined),
+        },
+      }),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('### Messaging');
+    expect(prompt).toContain('### Channel Management');
+    expect(prompt).toContain('### Task Tracking');
+    expect(prompt).toContain('### Memory (Durable User Memory)');
+    expect(prompt).not.toContain('### Guild Info & Management');
+  });
+
+  it('logs prompt section estimate payload with reaction flow label', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+      discordActionsChannels: true,
+      discordActionsTasks: true,
+      discordActionsMemory: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction({
+      message: mockMessage({
+        content: 'Please remember this note.',
+        channel: {
+          id: 'ch-1',
+          name: 'task-board',
+          isThread: () => false,
+          send: vi.fn().mockResolvedValue(undefined),
+        },
+      }),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    const infoCalls = (params.log?.info as ReturnType<typeof vi.fn>).mock.calls;
+    const estimateCall = infoCalls.find((call: any[]) => call[1] === 'reaction:prompt:section-estimates');
+    expect(estimateCall).toBeTruthy();
+
+    const payload = estimateCall![0];
+    expect(payload.flow).toBe('reaction');
+    expect(payload.totalChars).toEqual(expect.any(Number));
+    expect(payload.totalEstTokens).toEqual(expect.any(Number));
+    expect(payload.actionSchemaSelection).toEqual(expect.objectContaining({
+      includedCategories: expect.arrayContaining(['messaging', 'channels']),
+      tierBuckets: expect.objectContaining({
+        core: expect.arrayContaining(['messaging', 'channels']),
+        channelContextual: expect.any(Array),
+        keywordTriggered: expect.any(Array),
+      }),
+      keywordHits: expect.any(Array),
+    }));
+
+    const sectionKeys = [
+      'soul',
+      'identity',
+      'user',
+      'agents',
+      'tools',
+      'pa',
+      'durableMemory',
+      'rollingSummary',
+      'channelContext',
+      'tasks',
+      'actionsReference',
+    ] as const;
+    for (const key of sectionKeys) {
+      expect(payload.sections[key]).toEqual(expect.objectContaining({
+        chars: expect.any(Number),
+        estTokens: expect.any(Number),
+        included: expect.any(Boolean),
+      }));
+    }
+    expect(payload.sections.actionsReference.included).toBe(true);
+  });
+
+  it('image attachments are downloaded and passed to runtime.invoke', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    // Mock global fetch for the image download
+    const originalFetch = globalThis.fetch;
+    const imgData = (() => { const b = Buffer.alloc(45); Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]).copy(b); return b; })();
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(imgData.buffer.slice(imgData.byteOffset, imgData.byteOffset + imgData.byteLength)),
+    }) as any;
+
+    try {
+      const reaction = mockReaction();
+      reaction.message.attachments = {
+        size: 1,
+        values: () => [{
+          url: 'https://cdn.discordapp.com/attachments/123/456/photo.png',
+          name: 'photo.png',
+          contentType: 'image/png',
+          size: 100,
+        }] as any,
+      };
+      await handler(reaction as any, mockUser() as any);
+
+      // Images should be passed in invoke params, not as URL text in prompt
+      const invokeParams = invokeSpy.mock.calls[0][0];
+      expect(invokeParams.images).toBeDefined();
+      expect(invokeParams.images).toHaveLength(1);
+      expect(invokeParams.images[0].mediaType).toBe('image/png');
+      // Prompt should NOT contain the raw URL
+      expect(invokeParams.prompt).not.toContain('https://cdn.discordapp.com');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('prompt includes durable memory when enabled and store has items', async () => {
+    // Write a real durable memory file so the handler loads it without mocking.
+    const os = await import('node:os');
+    const fsP = await import('node:fs/promises');
+    const pathM = await import('node:path');
+    const tmpDir = await fsP.mkdtemp(pathM.join(os.tmpdir(), 'durable-'));
+    const store = {
+      version: 1,
+      updatedAt: Date.now(),
+      items: [{
+        id: 'test-1',
+        kind: 'fact',
+        text: 'User loves TypeScript',
+        tags: [],
+        status: 'active',
+        source: { type: 'manual' },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      }],
+    };
+    await fsP.writeFile(pathM.join(tmpDir, 'user-1.json'), JSON.stringify(store), 'utf8');
+
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime, durableMemoryEnabled: true, durableDataDir: tmpDir });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    await handler(mockReaction() as any, mockUser() as any);
+
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('Durable memory');
+    expect(prompt).toContain('User loves TypeScript');
+
+    await fsP.rm(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  });
+
+  it('prompt includes open-tasks section when taskCtx has open tasks', async () => {
+    const { TaskStore } = await import('../tasks/store.js');
+    const store = new TaskStore({ prefix: 'rx' });
+    store.create({ title: 'Fix login bug' });
+    store.create({ title: 'Add dark mode' });
+
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      taskCtx: { store } as any,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    await handler(mockReaction() as any, mockUser() as any);
+
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('Open tasks:');
+    expect(prompt).toContain('rx-001');
+    expect(prompt).toContain('Fix login bug');
+    expect(prompt).toContain('rx-002');
+    expect(prompt).toContain('Add dark mode');
+  });
+
+  it('Discord actions parsed and executed from response, results appended to output', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'Here is my response\n\n<discord-action>{"type":"react","channelId":"ch-1","messageId":"msg-1","emoji":"✅"}</discord-action>' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction();
+    await handler(reaction as any, mockUser() as any);
+
+    // Placeholder posted first.
+    expect(reaction.message.reply).toHaveBeenCalledOnce();
+    expect(reaction.message.reply.mock.calls[0][0].content).toMatch(/Thinking/);
+    // Final output via edit.
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    const replyContent: string = lastEditCall[0].content;
+    // The action block should be stripped from the clean text.
+    expect(replyContent).not.toContain('<discord-action>');
+    // Action results (Done: or Failed:) should be appended.
+    expect(replyContent).toMatch(/Done:|Failed:/);
+  });
+
+  it('suppresses sendMessage targeting parent forum when reaction is in a forum thread', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'Here is my response.\n\n<discord-action>{"type":"sendMessage","channel":"forum-parent-1","content":"hello"}</discord-action>' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    // Build a guild with the forum channel in the cache.
+    const forumCh = {
+      id: 'forum-parent-1',
+      name: 'beads',
+      type: ChannelType.GuildForum,
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => true),
+      })),
+      send: vi.fn().mockResolvedValue(undefined),
+    };
+    const threadChannel = {
+      id: 'thread-1',
+      name: 'my-thread',
+      type: ChannelType.PublicThread,
+      parentId: 'forum-parent-1',
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => true),
+      })),
+      isThread: () => true,
+      joinable: false,
+      joined: true,
+      parent: { name: 'beads' },
+      send: vi.fn().mockResolvedValue(undefined),
+    };
+    const channelsMap = new Map<string, any>([
+      ['forum-parent-1', forumCh],
+      ['thread-1', threadChannel],
+    ]);
+    const guild = {
+      members: {
+        fetch: vi.fn(async () => ({
+          id: 'user-1',
+          permissions: {
+            has: vi.fn(() => true),
+          },
+        })),
+      },
+      channels: {
+        cache: {
+          get: (id: string) => channelsMap.get(id),
+          find: (fn: (ch: any) => boolean) => {
+            for (const ch of channelsMap.values()) if (fn(ch)) return ch;
+            return undefined;
+          },
+          values: () => channelsMap.values(),
+        },
+      },
+    };
+    const reaction = mockReaction({
+      message: mockMessage({ channel: threadChannel, channelId: 'thread-1', guild }),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    // The reply should contain prose and NOT contain a Failed: line or forum channel error text.
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    const replyContent: string = lastEditCall[0].content;
+    expect(replyContent).toContain('Here is my response.');
+    expect(replyContent).not.toContain('Failed:');
+    expect(replyContent).not.toContain('forum channel');
+    // Reply should NOT have been deleted (response was posted, not suppressed as empty).
+    expect(replyObj.delete).not.toHaveBeenCalled();
+    // Forum channel's .send() should NOT have been called.
+    expect(forumCh.send).not.toHaveBeenCalled();
+  });
+
+  it('suppresses sendMessage Done line from posted output', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'Sending a message for you.\n\n<discord-action>{"type":"sendMessage","channel":"general","content":"hello"}</discord-action>' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    // Build a mock channel that resolveChannel can find by name.
+    const targetChannel = { id: 'ch-target', name: 'general', type: ChannelType.GuildText, send: vi.fn().mockResolvedValue({ id: 'sent-1' }) };
+    const reaction = mockReaction({
+      message: mockMessage({
+        guild: {
+          members: {
+            fetch: vi.fn(async () => ({
+              id: 'user-1',
+              permissions: {
+                has: vi.fn(() => true),
+              },
+            })),
+          },
+          channels: {
+            cache: {
+              get: vi.fn(),
+              find: vi.fn((pred: (ch: any) => boolean) => pred(targetChannel) ? targetChannel : undefined),
+            },
+          },
+        },
+      }),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    const replyContent: string = lastEditCall[0].content;
+    // Should NOT contain 'Done: Sent message'.
+    expect(replyContent).not.toContain('Done: Sent message');
+    // Clean text should still be present.
+    expect(replyContent).toContain('Sending a message for you.');
+  });
+
+  it('deletes placeholder when sendMessage-only with no prose', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: '<discord-action>{"type":"sendMessage","channel":"general","content":"hello"}</discord-action>' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const targetChannel = {
+      id: 'ch-target',
+      name: 'general',
+      type: ChannelType.GuildText,
+      permissionsFor: vi.fn(() => ({
+        has: vi.fn(() => true),
+      })),
+      send: vi.fn().mockResolvedValue({ id: 'sent-1' }),
+    };
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const reaction = mockReaction({
+      message: mockMessage({
+        guild: {
+          members: {
+            fetch: vi.fn(async () => ({
+              id: 'user-1',
+              permissions: {
+                has: vi.fn(() => true),
+              },
+            })),
+          },
+          channels: {
+            cache: {
+              get: vi.fn(),
+              find: vi.fn((pred: (ch: any) => boolean) => pred(targetChannel) ? targetChannel : undefined),
+            },
+          },
+        },
+        reply: vi.fn().mockResolvedValue(replyObj),
+        _replyObj: replyObj,
+      }),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    // The sendMessage action should have fired.
+    expect(targetChannel.send).toHaveBeenCalledOnce();
+    // Placeholder should have been deleted (no output to display).
+    expect(replyObj.delete).toHaveBeenCalledOnce();
+  });
+
+  it('fetches partial reaction before processing', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction({ partial: true });
+    await handler(reaction as any, mockUser() as any);
+
+    expect(reaction.fetch).toHaveBeenCalledOnce();
+    expect(queue.run).toHaveBeenCalledOnce();
+  });
+
+  it('fetches partial message before processing', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const msg = mockMessage({ partial: true });
+    const reaction = mockReaction({ message: msg });
+    await handler(reaction as any, mockUser() as any);
+
+    expect(msg.fetch).toHaveBeenCalledOnce();
+    expect(queue.run).toHaveBeenCalledOnce();
+  });
+
+  it('handles partial reaction fetch failure gracefully', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const reaction = mockReaction({
+      partial: true,
+      fetch: vi.fn().mockRejectedValue(new Error('Unknown Reaction')),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    expect(params.log?.warn).toHaveBeenCalled();
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('handles partial message fetch failure gracefully', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const msg = mockMessage({
+      partial: true,
+      fetch: vi.fn().mockRejectedValue(new Error('Unknown Message')),
+    });
+    const reaction = mockReaction({ message: msg });
+    await handler(reaction as any, mockUser() as any);
+
+    expect(params.log?.warn).toHaveBeenCalled();
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('handles runtime error (logged, status posted)', async () => {
+    const statusPoster = {
+      online: vi.fn(),
+      offline: vi.fn(),
+      runtimeError: vi.fn(),
+      handlerError: vi.fn(),
+      actionFailed: vi.fn(),
+      taskSyncComplete: vi.fn(),
+    };
+    const statusRef: StatusRef = { current: statusPoster };
+    const params = makeParams({ runtime: makeMockRuntimeError('timeout reached') });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue, statusRef);
+
+    const reaction = mockReaction();
+    await handler(reaction as any, mockUser() as any);
+
+    expect(params.log?.error).toHaveBeenCalled();
+    expect(statusPoster.runtimeError).toHaveBeenCalledOnce();
+    // Placeholder first, then error via edit on the reply object.
+    expect(reaction.message.reply).toHaveBeenCalledOnce();
+    expect(reaction.message.reply.mock.calls[0][0].content).toMatch(/Thinking/);
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    expect(lastEditCall[0].content).toContain('Runtime error: timeout reached');
+  });
+
+  it('joins thread before replying when autoJoinThreads is enabled', async () => {
+    const joinFn = vi.fn().mockResolvedValue(undefined);
+    const params = makeParams({ autoJoinThreads: true });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const threadChannel = {
+      id: 'thread-1',
+      name: 'my-thread',
+      parentId: 'ch-1',
+      isThread: () => true,
+      joinable: true,
+      joined: false,
+      join: joinFn,
+      parent: { name: 'general' },
+      send: vi.fn().mockResolvedValue(undefined),
+    };
+    const reaction = mockReaction({
+      message: mockMessage({ channel: threadChannel, channelId: 'thread-1' }),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    expect(joinFn).toHaveBeenCalledOnce();
+    // Placeholder reply posted.
+    expect(reaction.message.reply).toHaveBeenCalledOnce();
+    expect(reaction.message.reply.mock.calls[0][0].content).toMatch(/Thinking/);
+  });
+
+  it('passes addDirs to runtime.invoke when useGroupDirCwd is active', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime, useGroupDirCwd: true });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const invokeParams = invokeSpy.mock.calls[0][0];
+    expect(invokeParams.addDirs).toBeDefined();
+    expect(invokeParams.addDirs).toContain('/tmp/workspace');
+  });
+
+  it('passes session ID to runtime.invoke when useRuntimeSessions is enabled', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const sessionManager = { getOrCreate: vi.fn().mockResolvedValue('ses-abc') };
+    const params = makeParams({ runtime, useRuntimeSessions: true, sessionManager: sessionManager as any });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+
+    expect(sessionManager.getOrCreate).toHaveBeenCalledOnce();
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    expect(invokeSpy.mock.calls[0][0].sessionId).toBe('ses-abc');
+  });
+
+  it('suppresses trivial responses (e.g. HEARTBEAT_OK) and deletes placeholder', async () => {
+    const params = makeParams({ runtime: makeMockRuntime('HEARTBEAT_OK') });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(replyObj.delete).toHaveBeenCalledOnce();
+    // edit is called during streaming (placeholder update), but editThenSendChunks should NOT be reached.
+    // The log should confirm suppression.
+    expect(params.log?.info).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionKey: expect.any(String), chars: expect.any(Number) }),
+      expect.stringContaining('trivial response suppressed'),
+    );
+  });
+
+  it('does not suppress genuine short responses (e.g. "ok")', async () => {
+    const shortResponse = 'ok';
+    const params = makeParams({ runtime: makeMockRuntime(shortResponse) });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(replyObj.delete).not.toHaveBeenCalled();
+    // editThenSendChunks calls reply.edit with the final text
+    expect(replyObj.edit).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining(shortResponse) }),
+    );
+  });
+
+  it('does not suppress HEARTBEAT_OK when it has Discord actions', async () => {
+    const responseWithAction = 'HEARTBEAT_OK\n<discord-action>{"type":"react","channelId":"ch-1","messageId":"msg-1","emoji":"👍"}</discord-action>';
+    const params = makeParams({
+      runtime: makeMockRuntime(responseWithAction),
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    // Should NOT be suppressed because there are parsed actions.
+    expect(replyObj.delete).not.toHaveBeenCalled();
+  });
+
+  it('suppresses whitespace-only responses', async () => {
+    const params = makeParams({ runtime: makeMockRuntime('   \n  ') });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(replyObj.delete).toHaveBeenCalledOnce();
+  });
+
+  it('does not suppress short responses that have images', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'Here.' };
+        yield { type: 'image_data', image: { data: 'abc', mediaType: 'image/png' } } as any;
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    // Should NOT be suppressed because images are present.
+    expect(replyObj.delete).not.toHaveBeenCalled();
+  });
+
+  it('suppresses (no output) fallback response', async () => {
+    // When runtime produces empty text and no images, processedText becomes '(no output)' (11 chars).
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: '' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(replyObj.delete).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces unavailable action types instead of suppressing empty output', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: '<discord-action>{"type":"totallyUnknownAction"}</discord-action>' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsChannels: true,
+    });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(replyObj.delete).not.toHaveBeenCalled();
+    const lastEdit = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1]?.[0]?.content ?? '';
+    expect(lastEdit).toContain('Ignored unavailable action type:');
+    expect(lastEdit).toContain('`totallyUnknownAction`');
+  });
+
+  it('dispose() is called even when suppression triggers early return', async () => {
+    const params = makeParams({ runtime: makeMockRuntime('HEARTBEAT_OK') });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    // In-flight reply should be cleaned up (count back to 0).
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
+  it('swallows 50083 (thread archived) without triggering handlerError', async () => {
+    const statusPoster = {
+      online: vi.fn(),
+      offline: vi.fn(),
+      runtimeError: vi.fn(),
+      handlerError: vi.fn(),
+      actionFailed: vi.fn(),
+      taskSyncComplete: vi.fn(),
+    };
+    const statusRef: StatusRef = { current: statusPoster };
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue, statusRef);
+
+    // Make reply.edit throw a Discord 50083 "Thread is archived" error.
+    const err50083 = Object.assign(new Error('Thread is archived'), { code: 50083 });
+    const replyObj = { edit: vi.fn().mockRejectedValue(err50083), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg._replyObj = replyObj;
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(statusPoster.handlerError).not.toHaveBeenCalled();
+    expect(params.log?.info).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionKey: expect.any(String) }),
+      expect.stringContaining('reply skipped (thread archived by action)'),
+    );
+  });
+
+  it('text file attachments are downloaded and inlined in the prompt', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const originalFetch = globalThis.fetch;
+    const fileContent = 'const x = 42;';
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(new TextEncoder().encode(fileContent).buffer),
+    }) as any;
+
+    try {
+      const reaction = mockReaction();
+      reaction.message.attachments = {
+        size: 1,
+        values: () => [{
+          url: 'https://cdn.discordapp.com/attachments/123/456/example.ts',
+          name: 'example.ts',
+          contentType: null,
+          size: 100,
+        }] as any,
+      };
+      await handler(reaction as any, mockUser() as any);
+
+      const invokeParams = invokeSpy.mock.calls[0][0];
+      expect(invokeParams.prompt).toContain('[Attached file: example.ts]');
+      expect(invokeParams.prompt).toContain('const x = 42;');
+      expect(invokeParams.prompt).not.toContain('https://cdn.discordapp.com');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('unsupported non-image attachment types produce notes in the prompt', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('should not be called')) as any;
+
+    try {
+      const reaction = mockReaction();
+      reaction.message.attachments = {
+        size: 1,
+        values: () => [{
+          url: 'https://cdn.discordapp.com/attachments/123/456/archive.zip',
+          name: 'archive.zip',
+          contentType: 'application/zip',
+          size: 5000,
+        }] as any,
+      };
+      await handler(reaction as any, mockUser() as any);
+
+      const invokeParams = invokeSpy.mock.calls[0][0];
+      expect(invokeParams.prompt).toContain('[Unsupported attachment: archive.zip (application/zip)]');
+      expect(invokeParams.prompt).not.toContain('https://cdn.discordapp.com');
+      // fetch should NOT have been called (unsupported type is classified before download)
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('mixed image and text attachments: images passed as ImageData, text inlined in prompt', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const originalFetch = globalThis.fetch;
+    const fileContent = 'hello = true';
+    const imgData = (() => { const b = Buffer.alloc(45); Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]).copy(b); return b; })();
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('.toml')) {
+        return Promise.resolve({
+          ok: true,
+          arrayBuffer: () => Promise.resolve(new TextEncoder().encode(fileContent).buffer),
+        });
+      }
+      // Image path: downloadAttachment does buffer.toString('base64') with no content validation
+      return Promise.resolve({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(imgData.buffer.slice(imgData.byteOffset, imgData.byteOffset + imgData.byteLength)),
+      });
+    }) as any;
+
+    try {
+      const reaction = mockReaction();
+      reaction.message.attachments = {
+        size: 2,
+        values: () => [
+          {
+            url: 'https://cdn.discordapp.com/attachments/123/456/photo.png',
+            name: 'photo.png',
+            contentType: 'image/png',
+            size: 100,
+          },
+          {
+            url: 'https://cdn.discordapp.com/attachments/123/456/config.toml',
+            name: 'config.toml',
+            contentType: null,
+            size: 50,
+          },
+        ] as any,
+      };
+      await handler(reaction as any, mockUser() as any);
+
+      const invokeParams = invokeSpy.mock.calls[0][0];
+      // Image should be in images array
+      expect(invokeParams.images).toBeDefined();
+      expect(invokeParams.images).toHaveLength(1);
+      expect(invokeParams.images[0].mediaType).toBe('image/png');
+      // Text file should be inlined in prompt
+      expect(invokeParams.prompt).toContain('[Attached file: config.toml]');
+      expect(invokeParams.prompt).toContain('hello = true');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('text attachment download failure is caught and handler continues', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    // Mock fetch to throw — downloadTextAttachments catches per-file errors internally
+    // and surfaces them as textResult.errors entries rather than throwing
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error('network collapsed')) as any;
+
+    try {
+      const reaction = mockReaction();
+      reaction.message.attachments = {
+        size: 1,
+        values: () => [{
+          url: 'https://cdn.discordapp.com/attachments/123/456/example.ts',
+          name: 'example.ts',
+          contentType: null,
+          size: 100,
+        }] as any,
+      };
+      await handler(reaction as any, mockUser() as any);
+
+      // Handler should still invoke the runtime (graceful degradation)
+      expect(invokeSpy).toHaveBeenCalledOnce();
+      const invokeParams = invokeSpy.mock.calls[0][0];
+      // File contents should not be present (download failed)
+      expect(invokeParams.prompt).not.toContain('[Attached file:');
+      // The error is caught per-file inside downloadTextAttachments, so it surfaces
+      // as a textResult.errors entry logged via info, not the outer catch's warn
+      expect(invokeParams.prompt).toContain('example.ts: download failed');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('still triggers handlerError for non-50083 Discord errors', async () => {
+    const statusPoster = {
+      online: vi.fn(),
+      offline: vi.fn(),
+      runtimeError: vi.fn(),
+      handlerError: vi.fn(),
+      actionFailed: vi.fn(),
+      taskSyncComplete: vi.fn(),
+    };
+    const statusRef: StatusRef = { current: statusPoster };
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue, statusRef);
+
+    const err50013 = Object.assign(new Error('Missing Permissions'), { code: 50013 });
+    const replyObj = { edit: vi.fn().mockRejectedValue(err50013), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg._replyObj = replyObj;
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(statusPoster.handlerError).toHaveBeenCalledOnce();
+  });
+});
+
+describe('createReactionRemoveHandler', () => {
+  it('ignores self-reactions (bot reacting to its own)', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    const reaction = mockReaction();
+    const user = mockUser({ id: 'bot-1' });
+    await handler(reaction as any, user as any);
+
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('ignores non-allowlisted users', async () => {
+    const params = makeParams({ allowUserIds: new Set(['other-user']) });
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('ignores reactions in non-allowed channels', async () => {
+    const params = makeParams({ allowChannelIds: new Set(['other-channel']) });
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('ignores DM reactions (guildId null)', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    const reaction = mockReaction({
+      message: mockMessage({ guildId: null }),
+    });
+    await handler(reaction as any, mockUser() as any);
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('ignores stale messages older than reactionMaxAgeMs', async () => {
+    const params = makeParams({ reactionMaxAgeMs: 1000 });
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    const reaction = mockReaction({
+      message: mockMessage({ createdTimestamp: Date.now() - 5000 }),
+    });
+    await handler(reaction as any, mockUser() as any);
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('happy path — allowlisted user unreacts, runtime responds, reply posted', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(queue.run).toHaveBeenCalledOnce();
+    // Immediate placeholder reply.
+    expect(reaction.message.reply).toHaveBeenCalledOnce();
+    expect(reaction.message.reply.mock.calls[0][0].content).toMatch(/Thinking/);
+    // Final output via edit on the reply object.
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    expect(lastEditCall[0].content).toContain('Reaction response!');
+  });
+
+  it('prompt contains "removed their" and does NOT contain "reacted with"', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('removed their');
+    expect(prompt).not.toContain('reacted with');
+  });
+
+  it('increments discord.reaction_remove.received metric', async () => {
+    const { MetricsRegistry } = await import('../observability/metrics.js');
+    const metrics = new MetricsRegistry();
+    const params = makeParams({ metrics });
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+
+    const snap = metrics.snapshot();
+    expect(snap.counters['discord.reaction_remove.received']).toBe(1);
+  });
+
+  it('handles partial reaction fetch failure gracefully', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    const reaction = mockReaction({
+      partial: true,
+      fetch: vi.fn().mockRejectedValue(new Error('Unknown Reaction')),
+    });
+    await handler(reaction as any, mockUser() as any);
+
+    expect(params.log?.warn).toHaveBeenCalled();
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('handles partial message fetch failure gracefully', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    const msg = mockMessage({
+      partial: true,
+      fetch: vi.fn().mockRejectedValue(new Error('Unknown Message')),
+    });
+    const reaction = mockReaction({ message: msg });
+    await handler(reaction as any, mockUser() as any);
+
+    expect(params.log?.warn).toHaveBeenCalled();
+    expect(queue.run).not.toHaveBeenCalled();
+  });
+
+  it('handles runtime error (logged, status posted)', async () => {
+    const statusPoster = {
+      online: vi.fn(),
+      offline: vi.fn(),
+      runtimeError: vi.fn(),
+      handlerError: vi.fn(),
+      actionFailed: vi.fn(),
+      taskSyncComplete: vi.fn(),
+    };
+    const statusRef: StatusRef = { current: statusPoster };
+    const params = makeParams({ runtime: makeMockRuntimeError('timeout reached') });
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue, statusRef);
+
+    const reaction = mockReaction();
+    await handler(reaction as any, mockUser() as any);
+
+    expect(params.log?.error).toHaveBeenCalled();
+    expect(statusPoster.runtimeError).toHaveBeenCalledOnce();
+    // Placeholder first, then error via edit.
+    expect(reaction.message.reply).toHaveBeenCalledOnce();
+    expect(reaction.message.reply.mock.calls[0][0].content).toMatch(/Thinking/);
+    const replyObj = reaction.message._replyObj;
+    const lastEditCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    expect(lastEditCall[0].content).toContain('Runtime error: timeout reached');
+  });
+
+  it('logs prompt section estimate payload with reaction-remove flow label', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionRemoveHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+
+    const infoCalls = (params.log?.info as ReturnType<typeof vi.fn>).mock.calls;
+    const estimateCall = infoCalls.find((call: any[]) => call[1] === 'reaction-remove:prompt:section-estimates');
+    expect(estimateCall).toBeTruthy();
+    expect(estimateCall![0]).toEqual(expect.objectContaining({
+      flow: 'reaction-remove',
+      sections: expect.any(Object),
+      totalChars: expect.any(Number),
+      totalEstTokens: expect.any(Number),
+    }));
+  });
+});
+
+describe('streaming behavior', () => {
+  it('emits multiple edits for text_delta events (throttled)', async () => {
+    vi.useFakeTimers();
+    try {
+      const runtime: RuntimeAdapter = {
+        id: 'claude_code',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(): AsyncIterable<EngineEvent> {
+          yield { type: 'text_delta', text: 'Hello ' };
+          yield { type: 'text_delta', text: 'world' };
+          yield { type: 'text_final', text: 'Hello world' };
+          yield { type: 'done' };
+        },
+      };
+      const params = makeParams({ runtime });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      const reaction = mockReaction();
+
+      await handler(reaction as any, mockUser() as any);
+
+      const replyObj = reaction.message._replyObj;
+      // At least the forced final edit should have happened.
+      expect(replyObj.edit).toHaveBeenCalled();
+      // Last edit should contain final text.
+      const lastCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+      expect(lastCall[0].content).toContain('Hello world');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('streams log_line events into delta text', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'log_line', stream: 'stdout', line: 'building...' };
+        yield { type: 'log_line', stream: 'stderr', line: 'warn: deprecated' };
+        yield { type: 'text_final', text: 'Done' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    const replyObj = reaction.message._replyObj;
+    // Some intermediate edit should contain the log lines.
+    const allEditContents = replyObj.edit.mock.calls.map((c: any) => c[0].content);
+    const hasStdout = allEditContents.some((c: string) => c.includes('Update: building...'));
+    const hasStderr = allEditContents.some((c: string) => c.includes('Warning: warn: deprecated'));
+    expect(hasStdout).toBe(true);
+    expect(hasStderr).toBe(true);
+  });
+
+  it('streams tool lifecycle and usage events into delta text', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'preview_debug', source: 'codex', phase: 'started', itemType: 'reasoning' };
+        yield { type: 'tool_start', name: 'readFile', input: { path: 'README.md' } };
+        yield { type: 'usage', inputTokens: 11, outputTokens: 7, totalTokens: 18, costUsd: 0.0012 };
+        yield { type: 'tool_end', name: 'readFile', ok: true, output: 'ok' };
+        yield { type: 'text_final', text: 'Done' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    const replyObj = reaction.message._replyObj;
+    const allEditContents = replyObj.edit.mock.calls.map((c: any) => c[0].content);
+    expect(allEditContents.some((c: string) => c.includes('Hypothesis: reasoning in progress.'))).toBe(true);
+    expect(allEditContents.some((c: string) => c.includes('Next check: readFile.'))).toBe(true);
+    expect(allEditContents.some((c: string) => c.includes('Usage: in 11, out 7, total 18, cost $0.0012.'))).toBe(true);
+    expect(allEditContents.some((c: string) => c.includes('Finding: readFile finished.'))).toBe(true);
+  });
+
+  it('keeps preview_debug visible in debug mode without requiring force-allow fallback', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'codex',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_delta', text: 'native reasoning stream\n' };
+        yield { type: 'preview_debug', source: 'codex', phase: 'started', itemType: 'reasoning' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime, debugStreamPreviewLines: true });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(params.log?.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        flow: 'reaction',
+        eventType: 'preview_debug',
+        allow: true,
+        effectiveAllow: true,
+        forceAllowPreviewDebug: false,
+        suppressionReason: 'guaranteed_signal',
+      }),
+      'discord:preview-line',
+    );
+  });
+
+  it('redacts structured runtime payload fragments from streaming preview text', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'log_line', stream: 'stdout', line: 'runtime emitted {"type":"status","step":"draft"}' };
+        yield { type: 'log_line', stream: 'stderr', line: 'warn {"ok":false,"details":"private"}' };
+        yield { type: 'text_final', text: 'Done' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    const replyObj = reaction.message._replyObj;
+    const allEdits = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? '')).join('\n');
+    expect(allEdits).toContain('Update: runtime emitted');
+    expect(allEdits).toContain('Warning: warn');
+    expect(allEdits).not.toContain('"type":"status"');
+    expect(allEdits).not.toContain('"ok":false');
+  });
+
+  it('caps extra runtime signal lines and suppresses overflow', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        for (let i = 1; i <= 14; i++) {
+          yield { type: 'log_line', stream: 'stdout', line: `signal-${i.toString().padStart(2, '0')}` };
+        }
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    const replyObj = reaction.message._replyObj;
+    const allEdits = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? '')).join('\n');
+    expect(allEdits).toContain(RUNTIME_SIGNAL_SUPPRESSED_LINE);
+    expect(allEdits).not.toContain('signal-14');
+  });
+
+  it('preserves lifecycle visibility under log spam for reactions', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        for (let i = 1; i <= 30; i++) {
+          yield { type: 'log_line', stream: 'stdout', line: `log-spam-${i.toString().padStart(2, '0')}` };
+        }
+        yield { type: 'tool_start', name: 'readFile', input: { path: 'README.md' } };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    const replyObj = reaction.message._replyObj;
+    const allEdits = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? '')).join('\n');
+    expect(allEdits).toContain('Next check: readFile.');
+  });
+
+  it('keeps runtime event payloads unchanged while adapting streaming preview text', async () => {
+    const toolStartEvt: EngineEvent = {
+      type: 'tool_start',
+      name: 'Read',
+      input: { path: '/tmp/file.ts', flags: ['r'] },
+    };
+    const original = JSON.parse(JSON.stringify(toolStartEvt));
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield toolStartEvt;
+        yield { type: 'text_final', text: 'Done' };
+        yield { type: 'done' };
+      },
+    };
+    const params = makeParams({ runtime, streamPreviewMode: 'raw' });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(toolStartEvt).toEqual(original);
+    const replyObj = reaction.message._replyObj;
+    const allEdits = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? '')).join('\n');
+    expect(allEdits).toContain('Next check: Read.');
+    expect(allEdits).not.toContain('/tmp/file.ts');
+    expect(allEdits).not.toContain('flags');
+  });
+
+  it('times out hung keepalive streaming edits and still finalizes', async () => {
+    vi.useFakeTimers();
+    try {
+      const unblockRuntime = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const runtimeStarted = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      let stallEditCalls = 0;
+
+      const runtime: RuntimeAdapter = {
+        id: 'claude_code',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(): AsyncIterable<EngineEvent> {
+          runtimeStarted.resolve();
+          await unblockRuntime.promise;
+          yield { type: 'text_final', text: 'Final answer' };
+          yield { type: 'done' };
+        },
+      };
+
+      const replyObj = {
+        edit: vi.fn().mockImplementation(async () => {
+          stallEditCalls++;
+          if (stallEditCalls === 1) {
+            await new Promise<void>(() => {});
+          }
+        }),
+        delete: vi.fn().mockResolvedValue(undefined),
+      };
+      const reaction = mockReaction({
+        message: mockMessage({
+          reply: vi.fn().mockResolvedValue(replyObj),
+          _replyObj: replyObj,
+        }),
+      });
+
+      const params = makeParams({ runtime, streamStallWarningMs: 1 });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+
+      let settled = false;
+      const pending = handler(reaction as any, mockUser() as any).then(() => { settled = true; });
+
+      await runtimeStarted.promise;
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(stallEditCalls).toBeGreaterThanOrEqual(1);
+
+      unblockRuntime.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(
+        replyObj.edit.mock.calls.some((call: any[]) =>
+          String(call?.[0]?.content ?? '').includes('Final answer'),
+        ),
+      ).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(4100);
+      await pending;
+      expect(
+        replyObj.edit.mock.calls.some((call: any[]) =>
+          String(call?.[0]?.content ?? '').includes('Final answer'),
+        ),
+      ).toBe(true);
+      expect(params.log?.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ flow: 'reaction', timeoutMs: 4_000 }),
+        'discord:stream edit timeout',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('emits periodic still-running progress while stalled with no runtime events', async () => {
+    vi.useFakeTimers();
+    try {
+      const unblockRuntime = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const runtimeStarted = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const runtime: RuntimeAdapter = {
+        id: 'claude_code',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(invokeParams): AsyncIterable<EngineEvent> {
+          invokeParams.onTelemetry?.({ type: 'first_byte', stream: 'stdout', atMs: Date.now() });
+          runtimeStarted.resolve();
+          await unblockRuntime.promise;
+          yield { type: 'done' };
+        },
+      };
+
+      const params = makeParams({
+        runtime,
+        streamStallWarningMs: 1,
+        log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
+      });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      const reaction = mockReaction();
+
+      const pending = handler(reaction as any, mockUser() as any);
+      await runtimeStarted.promise;
+      await vi.advanceTimersByTimeAsync(41_000);
+
+      const replyObj = reaction.message._replyObj;
+      const allEditContents = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? ''));
+      const combined = allEditContents.join('\n');
+      expect(combined).toContain('Runtime heartbeat');
+      expect(combined).toContain('Still active');
+      expect(combined).toContain('waiting for first runtime event');
+      expect(params.log?.info).toHaveBeenCalledWith(expect.objectContaining({
+        flow: 'reaction',
+        stallSeconds: expect.any(Number),
+        sawRuntimeEvent: false,
+        spawnToFirstByteMs: expect.any(Number),
+      }), 'discord:stream heartbeat');
+
+      unblockRuntime.resolve();
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('surfaces explicit no-reasoning heartbeat when codex has runtime events but no reasoning signals', async () => {
+    vi.useFakeTimers();
+    try {
+      const allowDone = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const runtimeStarted = (() => {
+        let resolve!: () => void;
+        const promise = new Promise<void>((r) => { resolve = r; });
+        return { promise, resolve };
+      })();
+      const runtime: RuntimeAdapter = {
+        id: 'codex',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(): AsyncIterable<EngineEvent> {
+          runtimeStarted.resolve();
+          yield {
+            type: 'preview_debug',
+            source: 'codex',
+            phase: 'started',
+            itemType: 'command_execution',
+          };
+          await allowDone.promise;
+          yield { type: 'done' };
+        },
+      };
+
+      const params = makeParams({ runtime, streamStallWarningMs: 1 });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      const reaction = mockReaction();
+
+      const pending = handler(reaction as any, mockUser() as any);
+      await runtimeStarted.promise;
+      await vi.advanceTimersByTimeAsync(31_000);
+
+      const replyObj = reaction.message._replyObj;
+      const combined = replyObj.edit.mock.calls.map((c: any) => String(c?.[0]?.content ?? '')).join('\n');
+      expect(combined).toContain('runtime events received');
+
+      allowDone.resolve();
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('cleans up stale placeholder on handler error after reply was created', async () => {
+    // Runtime that throws after yielding nothing.
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        throw new Error('unexpected crash');
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    // Placeholder was posted.
+    expect(reaction.message.reply).toHaveBeenCalledOnce();
+    // Reply should be edited with error message (not left as "Thinking.").
+    const replyObj = reaction.message._replyObj;
+    expect(replyObj.edit).toHaveBeenCalled();
+    const lastCall = replyObj.edit.mock.calls[replyObj.edit.mock.calls.length - 1];
+    expect(lastCall[0].content).toMatch(/error|unexpected/i);
+  });
+});
+
+describe('reaction prompt interception', () => {
+  afterEach(() => {
+    reactionPrompts._resetForTest();
+  });
+
+  it('continues into AI invocation with resolved-prompt text when reaction matches a pending prompt', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue({ question: 'Proceed?', chosenEmoji: '✅' });
+    try {
+      const params = makeParams({ runtime });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+
+      await handler(mockReaction() as any, mockUser() as any);
+
+      expect(spy).toHaveBeenCalledWith('msg-1', expect.any(String));
+      expect(queue.run).toHaveBeenCalledOnce();
+      expect(invokeSpy).toHaveBeenCalledOnce();
+      const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+      expect(prompt).toContain('✅');
+      expect(prompt).toContain('Proceed?');
+      expect(prompt).toContain('Act on the user\'s choice. Do not re-ask the question.');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('injects a dead-run guard when no forge or plan run is active in the channel', async () => {
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction({
+      message: mockMessage({
+        author: { id: 'bot-1', username: 'Weston', displayName: 'Weston' },
+        content: 'Handling it directly in ws-1218 now.',
+      }),
+    });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('Tracked forge/plan run state: there is no active forge or plan run in this channel right now.');
+    expect(prompt).toContain('Do not claim that work is currently running, auditing, being handled, or still in progress.');
+    expect(prompt).toContain('The sections above are internal system context.');
+  });
+
+  it('injects the active-run note instead when a forge or plan run is active in the channel', async () => {
+    forgePlanRegistry.addRunningPlan('plan-1219', 'ch-1');
+
+    const invokeSpy = vi.fn();
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeSpy(p);
+        yield { type: 'text_final', text: 'ok' };
+        yield { type: 'done' };
+      },
+    };
+
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    await handler(mockReaction() as any, mockUser() as any);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('Tracked forge/plan run state: a forge or plan run is currently active in this channel.');
+    expect(prompt).not.toContain('there is no active forge or plan run in this channel right now');
+  });
+
+  it('prompt interception fires before staleness guard — resolves even when message is stale', async () => {
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue({ question: 'test prompt', chosenEmoji: '✅' });
+    try {
+      const params = makeParams({ reactionMaxAgeMs: 1 }); // extremely short — would normally reject
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+
+      // Message is "old" and would be rejected by the staleness guard if it fired first.
+      const reaction = mockReaction({
+        message: mockMessage({ createdTimestamp: Date.now() - 5000 }),
+      });
+      await handler(reaction as any, mockUser() as any);
+
+      // spy was called, proving interception ran before the staleness guard could short-circuit.
+      expect(spy).toHaveBeenCalled();
+      // Staleness guard is bypassed for resolved prompts, so the queue IS called.
+      expect(queue.run).toHaveBeenCalledOnce();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('passes full <:name:id> identifier for custom emoji to tryResolveReactionPrompt', async () => {
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue({ question: 'test prompt', chosenEmoji: '✅' });
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+
+      const reaction = mockReaction({
+        emoji: { name: 'yes', id: '123456789' },
+      });
+      await handler(reaction as any, mockUser() as any);
+
+      expect(spy).toHaveBeenCalledWith('msg-1', '<:yes:123456789>');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('unicode emoji passes name directly to tryResolveReactionPrompt', async () => {
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue({ question: 'test prompt', chosenEmoji: '✅' });
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+
+      const reaction = mockReaction({ emoji: { name: '✅' } });
+      await handler(reaction as any, mockUser() as any);
+
+      expect(spy).toHaveBeenCalledWith('msg-1', '✅');
+      // Resolved prompt continues into AI invocation.
+      expect(queue.run).toHaveBeenCalledOnce();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('remove handler does not call tryResolveReactionPrompt', async () => {
+    const spy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt');
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionRemoveHandler(params, queue);
+
+      await handler(mockReaction() as any, mockUser() as any);
+
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('reactionPrompt action → executor returns immediately → no auto-follow-up (not a query action)', async () => {
+    const invokeCalls: any[] = [];
+
+    const promptMsgId = 'prompt-integration-1';
+    const reactFn = vi.fn().mockResolvedValue(undefined);
+    const sendFn = vi.fn().mockResolvedValue({ id: promptMsgId, react: reactFn });
+
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeCalls.push(p);
+        // Emit a reactionPrompt action — fire-and-forget, not a query action.
+        yield { type: 'text_final', text: '<discord-action>{"type":"reactionPrompt","question":"Proceed?","choices":["✅","❌"]}</discord-action>' };
+        yield { type: 'done' };
+      },
+    };
+
+    const textCh = { id: 'ch-1', name: 'general', send: sendFn };
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsMessaging: true,
+      actionFollowupDepth: 1,
+    });
+
+    const reaction = mockReaction({
+      message: mockMessage({
+        guild: {
+          channels: {
+            cache: {
+              get: (id: string) => id === 'ch-1' ? textCh : undefined,
+              find: vi.fn(),
+            },
+          },
+        },
+      }),
+    });
+
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    await handler(reaction as any, mockUser() as any);
+
+    // shouldTriggerFollowUp returns false when a non-query action succeeds (reactionPrompt
+    // is a non-query action that succeeded here), so the auto-follow-up loop does not fire.
+    // The second invocation (acting on the user's choice) happens in a separate handler call
+    // triggered when the user actually reacts to the prompt message.
+    expect(invokeCalls).toHaveLength(1);
+
+    // The prompt was registered — the reaction handler will intercept the user's reaction.
+    expect(reactionPrompts.pendingPromptCount()).toBe(1);
+  });
+
+  it('rehydrates a persisted pending prompt after restart and resolves it through the handler', async () => {
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'reaction-handler-restart-'));
+    const priorDataDir = process.env.DISCOCLAW_DATA_DIR;
+
+    try {
+      process.env.DISCOCLAW_DATA_DIR = dataDir;
+      vi.resetModules();
+
+      const promptModule = await import('./reaction-prompts.js');
+      const promptMessageId = 'prompt-after-restart';
+      promptModule._resetForTest();
+
+      const sendFn = vi.fn().mockResolvedValue({
+        id: promptMessageId,
+        react: vi.fn().mockResolvedValue(undefined),
+      });
+      const promptResult = await promptModule.executeReactionPromptAction(
+        {
+          type: 'reactionPrompt',
+          question: 'Deploy the staged build?',
+          choices: ['✅', '❌'],
+        },
+        {
+          guild: {
+            channels: {
+              cache: {
+                get: vi.fn().mockReturnValue({ send: sendFn }),
+              },
+            },
+          } as any,
+          client: {} as any,
+          channelId: 'ch-1',
+          messageId: 'msg-origin',
+        },
+      );
+      expect(promptResult).toEqual({ ok: true, summary: 'Prompt sent — awaiting user reaction' });
+      expect(promptModule.pendingPromptCount()).toBe(1);
+
+      vi.resetModules();
+
+      const [{ createReactionAddHandler: createRestartedReactionAddHandler }, restartedPromptModule] = await Promise.all([
+        import('./reaction-handler.js'),
+        import('./reaction-prompts.js'),
+      ]);
+
+      const invokeSpy = vi.fn();
+      const runtime: RuntimeAdapter = {
+        id: 'claude_code',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(p): AsyncIterable<EngineEvent> {
+          invokeSpy(p);
+          yield { type: 'text_final', text: 'resolved after restart' };
+          yield { type: 'done' };
+        },
+      };
+
+      const params = makeParams({ runtime });
+      const queue = mockQueue();
+      const handler = createRestartedReactionAddHandler(params, queue);
+      const reaction = mockReaction({
+        emoji: { name: '✅' },
+        message: mockMessage({
+          id: promptMessageId,
+          content: 'Deploy the staged build?',
+          createdTimestamp: Date.now() - (7 * 24 * 60 * 60 * 1000),
+        }),
+      });
+
+      await handler(reaction as any, mockUser() as any);
+
+      expect(queue.run).toHaveBeenCalledOnce();
+      expect(invokeSpy).toHaveBeenCalledOnce();
+      const prompt: string = invokeSpy.mock.calls[0][0].prompt;
+      expect(prompt).toContain('User chose ✅ in response to: Deploy the staged build?');
+      expect(prompt).toContain('Act on the user\'s choice. Do not re-ask the question.');
+      expect(restartedPromptModule.pendingPromptCount()).toBe(0);
+
+      const storePath = path.join(dataDir, 'discord', 'reaction-prompts.json');
+      const raw = await fs.readFile(storePath, 'utf8');
+      expect(JSON.parse(raw)).toEqual([]);
+    } finally {
+      if (priorDataDir === undefined) {
+        delete process.env.DISCOCLAW_DATA_DIR;
+      } else {
+        process.env.DISCOCLAW_DATA_DIR = priorDataDir;
+      }
+      reactionPrompts._resetForTest();
+      vi.resetModules();
+      await fs.rm(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('non-query action failure triggers follow-up so bot can explain the error', async () => {
+    const invokeCalls: any[] = [];
+
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeCalls.push(p);
+        if (invokeCalls.length === 1) {
+          // First call: emit a generateImage action — non-query, will fail because
+          // no imagegenCtx is configured ("Imagegen subsystem not configured").
+          yield { type: 'text_final', text: 'Generating:\n<discord-action>{"type":"generateImage","prompt":"A mountain"}</discord-action>' };
+          yield { type: 'done' };
+        } else {
+          // Follow-up call: bot explains the failure.
+          yield { type: 'text_final', text: 'Sorry, image generation is not configured on this bot.' };
+          yield { type: 'done' };
+        }
+      },
+    };
+
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsImagegen: true,
+      actionFollowupDepth: 1,
+    });
+
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    await handler(mockReaction() as any, mockUser() as any);
+
+    // The initial invoke emits a failing non-query action, so shouldTriggerFollowUp
+    // returns true and the bot is re-invoked to explain the error.
+    expect(invokeCalls).toHaveLength(2);
+    const followUpPrompt: string = invokeCalls[1].prompt;
+    expect(followUpPrompt).toContain('[Auto-follow-up]');
+    expect(followUpPrompt).toContain('Failed:');
+  });
+
+  it('posts the follow-up placeholder, starts the watchdog, and carries the same lifecycle token through completion', async () => {
+    const order: string[] = [];
+    const invokeCalls: any[] = [];
+    const initialReply = mockReplyObject();
+    const followUpReply = mockReplyObject();
+    (initialReply as any).id = 'initial-reply';
+    (followUpReply as any).id = 'follow-up-reply';
+    const reply = vi.fn()
+      .mockImplementationOnce(async () => initialReply)
+      .mockImplementationOnce(async (opts: { content: string }) => {
+        order.push(`placeholder:${opts.content}`);
+        return followUpReply;
+      });
+    const message = mockMessage({ reply });
+    const reaction = mockReaction({ message });
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(prompt): AsyncIterable<EngineEvent> {
+        invokeCalls.push(prompt);
+        order.push(`invoke:${invokeCalls.length}`);
+        if (invokeCalls.length === 1) {
+          yield {
+            type: 'text_final',
+            text: 'Looking up channels.\n<discord-action>{"type":"channelList"}</discord-action>',
+          };
+        } else {
+          yield { type: 'text_final', text: 'I found the available channels.' };
+        }
+        yield { type: 'done' };
+      },
+    };
+    const watchdog = {
+      start: vi.fn(async (input: { messageId: string }) => {
+        order.push(`watchdog-start:${input.messageId}`);
+        return {
+          deduped: false,
+          run: {
+            runId: 'run-1',
+            channelId: 'ch-1',
+            messageId: input.messageId,
+            sessionKey: 'session-1',
+            runKind: 'discord-action-followup',
+            correlationToken: 'token-1',
+            notifyOnCompletion: false,
+            status: 'running',
+            startedAt: 0,
+            checkInDueAt: 0,
+            checkInPosted: false,
+            checkInPostedAt: null,
+            completion: null,
+            completionDetail: null,
+            completedAt: null,
+            finalPosted: false,
+            finalPostAttempts: 0,
+            lastFinalAttemptAt: null,
+            finalError: null,
+            updatedAt: 0,
+          },
+        };
+      }),
+      complete: vi.fn(async () => ({
+        runId: 'run-1',
+        channelId: 'ch-1',
+        messageId: 'follow-up-reply',
+        sessionKey: 'session-1',
+        runKind: 'discord-action-followup',
+        correlationToken: 'token-1',
+        notifyOnCompletion: false,
+        status: 'completed',
+        startedAt: 0,
+        checkInDueAt: 0,
+        checkInPosted: false,
+        checkInPostedAt: null,
+        completion: 'succeeded',
+        completionDetail: null,
+        completedAt: 0,
+        finalPosted: false,
+        finalPostAttempts: 0,
+        lastFinalAttemptAt: null,
+        finalError: null,
+        updatedAt: 0,
+      })),
+      startupSweep: vi.fn(async () => ({ interruptedRuns: 0, finalRetried: 0, finalPosted: 0, finalFailed: 0 })),
+    };
+
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsChannels: true,
+      actionFollowupDepth: 1,
+      longRunWatchdog: watchdog as any,
+      longRunStillRunningDelayMs: 1_000,
+    });
+
+    const handler = createReactionAddHandler(params, mockQueue());
+    await handler(reaction as any, mockUser() as any);
+
+    expect(invokeCalls).toHaveLength(2);
+    const placeholderCall = reply.mock.calls[1]?.[0]?.content as string;
+    expect(placeholderCall).toContain('Auto-follow-up');
+    const token = placeholderCall.match(/`([^`]+)`/)?.[1];
+    expect(token).toBeTruthy();
+    expect(order.indexOf(`placeholder:${placeholderCall}`)).toBeLessThan(order.indexOf('watchdog-start:follow-up-reply'));
+    expect(order.indexOf('watchdog-start:follow-up-reply')).toBeLessThan(order.indexOf('invoke:2'));
+    expect(watchdog.start).toHaveBeenCalledTimes(1);
+    expect(watchdog.complete).toHaveBeenCalledTimes(1);
+    expect(initialReply.edit.mock.calls.some((call) => String(call[0]?.content ?? '').includes(`Auto-follow-up \`${token}\`: pending.`))).toBe(true);
+    expect(followUpReply.edit.mock.calls.some((call) => String(call[0]?.content ?? '').includes(`Auto-follow-up \`${token}\`: completed.`))).toBe(true);
+  });
+
+  it('keeps terminal lifecycle on the placeholder when a reaction follow-up reply is chunked', async () => {
+    const invokeCalls: any[] = [];
+    const initialReply = mockReplyObject();
+    const followUpReply = mockReplyObject();
+    (initialReply as any).id = 'initial-reply';
+    (followUpReply as any).id = 'follow-up-reply';
+    const longBody = `Follow-up body ${'x'.repeat(2400)}`;
+    const reply = vi.fn()
+      .mockImplementationOnce(async () => initialReply)
+      .mockImplementationOnce(async () => followUpReply);
+    const message = mockMessage({ reply });
+    const reaction = mockReaction({ message });
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(prompt): AsyncIterable<EngineEvent> {
+        invokeCalls.push(prompt);
+        if (invokeCalls.length === 1) {
+          yield {
+            type: 'text_final',
+            text: 'Looking up channels.\n<discord-action>{"type":"channelList"}</discord-action>',
+          };
+        } else {
+          yield { type: 'text_final', text: longBody };
+        }
+        yield { type: 'done' };
+      },
+    };
+    const watchdog = {
+      start: vi.fn(async () => ({
+        deduped: false,
+        run: {
+          runId: 'run-1',
+          channelId: 'ch-1',
+          messageId: 'follow-up-reply',
+          sessionKey: 'session-1',
+          runKind: 'discord-action-followup',
+          correlationToken: 'token-1',
+          notifyOnCompletion: false,
+          status: 'running',
+          startedAt: 0,
+          checkInDueAt: 0,
+          checkInPosted: false,
+          checkInPostedAt: null,
+          completion: null,
+          completionDetail: null,
+          completedAt: null,
+          finalPosted: false,
+          finalPostAttempts: 0,
+          lastFinalAttemptAt: null,
+          finalError: null,
+          updatedAt: 0,
+        },
+      })),
+      complete: vi.fn(async () => ({
+        runId: 'run-1',
+        channelId: 'ch-1',
+        messageId: 'follow-up-reply',
+        sessionKey: 'session-1',
+        runKind: 'discord-action-followup',
+        correlationToken: 'token-1',
+        notifyOnCompletion: false,
+        status: 'completed',
+        startedAt: 0,
+        checkInDueAt: 0,
+        checkInPosted: false,
+        checkInPostedAt: null,
+        completion: 'succeeded',
+        completionDetail: null,
+        completedAt: 0,
+        finalPosted: false,
+        finalPostAttempts: 0,
+        lastFinalAttemptAt: null,
+        finalError: null,
+        updatedAt: 0,
+      })),
+      startupSweep: vi.fn(async () => ({ interruptedRuns: 0, finalRetried: 0, finalPosted: 0, finalFailed: 0 })),
+    };
+
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsChannels: true,
+      actionFollowupDepth: 1,
+      longRunWatchdog: watchdog as any,
+      longRunStillRunningDelayMs: 1_000,
+    });
+
+    const handler = createReactionAddHandler(params, mockQueue());
+    await handler(reaction as any, mockUser() as any);
+
+    const placeholderCall = reply.mock.calls[1]?.[0]?.content as string;
+    const token = placeholderCall.match(/`([^`]+)`/)?.[1];
+    expect(token).toBeTruthy();
+    expect(followUpReply.edit.mock.calls.some((call) => {
+      const content = String(call[0]?.content ?? '');
+      return content.includes(`Auto-follow-up \`${token}\`: completed.`)
+        && content.includes('Follow-up body');
+    })).toBe(true);
+    expect(message.channel.send).toHaveBeenCalled();
+    expect(String(message.channel.send.mock.calls[0]?.[0]?.content ?? '')).toContain('xxxxxxxx');
+  });
+});
+
+describe('🛑 per-message abort intercept', () => {
+  // Builds a 🛑 reaction on a bot-authored message.
+  function makeStopReaction() {
+    return mockReaction({
+      emoji: { name: '🛑' },
+      message: mockMessage({
+        author: { id: 'bot-1', username: 'TestBot', displayName: 'TestBot' },
+      }),
+    });
+  }
+
+  it('calls tryAbort with message ID and returns without AI invocation when no resolvedPrompt', async () => {
+    const tryAbortSpy = vi.spyOn(abortRegistry, 'tryAbort').mockReturnValue(false);
+    const isActiveSpy = vi.spyOn(abortRegistry, 'isActivelyStreaming').mockReturnValue(false);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(null);
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      expect(tryAbortSpy).toHaveBeenCalledOnce();
+      expect(tryAbortSpy).toHaveBeenCalledWith('msg-1');
+      expect(getOrchestratorSpy).toHaveBeenCalledOnce();
+      expect(queue.run).not.toHaveBeenCalled();
+    } finally {
+      tryAbortSpy.mockRestore();
+      isActiveSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+    }
+  });
+
+  it('calls requestCancel on a running forge orchestrator in the same channel', async () => {
+    const requestCancelFn = vi.fn();
+    const mockOrch = { isRunning: true, requestCancel: requestCancelFn };
+    const tryAbortSpy = vi.spyOn(abortRegistry, 'tryAbort').mockReturnValue(false);
+    const isActiveSpy = vi.spyOn(abortRegistry, 'isActivelyStreaming').mockReturnValue(false);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(mockOrch as any);
+    // Forge is running in the same channel as the reaction message ('ch-1').
+    const getChannelSpy = vi.spyOn(forgePlanRegistry, 'getActiveForgeChannelId').mockReturnValue('ch-1');
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      expect(requestCancelFn).toHaveBeenCalledOnce();
+      expect(queue.run).not.toHaveBeenCalled();
+    } finally {
+      tryAbortSpy.mockRestore();
+      isActiveSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+      getChannelSpy.mockRestore();
+    }
+  });
+
+  it('does not call requestCancel when forge is running in a different channel', async () => {
+    const requestCancelFn = vi.fn();
+    const mockOrch = { isRunning: true, requestCancel: requestCancelFn };
+    const tryAbortSpy = vi.spyOn(abortRegistry, 'tryAbort').mockReturnValue(false);
+    const isActiveSpy = vi.spyOn(abortRegistry, 'isActivelyStreaming').mockReturnValue(false);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(mockOrch as any);
+    // Forge is running in a different channel than the reaction message ('ch-1').
+    const getChannelSpy = vi.spyOn(forgePlanRegistry, 'getActiveForgeChannelId').mockReturnValue('other-channel');
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      expect(requestCancelFn).not.toHaveBeenCalled();
+      // tryAbort for per-message streaming is still called regardless.
+      expect(tryAbortSpy).toHaveBeenCalledOnce();
+    } finally {
+      tryAbortSpy.mockRestore();
+      isActiveSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+      getChannelSpy.mockRestore();
+    }
+  });
+
+  it('does not call requestCancel when forge orchestrator is not running', async () => {
+    const requestCancelFn = vi.fn();
+    const mockOrch = { isRunning: false, requestCancel: requestCancelFn };
+    const tryAbortSpy = vi.spyOn(abortRegistry, 'tryAbort').mockReturnValue(false);
+    const isActiveSpy = vi.spyOn(abortRegistry, 'isActivelyStreaming').mockReturnValue(false);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(mockOrch as any);
+    const getChannelSpy = vi.spyOn(forgePlanRegistry, 'getActiveForgeChannelId').mockReturnValue('ch-1');
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      expect(requestCancelFn).not.toHaveBeenCalled();
+    } finally {
+      tryAbortSpy.mockRestore();
+      isActiveSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+      getChannelSpy.mockRestore();
+    }
+  });
+
+  it('increments abort metric when message is actively streaming', async () => {
+    const { MetricsRegistry } = await import('../observability/metrics.js');
+    const metrics = new MetricsRegistry();
+    const tryAbortSpy = vi.spyOn(abortRegistry, 'tryAbort').mockReturnValue(true);
+    const isActiveSpy = vi.spyOn(abortRegistry, 'isActivelyStreaming').mockReturnValue(true);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(null);
+    try {
+      const params = makeParams({ metrics });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      const snap = metrics.snapshot();
+      expect(snap.counters['discord.reaction.abort']).toBe(1);
+    } finally {
+      tryAbortSpy.mockRestore();
+      isActiveSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+    }
+  });
+
+  it('does not increment abort metric when message is not actively streaming', async () => {
+    const { MetricsRegistry } = await import('../observability/metrics.js');
+    const metrics = new MetricsRegistry();
+    const tryAbortSpy = vi.spyOn(abortRegistry, 'tryAbort').mockReturnValue(false);
+    const isActiveSpy = vi.spyOn(abortRegistry, 'isActivelyStreaming').mockReturnValue(false);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(null);
+    try {
+      const params = makeParams({ metrics });
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      const snap = metrics.snapshot();
+      expect(snap.counters['discord.reaction.abort']).toBeUndefined();
+    } finally {
+      tryAbortSpy.mockRestore();
+      isActiveSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+    }
+  });
+
+  it('skips the intercept when resolvedPrompt is set — proceeds to AI invocation', async () => {
+    const promptSpy = vi.spyOn(reactionPrompts, 'tryResolveReactionPrompt').mockReturnValue({ question: 'Use 🛑?', chosenEmoji: '🛑' });
+    const tryAbortSpy = vi.spyOn(abortRegistry, 'tryAbort').mockReturnValue(false);
+    const isActiveSpy = vi.spyOn(abortRegistry, 'isActivelyStreaming').mockReturnValue(false);
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const handler = createReactionAddHandler(params, queue);
+      await handler(makeStopReaction() as any, mockUser() as any);
+
+      // Intercept was skipped — tryAbort not called.
+      expect(tryAbortSpy).not.toHaveBeenCalled();
+      // AI invocation proceeds normally.
+      expect(queue.run).toHaveBeenCalledOnce();
+    } finally {
+      promptSpy.mockRestore();
+      tryAbortSpy.mockRestore();
+      isActiveSpy.mockRestore();
+    }
+  });
+});
+
+describe('in-flight reply registry cleanup', () => {
+  afterEach(() => {
+    resetInFlight();
+  });
+
+  it('no leaked registry entries after normal completion', async () => {
+    const params = makeParams();
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
+  it('no leaked registry entries after runtime error', async () => {
+    const params = makeParams({ runtime: makeMockRuntimeError('timeout') });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(inFlightReplyCount()).toBe(0);
+  });
+
+  it('no leaked registry entries on handler exception', async () => {
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        throw new Error('unexpected crash');
+      },
+    };
+    const params = makeParams({ runtime });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+    const reaction = mockReaction();
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(inFlightReplyCount()).toBe(0);
+  });
+});

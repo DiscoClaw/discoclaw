@@ -1,0 +1,10 @@
+[
+  {
+    "messageId": "prompt-integration-1",
+    "question": "Proceed?",
+    "choices": [
+      "✅",
+      "❌"
+    ]
+  }
+]

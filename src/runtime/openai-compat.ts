@@ -1,0 +1,422 @@
+import type { RuntimeAdapter, EngineEvent, RuntimeCapability, RuntimeId, RuntimeInvokeParams } from './types.js';
+import type { ChatGptTokenProvider } from './openai-auth.js';
+import { buildToolSchemas, OPENAI_TO_DISCO_NAME } from './openai-tool-schemas.js';
+import { executeToolCall } from './openai-tool-exec.js';
+import { createRuntimeErrorEvent } from './runtime-failure.js';
+
+type CommonOpts = {
+  id?: RuntimeId;
+  baseUrl: string;
+  defaultModel: string;
+  enableTools?: boolean;
+  enableHybridPipeline?: boolean;
+  log?: { debug(...args: unknown[]): void };
+};
+
+type ApiKeyOpts = CommonOpts & {
+  auth?: 'api_key';
+  apiKey: string;
+};
+
+type ChatGptOAuthOpts = CommonOpts & {
+  auth: 'chatgpt_oauth';
+  tokenProvider: ChatGptTokenProvider;
+};
+
+export type OpenAICompatOpts = ApiKeyOpts | ChatGptOAuthOpts;
+export type OpenAIBearerAuth =
+  | { auth?: 'api_key'; apiKey: string }
+  | { auth: 'chatgpt_oauth'; tokenProvider: ChatGptTokenProvider };
+
+const TOOL_LOOP_CAP = 25;
+
+const SYSTEM_SENTINEL = '---\nThe sections above are internal system context.';
+
+/**
+ * Split a combined prompt into system + user messages.
+ * If `params.systemPrompt` is explicitly set, use that directly.
+ * Otherwise, auto-detect by scanning for the sentinel delimiter.
+ */
+export function splitSystemPrompt(params: Pick<RuntimeInvokeParams, 'prompt' | 'systemPrompt'>): { system: string | undefined; user: string } {
+  if (params.systemPrompt) {
+    return { system: params.systemPrompt, user: params.prompt };
+  }
+
+  const idx = params.prompt.indexOf(SYSTEM_SENTINEL);
+  if (idx === -1) {
+    return { system: undefined, user: params.prompt };
+  }
+
+  const splitPoint = idx + SYSTEM_SENTINEL.length;
+  // Skip a single trailing newline after the sentinel if present
+  const afterSentinel = splitPoint < params.prompt.length && params.prompt[splitPoint] === '\n'
+    ? splitPoint + 1
+    : splitPoint;
+
+  return {
+    system: params.prompt.slice(0, splitPoint),
+    user: params.prompt.slice(afterSentinel),
+  };
+}
+
+/**
+ * Returns true for models that require `max_completion_tokens` instead of `max_tokens`.
+ * Strips any provider namespace (e.g. "openai/") before matching.
+ */
+export function useMaxCompletionTokens(model: string): boolean {
+  const name = model.includes('/') ? model.slice(model.lastIndexOf('/') + 1) : model;
+  const lower = name.toLowerCase();
+  return lower.startsWith('o1') || lower.startsWith('o3') || lower.startsWith('gpt-5');
+}
+
+/** Extract the data payload from an SSE line, or undefined if not a data line. */
+function parseSSEData(line: string): string | undefined {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith(':')) return undefined;
+  // SSE spec: space after colon is optional (data:payload and data: payload are both valid)
+  if (trimmed.startsWith('data: ')) return trimmed.slice('data: '.length);
+  if (trimmed.startsWith('data:')) return trimmed.slice('data:'.length);
+  return undefined;
+}
+
+function toBearerAuth(opts: OpenAICompatOpts): OpenAIBearerAuth {
+  return opts.auth === 'chatgpt_oauth'
+    ? { auth: 'chatgpt_oauth', tokenProvider: opts.tokenProvider }
+    : { auth: 'api_key', apiKey: opts.apiKey };
+}
+
+function withBearerAuthorization(
+  headers: HeadersInit | undefined,
+  bearerToken: string,
+): Headers {
+  const nextHeaders = new Headers(headers);
+  nextHeaders.set('Authorization', `Bearer ${bearerToken}`);
+  return nextHeaders;
+}
+
+export async function fetchWithOpenAIBearerAuth(opts: {
+  url: string;
+  auth: OpenAIBearerAuth;
+  init?: Omit<RequestInit, 'headers'> & { headers?: HeadersInit };
+  signal?: AbortSignal;
+  fetchImpl?: typeof fetch;
+  log?: { debug(...args: unknown[]): void };
+  debugScope?: string;
+}): Promise<Response> {
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
+  const requestInit = opts.init ?? {};
+  let bearerToken = opts.auth.auth === 'chatgpt_oauth'
+    ? await opts.auth.tokenProvider.getAccessToken()
+    : opts.auth.apiKey;
+
+  let response = await fetchImpl(opts.url, {
+    ...requestInit,
+    headers: withBearerAuthorization(requestInit.headers, bearerToken),
+    signal: opts.signal ?? requestInit.signal,
+  });
+
+  if (!response.ok && response.status === 401 && opts.auth.auth === 'chatgpt_oauth') {
+    opts.log?.debug(`${opts.debugScope ?? 'openai-auth'}: 401 received, force-refreshing OAuth token`);
+    bearerToken = await opts.auth.tokenProvider.getAccessToken(true);
+    response = await fetchImpl(opts.url, {
+      ...requestInit,
+      headers: withBearerAuthorization(requestInit.headers, bearerToken),
+      signal: opts.signal ?? requestInit.signal,
+    });
+  }
+
+  return response;
+}
+
+export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapter {
+  const hybridEnabled = opts.enableHybridPipeline ?? true;
+  const caps: RuntimeCapability[] = ['streaming_text'];
+  if (opts.enableTools) {
+    caps.push('tools_fs', 'tools_exec');
+  }
+  const capabilities: ReadonlySet<RuntimeCapability> = new Set(caps);
+  const auth = toBearerAuth(opts);
+
+  return {
+    id: opts.id ?? 'openai',
+    capabilities,
+    defaultModel: opts.defaultModel,
+    invoke(params) {
+      return (async function* (): AsyncGenerator<EngineEvent> {
+        const model = params.model || opts.defaultModel;
+        const url = `${opts.baseUrl}/chat/completions`;
+
+        const tokenField = params.maxTokens !== undefined
+          ? (useMaxCompletionTokens(model)
+            ? { max_completion_tokens: params.maxTokens }
+            : { max_tokens: params.maxTokens })
+          : {};
+
+        // Determine whether to enter the tool loop
+        const toolsRequested = opts.enableTools && params.tools && params.tools.length > 0;
+        const requestedTools = params.tools ?? [];
+        const toolEligible = hybridEnabled
+          ? requestedTools
+          : requestedTools.filter((t) =>
+            t !== 'Pipeline'
+            && t !== 'Step'
+            && !t.startsWith('pipeline.')
+            && !t.startsWith('step.'));
+        const toolSchemas = toolsRequested ? buildToolSchemas(toolEligible) : [];
+        const allowedToolNames = new Set(toolSchemas.map((schema) => schema.function.name));
+        const useTools = toolSchemas.length > 0;
+
+        const controller = new AbortController();
+        let timer: ReturnType<typeof setTimeout> | undefined;
+
+        if (params.timeoutMs) {
+          timer = setTimeout(() => controller.abort(), params.timeoutMs);
+        }
+
+        // Forward caller's AbortSignal into the controller.
+        const onCallerAbort = () => controller.abort();
+        params.signal?.addEventListener('abort', onCallerAbort, { once: true });
+
+        if (params.signal?.aborted) controller.abort();
+
+        const { system: sysContent, user: userContent } = splitSystemPrompt(params);
+
+        try {
+          opts.log?.debug({ url, model }, 'openai-compat: request');
+
+          if (useTools) {
+            // ── Tool-loop path (non-streaming rounds) ──────────────────
+            const allowedRoots = [params.cwd, ...(params.addDirs ?? [])].filter(s => s !== '');
+            const messages: Array<Record<string, unknown>> = [];
+            if (sysContent) messages.push({ role: 'system', content: sysContent });
+            messages.push({ role: 'user', content: userContent });
+
+            for (let round = 0; round < TOOL_LOOP_CAP; round++) {
+              const body = JSON.stringify({
+                model,
+                messages,
+                stream: false,
+                tools: toolSchemas,
+                ...tokenField,
+              });
+
+              const response = await fetchWithOpenAIBearerAuth({
+                url,
+                auth,
+                signal: controller.signal,
+                init: {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body,
+                },
+                log: opts.log,
+                debugScope: 'openai-compat',
+              });
+
+              if (!response.ok) {
+                let detail = '';
+                try { const errBody = await response.json(); detail = `: ${JSON.stringify(errBody.error ?? errBody)}`; } catch { /* ignore */ }
+                yield createRuntimeErrorEvent(`OpenAI API error: ${response.status} ${response.statusText}${detail}`);
+                yield { type: 'done' };
+                return;
+              }
+
+              const json = await response.json();
+              const choice = json.choices?.[0];
+              const assistantMsg = choice?.message;
+
+              if (!assistantMsg) {
+                yield createRuntimeErrorEvent('No response from model');
+                yield { type: 'done' };
+                return;
+              }
+
+              const toolCalls: Array<{
+                id?: string;
+                function?: { name?: string; arguments?: string };
+              }> | undefined = assistantMsg.tool_calls;
+
+              if (!toolCalls || toolCalls.length === 0) {
+                // Model returned a final text response — emit and exit
+                const content: string = assistantMsg.content ?? '';
+                if (content) yield { type: 'text_delta', text: content };
+                yield { type: 'text_final', text: content };
+                yield { type: 'done' };
+                return;
+              }
+
+              // Append the assistant message (with tool_calls) to the conversation
+              messages.push(assistantMsg);
+
+              // Execute each tool call
+              for (const tc of toolCalls) {
+                const fnName: string = tc.function?.name ?? '';
+                const tcId: string | undefined = tc.id;
+                const discoName: string = OPENAI_TO_DISCO_NAME[fnName] ?? fnName;
+
+                let args: Record<string, unknown>;
+                try {
+                  args = JSON.parse(tc.function?.arguments ?? '{}');
+                } catch {
+                  // Malformed JSON — feed error back to model instead of crashing
+                  yield { type: 'tool_start', name: discoName, input: tc.function?.arguments };
+                  yield { type: 'tool_end', name: discoName, output: 'Malformed JSON in tool call arguments', ok: false };
+                  messages.push({
+                    role: 'tool',
+                    tool_call_id: tcId ?? 'unknown',
+                    content: 'Malformed JSON in tool call arguments',
+                  });
+                  continue;
+                }
+
+                yield { type: 'tool_start', name: discoName, input: args };
+
+                const result = await executeToolCall(fnName, args, allowedRoots, undefined, {
+                  allowedToolNames,
+                  runtimeId: opts.id ?? 'openai',
+                  adapterId: opts.id ?? 'openai',
+                  enableHybridPipeline: hybridEnabled,
+                });
+                yield { type: 'tool_end', name: discoName, output: result.result, ok: result.ok };
+
+                messages.push({
+                  role: 'tool',
+                  tool_call_id: tcId ?? 'unknown',
+                  content: result.result,
+                });
+              }
+            }
+
+            // Safety cap reached
+            yield createRuntimeErrorEvent('Tool loop safety cap reached (25 iterations)');
+            yield { type: 'done' };
+          } else {
+            // ── Streaming text path (no tools) ─────────────────────────
+            const streamMessages: Array<Record<string, unknown>> = [];
+            if (sysContent) streamMessages.push({ role: 'system', content: sysContent });
+            streamMessages.push({ role: 'user', content: userContent });
+
+            const body = JSON.stringify({
+              model,
+              messages: streamMessages,
+              stream: true,
+              ...tokenField,
+            });
+
+            let accumulated = '';
+
+            const response = await fetchWithOpenAIBearerAuth({
+              url,
+              auth,
+              signal: controller.signal,
+              init: {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body,
+              },
+              log: opts.log,
+              debugScope: 'openai-compat',
+            });
+
+            if (!response.ok) {
+              let detail = '';
+              try { const errBody = await response.json(); detail = `: ${JSON.stringify(errBody.error ?? errBody)}`; } catch { /* ignore */ }
+              yield createRuntimeErrorEvent(`OpenAI API error: ${response.status} ${response.statusText}${detail}`);
+              yield { type: 'done' };
+              return;
+            }
+
+            if (!response.body) {
+              yield createRuntimeErrorEvent('OpenAI API returned no response body');
+              yield { type: 'done' };
+              return;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            // Process a single SSE line, returning 'done' if [DONE] sentinel was hit
+            const processLine = function* (line: string): Generator<EngineEvent, boolean> {
+              const data = parseSSEData(line);
+              if (data === undefined) return false;
+
+              if (data === '[DONE]') {
+                yield { type: 'text_final', text: accumulated };
+                yield { type: 'done' };
+                return true;
+              }
+
+              try {
+                const parsed = JSON.parse(data);
+                const content = parsed?.choices?.[0]?.delta?.content;
+                if (content) {
+                  accumulated += content;
+                  yield { type: 'text_delta', text: content };
+                }
+              } catch {
+                // Skip unparseable lines
+              }
+              return false;
+            };
+
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+
+              buffer += decoder.decode(value, { stream: true });
+
+              // Process complete lines
+              const lines = buffer.split('\n');
+              // Keep the last (possibly incomplete) line in the buffer
+              buffer = lines.pop() ?? '';
+
+              for (const line of lines) {
+                const result = processLine(line);
+                let step = result.next();
+                while (!step.done) {
+                  yield step.value;
+                  step = result.next();
+                }
+                if (step.value) return; // [DONE] hit
+              }
+            }
+
+            // Process any remaining buffered content (stream ended without trailing newline)
+            if (buffer.trim()) {
+              const result = processLine(buffer);
+              let step = result.next();
+              while (!step.done) {
+                yield step.value;
+                step = result.next();
+              }
+              if (step.value) return; // [DONE] hit
+            }
+
+            // Stream ended without [DONE] — emit what we have
+            yield { type: 'text_final', text: accumulated };
+            yield { type: 'done' };
+          }
+        } catch (err) {
+          if (timer) clearTimeout(timer);
+
+          if (controller.signal.aborted) {
+            if (params.signal?.aborted) {
+              yield createRuntimeErrorEvent('aborted');
+            } else {
+              yield createRuntimeErrorEvent(`openai-compat timed out after ${params.timeoutMs}ms`);
+            }
+            yield { type: 'done' };
+            return;
+          }
+
+          yield createRuntimeErrorEvent(String(err));
+          yield { type: 'done' };
+        } finally {
+          if (timer) clearTimeout(timer);
+          params.signal?.removeEventListener('abort', onCallerAbort);
+        }
+      })();
+    },
+  };
+}

@@ -1,0 +1,711 @@
+# DiscoClaw Discord Actions
+
+DiscoClaw supports "Discord Actions": structured JSON blocks embedded in the AI runtime's response that the orchestrator parses and executes against the Discord API.
+
+This is intentionally not slash commands. Actions are internal plumbing that let the AI runtime do things like create channels, read messages, manage roles, etc, when enabled. The orchestrator handles parsing, dispatch, and result reporting.
+
+## Quick Overview
+
+- Action blocks look like:
+
+```text
+<discord-action>{"type":"channelList"}</discord-action>
+```
+
+- The orchestrator strips these blocks out of the message before posting, executes them, then appends a short "Done:" or "Failed:" line for each action.
+- Actions are only available in guild contexts (not DMs), and only if enabled via env flags.
+
+## Where Things Live
+
+Core parsing, dispatch, and prompt text:
+- `src/discord/actions.ts`
+
+Action categories (each module defines types, an executor, and prompt examples):
+- `src/discord/actions-channels.ts`
+- `src/discord/actions-messaging.ts`
+- `src/discord/actions-guild.ts`
+- `src/discord/actions-moderation.ts`
+- `src/discord/actions-poll.ts`
+- `src/tasks/task-action-contract.ts` (task action request/type set)
+- `src/tasks/task-action-executor.ts` (task action dispatcher)
+- `src/tasks/task-action-mutations.ts` (task create/update/close handlers)
+- `src/tasks/task-action-thread-sync.ts` (task thread lifecycle helpers for mutation handlers)
+- `src/tasks/task-action-mutation-helpers.ts` (shared mutation helpers)
+- `src/tasks/task-action-read-ops.ts` (task show/list/sync/tag-map handlers)
+- `src/tasks/task-action-runner-types.ts` (shared task action runner contracts)
+- `src/tasks/task-action-prompt.ts` (task action prompt section)
+- `src/discord/actions-crons.ts`
+- `src/discord/actions-bot-profile.ts`
+- `src/discord/actions-forge.ts`
+- `src/discord/actions-plan.ts`
+- `src/discord/actions-memory.ts`
+- `src/discord/actions-defer.ts`
+- `src/discord/actions-loop.ts`
+- `src/discord/defer-scheduler.ts` (defer scheduler implementation)
+- `src/discord/actions-config.ts`
+- `src/discord/actions-imagegen.ts`
+- `src/discord/actions-voice.ts`
+- `src/discord/actions-spawn.ts`
+- `src/discord/reaction-prompts.ts`
+- `src/discord/reaction-prompt-store.ts` (durable pending prompt store)
+
+Channel action types (in `src/discord/actions-channels.ts`):
+- `channelList`, `channelCreate`, `channelDelete`, `channelEdit`, `channelInfo`, `channelMove`
+- `threadListArchived`, `threadEdit`
+- `forumTagCreate`, `forumTagDelete`, `forumTagList`
+
+Messaging action types (in `src/discord/actions-messaging.ts`):
+- `sendMessage`, `sendFile`, `react`, `unreact`, `readMessages`, `fetchMessage`
+- `editMessage`, `deleteMessage`, `bulkDelete`, `crosspost`, `threadCreate`
+- `pinMessage`, `unpinMessage`, `listPins`
+
+Cron action types (in `src/discord/actions-crons.ts`):
+- `cronCreate`, `cronUpdate`, `cronList`, `cronShow`, `cronPause`, `cronResume`, `cronDelete`, `cronTrigger`, `cronSync`, `cronTagMapReload`
+
+Bot profile action types (in `src/discord/actions-bot-profile.ts`):
+- `botSetStatus`, `botSetActivity`, `botSetNickname`
+
+Forge action types (in `src/discord/actions-forge.ts`):
+- `forgeCreate`, `forgeResume`, `forgeStatus`, `forgeCancel`
+
+Plan action types (in `src/discord/actions-plan.ts`):
+- `planList`, `planShow`, `planApprove`, `planClose`, `planCreate`, `planRun`
+
+Memory action types (in `src/discord/actions-memory.ts`):
+- `memoryRemember`, `memoryForget`, `memoryShow`
+
+Task action types (in `src/tasks/task-action-contract.ts`):
+- `taskCreate`, `taskUpdate`, `taskClose`, `taskShow`, `taskList`, `taskSync`, `tagMapReload`
+
+Defer action types (in `src/discord/actions-defer.ts`):
+- `defer`, `deferList`
+
+Loop action types (in `src/discord/actions-loop.ts`):
+- `loopCreate`, `loopList`, `loopCancel`
+
+Config action types (in `src/discord/actions-config.ts`):
+- `modelSet`, `modelShow`
+
+Imagegen action types (in `src/discord/actions-imagegen.ts`):
+- `generateImage`
+
+Voice action types (in `src/discord/actions-voice.ts`):
+- `voiceJoin`, `voiceLeave`, `voiceStatus`, `voiceMute`, `voiceDeafen`
+
+Spawn action types (in `src/discord/actions-spawn.ts`):
+- `spawnAgent`
+
+Reaction prompt types (in `src/discord/reaction-prompts.ts`):
+- `reactionPrompt` (gated under messaging flag — only available when messaging actions are enabled)
+
+> **Task References:** Task IDs are the stable identifier for cross-task interaction. When interacting with another task (e.g. reading its content, posting an update, or closing it), always use `taskShow`/`taskUpdate`/etc. with the task ID. Do not use channel-name based messaging actions for task threads.
+
+Query actions (read-only actions that can trigger an auto-follow-up loop):
+- `src/discord/action-categories.ts`
+
+Integration points (where actions are included in the prompt and executed):
+- `src/discord.ts` (normal message handling)
+- `src/cron/executor.ts` (cron jobs)
+- `src/discord/deferred-runner.ts` (deferred action execution)
+- `src/discord/reaction-handler.ts` (reaction-based prompt resolution)
+- `src/index.ts` (startup JSON healing for persisted action-related stores, including reaction prompts)
+
+Env wiring:
+- `.env.example` / `.env.example.full`
+- `src/index.ts`
+
+## Enabling And Gating
+
+Actions are controlled by a master switch plus per-category switches:
+
+- Master: `DISCOCLAW_DISCORD_ACTIONS` (default 1 — on by default)
+- Categories (only relevant if master is 1):
+  - `DISCOCLAW_DISCORD_ACTIONS_CHANNELS` (default 1)
+  - `DISCOCLAW_DISCORD_ACTIONS_MESSAGING` (default 1)
+  - `DISCOCLAW_DISCORD_ACTIONS_GUILD` (default 1)
+  - `DISCOCLAW_DISCORD_ACTIONS_MODERATION` (default 0)
+  - `DISCOCLAW_DISCORD_ACTIONS_POLLS` (default 1)
+  - `DISCOCLAW_DISCORD_ACTIONS_TASKS` (default 1; also requires tasks subsystem enabled/configured)
+  - `DISCOCLAW_DISCORD_ACTIONS_CRONS` (default 1; also requires cron subsystem enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE` (default 1)
+  - `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 1; also requires forge commands enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 1; also requires plan commands enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1; also requires durable memory enabled)
+  - `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` default 1800, `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` default 5)
+  - `DISCOCLAW_DISCORD_ACTIONS_LOOP` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` default 60, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` default 86400, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT` default 5)
+  - `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0; controls actual image generation readiness. Normal manual/help surfaces still advertise `imagegen` by default, but execution still requires this flag plus at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`)
+  - `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` default 8)
+  - `config` (`modelSet`/`modelShow`) — no separate env flag; always enabled when master switch is on
+  - `reactionPrompt` — no separate env flag; gated under `DISCOCLAW_DISCORD_ACTIONS_MESSAGING`
+
+Those env vars get translated into an `ActionCategoryFlags` object (see `src/discord/actions.ts`) and passed down from `src/index.ts` into the Discord handler and cron executor.
+
+Important behavioral notes:
+- Even if a category is implemented, it is not usable unless its flag is enabled.
+- Actions are not advertised to the model in DMs: `src/discord.ts` only appends the actions prompt section for non-DM messages, and execution requires `msg.guild`.
+- `imagegen` has an intentional discoverability/readiness split on the normal manual Discord path: ordinary user turns, their auto-follow-ups, and help/model surfaces such as `!models` / `!models help` can expose `imagegen` before setup is complete.
+- If an interactive/manual invocation emits `generateImage` without configured imagegen context, `executeDiscordActions(...)` returns a setup walkthrough instead of generating an image. That walkthrough points the operator at `.env`, `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN`, provider keys, restart, and `!models help`.
+- The setup walkthrough is tied to the shared interactive action-confirmation mode used by manual user turns and their follow-ups. Automated callers keep the raw `Imagegen subsystem not configured` error.
+- Reaction and deferred surfaces remain separately flag-driven. This document does not treat them as already non-advertised; they continue to follow their current flow-specific contracts.
+
+## Tiered Schema Injection (Prompt Guidance)
+
+Prompt-time action schema guidance is assembled by `buildTieredDiscordActionsPromptSection(...)` in `src/discord/actions.ts`.
+
+- When called without selection inputs (`discordActionsPromptSection(...)` wrapper), it includes every enabled category (legacy full reference behavior).
+- When called with selection inputs (current message/reaction/defer/voice invocation flows), it injects a reduced subset across three tiers:
+  - `core` (always): `messaging`, `channels`
+  - `channelContextual`: inferred from `channelName`, `channelContextPath`, and `isThread` (currently adds task/cron categories when context indicates they are relevant)
+  - `keywordTriggered`: inferred from `userText` keyword matches (memory/task/plan/forge/cron/config/imagegen/voice/moderation/poll/guild/botProfile/spawn keywords)
+- Selection inputs are: `channelName`, `channelContextPath`, `isThread`, and `userText`.
+- Included categories are deduplicated and rendered in deterministic category order.
+- Optional schema estimate logging can be enabled with `DISCOCLAW_LOG_ACTION_SCHEMA_ESTIMATES=1`, which logs per-section `chars` and `estTokens` using `Math.ceil(chars / 4)`.
+
+Capability/gating note (important):
+- Prompt injection selection only changes what schema text is shown to the model.
+- `parseDiscordActions(...)` still hard-gates by `ActionCategoryFlags` and strips disabled action types.
+- `executeDiscordActions(...)` still enforces runtime/subsystem availability for each category.
+- So even when a schema section is not injected, parser/executor capability remains env/context-gated; prompt selection does not grant capability.
+
+## Action Lifecycle (End To End)
+
+1. Prompt injection:
+  - The model is taught the available actions via `buildTieredDiscordActionsPromptSection(...)` (with flow-specific selection inputs) in `src/discord/actions.ts`.
+  - `discordActionsPromptSection(...)` remains as the full-reference wrapper used when no selection inputs are provided.
+  - Each category contributes examples via its `*ActionsPromptSection()` function.
+
+2. Model emits action blocks:
+  - It includes one or more `<discord-action>...</discord-action>` blocks in its response.
+
+3. Parse:
+  - `parseDiscordActions(text, flags)` in `src/discord/actions.ts` extracts JSON blocks.
+  - It drops malformed JSON silently.
+  - It drops actions whose `type` is not enabled by the current flags.
+  - It returns `{ cleanText, actions, strippedUnrecognizedTypes }` where `cleanText` has the blocks removed.
+
+4. Execute:
+  - `executeDiscordActions(actions, ctx, log, subsystemContexts)` in `src/discord/actions.ts` dispatches to the right category module based on `action.type`.
+  - Subsystem contexts (`taskCtx`, `cronCtx`, `forgeCtx`, `planCtx`, `memoryCtx`) are passed as a `SubsystemContexts` bag. Actions requiring a missing context return a "not configured" error.
+  - Each action returns `{ ok: true, summary }` or `{ ok: false, error }`.
+
+5. Post-processing:
+  - The bot appends "Done:" / "Failed:" lines after `cleanText` and posts the result.
+
+6. Optional auto-follow-up:
+  - If any action type is listed in `QUERY_ACTION_TYPES` (`src/discord/action-categories.ts`) and at least one of those query actions succeeded, `src/discord.ts` can automatically invoke the model again with the results.
+  - This is intended for "read/list/info" actions where the model needs returned data to keep reasoning.
+
+## Autonomous Action Categories
+
+The forge, plan, and memory categories enable the AI runtime to self-initiate operations that previously required human `!` commands. Combined with cron jobs, these enable fully autonomous workflows: crons that check for approved plans and forge them, post-forge memory updates, bot-initiated planning from task context, etc.
+
+### Forge Actions (`actions-forge.ts`)
+
+Allow the model to start new forge runs, resume existing plans, monitor progress, and cancel forge work without a human `!forge` command.
+
+| Action | Description | Mutating? | Async? |
+|--------|-------------|-----------|--------|
+| `forgeCreate` | Start a new forge run from a description | Yes | Yes (fire-and-forget; progress posted to channel) |
+| `forgeResume` | Continue an existing plan based on its current status: DRAFT/REVIEW re-enter forge, APPROVED/IMPLEMENTING route to `planRun` | Yes | Yes (fire-and-forget) |
+| `forgeStatus` | Check if a forge is currently running | No | No |
+| `forgeCancel` | Cancel the running forge | Yes | No (sets cancel flag) |
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_FORGE` (default 1, requires `DISCOCLAW_FORGE_COMMANDS_ENABLED`).
+Context: Requires `ForgeContext` with an `orchestratorFactory`, plans directory, and progress callback. If `forgeResume` needs to continue an `APPROVED` or `IMPLEMENTING` plan, `ForgeContext.planCtx` must also be configured so it can delegate to `planRun`.
+Concurrency: Only one forge at a time (module-level singleton via `forge-plan-registry.ts`). Acquires the workspace writer lock for the duration of the run.
+Status routing: `forgeResume` inspects the current plan status before choosing a path. `DRAFT` / `REVIEW` plans resume the forge audit/revise loop. `APPROVED` / `IMPLEMENTING` plans skip re-auditing and hand off directly to `planRun` for implementation.
+Recursion guard: `forgeCreate` and `forgeResume` are blocked at `depth >= 1` to prevent forge-initiated forges.
+
+### Plan Actions (`actions-plan.ts`)
+
+Allow the model to create, inspect, approve, and close plans without a human `!plan` command.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `planCreate` | Create a new plan file + backing task | Yes |
+| `planList` | List plans, optionally filtered by status | No (query) |
+| `planShow` | Show plan details (header, status, task) | No (query) |
+| `planApprove` | Set plan status to APPROVED, update backing task | Yes |
+| `planClose` | Set plan status to CLOSED, close backing task | Yes |
+| `planRun` | Execute all remaining phases of a plan (fire-and-forget); posts a live-updating status message to the channel reflecting the current phase and final outcome (unless `skipCompletionNotify` is set) | Yes |
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_PLAN` (default 1, requires `DISCOCLAW_PLAN_COMMANDS_ENABLED`).
+Context: Requires `PlanContext` with plans directory, workspace CWD, runtime, and model.
+
+Note: `planApprove` and `planClose` are blocked while a plan is `IMPLEMENTING`.
+Recursion guard: `planRun` is blocked at `depth >= 1` to prevent plan runs from spawning nested plan runs.
+Status gate: `planRun` requires the plan to be in `APPROVED` or `IMPLEMENTING` status.
+Auto-close: When all phases complete (done or skipped), `planRun` automatically closes the plan and its backing task via `closePlanIfComplete`.
+
+### Memory Actions (`actions-memory.ts`)
+
+Allow the model to read and mutate the user's durable memory (facts, preferences, projects, constraints) without a human `!memory` command.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `memoryRemember` | Store a fact/preference/note | Yes |
+| `memoryForget` | Deprecate items matching a substring | Yes |
+| `memoryShow` | Show current durable memory items | No (query) |
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_MEMORY` (default 1, requires durable memory enabled).
+Context: Requires `MemoryContext` with user ID, data directory, and capacity limits.
+Concurrency: Writes are serialized per-user via `durableWriteQueue`.
+
+### Cron Actions (`actions-crons.ts`)
+
+Allow the model to manage scheduled tasks: create, update, pause/resume, delete, trigger, and sync crons.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `cronCreate` | Create a new scheduled task (forum thread + scheduler registration) | Yes |
+| `cronUpdate` | Update a cron's schedule, prompt, model, or tags | Yes |
+| `cronList` | List all registered cron jobs with status | No (query) |
+| `cronShow` | Show full details for a specific cron | No (query) |
+| `cronPause` | Pause a cron (stops scheduling, cancels in-flight run) | Yes |
+| `cronResume` | Resume a paused cron | Yes |
+| `cronDelete` | Remove a cron and archive its forum thread | Yes |
+| `cronTrigger` | Manually fire a cron job immediately | Yes |
+| `cronSync` | Run full bidirectional sync (tags, names, status messages) | Yes |
+| `cronTagMapReload` | Reload the tag map from disk | Yes |
+
+#### `cronCreate` / `cronUpdate` Fields
+
+Both actions share the same writeable field set (except where noted):
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `name` | Yes (create) | Human-readable name for the cron job |
+| `schedule` | Yes (create) | Cron expression (e.g. `"0 9 * * 1"`) |
+| `prompt` | Yes (create) | Prompt text sent to the AI runtime at each execution |
+| `channel` | Yes (create) | Target channel name or ID for output |
+| `model` | No | Model override for this job |
+| `tags` | No | Forum thread tags to apply |
+| `routingMode` | No | Set to `"json"` to enable JSON routing mode (see below) |
+| `allowedActions` | No | Comma-separated action types permitted during execution (see below) |
+| `state` | No (update only) | JSON object to set as the job's persistent state (see [Job State](cron.md#job-state)) |
+| `chain` | No | Comma-separated `cronId` strings of downstream jobs to trigger on successful completion (see [Job Chaining](cron.md#job-chaining)) |
+
+`cronUpdate` additionally requires `cronId` (the cron job ID to update). Only supplied fields are changed.
+
+> **Note:** There is no `cronSetState` action. State write-back during execution uses the `<cron-state>` block convention at the executor level, not a Discord action. Use `cronUpdate` with a `state` field for manual state management.
+
+`cronShow` output includes `routingMode`, `allowedActions`, and `chain` when set on the job.
+
+#### JSON Routing Mode
+
+When `routingMode: "json"` is set on a cron job, the executor instructs the AI runtime to return output as a JSON array of `{"channel", "content"}` objects instead of posting a single reply to the job's default channel.
+
+Example response the AI is expected to produce:
+
+```json
+[
+  {"channel": "general", "content": "Good morning! Today's summary: ..."},
+  {"channel": "alerts",  "content": "Heads-up: threshold exceeded"}
+]
+```
+
+The orchestrator iterates the array and sends each `content` string to the named `channel`. If JSON parsing fails or every entry fails to send, raw output falls back to the default channel.
+
+#### Channel Placeholder Expansion
+
+Cron prompts support two built-in placeholders that are expanded at execution time:
+
+| Placeholder | Expands to |
+|-------------|------------|
+| `{{channel}}` | The job's target channel name |
+| `{{channelId}}` | The job's target channel ID |
+
+These allow prompts to reference their own delivery context without hardcoding channel names or IDs.
+
+#### `allowedActions` Semantics
+
+- **Format:** comma-separated action type name strings, e.g. `"sendMessage,taskCreate,taskUpdate"`. Whitespace around commas is ignored.
+- **Narrowing only:** `allowedActions` can only restrict the set that global env flags permit. Listing a type that is disabled by its env flag (or excluded from cron flows entirely) has no effect — those types remain unavailable.
+- **Clearing:** set `allowedActions` to `""` (empty string) on `cronUpdate` to remove the restriction. When cleared, the job inherits the full set of globally-enabled, cron-permitted action types.
+- **Enforcement:** the cron executor (`src/cron/executor.ts`) reads the stored `allowedActions` value at execution time and intersects it with the global `cronActionFlags` before building the action prompt and running the job.
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_CRONS` (default 1, requires cron subsystem enabled).
+Context: Requires `CronContext` with scheduler, forum channel, tag map, stats store, and runtime.
+Cron-to-cron restriction: Cron jobs themselves cannot emit cron actions (the `crons` flag is forced to `false` in the cron executor's action flags to prevent self-modification loops).
+
+### Bot Profile Actions (`actions-bot-profile.ts`)
+
+Allow the model to change the bot's Discord presence and nickname.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `botSetStatus` | Change online status (online/idle/dnd/invisible) | Yes |
+| `botSetActivity` | Set activity text (Playing/Listening/Watching/Competing/Custom) | Yes |
+| `botSetNickname` | Change server nickname | Yes |
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE` (default 1).
+No subsystem context required (uses the Discord client directly).
+Excluded from cron flows to avoid rate-limit and abuse issues.
+
+### Defer Actions (`actions-defer.ts`)
+
+Allow the model to schedule a deferred follow-up invocation in a target channel after a delay.
+
+| Action | Description | Mutating? | Async? |
+|--------|-------------|-----------|--------|
+| `defer` | Schedule a delayed re-invocation of the runtime in a named channel | Yes | Yes (in-process timer; fires after `delaySeconds`) |
+| `deferList` | Query all pending deferred actions (channel, prompt, time remaining) | No (query) | No |
+
+Fields (`defer`): `channel` (channel name or ID), `prompt` (text sent as the user message when the timer fires), `delaySeconds` (positive number).
+Fields (`deferList`): none — returns a snapshot of all active deferred jobs.
+
+Job IDs: Each scheduled defer is assigned a stable numeric `id` by the `DeferScheduler`. The `defer` action includes the `id` in its success summary (e.g. `id=3`), and `deferList` output prefixes each entry with its `id`. These IDs are the stable identifiers for addressing specific pending jobs — they are the prerequisite for a future `deferCancel` action.
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1).
+`DeferScheduler` constraints: delays are capped at `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` (default 1800 s); at most `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` (default 5) timers may be pending simultaneously. Timers are in-process only — they do not survive a restart.
+`DeferScheduler` lifecycle methods: the scheduler stores `setTimeout` timer refs alongside job metadata, enabling individual and bulk cancellation.
+- `cancel(id)` — cancel a single pending job by its numeric ID. Clears the timer and removes the job from the active set. Returns `true` if the job existed and was cancelled, `false` otherwise.
+- `cancelAll()` — cancel all pending jobs and clear their timers. Returns the count of jobs cancelled. This is the clean-shutdown primitive — callers can drain all pending timers before the process exits.
+Execution flow: when the timer fires, `deferred-runner.ts` resolves the channel, builds a prompt (PA preamble + deferred header + user prompt text), invokes the runtime directly, then parses any action blocks from the response and posts the result to the target channel. This is a direct runtime invocation, not a replay through the Discord message handler.
+
+For recurring work, prefer `loopCreate` over chaining defers together. Loops make the repeat semantics explicit and expose inspectable metadata plus cancellation.
+
+### Loop Actions (`actions-loop.ts`)
+
+Allow the model to schedule a repeating self-invocation in a target channel at a fixed interval. This is the first-class replacement for ad-hoc nested `defer` chains when the intent is "run this again every N seconds until canceled."
+
+| Action | Description | Mutating? | Async? |
+|--------|-------------|-----------|--------|
+| `loopCreate` | Create a repeating scheduled self-invocation in a named channel | Yes | Yes (in-process timer; repeats every `intervalSeconds`) |
+| `loopList` | Inspect active loops and their metadata | No (query) | No |
+| `loopCancel` | Cancel one active loop by ID | Yes | No |
+
+Fields (`loopCreate`):
+- `channel` — target channel name or ID for each loop tick
+- `prompt` — fully self-contained user message sent on every tick
+- `intervalSeconds` — repeat interval in seconds
+- `label` — optional human-readable purpose label shown in `loopList`
+
+Fields (`loopList`): none — returns all active loops with `id`, `label`, target `channel`, interval, next run time, remaining time, origin channel/thread, consecutive failure count, and prompt text.
+
+Fields (`loopCancel`):
+- `id` — positive numeric loop ID returned by `loopCreate` and shown by `loopList`
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_LOOP` (default 1).
+`LoopScheduler` constraints: intervals must stay within `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` (default 60 s) and `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` (default 86400 s); at most `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT` (default 5) loops may be active simultaneously. Like defer timers, loops are in-process only and do not survive a restart.
+Origin metadata: every loop stores where it came from so `loopList` can show the origin channel or thread that created it, alongside the label and next run time.
+Failure behavior: terminal errors such as missing guild/channel cancel the loop immediately. Non-terminal tick failures increment a consecutive-failure counter; after 3 consecutive failures the scheduler auto-cancels the loop. If a tick is still running when the next interval arrives, the overlapping tick is skipped rather than run concurrently.
+
+Execution flow:
+1. `loopCreate` validates the target channel, prompt, interval bounds, and global concurrent-loop cap, then registers the loop with origin metadata from the current channel/thread.
+2. Each tick resolves the target channel, applies the standard Discord allowlist/channel checks, and builds a fresh scheduled-self-invocation prompt using PA context, channel context, open-task context, and the tier-selected action schema for the loop prompt text.
+3. The runtime is invoked directly with no conversation history; each tick is isolated, so the stored `prompt` must contain the full recurring instruction.
+4. Returned action blocks are parsed and executed with the loop tick's synthetic action context. Tick action capability is intentionally narrowed to read/inspection-oriented actions plus loop inspection, not the full action surface.
+5. The final text and any action result summaries are posted to the target channel.
+6. `loopList` exposes the active loop set for inspection, and `loopCancel` stops a specific loop by `id`.
+
+### Config Actions (`actions-config.ts`)
+
+Allow the model to inspect and update live model assignments for all runtime roles without restarting the bot.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `modelSet` | Change the model for a named role (takes effect immediately, reverts on restart) | Yes |
+| `modelShow` | Show current model assignments for all roles | No (query) |
+
+Roles: `chat`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`.
+Changes are **ephemeral** — use env vars for persistent configuration.
+No subsystem context required beyond `ConfigContext` (holds `botParams` and the runtime adapter).
+No separate env flag — config actions are always enabled when the master switch is on.
+`modelShow` is a query action: it triggers the auto-follow-up loop so the model can read and reason about the current configuration.
+
+### Imagegen Actions (`actions-imagegen.ts`)
+
+Allow the model to generate images via OpenAI or Gemini and post them to a Discord channel.
+
+Discoverability vs. readiness:
+- `imagegen` is intentionally visible by default in the normal user-facing Discord help/onboarding path and the normal manual message/follow-up tool path, even before image generation is configured.
+- `!models` shows an `imagegen` row (`setup-required` when unconfigured), and `!models help` explicitly says setup is still required and must be done with environment variables rather than `!models set`.
+- Actual generation still follows the existing enablement/config path described below.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `generateImage` | Generate an image and post it to a channel | Yes |
+
+Fields: `prompt` (required), `channel` (optional — defaults to current channel), `model` (optional), `provider` (optional: `openai` or `gemini`, auto-detected from model prefix), `size` (optional), `quality` (optional: `standard` or `hd`, dall-e-3 only), `caption` (optional).
+
+Available models:
+- OpenAI: `dall-e-3`, `gpt-image-1`
+- Gemini: `imagen-4.0-generate-001`, `imagen-4.0-fast-generate-001`, `imagen-4.0-ultra-generate-001`
+
+Default model is auto-detected from available API keys: if only `IMAGEGEN_GEMINI_API_KEY` is set → `imagen-4.0-generate-001`; otherwise → `dall-e-3`. Override with `IMAGEGEN_DEFAULT_MODEL`.
+
+Valid sizes:
+- OpenAI dall-e-3: `1024x1024` (default), `1024x1792`, `1792x1024`, `256x256`, `512x512`
+- OpenAI gpt-image-1: same as above, plus `auto`
+- Gemini: `1:1` (default), `3:4`, `4:3`, `9:16`, `16:9`
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0). Actual generation still requires this flag plus at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`; the action cannot run until that existing config is present.
+Context: Requires `ImagegenContext` with `apiKey` (OpenAI), `geminiApiKey`, `baseUrl`, and `defaultModel`.
+Available in cron flows when `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` is set — follows the env flag rather than being hardcoded off.
+Unconfigured normal manual/follow-up invocations return a setup walkthrough instead of the raw not-configured error. That stub is only used on the shared interactive/manual confirmation path; automated callers still receive `Imagegen subsystem not configured`.
+Loop ticks do not use the manual setup-stub path. If a loop emits `generateImage` while image generation is unavailable there, the output is treated as unsupported for loop execution rather than receiving the interactive setup walkthrough.
+Reaction and deferred execution stay on their own current flag-driven contracts; this section does not imply those surfaces already advertise or suppress `imagegen` the same way as the normal manual/help path.
+
+**Example action blocks:**
+
+```xml
+<discord-action>{"type":"generateImage","prompt":"a serene mountain lake at sunset"}</discord-action>
+```
+
+```xml
+<discord-action>{"type":"generateImage","prompt":"a friendly robot waving","model":"gpt-image-1","size":"1024x1024","caption":"Here's your robot!"}</discord-action>
+```
+
+```xml
+<discord-action>{"type":"generateImage","prompt":"abstract geometric pattern","provider":"gemini","model":"imagen-4.0-generate-001","size":"16:9"}</discord-action>
+```
+
+### Voice Actions (`actions-voice.ts`)
+
+Allow the model to control voice channel presence and state.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `voiceJoin` | Join a voice channel by name or ID | Yes |
+| `voiceLeave` | Leave the current voice connection | Yes |
+| `voiceStatus` | Check current voice connection state | No |
+| `voiceMute` | Mute or unmute the bot in voice | Yes |
+| `voiceDeafen` | Deafen or undeafen the bot in voice | Yes |
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_VOICE` (default 0, requires `DISCOCLAW_VOICE_ENABLED=1`).
+Context: Requires `VoiceContext` with a `VoiceConnectionManager` instance.
+Disabled in cron flows — voice actions require a live Discord guild context.
+
+### Reaction Prompt Actions (`reaction-prompts.ts`)
+
+Allow the model to present an emoji-based multiple-choice question to the user without requiring a typed reply.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `reactionPrompt` | Send a question message, add emoji reactions as choices, and await the user's reaction | Yes |
+
+Fields: `question` (string displayed as the bot message), `choices` (2–9 emoji strings added as reactions).
+Gated under the `messaging` flag — no separate env var.
+Persistence: pending prompts are durably persisted to `DISCOCLAW_DATA_DIR/discord/reaction-prompts.json` (default source checkout path: `data/discord/reaction-prompts.json`) by `src/discord/reaction-prompt-store.ts`. The store writes on create, resolve, and cleanup using a temp-file-plus-rename pattern so pending waits survive service restarts.
+Boot rehydration: `ReactionPromptStore` hydrates from disk on construction, and `src/index.ts` includes the store file in startup JSON healing so a corrupted prompt store is backed up before the bot starts.
+Prompt store lifecycle: `registerPrompt` records the pending prompt keyed by message ID and persists it before reactions are added; `tryResolveReactionPrompt` (called from `reaction-handler.ts`) matches incoming reactions to the stored record, returns the resolved choice, removes the record, and persists that deletion. `removePrompt` is used for best-effort cleanup if reaction setup fails after the prompt message is sent.
+When the user reacts, `reaction-handler.ts` detects the match and re-invokes the runtime with a system message conveying the user's choice.
+
+### Spawn Actions (`actions-spawn.ts`)
+
+Allow the model to spawn a parallel sub-agent invocation in a target channel, executing an independent AI runtime call that runs fire-and-forget alongside the current response. Each spawned agent posts its own output directly to the target channel.
+
+| Action | Description | Mutating? | Async? |
+|--------|-------------|-----------|--------|
+| `spawnAgent` | Spawn a parallel AI invocation in a named channel with a given prompt | Yes | Yes (fire-and-forget; result posted to target channel) |
+
+#### Fields
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `channel` | Yes | Target channel name or ID where the spawned agent posts its output |
+| `prompt` | Yes | Instruction text sent to the spawned agent as the user message |
+| `model` | No | Model override for the spawned invocation |
+| `label` | No | Short human-readable label for the agent (used in error messages and summaries) |
+
+#### Execution Flow
+
+1. The action executor receives a `spawnAgent` block from the model's response.
+2. It resolves the target channel on the current guild.
+3. It builds a prompt preamble (root policy + inlined workspace PA context files) and prepends it to the user-supplied `prompt`.
+4. It registers the spawned agent in the **abort registry** (key: `spawn-<counter>-<label>`, using a module-level incrementing counter to avoid collisions in parallel batches) and passes the resulting `AbortSignal` to `runtime.invoke()`. This makes the agent visible to `tryAbortAll()`, so `!stop` can kill running spawned agents alongside the main stream.
+5. It streams the runtime output, collecting text events (`text_delta` / `text_final`) and returning an error if the stream emits an `error` event.
+6. The collected output text is passed through `parseDiscordActions()` to extract any `<discord-action>` blocks, and the remaining (cleaned) text is split and posted to the target channel via `targetChannel.send()`.
+7. Extracted action blocks are executed via `executeDiscordActions()` using the same subsystem contexts as the parent invocation, so spawned agents can perform Discord actions (send messages, manage tasks, etc.) just like deferred or chat-originated invocations.
+8. In the `finally` block, the abort registry entry is disposed (moved into a 15 s cooldown window, same as the main stream).
+
+Multiple `spawnAgent` actions in a single response are dispatched in parallel via `Promise.allSettled`, so all spawns start immediately and run concurrently.
+
+#### Depth Guard
+
+`spawnAgent` is blocked when the current invocation is already at `depth >= 1`. A spawned agent runs at `depth = 1` and cannot itself emit `spawnAgent` actions — the executor returns a `{ ok: false, error: '...' }` result and the nested spawn is dropped before the runtime is called.
+
+This prevents unbounded parallel agent trees from a single top-level message.
+
+#### Abort Integration
+
+Each spawned agent registers independently in the abort registry (`src/discord/abort-registry.ts`) before its runtime invocation starts. This means:
+
+- **`!stop`** calls `tryAbortAll()`, which aborts all active streams — including any in-flight spawned agents.
+- **🛑 on the parent reply** aborts the parent stream before action execution, preventing spawns from launching at all. It does not abort already-running spawned agents.
+- **Per-batch isolation:** When multiple `spawnAgent` actions run in parallel, each gets its own abort key (`spawn-<counter>-<label>`) and `AbortSignal`. Aborting one does not affect the others (though `tryAbortAll()` aborts them all).
+- **Lifecycle:** The abort entry is disposed in the `finally` block after the stream completes (success, error, or abort), moving it into the standard 15 s cooldown window.
+- **Validation short-circuit:** Abort registration is skipped for early failures (recursion guard, missing channel, empty prompt) since no runtime invocation occurs.
+
+Env: `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 1; set to 0 to disable).
+Context: Requires access to the runtime adapter and the current guild (same as the parent invocation). Receives subsystem contexts (message, guild, subsystems) for action parsing and execution.
+Concurrency: At most `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` (default 8) spawned agents run in parallel globally across all responses. If more spawns are requested than the limit allows, they queue behind the global semaphore until a slot opens — none are dropped.
+
+### Cron Flow Restrictions
+
+When actions are executed within a cron job (via `src/cron/executor.ts`), the following categories are always disabled regardless of env flags:
+
+- `crons` — prevents cron jobs from mutating cron state (self-modification loops)
+- `botProfile` — prevents rate-limit and abuse issues
+- `memory` — no user context in cron flows
+- `config` — no relevant runtime context in cron flows
+- `defer` — deferred runs target Discord message flows, not cron flows
+- `voice` — voice actions require a live Discord guild context
+- `spawn` — spawning parallel agents from cron jobs could create unbounded agent trees
+
+The following categories are **enabled** in cron flows (gated by their respective env flags):
+
+- `forge` — enables cron → forge autonomous workflows (e.g., scheduled plan drafting)
+- `plan` — enables cron → plan autonomous workflows (e.g., check for approved plans and run them)
+- `imagegen` — enables cron-triggered image generation (e.g., weather-image automations); requires `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1` and an API key
+
+**Principle:** A feature gated by an env flag should follow that flag everywhere. We don't hardcode it off in an additional place — if the user configured it, crons can use it.
+
+### Deferred Runner (`deferred-runner.ts`)
+
+The deferred runner is the integration point that fires scheduled follow-ups queued by the `defer` action. It wires `DeferScheduler` timers to full AI invocations. The sole export is `configureDeferredScheduler`, which returns a configured `DeferScheduler` instance.
+
+Execution flow (runs when a deferred timer fires):
+
+1. **Channel resolution** — resolves the target channel (by name or ID from the original `defer` action) on the guild stored in the original action context.
+2. **Channel allowlist** — if `DISCORD_CHANNEL_IDS` is configured, the target channel (or its thread parent) must be present; otherwise the run is dropped with a warning.
+3. **Channel context** — resolves the per-channel `DiscordChannelContext` for prompt building (used for context path and content directory).
+4. **Context inlining** — loads workspace PA files and inlines any matching context files for the target channel.
+5. **Prompt construction** — builds: PA preamble + `---\nDeferred follow-up scheduled for <#channel> (runs at HH:MM).\n---\nUser message:\n{prompt}`. If `discordActionsEnabled`, appends the tier-selected actions prompt section (core/contextual/keyword for the deferred prompt text + channel context).
+6. **Tool resolution** — applies workspace permissions and runtime capabilities to produce the effective tool list.
+7. **Runtime invocation** — invokes the runtime directly. This is not replayed through the normal Discord message handler.
+8. **Action parsing and execution** — parses action blocks (`parseDiscordActions`) and executes them (`executeDiscordActions`) with a synthetic action context (`messageId: "defer-<timestamp>"`).
+9. **Output assembly** — combines clean prose with display lines and posts to the target channel with `allowedMentions: { parse: [] }`.
+
+Action flag overrides (always applied, regardless of env):
+- `memory`: `false` — deferred runs carry no user identity.
+- `defer`: depth-gated — a deferred run can schedule further deferred runs up to `deferMaxDepth` (default 4). Each nested run increments `ActionContext.deferDepth`; when the depth limit is reached, the `defer` flag is set to `false` and further nesting is blocked.
+
+All other categories (`channels`, `messaging`, `guild`, `moderation`, `polls`, `tasks`, `crons`, `botProfile`, `forge`, `plan`, `config`, `imagegen`, `voice`) follow their env flags.
+
+Configuration:
+- `DISCOCLAW_DISCORD_ACTIONS_DEFER` (default 1) — master switch for the defer action.
+- `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS` (default 1800) — maximum allowed delay in seconds; enforced by `DeferScheduler`.
+- `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT` (default 5) — maximum number of pending timers.
+- `DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH` (default 4) — maximum nesting depth for deferred runs. A top-level defer starts at depth 0; each nested deferred run increments the counter. When `deferDepth >= deferMaxDepth`, the `defer` flag is forced to `false` and the run cannot schedule further defers.
+
+Timers are in-process only and do not survive a bot restart.
+
+### Reaction Handler (`reaction-handler.ts`)
+
+The reaction handler creates the `messageReactionAdd` and `messageReactionRemove` event listeners. Both modes share a single `createReactionHandler(mode, params, queue, statusRef)` implementation.
+
+Exported entry points:
+- `createReactionAddHandler` — handler for `messageReactionAdd`.
+- `createReactionRemoveHandler` — handler for `messageReactionRemove`.
+
+Handler step sequence (for each incoming reaction event):
+
+1. **Self-reaction guard** — ignores reactions emitted by the bot itself (infinite-loop prevention).
+2. **Partial fetch** — fetches the reaction and message objects if either is a Discord partial.
+3. **Guild-only** — ignores reactions in DMs (`guildId == null`).
+4. **Allowlist check** — ignores reactions from users not in `DISCORD_ALLOW_USER_IDS`.
+5. **Reaction prompt interception** — before the staleness guard, checks whether the reaction resolves a pending `reactionPrompt` (add mode only). If it does, `resolvedPrompt` is set and the staleness guard is bypassed. This lookup uses the disk-backed prompt store, so it still works after a service restart.
+6. **Abort intercept** — if the emoji is 🛑 and the reacted message is a bot reply, cancels all active runtime streams and any running forge plan (add mode), or silently consumes the event (remove mode). Skipped when `resolvedPrompt` is non-null.
+7. **Staleness guard** — drops reactions on messages older than `DISCOCLAW_REACTION_MAX_AGE_HOURS`. Bypassed when `resolvedPrompt` is set.
+8. **Channel restriction** — if `DISCORD_CHANNEL_IDS` is configured, ignores reactions outside allowlisted channels or their thread parents.
+9. **Session key + queue** — serializes per-`(channelId, userId)` session; all remaining work runs inside the queue callback.
+
+Inside the queue callback (AI invocation flow):
+- Optionally joins the thread if `autoJoinThreads` is enabled and the bot has not yet joined.
+- Posts a `**Thinking...**` placeholder reply.
+- Loads workspace PA files, context files, durable memory section, and task thread section.
+- Builds the prompt: PA preamble + task section + durable memory + reaction event line (or resolved-prompt line when `resolvedPrompt` is set) + original message content + attachment text + embeds + guidance line + tier-selected actions prompt section.
+- Downloads image attachments and non-image text attachments from the reacted-to message.
+- Streams the runtime response with keepalive ticks (every 5 s) and stall warnings.
+- Parses and executes action blocks. A per-event `memoryCtx` is constructed with the reacting user's ID so memory actions target the correct user.
+- Runs the auto-follow-up loop (up to `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` iterations).
+- Edits the placeholder reply with the final output, or deletes it for trivial or action-only responses.
+
+No action categories are force-disabled in reaction flows — all follow their env flags, identical to normal Discord message handling.
+
+Configuration:
+- `DISCOCLAW_REACTION_HANDLER` (default 1) — enables `messageReactionAdd`; when off, emoji reactions do not trigger AI invocations.
+- `DISCOCLAW_REACTION_REMOVE_HANDLER` (default 0) — enables `messageReactionRemove`; off by default since remove events are rarely actionable.
+- `DISCOCLAW_REACTION_MAX_AGE_HOURS` (default 24) — staleness cutoff in hours. Set to `0` to disable the guard entirely.
+
+Special behaviors:
+- **🛑 abort intercept:** Reacting with 🛑 to a bot reply cancels all active runtime streams and any running forge plan. In remove mode the event is silently consumed. The abort check is skipped when the reaction resolves a pending `reactionPrompt`.
+- **Staleness guard bypass:** Reactions that resolve a pending `reactionPrompt` always bypass the staleness guard, regardless of `DISCOCLAW_REACTION_MAX_AGE_HOURS`. The age check would otherwise reject reactions on prompt messages that aged out between emission and the user's response.
+- **Restart durability:** If the service restarts after sending a `reactionPrompt` but before the user reacts, the pending prompt is rehydrated from `reaction-prompts.json` on boot and resolves normally when the user eventually reacts.
+- **Guild-only:** Reactions in DMs are always ignored (no action flags are evaluated and no AI invocation occurs).
+
+## Adding A New Action (Existing Category)
+
+Example: add a new messaging action.
+
+Checklist:
+
+1. Add a new union variant to the category request type.
+  - Example file: `src/discord/actions-messaging.ts` (`export type MessagingActionRequest = ...`)
+
+2. Register the type string in that module's `*_ACTION_TYPES` set.
+  - Most modules build this from a `*_TYPE_MAP` object. Ensure your new type key is present.
+
+3. Implement the executor branch.
+  - Add a `case 'yourType':` to the `switch (action.type)` inside `execute*Action(...)`.
+  - Validate required fields and return a helpful `{ ok: false, error: '...' }` when inputs are missing.
+
+4. Update the prompt examples.
+  - Add a short example block and parameter notes to `*ActionsPromptSection()`.
+  - This is what teaches the model the action shape.
+
+5. Decide if it is a query action.
+  - If the action returns information that the model should process in an automatic follow-up, add its type to `QUERY_ACTION_TYPES` in `src/discord/action-categories.ts`.
+  - If it mutates state (create/edit/delete/moderate), it should usually NOT be a query action.
+
+6. Add tests.
+  - Parser/flag gating tests live in `src/discord/actions.test.ts`.
+  - If your action has non-trivial logic, add a focused unit test for its executor behavior.
+
+## Adding A New Category (New Module)
+
+If the new actions do not fit an existing category, create a new category module and wire it into the dispatcher and env flags.
+
+Steps:
+
+1. Create `src/discord/actions-yourcategory.ts` following an existing module pattern.
+  - Export:
+    - `export type YourCategoryActionRequest = ...`
+    - `export const YOURCATEGORY_ACTION_TYPES = new Set<string>(...)`
+    - `export async function executeYourCategoryAction(...)`
+    - `export function yourCategoryActionsPromptSection(): string`
+
+2. Wire it into the dispatcher and parser gating in `src/discord/actions.ts`.
+  - Add imports for `YOURCATEGORY_ACTION_TYPES`, `executeYourCategoryAction`, and the prompt section.
+  - Extend `ActionCategoryFlags` with a boolean for the new category.
+  - Extend `DiscordActionRequest` union.
+  - Update `buildValidTypes(...)` to include the new type set when enabled.
+  - Add a dispatch branch in `executeDiscordActions(...)`.
+  - Add prompt section inclusion in `discordActionsPromptSection(...)`.
+
+3. Add env flag plumbing in `src/index.ts` and `.env.example` / `.env.example.full`.
+  - Add a `DISCOCLAW_DISCORD_ACTIONS_YOURCATEGORY` env var (default should be conservative: typically `0`).
+  - Ensure the new boolean flows into the `actionFlags` object passed into both Discord message handling and cron context.
+
+4. If needed, add query-action types to `src/discord/action-categories.ts`.
+
+5. Add tests.
+  - Parser gating (disabled category types should be skipped) should be covered.
+  - If you add dispatcher wiring, include at least one smoke test that the dispatcher reaches your executor.
+
+## Permissions
+
+These actions require Discord role permissions, not Developer Portal settings.
+
+If an action fails with "Missing Permissions" or "Missing Access", update the bot's role in:
+- Server Settings -> Roles -> (bot role) -> enable the required permissions
+
+See `docs/discord-bot-setup.md` for recommended permission profiles and the note about `DISCOCLAW_DISCORD_ACTIONS=1` needing broader permissions (for example Manage Channels for channel actions).
+
+## Running Tests
+
+```bash
+pnpm test
+```

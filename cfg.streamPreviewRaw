@@ -1,0 +1,15 @@
+config: cfg.streamPreviewRaw
+env: DISCOCLAW_STREAM_PREVIEW_RAW
+default: 0 (compact)
+
+objective:
+- Make "Thinking..." previews feel live earlier and throughout runtime activity.
+- Reduce stale-looking preview blocks without leaking action payloads.
+
+behavior:
+- 0 (compact): 8-line tail, 72-char width, compact runtime signal formatting.
+- 1 (raw): 14-line tail, 120-char width, richer runtime signal formatting.
+- Preview text remains sanitized in both modes; <discord-action> tags (including partial trailing tags) are stripped before rendering.
+
+notes:
+- Use `1` when you want denser, continuously changing preview context during long tool-heavy runs.
