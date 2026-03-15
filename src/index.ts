@@ -33,7 +33,12 @@ import { configureDeferredScheduler, type ConfigureDeferredSchedulerOpts } from 
 import { configureLoopScheduler } from './discord/actions-loop.js';
 import { startDiscordBot, getActiveForgeId } from './discord.js';
 import { toBootReportMcpStatus, type StatusPoster } from './discord/status-channel.js';
-import { LongRunWatchdog, type LongRunWatchdogRun } from './discord/long-run-watchdog.js';
+import {
+  LongRunWatchdog,
+  type LongRunWatchdogRun,
+  buildDiscordActionFollowUpLifecycleLine,
+  isDiscordActionFollowUpRun,
+} from './discord/long-run-watchdog.js';
 import { buildLongRunFinalNotice, postLongRunWatchdogNoticeToChannel } from './discord/long-run-watchdog-notice.js';
 import { NO_MENTIONS } from './discord/allowed-mentions.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
@@ -500,10 +505,20 @@ const messageCoordinatorWatchdog = completionNotifyEnabled
     const watchdog = new LongRunWatchdog({
       dataFilePath: longRunWatchdogDataPath,
       stillRunningDelayMs: longRunStillRunningDelayMs,
-      postStillRunning: async () => {
-        // No-op: streaming preview heartbeats make a separate "Still running" message redundant.
+      postStillRunning: async (run) => {
+        if (!isDiscordActionFollowUpRun(run)) {
+          // Streaming preview heartbeats make a separate "Still running" message redundant.
+          return;
+        }
+        await postLongRunWatchdogNotice(run, buildDiscordActionFollowUpLifecycleLine(run.correlationToken, 'stalled'));
       },
       postFinal: async (run, meta) => {
+        if (isDiscordActionFollowUpRun(run)) {
+          if (run.completion === 'interrupted') {
+            await postLongRunWatchdogNotice(run, buildDiscordActionFollowUpLifecycleLine(run.correlationToken, 'failed'));
+          }
+          return;
+        }
         await postLongRunWatchdogNotice(run, buildLongRunFinalNotice({
           completion: run.completion,
           completionDetail: run.completionDetail,

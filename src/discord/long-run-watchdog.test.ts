@@ -244,6 +244,33 @@ describe('LongRunWatchdog', () => {
     watchdog.dispose();
   });
 
+  it('persists follow-up run kind and correlation token for discord action follow-ups', async () => {
+    const filePath = path.join(tmpDir, 'watchdog.json');
+    const watchdog = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning: vi.fn(async () => {}),
+      postFinal: vi.fn(async () => {}),
+      stillRunningDelayMs: 1_000,
+    });
+
+    await watchdog.start({
+      runId: 'run-followup',
+      channelId: 'chan-1',
+      messageId: 'msg-1',
+      runKind: 'discord-action-followup',
+      correlationToken: 'abc123',
+    });
+
+    const state = await watchdog.getRun('run-followup');
+    expect(state?.runKind).toBe('discord-action-followup');
+    expect(state?.correlationToken).toBe('abc123');
+
+    const persisted = await readRun(filePath, 'run-followup');
+    expect(persisted?.runKind).toBe('discord-action-followup');
+    expect(persisted?.correlationToken).toBe('abc123');
+    watchdog.dispose();
+  });
+
   it('persists failure detail across retries and restart recovery', async () => {
     const filePath = path.join(tmpDir, 'watchdog.json');
     const postStillRunningA = vi.fn(async () => {});

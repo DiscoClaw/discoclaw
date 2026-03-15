@@ -4,6 +4,14 @@ import type { LoggerLike } from '../logging/logger-like.js';
 
 type RunStatus = 'running' | 'completed';
 type CompletionKind = 'succeeded' | 'failed' | 'interrupted';
+export type LongRunWatchdogRunKind = 'default' | 'discord-action-followup';
+export type DiscordActionFollowUpLifecycleState =
+  | 'pending'
+  | 'stalled'
+  | 'completed'
+  | 'failed'
+  | 'completed after delay';
+export const DISCORD_ACTION_FOLLOW_UP_RUN_KIND: LongRunWatchdogRunKind = 'discord-action-followup';
 
 type PersistedStore = {
   version: 1;
@@ -17,6 +25,8 @@ export type LongRunWatchdogRun = {
   channelId: string;
   messageId: string;
   sessionKey: string;
+  runKind: LongRunWatchdogRunKind;
+  correlationToken: string | null;
   notifyOnCompletion: boolean;
   status: RunStatus;
   startedAt: number;
@@ -38,6 +48,8 @@ export type StartLongRunInput = {
   channelId: string;
   messageId: string;
   sessionKey?: string;
+  runKind?: LongRunWatchdogRunKind;
+  correlationToken?: string | null;
   stillRunningDelayMs?: number;
   notifyOnCompletion?: boolean;
 };
@@ -112,6 +124,39 @@ function asCompletionKind(value: unknown): CompletionKind | null {
   return null;
 }
 
+function asRunKind(value: unknown): LongRunWatchdogRunKind {
+  return value === DISCORD_ACTION_FOLLOW_UP_RUN_KIND ? DISCORD_ACTION_FOLLOW_UP_RUN_KIND : 'default';
+}
+
+function normalizeCorrelationToken(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 32);
+}
+
+export function isDiscordActionFollowUpRun(
+  run: Pick<LongRunWatchdogRun, 'runKind' | 'correlationToken'>,
+): run is Pick<LongRunWatchdogRun, 'runKind' | 'correlationToken'> & { correlationToken: string } {
+  return run.runKind === DISCORD_ACTION_FOLLOW_UP_RUN_KIND && typeof run.correlationToken === 'string' && run.correlationToken.length > 0;
+}
+
+export function buildDiscordActionFollowUpLifecycleLine(
+  token: string,
+  state: DiscordActionFollowUpLifecycleState,
+): string {
+  return `Auto-follow-up \`${token}\`: ${state}.`;
+}
+
+export function resolveDiscordActionFollowUpTerminalState(
+  run: Pick<LongRunWatchdogRun, 'completion' | 'checkInPosted'>,
+): Extract<DiscordActionFollowUpLifecycleState, 'completed' | 'failed' | 'completed after delay'> {
+  if (run.completion === 'succeeded') {
+    return run.checkInPosted ? 'completed after delay' : 'completed';
+  }
+  return 'failed';
+}
+
 function normalizeRun(runId: string, raw: Record<string, unknown>, now: number): LongRunWatchdogRun | null {
   const channelId = asString(raw.channelId).trim();
   const messageId = asString(raw.messageId).trim();
@@ -129,6 +174,8 @@ function normalizeRun(runId: string, raw: Record<string, unknown>, now: number):
     channelId,
     messageId,
     sessionKey: asString(raw.sessionKey),
+    runKind: asRunKind(raw.runKind),
+    correlationToken: normalizeCorrelationToken(raw.correlationToken),
     notifyOnCompletion: asBoolean(raw.notifyOnCompletion, true),
     status,
     startedAt,
@@ -193,6 +240,8 @@ export class LongRunWatchdog {
         channelId: input.channelId,
         messageId: input.messageId,
         sessionKey: input.sessionKey ?? '',
+        runKind: input.runKind ?? 'default',
+        correlationToken: normalizeCorrelationToken(input.correlationToken),
         notifyOnCompletion: input.notifyOnCompletion ?? true,
         status: 'running',
         startedAt: now,
@@ -481,6 +530,9 @@ export class LongRunWatchdog {
   }
 
   private requiresFinalPost(run: LongRunWatchdogRun): boolean {
+    if (run.runKind === DISCORD_ACTION_FOLLOW_UP_RUN_KIND) {
+      return run.completion === 'interrupted';
+    }
     if (run.completion === 'interrupted') return true;
     if (run.completion === 'failed' && run.completionDetail) return true;
     if (!run.notifyOnCompletion) return false;
