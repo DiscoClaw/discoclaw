@@ -173,6 +173,15 @@ async function applyPhase4ArchiveClosedThreads(
   tasksById: Map<string, TaskData>,
   plannedTaskIds: string[],
 ): Promise<void> {
+  let activeThreadIds: Set<string> | null = null;
+  try {
+    const fetchedActive = await ctx.forum.threads.fetchActive();
+    activeThreadIds = new Set(fetchedActive.threads.keys());
+  } catch (err) {
+    ctx.log?.warn({ err }, 'task-sync:phase4 failed to fetch active threads; falling back to per-task checks');
+    ctx.counters.warnings++;
+  }
+
   for (const taskId of plannedTaskIds) {
     const task = tasksById.get(taskId);
     if (!task) continue;
@@ -180,6 +189,9 @@ async function applyPhase4ArchiveClosedThreads(
       const latestTask = ctx.store.get(task.id) ?? task;
       const threadId = getThreadIdFromTask(latestTask);
       if (!threadId || latestTask.status !== 'closed') {
+        return;
+      }
+      if (activeThreadIds && !activeThreadIds.has(threadId)) {
         return;
       }
 

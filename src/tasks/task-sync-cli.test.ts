@@ -88,4 +88,23 @@ describe('runSyncWithStore', () => {
       expect.objectContaining({ store }),
     );
   });
+
+  it('defaults operator CLI helper throttle to engine default unless explicitly set', async () => {
+    const { runTaskSync } = await import('./task-sync-engine.js');
+    const { TaskStore } = await import('./store.js');
+
+    const store = new TaskStore();
+
+    await runSyncWithStore({
+      client: {} as any,
+      guild: {} as any,
+      forumId: 'forum-123',
+      tagMap: {},
+      store,
+    });
+
+    expect(runTaskSync).toHaveBeenCalledWith(
+      expect.objectContaining({ throttleMs: 250 }),
+    );
+  });
 });
