@@ -2038,9 +2038,18 @@ export async function executePhase(
 // Git helpers
 // ---------------------------------------------------------------------------
 
+// Strip GIT_DIR / GIT_WORK_TREE so git commands discover the repo from cwd,
+// not from an inherited hook environment (e.g. pre-push sets GIT_DIR).
+function localGitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  return env;
+}
+
 function gitAvailable(cwd: string): boolean {
   try {
-    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd, encoding: 'utf-8', stdio: 'pipe' });
+    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd, env: localGitEnv(), encoding: 'utf-8', stdio: 'pipe' });
     return true;
   } catch {
     return false;
@@ -2049,10 +2058,11 @@ function gitAvailable(cwd: string): boolean {
 
 function gitDiffNames(cwd: string): Set<string> | null {
   try {
+    const env = localGitEnv();
     const result = new Set<string>();
-    const unstaged = execFileSync('git', ['diff', '--name-only'], { cwd, encoding: 'utf-8', stdio: 'pipe' }).trim();
-    const staged = execFileSync('git', ['diff', '--staged', '--name-only'], { cwd, encoding: 'utf-8', stdio: 'pipe' }).trim();
-    const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd, encoding: 'utf-8', stdio: 'pipe' }).trim();
+    const unstaged = execFileSync('git', ['diff', '--name-only'], { cwd, env, encoding: 'utf-8', stdio: 'pipe' }).trim();
+    const staged = execFileSync('git', ['diff', '--staged', '--name-only'], { cwd, env, encoding: 'utf-8', stdio: 'pipe' }).trim();
+    const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd, env, encoding: 'utf-8', stdio: 'pipe' }).trim();
     for (const line of [...unstaged.split('\n'), ...staged.split('\n'), ...untracked.split('\n')]) {
       if (line.trim()) result.add(line.trim());
     }
@@ -2064,7 +2074,7 @@ function gitDiffNames(cwd: string): Set<string> | null {
 
 function gitIsTracked(cwd: string, file: string): boolean {
   try {
-    execFileSync('git', ['ls-files', '--error-unmatch', '--', file], { cwd, stdio: 'pipe' });
+    execFileSync('git', ['ls-files', '--error-unmatch', '--', file], { cwd, env: localGitEnv(), stdio: 'pipe' });
     return true;
   } catch {
     return false;
@@ -2210,7 +2220,7 @@ export async function runNextPhase(
 
     if (trackedToRevert.length > 0) {
       try {
-        execFileSync('git', ['checkout', '--', ...trackedToRevert], { cwd: opts.projectCwd, stdio: 'pipe' });
+        execFileSync('git', ['checkout', '--', ...trackedToRevert], { cwd: opts.projectCwd, env: localGitEnv(), stdio: 'pipe' });
       } catch (err) {
         opts.log?.warn({ err, files: trackedToRevert }, 'plan-manager: revert tracked files failed');
       }
@@ -2218,7 +2228,7 @@ export async function runNextPhase(
 
     if (untrackedToClean.length > 0) {
       try {
-        execFileSync('git', ['clean', '-fd', '--', ...untrackedToClean], { cwd: opts.projectCwd, stdio: 'pipe' });
+        execFileSync('git', ['clean', '-fd', '--', ...untrackedToClean], { cwd: opts.projectCwd, env: localGitEnv(), stdio: 'pipe' });
       } catch (err) {
         opts.log?.warn({ err, files: untrackedToClean }, 'plan-manager: clean untracked files failed');
       }
@@ -2296,8 +2306,9 @@ export async function runNextPhase(
         // Compute modified files list (fresh each iteration)
         let modifiedFilesList: string[] = [];
         try {
-          const tracked = execFileSync('git', ['diff', '--name-only', 'HEAD'], { cwd: opts.projectCwd, encoding: 'utf-8', stdio: 'pipe' }).trim();
-          const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], { cwd: opts.projectCwd, encoding: 'utf-8', stdio: 'pipe' }).trim();
+          const gitOpts = { cwd: opts.projectCwd, env: localGitEnv(), encoding: 'utf-8' as const, stdio: 'pipe' as const };
+          const tracked = execFileSync('git', ['diff', '--name-only', 'HEAD'], gitOpts).trim();
+          const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], gitOpts).trim();
           const combined = [...(tracked ? tracked.split('\n') : []), ...(untracked ? untracked.split('\n') : [])];
           modifiedFilesList = [...new Set(combined)];
         } catch {
@@ -2375,7 +2386,7 @@ export async function runNextPhase(
           let rollbackFailed = false;
           if (trackedToRevert.length > 0) {
             try {
-              execFileSync('git', ['checkout', '--', ...trackedToRevert], { cwd: opts.projectCwd, stdio: 'pipe' });
+              execFileSync('git', ['checkout', '--', ...trackedToRevert], { cwd: opts.projectCwd, env: localGitEnv(), stdio: 'pipe' });
             } catch (rollbackErr) {
               rollbackFailed = true;
               opts.log?.warn({ err: rollbackErr, files: trackedToRevert }, 'plan-manager: scoped rollback checkout failed');
@@ -2383,7 +2394,7 @@ export async function runNextPhase(
           }
           if (untrackedToClean.length > 0) {
             try {
-              execFileSync('git', ['clean', '-fd', '--', ...untrackedToClean], { cwd: opts.projectCwd, stdio: 'pipe' });
+              execFileSync('git', ['clean', '-fd', '--', ...untrackedToClean], { cwd: opts.projectCwd, env: localGitEnv(), stdio: 'pipe' });
             } catch (rollbackErr) {
               rollbackFailed = true;
               opts.log?.warn({ err: rollbackErr, files: untrackedToClean }, 'plan-manager: scoped rollback clean failed');
@@ -2500,12 +2511,13 @@ export async function runNextPhase(
   // 12. Git commit on success
   if (result.status === 'done' && isGitAvailable && modifiedFiles.length > 0) {
     try {
-      execFileSync('git', ['add', ...modifiedFiles], { cwd: opts.projectCwd, stdio: 'pipe' });
+      const env = localGitEnv();
+      execFileSync('git', ['add', ...modifiedFiles], { cwd: opts.projectCwd, env, stdio: 'pipe' });
       const commitMsg = `${allPhases.planId} ${phase.id}: ${phase.title}`;
-      execFileSync('git', ['commit', '-m', commitMsg], { cwd: opts.projectCwd, stdio: 'pipe' });
+      execFileSync('git', ['commit', '-m', commitMsg], { cwd: opts.projectCwd, env, stdio: 'pipe' });
 
       // Capture commit hash
-      const commitHash = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: opts.projectCwd, encoding: 'utf-8', stdio: 'pipe' }).trim();
+      const commitHash = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: opts.projectCwd, env, encoding: 'utf-8', stdio: 'pipe' }).trim();
 
       // Update phase with git commit hash
       allPhases = {
@@ -2518,7 +2530,7 @@ export async function runNextPhase(
       writePhasesFile(phasesFilePath, allPhases);
     } catch (err) {
       // Unstage files so the next retry doesn't see stale staged state
-      try { execFileSync('git', ['reset'], { cwd: opts.projectCwd, stdio: 'pipe' }); } catch { /* best-effort */ }
+      try { execFileSync('git', ['reset'], { cwd: opts.projectCwd, env: localGitEnv(), stdio: 'pipe' }); } catch { /* best-effort */ }
       opts.log?.warn({ err, phase: phase.id }, 'plan-manager: git commit failed');
     }
   } else if (result.status === 'done' && isGitAvailable && modifiedFiles.length === 0) {
