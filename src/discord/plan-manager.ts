@@ -2090,6 +2090,65 @@ function hashFileContent(filePath: string): string {
   }
 }
 
+/** Returns the current git branch name, or null if detached/unavailable. */
+export function gitCurrentBranch(cwd: string): string | null {
+  try {
+    return execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd, env: localGitEnv(), encoding: 'utf-8', stdio: 'pipe',
+    }).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Validates that a staged commit won't catastrophically delete most of the repo.
+ * Call after `git add` but before `git commit`.
+ *
+ * Returns null if safe, or an error message string if the commit should be rejected.
+ */
+export function validateCommitSafety(cwd: string, preBranch: string | null): string | null {
+  const env = localGitEnv();
+
+  // Check 1: Branch drift — did the branch change during phase execution?
+  if (preBranch) {
+    const currentBranch = gitCurrentBranch(cwd);
+    if (currentBranch && currentBranch !== preBranch) {
+      return `Branch changed during phase execution: expected "${preBranch}", got "${currentBranch}". ` +
+        'This may indicate git init or git checkout --orphan was run.';
+    }
+  }
+
+  // Check 2: Deletion ratio — would this commit delete >50% of tracked files?
+  try {
+    const deletedRaw = execFileSync(
+      'git', ['diff', '--cached', '--diff-filter=D', '--name-only'],
+      { cwd, env, encoding: 'utf-8', stdio: 'pipe' },
+    ).trim();
+    const deletedCount = deletedRaw ? deletedRaw.split('\n').length : 0;
+
+    if (deletedCount > 0) {
+      // git ls-files returns the post-staging index (deletions already removed),
+      // so add back deletedCount to get the original total.
+      const remainingRaw = execFileSync(
+        'git', ['ls-files'],
+        { cwd, env, encoding: 'utf-8', stdio: 'pipe' },
+      ).trim();
+      const remainingCount = remainingRaw ? remainingRaw.split('\n').length : 0;
+      const originalTotal = remainingCount + deletedCount;
+
+      if (originalTotal > 0 && deletedCount / originalTotal > 0.5) {
+        return `Commit would delete ${deletedCount} of ${originalTotal} tracked files (${Math.round(deletedCount / originalTotal * 100)}%). ` +
+          'This exceeds the 50% safety threshold.';
+      }
+    }
+  } catch {
+    // git command failed — skip this check rather than blocking
+  }
+
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // High-level runner
 // ---------------------------------------------------------------------------
@@ -2186,6 +2245,7 @@ export async function runNextPhase(
 
   // 6. Git snapshot (null = git command failed, skip modified-files tracking)
   const preSnapshot = isGitAvailable ? gitDiffNames(opts.projectCwd) : null;
+  const preBranch = isGitAvailable ? gitCurrentBranch(opts.projectCwd) : null;
 
   // 7. Auto-revert on retry
   if (phase.status === 'failed' && phase.modifiedFiles && phase.failureHashes && isGitAvailable && preSnapshot) {
@@ -2513,6 +2573,19 @@ export async function runNextPhase(
     try {
       const env = localGitEnv();
       execFileSync('git', ['add', ...modifiedFiles], { cwd: opts.projectCwd, env, stdio: 'pipe' });
+
+      // Safety gate: validate commit won't catastrophically delete files
+      const safetyError = validateCommitSafety(opts.projectCwd, preBranch);
+      if (safetyError) {
+        execFileSync('git', ['reset'], { cwd: opts.projectCwd, env, stdio: 'pipe' });
+        opts.log?.error({ phase: phase.id, safetyError }, 'plan-manager: commit blocked by safety check');
+        // Mark phase as failed — a catastrophic deletion shouldn't graduate
+        allPhases = updatePhaseStatus(allPhases, phase.id, 'failed', undefined, safetyError, null);
+        writePhasesFile(phasesFilePath, allPhases);
+        const failedPhase = allPhases.phases.find((p) => p.id === phase.id)!;
+        return { result: 'failed', phase: failedPhase, output: '', error: safetyError };
+      }
+
       const commitMsg = `${allPhases.planId} ${phase.id}: ${phase.title}`;
       execFileSync('git', ['commit', '-m', commitMsg], { cwd: opts.projectCwd, env, stdio: 'pipe' });
 

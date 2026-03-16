@@ -35,6 +35,8 @@ import {
   readPhasesFile,
   executePhase,
   runNextPhase,
+  gitCurrentBranch,
+  validateCommitSafety,
 } from './plan-manager.js';
 import type {
   PlanPhases,
@@ -3942,5 +3944,103 @@ describe('buildPostRunSummary', () => {
         summary: 'dist built cleanly',
       },
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// gitCurrentBranch / validateCommitSafety
+// ---------------------------------------------------------------------------
+
+describe('gitCurrentBranch', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'git-safety-'));
+    const gitEnv = { ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined };
+    execSync('git init', { cwd: tmpDir, env: gitEnv, stdio: 'pipe' });
+    execSync('git config user.email "test@test.com"', { cwd: tmpDir, env: gitEnv, stdio: 'pipe' });
+    execSync('git config user.name "Test"', { cwd: tmpDir, env: gitEnv, stdio: 'pipe' });
+    fsSync.writeFileSync(path.join(tmpDir, 'README.md'), 'test');
+    execSync('git add . && git commit -m "init"', { cwd: tmpDir, env: gitEnv, stdio: 'pipe' });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns the current branch name', () => {
+    const branch = gitCurrentBranch(tmpDir);
+    // Default branch is typically "main" or "master"
+    expect(typeof branch).toBe('string');
+    expect(branch!.length).toBeGreaterThan(0);
+  });
+
+  it('returns null for non-git directory', async () => {
+    const nonGit = await fs.mkdtemp(path.join(os.tmpdir(), 'non-git-'));
+    try {
+      expect(gitCurrentBranch(nonGit)).toBeNull();
+    } finally {
+      await fs.rm(nonGit, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('validateCommitSafety', () => {
+  let tmpDir: string;
+  const gitEnv = () => ({ ...process.env, GIT_DIR: undefined, GIT_WORK_TREE: undefined });
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'commit-safety-'));
+    execSync('git init', { cwd: tmpDir, env: gitEnv(), stdio: 'pipe' });
+    execSync('git config user.email "test@test.com"', { cwd: tmpDir, env: gitEnv(), stdio: 'pipe' });
+    execSync('git config user.name "Test"', { cwd: tmpDir, env: gitEnv(), stdio: 'pipe' });
+    // Create a repo with enough files to trigger ratio checks
+    for (let i = 0; i < 20; i++) {
+      fsSync.writeFileSync(path.join(tmpDir, `file-${i}.txt`), `content-${i}`);
+    }
+    execSync('git add . && git commit -m "init with 20 files"', { cwd: tmpDir, env: gitEnv(), stdio: 'pipe' });
+  });
+
+  afterEach(async () => {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns null for safe commit (no deletions)', () => {
+    // Stage a small change
+    fsSync.writeFileSync(path.join(tmpDir, 'file-0.txt'), 'updated');
+    execSync('git add file-0.txt', { cwd: tmpDir, env: gitEnv(), stdio: 'pipe' });
+    const branch = gitCurrentBranch(tmpDir);
+    expect(validateCommitSafety(tmpDir, branch)).toBeNull();
+  });
+
+  it('rejects commit that deletes >50% of files', () => {
+    // Delete 15 of 20 files (75%)
+    for (let i = 0; i < 15; i++) {
+      fsSync.unlinkSync(path.join(tmpDir, `file-${i}.txt`));
+    }
+    execSync('git add -A', { cwd: tmpDir, env: gitEnv(), stdio: 'pipe' });
+    const branch = gitCurrentBranch(tmpDir);
+    const result = validateCommitSafety(tmpDir, branch);
+    expect(result).not.toBeNull();
+    expect(result).toContain('safety threshold');
+  });
+
+  it('allows commit that deletes <50% of files', () => {
+    // Delete 5 of 20 files (25%)
+    for (let i = 0; i < 5; i++) {
+      fsSync.unlinkSync(path.join(tmpDir, `file-${i}.txt`));
+    }
+    execSync('git add -A', { cwd: tmpDir, env: gitEnv(), stdio: 'pipe' });
+    const branch = gitCurrentBranch(tmpDir);
+    expect(validateCommitSafety(tmpDir, branch)).toBeNull();
+  });
+
+  it('rejects when branch changed', () => {
+    // Simulate branch drift by passing a different preBranch
+    fsSync.writeFileSync(path.join(tmpDir, 'file-0.txt'), 'updated');
+    execSync('git add file-0.txt', { cwd: tmpDir, env: gitEnv(), stdio: 'pipe' });
+    const result = validateCommitSafety(tmpDir, 'some-other-branch');
+    expect(result).not.toBeNull();
+    expect(result).toContain('Branch changed');
   });
 });

@@ -114,6 +114,17 @@ Your training data has a cutoff date. Anything that could have changed recently 
 
 The cost of a quick web search is negligible. The cost of confidently declaring something doesn't exist -- when it dropped two days ago -- is your credibility.
 
+## Git Safety Rules
+
+These rules apply to all git operations, including freeform "commit and PR" flows:
+
+- **Never** run `git init` in the project directory
+- **Never** run `git checkout --orphan` — this replaces the entire repo tree
+- **Never** run `git reset --hard` to a different commit without explicit user approval
+- Before pushing, verify the diff is proportional to the task — a bug fix should not delete hundreds of files
+- If the diff shows mass deletions unrelated to the task, **stop and report** instead of pushing
+- Do not switch branches during implementation unless the task explicitly requires it
+
 ## Landing the Plane (Session Completion)
 
 Work is complete only when `git push` succeeds — local-only work is stranded work. If push fails, resolve and retry.
