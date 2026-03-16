@@ -541,6 +541,7 @@ describe('createReactionAddHandler', () => {
     const imgData = (() => { const b = Buffer.alloc(45); Buffer.from([0x89,0x50,0x4E,0x47,0x0D,0x0A,0x1A,0x0A]).copy(b); return b; })();
     globalThis.fetch = vi.fn().mockResolvedValue({
       ok: true,
+      headers: new Map([['content-type', 'image/png']]),
       arrayBuffer: () => Promise.resolve(imgData.buffer.slice(imgData.byteOffset, imgData.byteOffset + imgData.byteLength)),
     }) as any;
 
@@ -1335,12 +1336,14 @@ describe('createReactionAddHandler', () => {
       if (url.includes('.toml')) {
         return Promise.resolve({
           ok: true,
+          headers: new Map([['content-type', 'text/plain']]),
           arrayBuffer: () => Promise.resolve(new TextEncoder().encode(fileContent).buffer),
         });
       }
-      // Image path: downloadAttachment does buffer.toString('base64') with no content validation
+      // Image path
       return Promise.resolve({
         ok: true,
+        headers: new Map([['content-type', 'image/png']]),
         arrayBuffer: () => Promise.resolve(imgData.buffer.slice(imgData.byteOffset, imgData.byteOffset + imgData.byteLength)),
       });
     }) as any;

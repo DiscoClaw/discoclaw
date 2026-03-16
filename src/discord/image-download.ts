@@ -1,9 +1,8 @@
 import type { ImageData } from '../runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from '../runtime/types.js';
 import { maybeDownscale } from '../image/resize.js';
-
-/** Allowed Discord CDN hosts (SSRF protection). */
-const ALLOWED_HOSTS = new Set(['cdn.discordapp.com', 'media.discordapp.net']);
+import { validateImageUrl } from '../image/url-safety.js';
+import { safeImageDownload } from '../runtime/tools/image-download.js';
 
 /** Max bytes per individual image (20 MB). */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -122,8 +121,60 @@ function safeName(attachment: AttachmentLike): string {
 }
 
 /**
+ * Download an image from a public http(s) URL.
+ * Delegates to the shared safeImageDownload helper for SSRF protection,
+ * Content-Type validation, size limits, and magic-byte verification,
+ * then applies SSRF DNS-resolution checks and downscaling.
+ */
+export async function downloadPublicImage(
+  url: string,
+  label: string = 'image',
+): Promise<{ ok: true; image: ImageData } | { ok: false; error: string }> {
+  // SSRF safety: validate scheme, hostname, and resolved IP before fetching.
+  const safety = await validateImageUrl(url);
+  if (!safety.safe) {
+    return { ok: false, error: `${label}: ${safety.reason}` };
+  }
+
+  const result = await safeImageDownload(url, {
+    allowHttp: true,
+    timeoutMs: DOWNLOAD_TIMEOUT_MS,
+    maxBytes: MAX_IMAGE_BYTES,
+  });
+
+  if (!result.ok) {
+    return { ok: false, error: `${label}: ${result.error}` };
+  }
+
+  // Reject truncated payloads below format structural minimums.
+  const minBytes = MIN_BYTES_FOR_TYPE[result.mediaType];
+  if (minBytes && result.buffer.length < minBytes) {
+    return { ok: false, error: `${label}: image too small to be valid ${result.mediaType} (${result.buffer.length} bytes, minimum ${minBytes})` };
+  }
+
+  // Downscale oversized images to stay within Anthropic API dimension limits.
+  let finalBuffer: Buffer = result.buffer;
+  let finalMediaType = result.mediaType;
+  try {
+    const downscaled = await maybeDownscale(result.buffer, result.mediaType);
+    finalBuffer = downscaled.buffer;
+    finalMediaType = downscaled.mediaType;
+  } catch {
+    // Degrade gracefully — use original buffer if downscale fails.
+  }
+
+  return {
+    ok: true,
+    image: {
+      base64: finalBuffer.toString('base64'),
+      mediaType: finalMediaType,
+    },
+  };
+}
+
+/**
  * Download a single Discord image attachment.
- * Returns the ImageData on success, or an error string on failure.
+ * Delegates to downloadPublicImage after pre-checking Discord metadata.
  */
 export async function downloadAttachment(
   attachment: AttachmentLike,
@@ -131,82 +182,23 @@ export async function downloadAttachment(
 ): Promise<{ ok: true; image: ImageData } | { ok: false; error: string }> {
   const name = safeName(attachment);
 
-  // SSRF protection: validate host.
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(attachment.url);
-  } catch {
-    return { ok: false, error: `${name}: invalid URL` };
-  }
-
-  if (parsedUrl.protocol !== 'https:' || !ALLOWED_HOSTS.has(parsedUrl.hostname)) {
-    return { ok: false, error: `${name}: blocked (non-Discord CDN host)` };
-  }
-
   // Pre-check size from Discord metadata.
   if (attachment.size != null && attachment.size > MAX_IMAGE_BYTES) {
     const sizeMB = (attachment.size / (1024 * 1024)).toFixed(1);
     return { ok: false, error: `${name}: too large (${sizeMB} MB, max 20 MB)` };
   }
 
-  try {
-    const response = await fetch(attachment.url, {
-      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-      redirect: 'error',
-    });
+  return downloadPublicImage(attachment.url, name);
+}
 
-    if (!response.ok) {
-      return { ok: false, error: `${name}: HTTP ${response.status}` };
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-
-    // Post-download size check.
-    if (buffer.length > MAX_IMAGE_BYTES) {
-      const sizeMB = (buffer.length / (1024 * 1024)).toFixed(1);
-      return { ok: false, error: `${name}: too large (${sizeMB} MB, max 20 MB)` };
-    }
-
-    // Sniff actual format from magic bytes — override declared MIME.
-    const sniffed = sniffMediaType(buffer);
-    if (!sniffed) {
-      return { ok: false, error: `${name}: unsupported image format (magic bytes don't match PNG, JPEG, GIF, or WebP)` };
-    }
-
-    // Reject truncated payloads below format structural minimums.
-    const minBytes = MIN_BYTES_FOR_TYPE[sniffed];
-    if (minBytes && buffer.length < minBytes) {
-      return { ok: false, error: `${name}: image too small to be valid ${sniffed} (${buffer.length} bytes, minimum ${minBytes})` };
-    }
-
-    // Downscale oversized images to stay within Anthropic API dimension limits.
-    let finalBuffer: Buffer = buffer;
-    let finalMediaType = sniffed;
-    try {
-      const downscaled = await maybeDownscale(buffer, sniffed);
-      finalBuffer = downscaled.buffer;
-      finalMediaType = downscaled.mediaType;
-    } catch {
-      // Degrade gracefully — use original buffer if downscale fails.
-    }
-
-    return {
-      ok: true,
-      image: {
-        base64: finalBuffer.toString('base64'),
-        mediaType: finalMediaType,
-      },
-    };
-  } catch (err: unknown) {
-    const errObj = err instanceof Error ? err : null;
-    if (errObj?.name === 'TimeoutError' || errObj?.name === 'AbortError') {
-      return { ok: false, error: `${name}: download timed out` };
-    }
-    if (errObj?.name === 'TypeError' && String(errObj.message).includes('redirect')) {
-      return { ok: false, error: `${name}: blocked (unexpected redirect)` };
-    }
-    return { ok: false, error: `${name}: download failed` };
-  }
+/**
+ * Download an image from a public URL for use as a source image.
+ * Thin wrapper around downloadPublicImage.
+ */
+export async function downloadImageUrl(
+  url: string,
+): Promise<{ ok: true; image: ImageData } | { ok: false; error: string }> {
+  return downloadPublicImage(url, 'sourceImage');
 }
 
 /**

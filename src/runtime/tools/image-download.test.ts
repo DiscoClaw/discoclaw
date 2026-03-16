@@ -61,7 +61,7 @@ describe('image-download execute', () => {
     const pngData = Buffer.concat([PNG_HEADER, Buffer.alloc(100)]);
 
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response(pngData, { status: 200 }),
+      new Response(pngData, { status: 200, headers: { 'content-type': 'image/png' } }),
     );
 
     const r = await execute({ url: 'https://example.com/image.png' }, ['/tmp']);
@@ -115,12 +115,22 @@ describe('image-download execute', () => {
     expect(r.result).toContain('Invalid URL');
   });
 
-  it('returns error for non-image content', async () => {
+  it('returns error for non-image content type', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
-      new Response('plain text', { status: 200 }),
+      new Response('plain text', { status: 200, headers: { 'content-type': 'text/plain' } }),
     );
 
     const r = await execute({ url: 'https://example.com/file.txt' }, ['/tmp']);
+    expect(r.ok).toBe(false);
+    expect(r.result).toContain('unexpected Content-Type');
+  });
+
+  it('returns error for image content type with non-image magic bytes', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      new Response('plain text', { status: 200, headers: { 'content-type': 'image/png' } }),
+    );
+
+    const r = await execute({ url: 'https://example.com/fake.png' }, ['/tmp']);
     expect(r.ok).toBe(false);
     expect(r.result).toContain('Not a recognized image format');
   });
