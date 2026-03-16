@@ -2,6 +2,7 @@ import type { ImageData } from '../runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from '../runtime/types.js';
 import { maybeDownscale } from '../image/resize.js';
 import { validateImageUrl } from '../image/url-safety.js';
+import { safeImageDownload } from '../runtime/tools/image-download.js';
 
 /** Max bytes per individual image (20 MB). */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -121,7 +122,9 @@ function safeName(attachment: AttachmentLike): string {
 
 /**
  * Download an image from a public http(s) URL.
- * Validates scheme, enforces size/timeout limits, sniffs format, and downscales if needed.
+ * Delegates to the shared safeImageDownload helper for SSRF protection,
+ * Content-Type validation, size limits, and magic-byte verification,
+ * then applies SSRF DNS-resolution checks and downscaling.
  */
 export async function downloadPublicImage(
   url: string,
@@ -133,64 +136,40 @@ export async function downloadPublicImage(
     return { ok: false, error: `${label}: ${safety.reason}` };
   }
 
-  try {
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
-      redirect: 'error',
-    });
+  const result = await safeImageDownload(url, {
+    allowHttp: true,
+    timeoutMs: DOWNLOAD_TIMEOUT_MS,
+    maxBytes: MAX_IMAGE_BYTES,
+  });
 
-    if (!response.ok) {
-      return { ok: false, error: `${label}: HTTP ${response.status}` };
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-
-    // Post-download size check.
-    if (buffer.length > MAX_IMAGE_BYTES) {
-      const sizeMB = (buffer.length / (1024 * 1024)).toFixed(1);
-      return { ok: false, error: `${label}: too large (${sizeMB} MB, max 20 MB)` };
-    }
-
-    // Sniff actual format from magic bytes — override declared MIME.
-    const sniffed = sniffMediaType(buffer);
-    if (!sniffed) {
-      return { ok: false, error: `${label}: unsupported image format (magic bytes don't match PNG, JPEG, GIF, or WebP)` };
-    }
-
-    // Reject truncated payloads below format structural minimums.
-    const minBytes = MIN_BYTES_FOR_TYPE[sniffed];
-    if (minBytes && buffer.length < minBytes) {
-      return { ok: false, error: `${label}: image too small to be valid ${sniffed} (${buffer.length} bytes, minimum ${minBytes})` };
-    }
-
-    // Downscale oversized images to stay within Anthropic API dimension limits.
-    let finalBuffer: Buffer = buffer;
-    let finalMediaType = sniffed;
-    try {
-      const downscaled = await maybeDownscale(buffer, sniffed);
-      finalBuffer = downscaled.buffer;
-      finalMediaType = downscaled.mediaType;
-    } catch {
-      // Degrade gracefully — use original buffer if downscale fails.
-    }
-
-    return {
-      ok: true,
-      image: {
-        base64: finalBuffer.toString('base64'),
-        mediaType: finalMediaType,
-      },
-    };
-  } catch (err: unknown) {
-    const errObj = err instanceof Error ? err : null;
-    if (errObj?.name === 'TimeoutError' || errObj?.name === 'AbortError') {
-      return { ok: false, error: `${label}: download timed out` };
-    }
-    if (errObj?.name === 'TypeError' && String(errObj.message).includes('redirect')) {
-      return { ok: false, error: `${label}: blocked (unexpected redirect)` };
-    }
-    return { ok: false, error: `${label}: download failed` };
+  if (!result.ok) {
+    return { ok: false, error: `${label}: ${result.error}` };
   }
+
+  // Reject truncated payloads below format structural minimums.
+  const minBytes = MIN_BYTES_FOR_TYPE[result.mediaType];
+  if (minBytes && result.buffer.length < minBytes) {
+    return { ok: false, error: `${label}: image too small to be valid ${result.mediaType} (${result.buffer.length} bytes, minimum ${minBytes})` };
+  }
+
+  // Downscale oversized images to stay within Anthropic API dimension limits.
+  let finalBuffer: Buffer = result.buffer;
+  let finalMediaType = result.mediaType;
+  try {
+    const downscaled = await maybeDownscale(result.buffer, result.mediaType);
+    finalBuffer = downscaled.buffer;
+    finalMediaType = downscaled.mediaType;
+  } catch {
+    // Degrade gracefully — use original buffer if downscale fails.
+  }
+
+  return {
+    ok: true,
+    image: {
+      base64: finalBuffer.toString('base64'),
+      mediaType: finalMediaType,
+    },
+  };
 }
 
 /**

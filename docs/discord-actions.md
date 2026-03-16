@@ -469,15 +469,25 @@ Reaction and deferred execution stay on their own current flag-driven contracts;
 
 The optional `sourceImage` field lets native Gemini image models perform image-to-image edits. When provided, the orchestrator builds a multipart `contents[].parts[]` payload containing the prompt text plus the source image as `inlineData`, enabling the model to edit the supplied image according to the prompt. When `sourceImage` is omitted, generation works exactly as before (text-only prompt).
 
-In this first cut, `sourceImage` only supports Discord message attachments. Generic URLs and local file paths are deferred to a future release.
+`sourceImage` supports two forms: Discord message attachments and public `http(s)` URLs. Local file paths are deferred to a future release.
+
+**Attachment form** (`"type": "attachment"` or omitted `type`):
 
 | Sub-field | Type | Required | Description |
 |-----------|------|----------|-------------|
+| `type` | `"attachment"` | No | Explicit form selector. Default when `type` is omitted. |
 | `messageId` | string | No | ID of the Discord message containing the attachment. Defaults to the message that triggered the current invocation. |
 | `channelId` | string | No | ID of the channel containing the source message. Defaults to the channel of the triggering message. |
 | `attachmentIndex` | number | No | Zero-based index into the message's `attachments` collection. Defaults to `0` (the first attachment). If the index is out of range, the action fails with a descriptive error. |
 
 When both `messageId` and `channelId` are omitted, the orchestrator resolves the attachment from the triggering Discord message — so a user can simply attach an image to their message and the AI can reference it without needing explicit IDs.
+
+**URL form** (`"type": "url"`):
+
+| Sub-field | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `type` | `"url"` | Yes | Selects the public-URL form. |
+| `url` | string | Yes | A public `http(s)` URL pointing to an image (PNG, JPEG, GIF, or WebP). SSRF protection blocks private/internal IPs, localhost, and redirects. |
 
 > **Note:** `sourceImage` is currently supported only with Gemini-family models (those using the `gemini` provider). Supplying `sourceImage` with an OpenAI model will return an error.
 
@@ -505,6 +515,12 @@ The empty `sourceImage: {}` defaults to attachment index 0 on the triggering mes
 
 ```xml
 <discord-action>{"type":"generateImage","prompt":"make this image look like a watercolor painting","provider":"gemini","model":"gemini-2.0-flash-preview-image-generation","sourceImage":{"messageId":"1234567890123456789","channelId":"9876543210987654321","attachmentIndex":1}}</discord-action>
+```
+
+Edit an image from a public URL:
+
+```xml
+<discord-action>{"type":"generateImage","prompt":"make this photo a pencil sketch","provider":"gemini","model":"gemini-2.0-flash-preview-image-generation","sourceImage":{"type":"url","url":"https://example.com/photo.jpg"}}</discord-action>
 ```
 
 ### Voice Actions (`actions-voice.ts`)

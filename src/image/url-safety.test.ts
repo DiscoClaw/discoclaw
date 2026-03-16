@@ -71,6 +71,13 @@ describe('isPrivateIPv6', () => {
     expect(isPrivateIPv6('FE80::1')).toBe(true);
   });
 
+  it('detects unique-local fc00::/7', () => {
+    expect(isPrivateIPv6('fc00::1')).toBe(true);
+    expect(isPrivateIPv6('fd00::1')).toBe(true);
+    expect(isPrivateIPv6('fdff::1')).toBe(true);
+    expect(isPrivateIPv6('FD12:3456:789a::1')).toBe(true);
+  });
+
   it('detects IPv4-mapped private addresses', () => {
     expect(isPrivateIPv6('::ffff:127.0.0.1')).toBe(true);
     expect(isPrivateIPv6('::ffff:10.0.0.1')).toBe(true);
@@ -197,6 +204,17 @@ describe('validateImageUrl', () => {
     mockLookup.mockResolvedValue({ address: '::1', family: 6 } as any);
     const result = await validateImageUrl('https://evil.example.com/photo.png');
     expect(result).toEqual({ safe: false, reason: 'hostname resolves to a private/internal IP' });
+  });
+
+  it('rejects hostname resolving to unique-local IPv6 (fc00::/7)', async () => {
+    mockLookup.mockResolvedValue({ address: 'fd00::1', family: 6 } as any);
+    const result = await validateImageUrl('https://evil.example.com/photo.png');
+    expect(result).toEqual({ safe: false, reason: 'hostname resolves to a private/internal IP' });
+  });
+
+  it('rejects literal unique-local IPv6', async () => {
+    const result = await validateImageUrl('http://[fd00::1]/image.png');
+    expect(result).toEqual({ safe: false, reason: 'private/internal hosts are not allowed' });
   });
 
   // DNS failure — allow through (let fetch handle it)

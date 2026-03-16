@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import {
   resolveMediaType, downloadAttachment, downloadMessageImages,
   downloadPublicImage, downloadImageUrl,
@@ -19,9 +19,15 @@ vi.mock('../image/url-safety.js', () => ({
   validateImageUrl: vi.fn(async () => ({ safe: true })),
 }));
 
+vi.mock('../runtime/tools/image-download.js', () => ({
+  safeImageDownload: vi.fn(),
+}));
+
 import { maybeDownscale } from '../image/resize.js';
 import { validateImageUrl } from '../image/url-safety.js';
+import { safeImageDownload } from '../runtime/tools/image-download.js';
 const mockValidateImageUrl = vi.mocked(validateImageUrl);
+const mockSafeImageDownload = vi.mocked(safeImageDownload);
 
 // --- Helper buffers with valid magic bytes ---
 
@@ -182,23 +188,14 @@ describe('sniffMediaType', () => {
 });
 
 describe('downloadAttachment', () => {
-  const originalFetch = globalThis.fetch;
-
   beforeEach(() => {
-    globalThis.fetch = vi.fn();
+    mockSafeImageDownload.mockReset();
     mockValidateImageUrl.mockResolvedValue({ safe: true });
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
   });
 
   it('downloads and base64-encodes a valid image', async () => {
     const data = makePngBuffer();
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/png' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/photo.png', name: 'photo.png', size: data.length },
@@ -214,10 +211,7 @@ describe('downloadAttachment', () => {
 
   it('accepts non-Discord-CDN https URLs (host restriction removed)', async () => {
     const data = makePngBuffer();
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/png' });
 
     const result = await downloadAttachment(
       { url: 'https://example.com/photo.png', name: 'photo.png', size: data.length },
@@ -225,15 +219,12 @@ describe('downloadAttachment', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(globalThis.fetch).toHaveBeenCalled();
+    expect(mockSafeImageDownload).toHaveBeenCalled();
   });
 
   it('accepts HTTP URLs (both http and https allowed)', async () => {
     const data = makePngBuffer();
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/png' });
 
     const result = await downloadAttachment(
       { url: 'http://cdn.discordapp.com/photo.png', name: 'photo.png', size: data.length },
@@ -241,7 +232,7 @@ describe('downloadAttachment', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(globalThis.fetch).toHaveBeenCalled();
+    expect(mockSafeImageDownload).toHaveBeenCalled();
   });
 
   it('rejects non-http(s) URLs', async () => {
@@ -253,7 +244,7 @@ describe('downloadAttachment', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('only http(s) URLs are allowed');
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mockSafeImageDownload).not.toHaveBeenCalled();
   });
 
   it('rejects oversized images from Discord metadata pre-check', async () => {
@@ -267,15 +258,11 @@ describe('downloadAttachment', () => {
       expect(result.error).toContain('too large');
       expect(result.error).toContain('max 20 MB');
     }
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mockSafeImageDownload).not.toHaveBeenCalled();
   });
 
   it('rejects oversized images after download', async () => {
-    const bigBuf = Buffer.alloc(21 * 1024 * 1024); // 21 MB
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(bigBuf.buffer.slice(bigBuf.byteOffset, bigBuf.byteOffset + bigBuf.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: false, error: 'Image too large: 21.0 MB (max 20 MB)' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/photo.png', name: 'photo.png', size: 100 }, // size lies
@@ -287,7 +274,7 @@ describe('downloadAttachment', () => {
   });
 
   it('handles HTTP error responses', async () => {
-    (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 404 });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: false, error: 'HTTP 404 Not Found' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/photo.png', name: 'photo.png' },
@@ -299,7 +286,7 @@ describe('downloadAttachment', () => {
   });
 
   it('handles network errors', async () => {
-    (globalThis.fetch as any).mockRejectedValue(new Error('ECONNREFUSED'));
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: false, error: 'download failed' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/photo.png', name: 'photo.png' },
@@ -311,8 +298,7 @@ describe('downloadAttachment', () => {
   });
 
   it('handles timeout', async () => {
-    const timeoutErr = new DOMException('signal timed out', 'TimeoutError');
-    (globalThis.fetch as any).mockRejectedValue(timeoutErr);
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: false, error: 'Request timed out (10s limit)' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/photo.png', name: 'photo.png' },
@@ -335,8 +321,7 @@ describe('downloadAttachment', () => {
   });
 
   it('rejects redirected responses', async () => {
-    const redirectErr = new TypeError('fetch failed: redirect mode is set to error');
-    (globalThis.fetch as any).mockRejectedValue(redirectErr);
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: false, error: 'Blocked: unexpected redirect' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/photo.png', name: 'photo.png' },
@@ -344,14 +329,12 @@ describe('downloadAttachment', () => {
     );
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain('blocked (unexpected redirect)');
+    if (!result.ok) expect(result.error).toContain('unexpected redirect');
   });
 
   it('rejects zero-byte image (unrecognized magic bytes)', async () => {
-    const data = Buffer.alloc(0);
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    mockSafeImageDownload.mockResolvedValueOnce({
+      ok: false, error: 'Not a recognized image format (expected PNG, JPEG, GIF, or WebP)',
     });
 
     const result = await downloadAttachment(
@@ -361,12 +344,12 @@ describe('downloadAttachment', () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('unsupported image format');
+      expect(result.error).toContain('Not a recognized image format');
     }
   });
 
   it('error messages are sanitized — no raw URLs', async () => {
-    (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 500 });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: false, error: 'HTTP 500 Internal Server Error' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/photo.png?token=secret', name: 'photo.png' },
@@ -381,12 +364,9 @@ describe('downloadAttachment', () => {
   });
 
   it('overrides declared MIME when magic bytes differ', async () => {
-    // Declare image/webp but send JPEG bytes
+    // Declare image/webp but safeImageDownload returns JPEG (sniffed from magic bytes)
     const data = makeJpegBuffer();
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/jpeg' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/photo.webp', name: 'photo.webp', size: data.length },
@@ -400,45 +380,38 @@ describe('downloadAttachment', () => {
   });
 
   it('rejects unsupported format (random bytes)', async () => {
-    const data = Buffer.alloc(64, 0x42);
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    mockSafeImageDownload.mockResolvedValueOnce({
+      ok: false, error: 'Not a recognized image format (expected PNG, JPEG, GIF, or WebP)',
     });
 
     const result = await downloadAttachment(
-      { url: 'https://cdn.discordapp.com/attachments/123/456/mystery.png', name: 'mystery.png', size: data.length },
+      { url: 'https://cdn.discordapp.com/attachments/123/456/mystery.png', name: 'mystery.png', size: 64 },
       'image/png',
     );
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
-      expect(result.error).toContain('unsupported image format');
+      expect(result.error).toContain('Not a recognized image format');
     }
   });
 
   it('rejects truncated PNG (7 bytes, incomplete signature)', async () => {
-    const data = Buffer.from([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A]);
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    mockSafeImageDownload.mockResolvedValueOnce({
+      ok: false, error: 'Not a recognized image format (expected PNG, JPEG, GIF, or WebP)',
     });
 
     const result = await downloadAttachment(
-      { url: 'https://cdn.discordapp.com/attachments/123/456/trunc.png', name: 'trunc.png', size: data.length },
+      { url: 'https://cdn.discordapp.com/attachments/123/456/trunc.png', name: 'trunc.png', size: 7 },
       'image/png',
     );
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain('unsupported image format');
+    if (!result.ok) expect(result.error).toContain('Not a recognized image format');
   });
 
   it('rejects header-only JPEG (3 bytes, below MIN_JPEG_BYTES)', async () => {
     const data = Buffer.from([0xFF, 0xD8, 0xFF]);
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/jpeg' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/tiny.jpg', name: 'tiny.jpg', size: data.length },
@@ -451,10 +424,7 @@ describe('downloadAttachment', () => {
 
   it('rejects header-only PNG (8 bytes, below MIN_PNG_BYTES)', async () => {
     const data = makePngBuffer(8);
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/png' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/tiny.png', name: 'tiny.png', size: data.length },
@@ -467,10 +437,7 @@ describe('downloadAttachment', () => {
 
   it('accepts GIF at exactly MIN_GIF_BYTES', async () => {
     const data = makeGifBuffer(MIN_GIF_BYTES);
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/gif' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/tiny.gif', name: 'tiny.gif', size: data.length },
@@ -483,10 +450,7 @@ describe('downloadAttachment', () => {
 
   it('rejects GIF at MIN_GIF_BYTES - 1', async () => {
     const data = makeGifBuffer(MIN_GIF_BYTES - 1);
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/gif' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/tiny.gif', name: 'tiny.gif', size: data.length },
@@ -499,10 +463,7 @@ describe('downloadAttachment', () => {
 
   it('accepts PNG at exactly MIN_PNG_BYTES', async () => {
     const data = makePngBuffer(MIN_PNG_BYTES);
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/png' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/min.png', name: 'min.png', size: data.length },
@@ -515,10 +476,7 @@ describe('downloadAttachment', () => {
 
   it('rejects PNG at MIN_PNG_BYTES - 1', async () => {
     const data = makePngBuffer(MIN_PNG_BYTES - 1);
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/png' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/almost.png', name: 'almost.png', size: data.length },
@@ -531,10 +489,7 @@ describe('downloadAttachment', () => {
 
   it('accepts WebP at exactly MIN_WEBP_BYTES', async () => {
     const data = makeWebpBuffer(MIN_WEBP_BYTES);
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/webp' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/min.webp', name: 'min.webp', size: data.length },
@@ -547,10 +502,7 @@ describe('downloadAttachment', () => {
 
   it('rejects WebP at MIN_WEBP_BYTES - 1', async () => {
     const data = makeWebpBuffer(MIN_WEBP_BYTES - 1);
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/webp' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/almost.webp', name: 'almost.webp', size: data.length },
@@ -563,10 +515,7 @@ describe('downloadAttachment', () => {
 
   it('accepts JPEG at exactly MIN_JPEG_BYTES', async () => {
     const data = makeJpegBuffer(MIN_JPEG_BYTES);
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/jpeg' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/min.jpg', name: 'min.jpg', size: data.length },
@@ -579,10 +528,7 @@ describe('downloadAttachment', () => {
 
   it('rejects JPEG at MIN_JPEG_BYTES - 1', async () => {
     const data = makeJpegBuffer(MIN_JPEG_BYTES - 1);
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/jpeg' });
 
     const result = await downloadAttachment(
       { url: 'https://cdn.discordapp.com/attachments/123/456/almost.jpg', name: 'almost.jpg', size: data.length },
@@ -596,10 +542,7 @@ describe('downloadAttachment', () => {
   it('calls maybeDownscale after successful download and uses its returned buffer', async () => {
     const originalData = makePngBuffer();
     const downscaledData = Buffer.from('downscaled-png-data');
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(originalData.buffer.slice(originalData.byteOffset, originalData.byteOffset + originalData.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: originalData, mediaType: 'image/png' });
     vi.mocked(maybeDownscale).mockResolvedValueOnce({
       buffer: downscaledData,
       mediaType: 'image/png',
@@ -621,10 +564,7 @@ describe('downloadAttachment', () => {
 
   it('succeeds with original buffer if maybeDownscale throws', async () => {
     const originalData = makePngBuffer();
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(originalData.buffer.slice(originalData.byteOffset, originalData.byteOffset + originalData.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: originalData, mediaType: 'image/png' });
     vi.mocked(maybeDownscale).mockRejectedValueOnce(new Error('sharp crashed'));
 
     const result = await downloadAttachment(
@@ -641,15 +581,9 @@ describe('downloadAttachment', () => {
 });
 
 describe('downloadMessageImages', () => {
-  const originalFetch = globalThis.fetch;
-
   beforeEach(() => {
-    globalThis.fetch = vi.fn();
+    mockSafeImageDownload.mockReset();
     mockValidateImageUrl.mockResolvedValue({ safe: true });
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
   });
 
   function makeAttachment(name: string, contentType: string, size: number): AttachmentLike {
@@ -659,15 +593,9 @@ describe('downloadMessageImages', () => {
   it('downloads multiple image attachments', async () => {
     const pngData = makePngBuffer();
     const jpegData = makeJpegBuffer();
-    (globalThis.fetch as any)
-      .mockResolvedValueOnce({
-        ok: true,
-        arrayBuffer: () => Promise.resolve(pngData.buffer.slice(pngData.byteOffset, pngData.byteOffset + pngData.byteLength)),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        arrayBuffer: () => Promise.resolve(jpegData.buffer.slice(jpegData.byteOffset, jpegData.byteOffset + jpegData.byteLength)),
-      });
+    mockSafeImageDownload
+      .mockResolvedValueOnce({ ok: true, buffer: pngData, mediaType: 'image/png' })
+      .mockResolvedValueOnce({ ok: true, buffer: jpegData, mediaType: 'image/jpeg' });
 
     const result = await downloadMessageImages([
       makeAttachment('a.png', 'image/png', 100),
@@ -682,10 +610,7 @@ describe('downloadMessageImages', () => {
 
   it('filters out non-image attachments silently', async () => {
     const pngData = makePngBuffer();
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(pngData.buffer.slice(pngData.byteOffset, pngData.byteOffset + pngData.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValue({ ok: true, buffer: pngData, mediaType: 'image/png' });
 
     const result = await downloadMessageImages([
       makeAttachment('a.png', 'image/png', 100),
@@ -701,10 +626,7 @@ describe('downloadMessageImages', () => {
 
   it('respects maxImages cap', async () => {
     const data = makePngBuffer();
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValue({ ok: true, buffer: data, mediaType: 'image/png' });
 
     const atts = Array.from({ length: 5 }, (_, i) => makeAttachment(`img${i}.png`, 'image/png', 100));
     const result = await downloadMessageImages(atts, 2);
@@ -714,10 +636,7 @@ describe('downloadMessageImages', () => {
 
   it('stops downloading when total byte cap is exceeded', async () => {
     const data = makePngBuffer();
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValue({ ok: true, buffer: data, mediaType: 'image/png' });
 
     const result = await downloadMessageImages([
       makeAttachment('a.png', 'image/png', 18 * 1024 * 1024), // 18 MB (under per-image 20 MB limit)
@@ -738,12 +657,6 @@ describe('downloadMessageImages', () => {
   });
 
   it('rejects single attachment exceeding total byte cap', async () => {
-    const data = makePngBuffer();
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
-
     const result = await downloadMessageImages([
       makeAttachment('huge.png', 'image/png', 60 * 1024 * 1024), // 60 MB — exceeds 50 MB total cap
     ]);
@@ -755,12 +668,9 @@ describe('downloadMessageImages', () => {
 
   it('collects errors from individual failed downloads', async () => {
     const data = makePngBuffer();
-    (globalThis.fetch as any)
-      .mockResolvedValueOnce({
-        ok: true,
-        arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-      })
-      .mockResolvedValueOnce({ ok: false, status: 500 });
+    mockSafeImageDownload
+      .mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/png' })
+      .mockResolvedValueOnce({ ok: false, error: 'HTTP 500 Internal Server Error' });
 
     const result = await downloadMessageImages([
       makeAttachment('good.png', 'image/png', 100),
@@ -774,23 +684,14 @@ describe('downloadMessageImages', () => {
 });
 
 describe('downloadPublicImage', () => {
-  const originalFetch = globalThis.fetch;
-
   beforeEach(() => {
-    globalThis.fetch = vi.fn();
+    mockSafeImageDownload.mockReset();
     mockValidateImageUrl.mockResolvedValue({ safe: true });
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
   });
 
   it('downloads and returns image from https URL', async () => {
     const data = makePngBuffer();
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/png' });
 
     const result = await downloadPublicImage('https://example.com/photo.png', 'test');
 
@@ -803,10 +704,7 @@ describe('downloadPublicImage', () => {
 
   it('downloads and returns image from http URL', async () => {
     const data = makeJpegBuffer();
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/jpeg' });
 
     const result = await downloadPublicImage('http://example.com/photo.jpg', 'test');
 
@@ -821,7 +719,7 @@ describe('downloadPublicImage', () => {
     const result = await downloadPublicImage('ftp://example.com/photo.png', 'test');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('only http(s) URLs are allowed');
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mockSafeImageDownload).not.toHaveBeenCalled();
   });
 
   it('rejects data: URLs', async () => {
@@ -829,7 +727,7 @@ describe('downloadPublicImage', () => {
     const result = await downloadPublicImage('data:image/png;base64,abc', 'test');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('only http(s) URLs are allowed');
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mockSafeImageDownload).not.toHaveBeenCalled();
   });
 
   it('rejects invalid URLs', async () => {
@@ -844,28 +742,19 @@ describe('downloadPublicImage', () => {
     const result = await downloadPublicImage('http://192.168.1.1/photo.png', 'test');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('private/internal hosts are not allowed');
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(mockSafeImageDownload).not.toHaveBeenCalled();
   });
 });
 
 describe('downloadImageUrl', () => {
-  const originalFetch = globalThis.fetch;
-
   beforeEach(() => {
-    globalThis.fetch = vi.fn();
+    mockSafeImageDownload.mockReset();
     mockValidateImageUrl.mockResolvedValue({ safe: true });
-  });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
   });
 
   it('delegates to downloadPublicImage with sourceImage label', async () => {
     const data = makePngBuffer();
-    (globalThis.fetch as any).mockResolvedValue({
-      ok: true,
-      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
-    });
+    mockSafeImageDownload.mockResolvedValueOnce({ ok: true, buffer: data, mediaType: 'image/png' });
 
     const result = await downloadImageUrl('https://example.com/photo.png');
 

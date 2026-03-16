@@ -48,7 +48,7 @@ export function isPrivateIPv4(ip: string): boolean {
 }
 
 /**
- * Check whether an IPv6 address string is loopback or link-local.
+ * Check whether an IPv6 address string is loopback, link-local, or unique-local.
  * Also catches IPv4-mapped IPv6 addresses (::ffff:x.x.x.x).
  */
 export function isPrivateIPv6(ip: string): boolean {
@@ -59,6 +59,9 @@ export function isPrivateIPv6(ip: string): boolean {
 
   // Link-local fe80::/10
   if (normalized.startsWith('fe80:') || normalized.startsWith('fe80%')) return true;
+
+  // Unique-local fc00::/7 (fc00:: through fdff::)
+  if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
 
   // IPv4-mapped ::ffff:x.x.x.x
   const v4Mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);

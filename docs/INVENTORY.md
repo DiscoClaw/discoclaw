@@ -32,7 +32,7 @@ Legend: **done** | *stub* | ~~cut~~
 | Channel allowlist (optional) | `src/discord/allowlist.ts` | **done** |
 | Workspace permissions (readonly/standard/full/custom) | `src/workspace-permissions.ts` | **done** |
 | External content = data, not instructions | CLAUDE.md + prompts | **done** |
-| Image download SSRF protection (host allowlist, redirect rejection) | `src/discord/image-download.ts` | **done** |
+| Image download SSRF protection (private IP-range blocking, DNS resolution check, redirect rejection) | `src/image/url-safety.ts`, `src/discord/image-download.ts` | **done** |
 | YouTube transcript injection scanning (sanitize fetched transcript content before prompt injection) | `src/discord/youtube-transcript.ts` | **done** |
 
 ## 3. Runtime Adapters (`src/runtime/`)
