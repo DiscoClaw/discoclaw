@@ -116,12 +116,14 @@ describe('imagegenActionsPromptSection', () => {
 
   it('includes resolved default model when provided', () => {
     const section = imagegenActionsPromptSection('gpt-image-1');
-    expect(section).toContain('Current default: `gpt-image-1`');
+    expect(section).toContain('Default is `gpt-image-1`');
+    expect(section).toContain('Omit this field to use the default');
   });
 
   it('omits default model note when not provided', () => {
     const section = imagegenActionsPromptSection();
-    expect(section).not.toContain('Current default:');
+    expect(section).not.toContain('Default is `');
+    expect(section).toContain('Default depends on configuration');
   });
 });
 
