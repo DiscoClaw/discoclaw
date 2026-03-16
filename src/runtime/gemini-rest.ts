@@ -22,6 +22,13 @@ function parseSSEData(line: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Only alphanumerics, hyphens, dots, and underscores are legal in a Gemini
+ * model path segment.  Anything else (slashes, colons, percent-encoding,
+ * whitespace …) could alter the request URL.
+ */
+const GEMINI_MODEL_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
+
 export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
   const capabilities: ReadonlySet<RuntimeCapability> = new Set(['streaming_text']);
   const baseUrl = opts.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
@@ -33,6 +40,15 @@ export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
     invoke(params: RuntimeInvokeParams) {
       return (async function* (): AsyncGenerator<EngineEvent> {
         const model = params.model || opts.defaultModel;
+
+        if (!GEMINI_MODEL_RE.test(model)) {
+          yield createRuntimeErrorEvent(
+            `gemini-rest: invalid model identifier: ${model}`,
+          );
+          yield { type: 'done' };
+          return;
+        }
+
         const url = `${baseUrl}/models/${model}:streamGenerateContent?alt=sse`;
 
         const controller = new AbortController();

@@ -283,6 +283,96 @@ describe('Gemini REST runtime adapter', () => {
     );
   });
 
+  it('rejects model with path traversal characters', async () => {
+    globalThis.fetch = vi.fn();
+
+    const runtime = createGeminiRestRuntime({
+      apiKey: 'test-key',
+      defaultModel: 'gemini-2.5-flash',
+    });
+
+    const events = await collectEvents(
+      runtime.invoke({ prompt: 'test', model: '../evil/path', cwd: '/tmp' }),
+    );
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+    expect((error as { message: string }).message).toContain('invalid model identifier');
+    expect(events.at(-1)?.type).toBe('done');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects model with colons', async () => {
+    globalThis.fetch = vi.fn();
+
+    const runtime = createGeminiRestRuntime({
+      apiKey: 'test-key',
+      defaultModel: 'gemini-2.5-flash',
+    });
+
+    const events = await collectEvents(
+      runtime.invoke({ prompt: 'test', model: 'model:inject', cwd: '/tmp' }),
+    );
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+    expect((error as { message: string }).message).toContain('invalid model identifier');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects model with slashes', async () => {
+    globalThis.fetch = vi.fn();
+
+    const runtime = createGeminiRestRuntime({
+      apiKey: 'test-key',
+      defaultModel: 'gemini-2.5-flash',
+    });
+
+    const events = await collectEvents(
+      runtime.invoke({ prompt: 'test', model: 'models/evil', cwd: '/tmp' }),
+    );
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty model when defaultModel is also empty', async () => {
+    globalThis.fetch = vi.fn();
+
+    const runtime = createGeminiRestRuntime({
+      apiKey: 'test-key',
+      defaultModel: '',
+    });
+
+    const events = await collectEvents(
+      runtime.invoke({ prompt: 'test', model: '', cwd: '/tmp' }),
+    );
+
+    const error = events.find((e) => e.type === 'error');
+    expect(error).toBeDefined();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('accepts valid model identifiers with dots and hyphens', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      makeSSEResponse([makeGeminiSSEData('ok')]),
+    );
+
+    const runtime = createGeminiRestRuntime({
+      apiKey: 'test-key',
+      defaultModel: 'gemini-2.5-flash',
+    });
+
+    const events = await collectEvents(
+      runtime.invoke({ prompt: 'test', model: 'gemini-2.5-pro-preview-05-06', cwd: '/tmp' }),
+    );
+
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+    expect(events.find((e) => e.type === 'text_final')).toBeDefined();
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+  });
+
   it('supports custom baseUrl', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       makeSSEResponse([makeGeminiSSEData('ok')]),
