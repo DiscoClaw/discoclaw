@@ -1,5 +1,7 @@
 # DiscoClaw Cron System
 
+> **Quick-reference context module:** [`.context/automations.md`](../.context/automations.md) — a compact cheat sheet for AI sessions (lifecycle, primitives, safety rails, config). Load it instead of this full doc when you only need the essentials.
+
 The cron system lets you define recurring tasks as forum threads in plain language. DiscoClaw parses the schedule, registers a timer, and executes the prompt on each tick — posting results to a target Discord channel.
 
 ## How It Works
