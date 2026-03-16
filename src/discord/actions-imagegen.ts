@@ -1,7 +1,9 @@
 import { AttachmentBuilder } from 'discord.js';
+import type { TextChannel } from 'discord.js';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import { resolveChannel, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
+import { downloadMessageImages } from './image-download.js';
 
 /**
  * Maintainers: start with `docs/official-docs.md` before changing model IDs,
@@ -12,8 +14,15 @@ import { NO_MENTIONS } from './allowed-mentions.js';
 // Types
 // ---------------------------------------------------------------------------
 
+export type SourceImageRef = {
+  type: 'attachment';
+  channelId?: string;
+  messageId?: string;
+  attachmentIndex?: number;
+};
+
 export type ImagegenActionRequest =
-  | { type: 'generateImage'; prompt: string; channel?: string; size?: string; model?: string; quality?: string; caption?: string; provider?: 'openai' | 'gemini' };
+  | { type: 'generateImage'; prompt: string; channel?: string; size?: string; model?: string; quality?: string; caption?: string; provider?: 'openai' | 'gemini'; sourceImage?: SourceImageRef };
 
 const IMAGEGEN_TYPE_MAP: Record<ImagegenActionRequest['type'], true> = {
   generateImage: true,
@@ -185,11 +194,18 @@ async function callGeminiNative(
   prompt: string,
   model: string,
   geminiApiKey: string,
+  sourceImage?: { base64: string; mediaType: string },
 ): Promise<{ ok: true; b64: string } | { ok: false; error: string }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
+  const parts: Array<Record<string, unknown>> = [];
+  if (sourceImage) {
+    parts.push({ inlineData: { mimeType: sourceImage.mediaType, data: sourceImage.base64 } });
+  }
+  parts.push({ text: prompt });
+
   const body = {
-    contents: [{ parts: [{ text: prompt }] }],
+    contents: [{ parts }],
     generationConfig: { responseModalities: ['TEXT', 'IMAGE'] },
   };
 
@@ -233,13 +249,58 @@ async function callGeminiNative(
     return { ok: false, error: 'generateImage: failed to parse API response' };
   }
 
-  const parts = data.candidates?.[0]?.content?.parts ?? [];
-  const imagePart = parts.find(p => p.inlineData?.mimeType?.startsWith('image/'));
+  const responseParts = data.candidates?.[0]?.content?.parts ?? [];
+  const imagePart = responseParts.find(p => p.inlineData?.mimeType?.startsWith('image/'));
   if (!imagePart?.inlineData?.data) {
     return { ok: false, error: 'generateImage: API returned no image data' };
   }
 
   return { ok: true, b64: imagePart.inlineData.data };
+}
+
+// ---------------------------------------------------------------------------
+// Source image resolution
+// ---------------------------------------------------------------------------
+
+async function resolveSourceImage(
+  sourceImage: SourceImageRef,
+  ctx: ActionContext,
+): Promise<{ ok: true; base64: string; mediaType: string } | { ok: false; error: string }> {
+  const channelId = sourceImage.channelId ?? ctx.channelId;
+  const messageId = sourceImage.messageId ?? ctx.messageId;
+  const attachmentIndex = sourceImage.attachmentIndex ?? 0;
+
+  let channel;
+  try {
+    channel = await ctx.client.channels.fetch(channelId);
+  } catch {
+    return { ok: false, error: `generateImage: could not fetch channel "${channelId}"` };
+  }
+  if (!channel || !('messages' in channel)) {
+    return { ok: false, error: `generateImage: channel "${channelId}" is not a text channel` };
+  }
+
+  let message;
+  try {
+    message = await (channel as TextChannel).messages.fetch(messageId);
+  } catch {
+    return { ok: false, error: `generateImage: could not fetch message "${messageId}"` };
+  }
+
+  const attachments = [...message.attachments.values()];
+  if (attachmentIndex < 0 || attachmentIndex >= attachments.length) {
+    return { ok: false, error: `generateImage: no attachment at index ${attachmentIndex} (message has ${attachments.length} attachment${attachments.length === 1 ? '' : 's'})` };
+  }
+
+  const target = attachments[attachmentIndex];
+  const result = await downloadMessageImages([target], 1);
+
+  if (result.images.length === 0) {
+    const reason = result.errors.length > 0 ? `: ${result.errors[0]}` : '';
+    return { ok: false, error: `generateImage: source image attachment rejected${reason}` };
+  }
+
+  return { ok: true, base64: result.images[0].base64, mediaType: result.images[0].mediaType };
 }
 
 // ---------------------------------------------------------------------------
@@ -307,11 +368,24 @@ export async function executeImagegenAction(
         }
       }
 
+      // Resolve source image if provided
+      let resolvedSourceImage: { base64: string; mediaType: string } | undefined;
+      if (action.sourceImage) {
+        if (!model.startsWith('gemini-')) {
+          return { ok: false, error: `generateImage: sourceImage is only supported with native Gemini models (gemini-*), not "${model}"` };
+        }
+        const srcResult = await resolveSourceImage(action.sourceImage, ctx);
+        if (!srcResult.ok) {
+          return { ok: false, error: srcResult.error };
+        }
+        resolvedSourceImage = { base64: srcResult.base64, mediaType: srcResult.mediaType };
+      }
+
       // Call provider
       let result: { ok: true; b64: string } | { ok: false; error: string };
       if (provider === 'gemini') {
         if (model.startsWith('gemini-')) {
-          result = await callGeminiNative(action.prompt.trim(), model, imagegenCtx.geminiApiKey!);
+          result = await callGeminiNative(action.prompt.trim(), model, imagegenCtx.geminiApiKey!, resolvedSourceImage);
         } else {
           result = await callGemini(action.prompt.trim(), model, size, imagegenCtx.geminiApiKey!);
         }
@@ -369,5 +443,18 @@ ${modelFieldDoc}
   - Gemini (Imagen): aspect ratios — \`1:1\` (default), \`3:4\`, \`4:3\`, \`9:16\`, \`16:9\`
   - Gemini (native): size/aspect-ratio params do not apply — omit \`size\` for these models
 - \`quality\` (optional): \`standard\` (default) or \`hd\` — applies to OpenAI dall-e-3 only.
-- \`caption\` (optional): Text message to accompany the image in the channel.`;
+- \`caption\` (optional): Text message to accompany the image in the channel.
+- \`sourceImage\` (optional): Reference a Discord attachment as the source image for image-to-image editing. **Only supported with native Gemini models** (\`gemini-*\`).
+  - \`type\` (required): Must be \`"attachment"\`.
+  - \`channelId\` (optional): Channel ID of the message containing the image. Defaults to the current channel.
+  - \`messageId\` (optional): Message ID containing the image attachment. Defaults to the current message.
+  - \`attachmentIndex\` (optional): Zero-based index of the attachment to use. Defaults to \`0\` (first attachment).
+  - Example — edit the image from the current message:
+    \`\`\`
+    <discord-action>{"type":"generateImage","prompt":"Make this image look like a watercolor painting","model":"gemini-3.1-flash-image-preview","sourceImage":{"type":"attachment"}}</discord-action>
+    \`\`\`
+  - Example — edit an image from a specific message:
+    \`\`\`
+    <discord-action>{"type":"generateImage","prompt":"Add a sunset sky","model":"gemini-3.1-flash-image-preview","sourceImage":{"type":"attachment","channelId":"123","messageId":"456","attachmentIndex":1}}</discord-action>
+    \`\`\``;
 }

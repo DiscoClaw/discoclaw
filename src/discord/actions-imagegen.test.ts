@@ -6,10 +6,17 @@ import {
   imagegenActionsPromptSection,
   resolveProvider,
 } from './actions-imagegen.js';
-import type { ImagegenContext } from './actions-imagegen.js';
+import type { ImagegenContext, SourceImageRef } from './actions-imagegen.js';
 import type { ActionContext, ActionCategoryFlags } from './actions.js';
 import { buildTieredDiscordActionsPromptSection, parseDiscordActions } from './actions.js';
 import { buildUnavailableActionTypesNotice } from './output-common.js';
+
+vi.mock('./image-download.js', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('./image-download.js')>();
+  return { ...orig, downloadMessageImages: vi.fn() };
+});
+import { downloadMessageImages } from './image-download.js';
+const mockDownloadMessageImages = vi.mocked(downloadMessageImages);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -44,6 +51,70 @@ function makeCtx(channels: any[]): ActionContext {
       },
     } as any,
     client: {} as any,
+    channelId: 'origin-ch',
+    messageId: 'msg1',
+  };
+}
+
+function makeMockAttachment(overrides: Partial<{ url: string; name: string; contentType: string; size: number }> = {}) {
+  return {
+    url: overrides.url ?? 'https://cdn.discordapp.com/attachments/123/456/image.png',
+    name: overrides.name ?? 'image.png',
+    contentType: overrides.contentType ?? 'image/png',
+    size: overrides.size ?? 1024,
+  };
+}
+
+function makeMockMessage(attachments: any[] = []) {
+  const attMap = new Map<string, any>();
+  attachments.forEach((att, i) => attMap.set(String(i), att));
+  return {
+    id: 'msg1',
+    attachments: attMap,
+  };
+}
+
+function makeMockTextChannelForClient(messages: Map<string, any> = new Map()) {
+  return {
+    id: 'origin-ch',
+    messages: {
+      fetch: vi.fn(async (id: string) => {
+        const msg = messages.get(id);
+        if (!msg) throw new Error('Unknown Message');
+        return msg;
+      }),
+    },
+  };
+}
+
+function makeCtxWithClient(channels: any[], clientChannels: Map<string, any> = new Map()): ActionContext {
+  const cache = new Map<string, any>();
+  for (const ch of channels) cache.set(ch.id, ch);
+
+  return {
+    guild: {
+      channels: {
+        cache: {
+          get: (id: string) => cache.get(id),
+          find: (fn: (ch: any) => boolean) => {
+            for (const ch of cache.values()) {
+              if (fn(ch)) return ch;
+            }
+            return undefined;
+          },
+          values: () => cache.values(),
+        },
+      },
+    } as any,
+    client: {
+      channels: {
+        fetch: vi.fn(async (id: string) => {
+          const ch = clientChannels.get(id);
+          if (!ch) throw new Error('Unknown Channel');
+          return ch;
+        }),
+      },
+    } as any,
     channelId: 'origin-ch',
     messageId: 'msg1',
   };
@@ -1298,6 +1369,342 @@ describe('default model resolution', () => {
 
     const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
     expect(callBody.model).toBe('dall-e-2');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Source image (image-to-image editing)
+// ---------------------------------------------------------------------------
+
+describe('generateImage — sourceImage', () => {
+  const geminiModel = 'gemini-3.1-flash-image-preview';
+
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeGeminiNativeSuccessResponse()));
+    mockDownloadMessageImages.mockReset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function setupSourceImageCtx(attachments: any[] = [makeMockAttachment()]) {
+    const msg = makeMockMessage(attachments);
+    const msgMap = new Map([['msg1', msg]]);
+    const clientCh = makeMockTextChannelForClient(msgMap);
+    const clientChannels = new Map([['origin-ch', clientCh]]);
+    const ch = makeMockChannel({ id: 'origin-ch', name: 'general' });
+    const ctx = makeCtxWithClient([ch], clientChannels);
+    return { ctx, ch, msg, clientCh };
+  }
+
+  it('resolves source image from current message and builds multipart request', async () => {
+    const { ctx, ch } = setupSourceImageCtx();
+    mockDownloadMessageImages.mockResolvedValue({
+      images: [{ base64: 'aW1hZ2VkYXRh', mediaType: 'image/png' }],
+      errors: [],
+    });
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Make it a watercolor',
+        model: geminiModel,
+        sourceImage: { type: 'attachment' },
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(ch.send).toHaveBeenCalled();
+
+    // Verify multipart request body
+    const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(callBody.contents[0].parts).toHaveLength(2);
+    expect(callBody.contents[0].parts[0]).toEqual({
+      inlineData: { mimeType: 'image/png', data: 'aW1hZ2VkYXRh' },
+    });
+    expect(callBody.contents[0].parts[1]).toEqual({ text: 'Make it a watercolor' });
+  });
+
+  it('defaults channelId and messageId to current context', async () => {
+    const { ctx } = setupSourceImageCtx();
+    mockDownloadMessageImages.mockResolvedValue({
+      images: [{ base64: 'abc', mediaType: 'image/jpeg' }],
+      errors: [],
+    });
+
+    await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Edit this',
+        model: geminiModel,
+        sourceImage: { type: 'attachment' },
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    // Should have fetched the default channel/message
+    const clientFetch = (ctx.client.channels.fetch as any);
+    expect(clientFetch).toHaveBeenCalledWith('origin-ch');
+  });
+
+  it('uses explicit channelId and messageId when provided', async () => {
+    const msg = makeMockMessage([makeMockAttachment()]);
+    const msgMap = new Map([['custom-msg', msg]]);
+    const clientCh = makeMockTextChannelForClient(msgMap);
+    const clientChannels = new Map([['custom-ch', clientCh]]);
+    const ch = makeMockChannel({ id: 'origin-ch', name: 'general' });
+    const ctx = makeCtxWithClient([ch], clientChannels);
+
+    mockDownloadMessageImages.mockResolvedValue({
+      images: [{ base64: 'abc', mediaType: 'image/png' }],
+      errors: [],
+    });
+
+    await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Edit this',
+        model: geminiModel,
+        sourceImage: { type: 'attachment', channelId: 'custom-ch', messageId: 'custom-msg' },
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(ctx.client.channels.fetch).toHaveBeenCalledWith('custom-ch');
+    expect(clientCh.messages.fetch).toHaveBeenCalledWith('custom-msg');
+  });
+
+  it('selects attachment by attachmentIndex', async () => {
+    const att0 = makeMockAttachment({ name: 'first.png' });
+    const att1 = makeMockAttachment({ name: 'second.jpg', contentType: 'image/jpeg' });
+    const { ctx } = setupSourceImageCtx([att0, att1]);
+
+    mockDownloadMessageImages.mockResolvedValue({
+      images: [{ base64: 'c2Vjb25k', mediaType: 'image/jpeg' }],
+      errors: [],
+    });
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Edit second image',
+        model: geminiModel,
+        sourceImage: { type: 'attachment', attachmentIndex: 1 },
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(true);
+    // downloadMessageImages should have been called with the second attachment
+    expect(mockDownloadMessageImages).toHaveBeenCalledWith([att1], 1);
+  });
+
+  it('returns error when attachmentIndex is out of bounds', async () => {
+    const { ctx } = setupSourceImageCtx([makeMockAttachment()]);
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Edit this',
+        model: geminiModel,
+        sourceImage: { type: 'attachment', attachmentIndex: 5 },
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('no attachment at index 5');
+    expect((result as any).error).toContain('1 attachment');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns error when message has no attachments', async () => {
+    const { ctx } = setupSourceImageCtx([]);
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Edit this',
+        model: geminiModel,
+        sourceImage: { type: 'attachment' },
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('no attachment at index 0');
+    expect((result as any).error).toContain('0 attachments');
+  });
+
+  it('returns error when downloadMessageImages rejects the attachment', async () => {
+    const { ctx } = setupSourceImageCtx();
+    mockDownloadMessageImages.mockResolvedValue({
+      images: [],
+      errors: ['image.png: unsupported image format (magic bytes don\'t match PNG, JPEG, GIF, or WebP)'],
+    });
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Edit this',
+        model: geminiModel,
+        sourceImage: { type: 'attachment' },
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('source image attachment rejected');
+    expect((result as any).error).toContain('unsupported image format');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects sourceImage with dall-e-3 (OpenAI model)', async () => {
+    const { ctx } = setupSourceImageCtx();
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Edit this',
+        model: 'dall-e-3',
+        sourceImage: { type: 'attachment' },
+      },
+      ctx,
+      makeImagegenCtx({ apiKey: 'openai-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('sourceImage is only supported with native Gemini models');
+    expect((result as any).error).toContain('dall-e-3');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects sourceImage with gpt-image-1 (OpenAI model)', async () => {
+    const { ctx } = setupSourceImageCtx();
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Edit this',
+        model: 'gpt-image-1',
+        sourceImage: { type: 'attachment' },
+      },
+      ctx,
+      makeImagegenCtx({ apiKey: 'openai-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('sourceImage is only supported with native Gemini models');
+    expect((result as any).error).toContain('gpt-image-1');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects sourceImage with imagen-* (non-native Gemini model)', async () => {
+    const { ctx } = setupSourceImageCtx();
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Edit this',
+        model: 'imagen-4.0-generate-001',
+        size: '1:1',
+        sourceImage: { type: 'attachment' },
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('sourceImage is only supported with native Gemini models');
+    expect((result as any).error).toContain('imagen-4.0-generate-001');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('text-only body is unchanged when sourceImage is omitted', async () => {
+    const ch = makeMockChannel({ id: 'origin-ch', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'A mountain',
+        model: geminiModel,
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(callBody.contents).toEqual([{ parts: [{ text: 'A mountain' }] }]);
+    expect(mockDownloadMessageImages).not.toHaveBeenCalled();
+  });
+
+  it('returns error when channel cannot be fetched', async () => {
+    const ch = makeMockChannel({ id: 'origin-ch', name: 'general' });
+    const clientChannels = new Map<string, any>();
+    const ctx = makeCtxWithClient([ch], clientChannels);
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Edit this',
+        model: geminiModel,
+        sourceImage: { type: 'attachment', channelId: 'nonexistent-ch' },
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('could not fetch channel');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('returns error when message cannot be fetched', async () => {
+    const clientCh = makeMockTextChannelForClient(new Map());
+    const clientChannels = new Map([['origin-ch', clientCh]]);
+    const ch = makeMockChannel({ id: 'origin-ch', name: 'general' });
+    const ctx = makeCtxWithClient([ch], clientChannels);
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Edit this',
+        model: geminiModel,
+        sourceImage: { type: 'attachment', messageId: 'nonexistent-msg' },
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('could not fetch message');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Prompt section — sourceImage docs
+// ---------------------------------------------------------------------------
+
+describe('imagegenActionsPromptSection — sourceImage docs', () => {
+  it('includes sourceImage field documentation', () => {
+    const section = imagegenActionsPromptSection();
+    expect(section).toContain('sourceImage');
+    expect(section).toContain('attachment');
+    expect(section).toContain('channelId');
+    expect(section).toContain('messageId');
+    expect(section).toContain('attachmentIndex');
+    expect(section).toContain('Only supported with native Gemini models');
   });
 });
 
