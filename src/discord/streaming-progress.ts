@@ -226,3 +226,85 @@ export function createStreamingProgress(
 
   return { onEvent, onProgress, dispose };
 }
+
+// ---------------------------------------------------------------------------
+// Simple progress helper (for periodic-edit use cases like image generation)
+// ---------------------------------------------------------------------------
+
+export type SimpleProgressController = {
+  /** Stop all intervals and clean up. Idempotent — safe to call multiple times. */
+  dispose: () => void;
+  /** Whether the underlying message is gone (deleted or in archived thread). */
+  readonly messageGone: boolean;
+};
+
+export type SimpleProgressOpts = {
+  /** Ordered content strings to cycle through (wraps around). */
+  contentCycle: string[];
+  /** Milliseconds between content edits. */
+  editIntervalMs: number;
+  /** Channel to pulse typing indicators on. */
+  typingChannel?: { sendTyping: () => Promise<unknown> };
+  /** Milliseconds between typing pulses. */
+  typingIntervalMs?: number;
+};
+
+/**
+ * Creates a lightweight progress controller that periodically edits a Discord
+ * message with cycling content strings and optionally pulses channel typing.
+ *
+ * Shares the same error-swallowing and idempotent disposal patterns as
+ * {@link createStreamingProgress}, without the ToolAwareQueue / streaming
+ * preview machinery.
+ */
+export function createSimpleProgress(
+  message: { edit: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown> },
+  opts: SimpleProgressOpts,
+): SimpleProgressController {
+  let disposed = false;
+  let messageGone = false;
+  let cycleIndex = 0;
+  const cycle = opts.contentCycle;
+
+  const editInterval =
+    cycle.length > 0
+      ? setInterval(() => {
+          if (disposed || messageGone) return;
+          cycleIndex = (cycleIndex + 1) % cycle.length;
+          message
+            .edit({ content: cycle[cycleIndex]!, allowedMentions: NO_MENTIONS })
+            .catch((err) => {
+              const code = errorCode(err);
+              if (code === 10008 || code === 50083) {
+                messageGone = true;
+              }
+              // swallow all edit errors during progress
+            });
+        }, opts.editIntervalMs)
+      : null;
+
+  const typingInterval =
+    opts.typingChannel && opts.typingIntervalMs
+      ? setInterval(() => {
+          if (disposed || messageGone) return;
+          opts.typingChannel!.sendTyping().catch(() => {});
+        }, opts.typingIntervalMs)
+      : null;
+
+  // Fire initial typing pulse so the indicator appears immediately.
+  if (opts.typingChannel) {
+    opts.typingChannel.sendTyping().catch(() => {});
+  }
+
+  return {
+    get messageGone() {
+      return messageGone;
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      if (editInterval !== null) clearInterval(editInterval);
+      if (typingInterval !== null) clearInterval(typingInterval);
+    },
+  };
+}
