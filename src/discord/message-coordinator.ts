@@ -28,6 +28,7 @@ import { executePlanAction } from './actions-plan.js';
 import type { PlanContext } from './actions-plan.js';
 import type { MemoryContext } from './actions-memory.js';
 import type { ConfigContext } from './actions-config.js';
+import { resolveDefaultModel } from './actions-imagegen.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 import type { VoiceContext } from './actions-voice.js';
 import type { SpawnContext } from './actions-spawn.js';
@@ -3088,6 +3089,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 channelContextPath: channelCtx.contextPath,
                 isThread,
                 userText: batch.map((m) => String(m.content ?? '')).join(' '),
+                imagegenDefaultModel: params.imagegenCtx ? resolveDefaultModel(params.imagegenCtx) : undefined,
               },
             );
             actionsReferenceSection = actionSelection.prompt;

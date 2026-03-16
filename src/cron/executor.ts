@@ -9,6 +9,7 @@ import type { CronContext } from '../discord/actions-crons.js';
 import type { ForgeContext } from '../discord/actions-forge.js';
 import type { PlanContext } from '../discord/actions-plan.js';
 import type { MemoryContext } from '../discord/actions-memory.js';
+import { resolveDefaultModel as resolveImagegenDefaultModel } from '../discord/actions-imagegen.js';
 import type { ImagegenContext } from '../discord/actions-imagegen.js';
 import type { VoiceContext } from '../discord/actions-voice.js';
 import type { DeferScheduler } from '../discord/defer-scheduler.js';
@@ -307,7 +308,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       const actionSelection = buildTieredDiscordActionsPromptSection(
         cronActionFlags,
         ctx.botDisplayName,
-        { userText: job.def.prompt },
+        { userText: job.def.prompt, imagegenDefaultModel: ctx.imagegenCtx ? resolveImagegenDefaultModel(ctx.imagegenCtx) : undefined },
       );
       if (actionSelection.prompt) {
         prompt += '\n\n---\n' + actionSelection.prompt;

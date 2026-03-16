@@ -113,6 +113,16 @@ describe('imagegenActionsPromptSection', () => {
     expect(section).toContain('channel');
     expect(section).toContain('dall-e-3');
   });
+
+  it('includes resolved default model when provided', () => {
+    const section = imagegenActionsPromptSection('gpt-image-1');
+    expect(section).toContain('Current default: `gpt-image-1`');
+  });
+
+  it('omits default model note when not provided', () => {
+    const section = imagegenActionsPromptSection();
+    expect(section).not.toContain('Current default:');
+  });
 });
 
 describe('resolveProvider', () => {

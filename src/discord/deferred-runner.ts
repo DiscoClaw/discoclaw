@@ -15,6 +15,7 @@ import type { ForgeContext } from './actions-forge.js';
 import type { PlanContext } from './actions-plan.js';
 import type { MemoryContext } from './actions-memory.js';
 import type { ConfigContext } from './actions-config.js';
+import { resolveDefaultModel } from './actions-imagegen.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 import type { VoiceContext } from './actions-voice.js';
 import type { SpawnContext } from './actions-spawn.js';
@@ -250,6 +251,7 @@ export function configureDeferredScheduler(
           channelContextPath: channelCtx.contextPath,
           isThread: threadParentId !== null,
           userText: action.prompt,
+          imagegenDefaultModel: opts.state.imagegenCtx ? resolveDefaultModel(opts.state.imagegenCtx) : undefined,
         },
       );
       actionsReferenceSection = actionSelection.prompt;

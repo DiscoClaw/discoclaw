@@ -768,7 +768,11 @@ function isActionSchemaCategoryEnabled(flags: ActionCategoryFlags, category: Act
   }
 }
 
-function renderActionSchemaCategorySection(category: ActionSchemaCategory): string {
+type ActionSchemaRenderContext = {
+  imagegenDefaultModel?: string;
+};
+
+function renderActionSchemaCategorySection(category: ActionSchemaCategory, renderCtx?: ActionSchemaRenderContext): string {
   switch (category) {
     case 'messaging':
       return `${messagingActionsPromptSection()}\n\n${reactionPromptSection()}`;
@@ -797,7 +801,7 @@ function renderActionSchemaCategorySection(category: ActionSchemaCategory): stri
     case 'loop':
       return loopActionsPromptSection();
     case 'imagegen':
-      return imagegenActionsPromptSection();
+      return imagegenActionsPromptSection(renderCtx?.imagegenDefaultModel);
     case 'voice':
       return voiceActionsPromptSection();
     case 'spawn':
@@ -914,6 +918,7 @@ export function buildTieredDiscordActionsPromptSection(
     channelContextPath?: string | null;
     isThread?: boolean;
     userText?: string;
+    imagegenDefaultModel?: string;
   },
 ): ActionSchemaSelection {
   const displayName = botDisplayName ?? 'Discoclaw';
@@ -961,9 +966,13 @@ export function buildTieredDiscordActionsPromptSection(
   sections.push(intro);
   sectionLogs.push({ section: 'intro', content: intro });
 
+  const renderCtx: ActionSchemaRenderContext | undefined = opts?.imagegenDefaultModel
+    ? { imagegenDefaultModel: opts.imagegenDefaultModel }
+    : undefined;
+
   for (const category of includedCategories) {
     if (category === 'defer') continue;
-    const section = renderActionSchemaCategorySection(category);
+    const section = renderActionSchemaCategorySection(category, renderCtx);
     if (!section) continue;
     sections.push(section);
     sectionLogs.push({ section: category, content: section });

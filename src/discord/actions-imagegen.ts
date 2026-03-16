@@ -346,7 +346,10 @@ export async function executeImagegenAction(
 // Prompt section
 // ---------------------------------------------------------------------------
 
-export function imagegenActionsPromptSection(): string {
+export function imagegenActionsPromptSection(resolvedDefaultModel?: string): string {
+  const defaultNote = resolvedDefaultModel
+    ? ` Current default: \`${resolvedDefaultModel}\`.`
+    : '';
   return `### Image Generation
 
 **generateImage** — Generate an image and post it to a channel:
@@ -355,7 +358,7 @@ export function imagegenActionsPromptSection(): string {
 \`\`\`
 - \`prompt\` (required): Text description of the image to generate.
 - \`channel\` (optional): Channel name (with or without #) or channel ID to post the image to. Defaults to the current channel/thread if omitted.
-- \`model\` (optional): Model to use. Default depends on configuration (auto-detected from available API keys). Common supported families/examples:
+- \`model\` (optional): Model to use.${defaultNote} Default depends on configuration (auto-detected from available API keys). Common supported families/examples:
   - OpenAI: \`dall-e-3\`, \`gpt-image-1\`
   - Gemini (Imagen): \`imagen-4.0-generate-001\`, \`imagen-4.0-fast-generate-001\`, \`imagen-4.0-ultra-generate-001\`
   - Gemini (native): \`gemini-3.1-flash-image-preview\`, \`gemini-3-pro-image-preview\`
