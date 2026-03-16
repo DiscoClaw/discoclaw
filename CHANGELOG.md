@@ -4,6 +4,18 @@ All notable changes to DiscoClaw are documented here.
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-03-15
+
+4 commits. Vision support for chat history images, imagegen model switching, reasoning effort tuning.
+
+### Added
+- Vision support for images in chat history — bot can now see images from thread/channel context, not just the triggering message (#696)
+- Image attachment awareness in readMessages/fetchMessage — metadata (filename, content type, dimensions) included in text summaries (#693)
+- Imagegen model runtime-switchable via `!models set` (#695)
+
+### Changed
+- Bumped `claude_code` capable tier reasoning effort to `high`, deep tier to `max` (#694)
+
 ## [0.8.0] — 2026-03-15
 
 38 commits. Forge and Codex reliability hardening, cron persistence, dashboard improvements, documentation overhaul.
