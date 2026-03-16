@@ -85,6 +85,127 @@ export function sniffMediaType(buffer: Buffer): string | null {
   return null;
 }
 
+/** Options for the shared SSRF-safe image download helper. */
+export interface SafeImageDownloadOptions {
+  /** Allow http: in addition to https:. Default: false (https-only). */
+  allowHttp?: boolean;
+  /** Fetch timeout in milliseconds. Default: 15_000. */
+  timeoutMs?: number;
+  /** Maximum image size in bytes. Default: 20 MB. */
+  maxBytes?: number;
+}
+
+export type SafeImageDownloadResult =
+  | { ok: true; buffer: Buffer; mediaType: string }
+  | { ok: false; error: string };
+
+/**
+ * Download an image from a URL with SSRF protections, size limits,
+ * Content-Type validation, and magic-byte verification.
+ *
+ * Shared helper for both the runtime download_image tool and the
+ * Discord image-download module.
+ */
+export async function safeImageDownload(
+  url: string,
+  options: SafeImageDownloadOptions = {},
+): Promise<SafeImageDownloadResult> {
+  const {
+    allowHttp = false,
+    timeoutMs = FETCH_TIMEOUT_MS,
+    maxBytes = MAX_IMAGE_BYTES,
+  } = options;
+
+  // Validate URL
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return { ok: false, error: 'Invalid URL' };
+  }
+
+  // Protocol check
+  if (allowHttp) {
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      return { ok: false, error: `Blocked: only http(s) URLs are allowed (got ${parsed.protocol})` };
+    }
+  } else {
+    if (parsed.protocol !== 'https:') {
+      return { ok: false, error: `Blocked: only HTTPS URLs are allowed (got ${parsed.protocol})` };
+    }
+  }
+
+  // Block private/loopback IPs and localhost
+  const hostname = parsed.hostname;
+  if (LOCALHOST_HOSTNAMES.has(hostname)) {
+    return { ok: false, error: 'Blocked: localhost URLs are not allowed' };
+  }
+  if (PRIVATE_IP_PREFIXES.some((prefix) => hostname.startsWith(prefix))) {
+    return { ok: false, error: 'Blocked: private/internal IP addresses are not allowed' };
+  }
+  if (hostname === '::1' || hostname === '[::1]') {
+    return { ok: false, error: 'Blocked: loopback addresses are not allowed' };
+  }
+
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(timeoutMs),
+      redirect: 'error',
+    });
+
+    if (!response.ok) {
+      return { ok: false, error: `HTTP ${response.status} ${response.statusText}` };
+    }
+
+    // Validate Content-Type starts with image/
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!contentType.split(';')[0].trim().toLowerCase().startsWith('image/')) {
+      return { ok: false, error: `Blocked: unexpected Content-Type (${contentType || 'none'})` };
+    }
+
+    // Early rejection from Content-Length header
+    const contentLength = response.headers.get('content-length');
+    if (contentLength != null) {
+      const declared = parseInt(contentLength, 10);
+      if (!Number.isNaN(declared) && declared > maxBytes) {
+        const sizeMB = (declared / (1024 * 1024)).toFixed(1);
+        const maxMB = (maxBytes / (1024 * 1024)).toFixed(0);
+        return { ok: false, error: `Image too large: ${sizeMB} MB (max ${maxMB} MB)` };
+      }
+    }
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+
+    // Post-download size check (actual bytes)
+    if (buffer.length > maxBytes) {
+      const sizeMB = (buffer.length / (1024 * 1024)).toFixed(1);
+      const maxMB = (maxBytes / (1024 * 1024)).toFixed(0);
+      return { ok: false, error: `Image too large: ${sizeMB} MB (max ${maxMB} MB)` };
+    }
+
+    // Validate image format via magic bytes (extra hardening)
+    const mediaType = sniffMediaType(buffer);
+    if (!mediaType) {
+      return { ok: false, error: 'Not a recognized image format (expected PNG, JPEG, GIF, or WebP)' };
+    }
+
+    if (!SUPPORTED_MEDIA_TYPES.has(mediaType)) {
+      return { ok: false, error: `Unsupported image format: ${mediaType}` };
+    }
+
+    return { ok: true, buffer, mediaType };
+  } catch (err: unknown) {
+    const e = err instanceof Error ? err : null;
+    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
+      return { ok: false, error: `Request timed out (${Math.round(timeoutMs / 1000)}s limit)` };
+    }
+    if (e?.name === 'TypeError' && String(e.message).includes('redirect')) {
+      return { ok: false, error: 'Blocked: unexpected redirect' };
+    }
+    return { ok: false, error: e?.message || 'download failed' };
+  }
+}
+
 export async function execute(
   args: Record<string, unknown>,
   _allowedRoots: string[],
@@ -92,71 +213,14 @@ export async function execute(
   const url = args.url as string;
   if (!url) return { result: 'url is required', ok: false };
 
-  // Validate URL
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return { result: 'Invalid URL', ok: false };
+  const result = await safeImageDownload(url);
+  if (!result.ok) {
+    return { result: result.error, ok: false };
   }
 
-  // HTTPS only
-  if (parsed.protocol !== 'https:') {
-    return { result: `Blocked: only HTTPS URLs are allowed (got ${parsed.protocol})`, ok: false };
-  }
-
-  // Block private/loopback IPs and localhost
-  const hostname = parsed.hostname;
-  if (LOCALHOST_HOSTNAMES.has(hostname)) {
-    return { result: 'Blocked: localhost URLs are not allowed', ok: false };
-  }
-  if (PRIVATE_IP_PREFIXES.some((prefix) => hostname.startsWith(prefix))) {
-    return { result: 'Blocked: private/internal IP addresses are not allowed', ok: false };
-  }
-  if (hostname === '::1' || hostname === '[::1]') {
-    return { result: 'Blocked: loopback addresses are not allowed', ok: false };
-  }
-
-  try {
-    const response = await fetch(url, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      redirect: 'error',
-    });
-
-    if (!response.ok) {
-      return { result: `HTTP ${response.status} ${response.statusText}`, ok: false };
-    }
-
-    const buffer = Buffer.from(await response.arrayBuffer());
-
-    if (buffer.length > MAX_IMAGE_BYTES) {
-      const sizeMB = (buffer.length / (1024 * 1024)).toFixed(1);
-      return { result: `Image too large: ${sizeMB} MB (max 20 MB)`, ok: false };
-    }
-
-    // Validate image format via magic bytes
-    const mediaType = sniffMediaType(buffer);
-    if (!mediaType) {
-      return { result: 'Not a recognized image format (expected PNG, JPEG, GIF, or WebP)', ok: false };
-    }
-
-    if (!SUPPORTED_MEDIA_TYPES.has(mediaType)) {
-      return { result: `Unsupported image format: ${mediaType}`, ok: false };
-    }
-
-    const base64 = buffer.toString('base64');
-    return {
-      result: JSON.stringify({ base64, media_type: mediaType, size: buffer.length }),
-      ok: true,
-    };
-  } catch (err: unknown) {
-    const e = err instanceof Error ? err : null;
-    if (e?.name === 'TimeoutError' || e?.name === 'AbortError') {
-      return { result: 'Request timed out (15s limit)', ok: false };
-    }
-    if (e?.name === 'TypeError' && String(e.message).includes('redirect')) {
-      return { result: 'Blocked: unexpected redirect', ok: false };
-    }
-    return { result: e?.message || 'download failed', ok: false };
-  }
+  const base64 = result.buffer.toString('base64');
+  return {
+    result: JSON.stringify({ base64, media_type: result.mediaType, size: result.buffer.length }),
+    ok: true,
+  };
 }
