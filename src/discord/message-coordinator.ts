@@ -10,7 +10,7 @@ import { KeyedQueue } from '../group-queue.js';
 import type { DiscordChannelContext } from './channel-context.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
 import { discordSessionKey } from './session-key.js';
-import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildDisplayResultLines, buildAllResultLines, appendActionResults, withoutRequesterGatedActionFlags } from './actions.js';
+import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildDisplayResultLines, buildAllResultLines, buildCappedResultLines, appendActionResults, withoutRequesterGatedActionFlags } from './actions.js';
 import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './actions.js';
 import type { DeferScheduler } from './defer-scheduler.js';
 import type { DeferActionRequest } from './actions-defer.js';
@@ -3330,6 +3330,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 useNativeTextFallback: runtimeSupportsNativeThinkingStream(params.runtime.id),
               });
               hadTextFinal = false;
+              let responseTruncated = false;
+              let responseFinishReason: string | undefined;
               let currentFollowUpToken: string | null = null;
               let currentFollowUpRunId: string | null = null;
 
@@ -3764,6 +3766,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       await appendRuntimeSignal(evt);
                     } else if (evt.type === 'image_data') {
                       collectedImages.push(evt.image);
+                    } else if (evt.type === 'finish_metadata') {
+                      responseTruncated = evt.truncated;
+                      responseFinishReason = evt.finishReason;
                     }
                   } else {
                     // Flat mode: stream text/final directly and append runtime signals.
@@ -3798,6 +3803,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       await appendRuntimeSignal(evt);
                     } else if (evt.type === 'image_data') {
                       collectedImages.push(evt.image);
+                    } else if (evt.type === 'finish_metadata') {
+                      responseTruncated = evt.truncated;
+                      responseFinishReason = evt.finishReason;
                     }
                   }
                 }
@@ -4028,14 +4036,40 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               if (shouldQueueFollowUp) {
                 const token = buildFollowUpToken();
                 const failureRetryPlaceholder = buildFailureRetryPlaceholder(actions, actionResults);
-                const followUpLines = buildAllResultLines(actionResults);
+                const followUpLines = buildCappedResultLines(actionResults);
                 const followUpSuffix = failureRetryPlaceholder
                   ? `One or more actions failed. If you retry, explicitly tell the user what failed and whether the retry succeeded or failed. Do not announce success before the action confirms it.`
                   : `Continue your analysis based on these results. If you need additional information, you may emit further query actions.`;
-                currentPrompt =
+
+                // Build the follow-up prompt with original request context and truncation awareness.
+                const followUpParts: string[] = [];
+
+                // Original request summary so a reset session knows what task it is continuing.
+                const originalRequest = userText.trim();
+                if (originalRequest) {
+                  const cappedRequest = originalRequest.length > 300
+                    ? `${originalRequest.slice(0, 300)}...[truncated]`
+                    : originalRequest;
+                  followUpParts.push(`[Original request] ${cappedRequest}`);
+                }
+
+                // Truncation notice when the previous response was cut off by output limits.
+                if (responseTruncated) {
+                  const reasonDetail = responseFinishReason ? ` (finishReason: ${responseFinishReason})` : '';
+                  followUpParts.push(
+                    `[Truncation notice] Your previous response was cut off by output token limits${reasonDetail}. ` +
+                    `Your earlier output may have ended before final reasoning or action blocks completed. ` +
+                    `Review the action results below and continue from where you left off.`,
+                  );
+                }
+
+                followUpParts.push(
                   `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
                   followUpLines.join('\n') +
-                  `\n\n${followUpSuffix}`;
+                  `\n\n${followUpSuffix}`,
+                );
+
+                currentPrompt = followUpParts.join('\n\n');
                 const followUpActionSection = buildTieredDiscordActionsPromptSection(
                   actionFlags,
                   params.botDisplayName,

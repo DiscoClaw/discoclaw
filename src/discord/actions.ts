@@ -632,6 +632,27 @@ export function buildAllResultLines(
 }
 
 /**
+ * Cap a single result line to approximately `maxChars` characters.
+ * If truncated, appends a visible `...[truncated]` suffix.
+ */
+export function capResultLine(line: string, maxChars = 1500): string {
+  if (line.length <= maxChars) return line;
+  return `${line.slice(0, maxChars)}...[truncated]`;
+}
+
+/**
+ * Build result lines for follow-up prompts with per-line length capping.
+ * Each line is capped at `maxChars` characters to prevent oversized payloads
+ * from crowding out reasoning and action blocks in follow-up prompts.
+ */
+export function buildCappedResultLines(
+  results: DiscordActionResult[],
+  maxChars = 1500,
+): string[] {
+  return buildAllResultLines(results).map((line) => capResultLine(line, maxChars));
+}
+
+/**
  * Append display result lines to body text, automatically closing any
  * unclosed fenced code block so the results render outside the block.
  * Returns body unchanged when there are no display lines.
