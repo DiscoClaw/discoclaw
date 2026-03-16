@@ -15,7 +15,13 @@ vi.mock('../image/resize.js', () => ({
   })),
 }));
 
+vi.mock('../image/url-safety.js', () => ({
+  validateImageUrl: vi.fn(async () => ({ safe: true })),
+}));
+
 import { maybeDownscale } from '../image/resize.js';
+import { validateImageUrl } from '../image/url-safety.js';
+const mockValidateImageUrl = vi.mocked(validateImageUrl);
 
 // --- Helper buffers with valid magic bytes ---
 
@@ -180,6 +186,7 @@ describe('downloadAttachment', () => {
 
   beforeEach(() => {
     globalThis.fetch = vi.fn();
+    mockValidateImageUrl.mockResolvedValue({ safe: true });
   });
 
   afterEach(() => {
@@ -238,6 +245,7 @@ describe('downloadAttachment', () => {
   });
 
   it('rejects non-http(s) URLs', async () => {
+    mockValidateImageUrl.mockResolvedValue({ safe: false, reason: 'only http(s) URLs are allowed' });
     const result = await downloadAttachment(
       { url: 'ftp://cdn.discordapp.com/photo.png', name: 'photo.png' },
       'image/png',
@@ -316,6 +324,7 @@ describe('downloadAttachment', () => {
   });
 
   it('handles invalid URL', async () => {
+    mockValidateImageUrl.mockResolvedValue({ safe: false, reason: 'invalid URL' });
     const result = await downloadAttachment(
       { url: 'not-a-url', name: 'bad.png' },
       'image/png',
@@ -636,6 +645,7 @@ describe('downloadMessageImages', () => {
 
   beforeEach(() => {
     globalThis.fetch = vi.fn();
+    mockValidateImageUrl.mockResolvedValue({ safe: true });
   });
 
   afterEach(() => {
@@ -768,6 +778,7 @@ describe('downloadPublicImage', () => {
 
   beforeEach(() => {
     globalThis.fetch = vi.fn();
+    mockValidateImageUrl.mockResolvedValue({ safe: true });
   });
 
   afterEach(() => {
@@ -806,6 +817,7 @@ describe('downloadPublicImage', () => {
   });
 
   it('rejects non-http(s) schemes', async () => {
+    mockValidateImageUrl.mockResolvedValue({ safe: false, reason: 'only http(s) URLs are allowed' });
     const result = await downloadPublicImage('ftp://example.com/photo.png', 'test');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('only http(s) URLs are allowed');
@@ -813,6 +825,7 @@ describe('downloadPublicImage', () => {
   });
 
   it('rejects data: URLs', async () => {
+    mockValidateImageUrl.mockResolvedValue({ safe: false, reason: 'only http(s) URLs are allowed' });
     const result = await downloadPublicImage('data:image/png;base64,abc', 'test');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('only http(s) URLs are allowed');
@@ -820,9 +833,18 @@ describe('downloadPublicImage', () => {
   });
 
   it('rejects invalid URLs', async () => {
+    mockValidateImageUrl.mockResolvedValue({ safe: false, reason: 'invalid URL' });
     const result = await downloadPublicImage('not-a-url', 'test');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('invalid URL');
+  });
+
+  it('rejects private IP addresses via SSRF check', async () => {
+    mockValidateImageUrl.mockResolvedValue({ safe: false, reason: 'private/internal hosts are not allowed' });
+    const result = await downloadPublicImage('http://192.168.1.1/photo.png', 'test');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('private/internal hosts are not allowed');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });
 
@@ -831,6 +853,7 @@ describe('downloadImageUrl', () => {
 
   beforeEach(() => {
     globalThis.fetch = vi.fn();
+    mockValidateImageUrl.mockResolvedValue({ safe: true });
   });
 
   afterEach(() => {
@@ -853,6 +876,7 @@ describe('downloadImageUrl', () => {
   });
 
   it('uses sourceImage label in error messages', async () => {
+    mockValidateImageUrl.mockResolvedValue({ safe: false, reason: 'only http(s) URLs are allowed' });
     const result = await downloadImageUrl('ftp://example.com/photo.png');
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('sourceImage');

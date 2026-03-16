@@ -1,6 +1,7 @@
 import type { ImageData } from '../runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from '../runtime/types.js';
 import { maybeDownscale } from '../image/resize.js';
+import { validateImageUrl } from '../image/url-safety.js';
 
 /** Max bytes per individual image (20 MB). */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
@@ -126,15 +127,10 @@ export async function downloadPublicImage(
   url: string,
   label: string = 'image',
 ): Promise<{ ok: true; image: ImageData } | { ok: false; error: string }> {
-  let parsedUrl: URL;
-  try {
-    parsedUrl = new URL(url);
-  } catch {
-    return { ok: false, error: `${label}: invalid URL` };
-  }
-
-  if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
-    return { ok: false, error: `${label}: only http(s) URLs are allowed` };
+  // SSRF safety: validate scheme, hostname, and resolved IP before fetching.
+  const safety = await validateImageUrl(url);
+  if (!safety.safe) {
+    return { ok: false, error: `${label}: ${safety.reason}` };
   }
 
   try {
