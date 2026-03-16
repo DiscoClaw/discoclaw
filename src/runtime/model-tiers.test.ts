@@ -166,8 +166,8 @@ describe('resolveReasoningEffort', () => {
     expect(resolveReasoningEffort('capable', 'claude_code')).toBe('medium');
   });
 
-  it('returns high for claude_code deep tier', () => {
-    expect(resolveReasoningEffort('deep', 'claude_code')).toBe('high');
+  it('returns max for claude_code deep tier', () => {
+    expect(resolveReasoningEffort('deep', 'claude_code')).toBe('max');
   });
 
   it('returns undefined for runtimes without effort mappings', () => {
