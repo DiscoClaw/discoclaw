@@ -195,6 +195,24 @@ Capability/gating note (important):
   - If any action type is listed in `QUERY_ACTION_TYPES` (`src/discord/action-categories.ts`) and at least one of those query actions succeeded, `src/discord.ts` can automatically invoke the model again with the results.
   - This is intended for "read/list/info" actions where the model needs returned data to keep reasoning.
 
+## Image Attachment Metadata in Read Actions
+
+`readMessages` and `fetchMessage` include compact image attachment metadata in their returned text summaries. Each attachment is rendered as:
+
+```
+[Attachment: filename.png (image/png, 1024x768)]
+```
+
+The metadata includes the filename, content type, and dimensions (when available). This makes image attachments visible in historical reads without requiring multimodal image content — the model can see that images exist, what type they are, and their dimensions, even though the actual image pixels are not included in the action result.
+
+This applies to all attachment types (images, videos, documents), not just images. Non-image attachments that lack dimensions render without the size component:
+
+```
+[Attachment: notes.txt (text/plain)]
+```
+
+> **Note:** This is text-level metadata only. True multimodal action-result images (where the model receives actual image content for vision analysis) are not part of this mechanism.
+
 ## Autonomous Action Categories
 
 The forge, plan, and memory categories enable the AI runtime to self-initiate operations that previously required human `!` commands. Combined with cron jobs, these enable fully autonomous workflows: crons that check for approved plans and forge them, post-forge memory updates, bot-initiated planning from task context, etc.
