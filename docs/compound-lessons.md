@@ -128,6 +128,13 @@ Source: task/chat context - `imagegenActionsPromptSection()` emitted static mode
 Applied: (PR implementing runtime-resolved imagegen default in prompt section and `!models set imagegen` persistence)
 Status: active
 
+### 2026-03-16 - Never interpolate untrusted identifiers into URL path segments without strict validation
+Tags: #audit #workflow #runtime
+Lesson: Never interpolate user-controlled or externally sourced identifiers (model names, resource IDs, etc.) into URL path segments without strict allowlist or pattern validation at the interpolation site. Even when the caller already validates, keep sink-level validation so that future call sites or refactors cannot bypass the check. The Gemini REST paths (`.../models/${model}:predict`, `:generateContent`, `:streamGenerateContent`) were vulnerable to path injection via crafted model values containing slashes, colons, or percent-encoded characters; a shared `validateGeminiModelId` guard now enforces a safe character set before any URL is constructed.
+Source: security audit of Gemini REST URL interpolation sites in `src/runtime/gemini-rest.ts` and `src/discord/actions-imagegen.ts`
+Applied: `src/gemini-model-validation.ts`, sink-level calls in `gemini-rest.ts` and `actions-imagegen.ts`
+Status: active
+
 ### 2026-03-10 - Keep interactive Discord trigger context in sync
 Tags: #workflow #task #discord
 Lesson: Interactive Discord trigger paths, including the message handler and reaction handler, must hydrate equivalent conversational context, including nearby channel history. When adding or changing an interactive trigger path, audit it against the main message handler's context-gathering steps so the AI does not ask for information that is already present in-channel; cron and webhook paths are non-interactive and exempt from this invariant.
