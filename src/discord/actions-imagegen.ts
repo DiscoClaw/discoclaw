@@ -56,7 +56,7 @@ const DISCORD_MAX_CONTENT = 2000;
 
 export function resolveDefaultModel(imagegenCtx: ImagegenContext): string {
   if (imagegenCtx.defaultModel) return imagegenCtx.defaultModel;
-  if (imagegenCtx.geminiApiKey && !imagegenCtx.apiKey) return 'imagen-4.0-generate-001';
+  if (imagegenCtx.geminiApiKey) return 'gemini-3.1-flash-image-preview';
   return 'dall-e-3';
 }
 

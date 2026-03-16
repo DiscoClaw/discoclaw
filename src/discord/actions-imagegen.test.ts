@@ -4,6 +4,7 @@ import {
   executeImagegenAction,
   IMAGEGEN_ACTION_TYPES,
   imagegenActionsPromptSection,
+  resolveDefaultModel,
   resolveProvider,
 } from './actions-imagegen.js';
 import type { ImagegenContext, SourceImageRef } from './actions-imagegen.js';
@@ -1294,6 +1295,23 @@ describe('default model resolution', () => {
     vi.unstubAllGlobals();
   });
 
+  it('resolveDefaultModel returns native Gemini model when geminiApiKey is present', () => {
+    expect(resolveDefaultModel({ geminiApiKey: 'gemini-key' })).toBe('gemini-3.1-flash-image-preview');
+  });
+
+  it('resolveDefaultModel returns native Gemini model when both keys are present', () => {
+    expect(resolveDefaultModel({ apiKey: 'openai-key', geminiApiKey: 'gemini-key' })).toBe('gemini-3.1-flash-image-preview');
+  });
+
+  it('resolveDefaultModel falls back to dall-e-3 when no geminiApiKey', () => {
+    expect(resolveDefaultModel({ apiKey: 'openai-key' })).toBe('dall-e-3');
+    expect(resolveDefaultModel({})).toBe('dall-e-3');
+  });
+
+  it('resolveDefaultModel respects explicit defaultModel over geminiApiKey', () => {
+    expect(resolveDefaultModel({ defaultModel: 'gpt-image-1', geminiApiKey: 'gemini-key' })).toBe('gpt-image-1');
+  });
+
   it('uses explicit defaultModel from context when set', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSuccessResponse()));
     const ch = makeMockChannel({ name: 'art' });
@@ -1310,7 +1328,7 @@ describe('default model resolution', () => {
   });
 
   it('auto-detects Gemini default when only geminiApiKey is present', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeGeminiSuccessResponse()));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeGeminiNativeSuccessResponse()));
     const ch = makeMockChannel({ name: 'art' });
     const ctx = makeCtx([ch]);
 
@@ -1321,7 +1339,7 @@ describe('default model resolution', () => {
     );
 
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringContaining('imagen-4.0-generate-001:predict'),
+      expect.stringContaining('gemini-3.1-flash-image-preview:generateContent'),
       expect.anything(),
     );
   });
@@ -1341,8 +1359,8 @@ describe('default model resolution', () => {
     expect(callBody.model).toBe('dall-e-3');
   });
 
-  it('falls back to dall-e-3 when both keys are present', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSuccessResponse()));
+  it('defaults to native Gemini when both keys are present', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeGeminiNativeSuccessResponse()));
     const ch = makeMockChannel({ name: 'art' });
     const ctx = makeCtx([ch]);
 
@@ -1352,8 +1370,10 @@ describe('default model resolution', () => {
       makeImagegenCtx({ apiKey: 'openai-key', geminiApiKey: 'gemini-key' }),
     );
 
-    const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
-    expect(callBody.model).toBe('dall-e-3');
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('gemini-3.1-flash-image-preview:generateContent'),
+      expect.anything(),
+    );
   });
 
   it('explicit action.model wins over imagegenCtx.defaultModel when both are set', async () => {
@@ -1689,6 +1709,40 @@ describe('generateImage — sourceImage', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('could not fetch message');
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('source-image flow succeeds without explicit model when geminiApiKey is configured', async () => {
+    const { ctx, ch } = setupSourceImageCtx();
+    mockDownloadMessageImages.mockResolvedValue({
+      images: [{ base64: 'aW1hZ2VkYXRh', mediaType: 'image/png' }],
+      errors: [],
+    });
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Make it a watercolor',
+        sourceImage: { type: 'attachment' },
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(ch.send).toHaveBeenCalled();
+
+    // Should route to native Gemini generateContent endpoint via default model
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('gemini-3.1-flash-image-preview:generateContent'),
+      expect.anything(),
+    );
+
+    // Source image should be included in the request body
+    const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(callBody.contents[0].parts).toHaveLength(2);
+    expect(callBody.contents[0].parts[0]).toEqual({
+      inlineData: { mimeType: 'image/png', data: 'aW1hZ2VkYXRh' },
+    });
   });
 });
 
