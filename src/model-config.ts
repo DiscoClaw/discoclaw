@@ -14,7 +14,8 @@ export type ModelRole =
   | 'summary'
   | 'cron'
   | 'cron-exec'
-  | 'voice';
+  | 'voice'
+  | 'imagegen';
 
 /** Record mapping each model role to its model string. */
 export type ModelConfig = Partial<Record<ModelRole, string>>;

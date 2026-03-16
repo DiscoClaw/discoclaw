@@ -185,6 +185,7 @@ const envModelDefaults: ModelConfig = {
 };
 if (cfg.forgeDrafterModel) envModelDefaults['forge-drafter'] = cfg.forgeDrafterModel;
 if (cfg.forgeAuditorModel) envModelDefaults['forge-auditor'] = cfg.forgeAuditorModel;
+if (cfg.imagegenDefaultModel) envModelDefaults['imagegen'] = cfg.imagegenDefaultModel;
 
 // --- PID lock: prevent duplicate bot instances ---
 const pidLockDir = dataDir ?? path.join(__dirname, '..', 'data');
@@ -1139,6 +1140,7 @@ const clearOverride = (role?: ModelRole): void => {
     'cron',
     'cron-exec',
     'voice',
+    'imagegen',
   ];
   if (!role) {
     // Reset all roles to env defaults
