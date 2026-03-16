@@ -27,6 +27,20 @@ const CONFIG_TYPE_MAP: Record<ConfigActionRequest['type'], true> = {
 };
 export const CONFIG_ACTION_TYPES = new Set<string>(Object.keys(CONFIG_TYPE_MAP));
 
+/**
+ * Config action types that mutate bot state and require requester authorization
+ * against DISCORD_ALLOW_USER_IDS. Read-only queries (modelShow, workspaceWarnings)
+ * are intentionally excluded.
+ *
+ * All role-scoped mutations — chat, voice, imagegen, fast, cron, forge-drafter,
+ * forge-auditor, plan-run, summary, cron-exec — flow through modelSet/modelReset,
+ * so this set covers every config-mutation path.
+ */
+export const CONFIG_MUTATING_ACTION_TYPES: ReadonlySet<string> = new Set<string>([
+  'modelSet',
+  'modelReset',
+]);
+
 export type ConfigContext = {
   /** The live botParams object — mutating fields takes effect next invocation. */
   botParams: ConfigMutableParams;
