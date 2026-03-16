@@ -57,12 +57,29 @@ function makeEmbed(overrides: Partial<any> = {}) {
   };
 }
 
+function makeAttachment(overrides: Partial<any> = {}) {
+  return {
+    name: overrides.name ?? 'image.png',
+    contentType: overrides.contentType ?? 'image/png',
+    width: overrides.width ?? null,
+    height: overrides.height ?? null,
+    ...overrides,
+  };
+}
+
+function makeAttachmentsCollection(attachments: any[]) {
+  return {
+    values() { return attachments[Symbol.iterator](); },
+  };
+}
+
 function makeMockMessage(id: string, overrides: Partial<any> = {}) {
   const { author: authorName, ...rest } = overrides;
   return {
     id,
     content: rest.content ?? 'Hello',
     embeds: rest.embeds ?? [],
+    attachments: rest.attachments ?? undefined,
     author: { username: authorName ?? 'testuser' },
     createdAt: new Date('2025-01-15T12:00:00Z'),
     createdTimestamp: new Date('2025-01-15T12:00:00Z').getTime(),
@@ -668,6 +685,121 @@ describe('readMessages', () => {
 
     expect(ch.messages.fetch).toHaveBeenCalledWith({ limit: 20 });
   });
+
+  it('shows attachment metadata for image-only message', async () => {
+    const msg = makeMockMessage('m1', {
+      content: '',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'photo.png', contentType: 'image/png', width: 1920, height: 1080 }),
+      ]),
+    });
+    const fetchedMessages = new Map([['m1', msg]]);
+    const ch = makeMockChannel({ name: 'general', fetchedMessages });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'readMessages', channel: '#general', limit: 5 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('[Attachment: photo.png (image/png, 1920x1080)]');
+    expect(summary).not.toContain('(no text)');
+  });
+
+  it('shows content plus attachment metadata for mixed message', async () => {
+    const msg = makeMockMessage('m1', {
+      content: 'Check this out',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'screenshot.jpg', contentType: 'image/jpeg', width: 800, height: 600 }),
+      ]),
+    });
+    const fetchedMessages = new Map([['m1', msg]]);
+    const ch = makeMockChannel({ name: 'general', fetchedMessages });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'readMessages', channel: '#general', limit: 5 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Check this out');
+    expect(summary).toContain('[Attachment: screenshot.jpg (image/jpeg, 800x600)]');
+  });
+
+  it('shows embed plus attachment metadata for embed+image message', async () => {
+    const msg = makeMockMessage('m1', {
+      content: '',
+      author: 'alice',
+      embeds: [makeEmbed({ title: 'Link Preview' })],
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'thumb.png', contentType: 'image/png' }),
+      ]),
+    });
+    const fetchedMessages = new Map([['m1', msg]]);
+    const ch = makeMockChannel({ name: 'general', fetchedMessages });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'readMessages', channel: '#general', limit: 5 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Title: Link Preview');
+    expect(summary).toContain('[Attachment: thumb.png (image/png)]');
+  });
+
+  it('degrades cleanly when attachment fields are missing', async () => {
+    const msg = makeMockMessage('m1', {
+      content: '',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: null, contentType: null, width: null, height: null }),
+      ]),
+    });
+    const fetchedMessages = new Map([['m1', msg]]);
+    const ch = makeMockChannel({ name: 'general', fetchedMessages });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'readMessages', channel: '#general', limit: 5 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('[Attachment: unknown]');
+    expect(summary).not.toContain('null');
+  });
+
+  it('shows attachment with dimensions but no content type', async () => {
+    const msg = makeMockMessage('m1', {
+      content: '',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'photo.webp', contentType: null, width: 640, height: 480 }),
+      ]),
+    });
+    const fetchedMessages = new Map([['m1', msg]]);
+    const ch = makeMockChannel({ name: 'general', fetchedMessages });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'readMessages', channel: '#general', limit: 5 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('[Attachment: photo.webp (640x480)]');
+  });
 });
 
 describe('fetchMessage', () => {
@@ -932,6 +1064,99 @@ describe('fetchMessage', () => {
 
     const summary = (result as any).summary as string;
     expect(summary).not.toContain('x'.repeat(3000));
+  });
+
+  it('shows attachment metadata for image-only message', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'photo.png', contentType: 'image/png', width: 1920, height: 1080 }),
+      ]),
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('[Attachment: photo.png (image/png, 1920x1080)]');
+    expect(summary).not.toContain('(no text)');
+  });
+
+  it('shows content plus attachment metadata for mixed message', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: 'Look at this',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'screenshot.jpg', contentType: 'image/jpeg', width: 800, height: 600 }),
+      ]),
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Look at this');
+    expect(summary).toContain('[Attachment: screenshot.jpg (image/jpeg, 800x600)]');
+  });
+
+  it('shows embed plus attachment metadata for embed+image message', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      embeds: [makeEmbed({ title: 'Link Preview' })],
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'thumb.png', contentType: 'image/png' }),
+      ]),
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('Title: Link Preview');
+    expect(summary).toContain('[Attachment: thumb.png (image/png)]');
+  });
+
+  it('degrades cleanly when attachment fields are missing', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: null, contentType: null, width: null, height: null }),
+      ]),
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('[Attachment: unknown]');
+    expect(summary).not.toContain('null');
   });
 });
 

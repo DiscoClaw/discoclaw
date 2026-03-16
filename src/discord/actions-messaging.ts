@@ -6,6 +6,28 @@ import { resolveChannel, fmtTime, findChannelRaw, describeChannelType } from './
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { isPathUnderRoots } from '../runtime/tools/path-security.js';
 
+/** Shape of a Discord attachment we read from message records. */
+interface AttachmentRecord {
+  name?: string | null;
+  contentType?: string | null;
+  width?: number | null;
+  height?: number | null;
+}
+
+/** Serialize Discord attachments into compact image metadata lines. */
+function formatAttachments(attachments: Iterable<AttachmentRecord> | undefined): string {
+  if (!attachments) return '';
+  const parts: string[] = [];
+  for (const a of attachments) {
+    const tag: string[] = [];
+    if (a.contentType) tag.push(a.contentType);
+    if (a.width && a.height) tag.push(`${a.width}x${a.height}`);
+    const detail = tag.length ? ` (${tag.join(', ')})` : '';
+    parts.push(`[Attachment: ${a.name || 'unknown'}${detail}]`);
+  }
+  return parts.join(' ');
+}
+
 /** Serialize Discord embeds into a compact text representation. */
 function formatEmbeds(embeds: Embed[] | undefined, truncate?: number): string {
   if (!embeds?.length) return '';
@@ -94,6 +116,7 @@ type MessageRecord = {
   author?: { username?: string };
   content?: string;
   embeds: Embed[];
+  attachments?: { values(): Iterable<AttachmentRecord> };
   createdAt: Date;
   createdTimestamp: number;
   reactions: {
@@ -343,8 +366,13 @@ export async function executeMessagingAction(
         const time = fmtTime(m.createdAt);
         const content = m.content || '';
         const embed = formatEmbeds(m.embeds, 200);
-        const combined = content || embed || '(no text)';
-        const text = (content && embed ? `${content} [Embed: ${embed}]` : combined).slice(0, 300);
+        const attach = formatAttachments(m.attachments?.values());
+        const parts: string[] = [];
+        if (content && embed) parts.push(`${content} [Embed: ${embed}]`);
+        else if (content) parts.push(content);
+        else if (embed) parts.push(embed);
+        if (attach) parts.push(attach);
+        const text = (parts.length ? parts.join(' ') : '(no text)').slice(0, 300);
         return `[${author}] ${text} (${time}, id:${m.id})`;
       });
       return { ok: true, summary: `Messages in #${channel.name}:\n${lines.join('\n')}` };
@@ -368,8 +396,13 @@ export async function executeMessagingAction(
       const time = fmtTime(message.createdAt);
       const contentText = message.content || '';
       const embedText = formatEmbeds(message.embeds, action.full ? undefined : 2000);
-      const body = contentText || embedText || '(no text)';
-      const combined = contentText && embedText ? `${contentText}\n[Embeds]\n${embedText}` : body;
+      const attachText = formatAttachments(message.attachments?.values());
+      const parts: string[] = [];
+      if (contentText && embedText) parts.push(`${contentText}\n[Embeds]\n${embedText}`);
+      else if (contentText) parts.push(contentText);
+      else if (embedText) parts.push(embedText);
+      if (attachText) parts.push(attachText);
+      const combined = parts.length ? parts.join('\n') : '(no text)';
       const text = action.full ? combined : combined.slice(0, 2000);
       return { ok: true, summary: `[${author}]: ${text} (${time}, #${messageChannel.name}, id:${message.id})` };
     }
@@ -698,6 +731,7 @@ export function messagingActionsPromptSection(): string {
 - \`channel\` (required): Channel name or ID.
 - \`limit\` (optional): 1–20, default 10.
 - \`before\` (optional): Message ID to fetch messages before.
+- Summaries include image attachment metadata (filename, content type, dimensions) when present.
 
 **fetchMessage** — Fetch a single message by ID:
 \`\`\`
@@ -705,6 +739,7 @@ export function messagingActionsPromptSection(): string {
 \`\`\`
 - Use \`fetchMessage\` to retrieve the full content of any Discord message by channel and message ID. This works for pinned prompts, status messages, and any other message you have the IDs for.
 - \`full\` (optional): When true, returns the complete message content without truncation. Default: false (content truncated to 2000 chars).
+- Includes image attachment metadata (filename, content type, dimensions) when present.
 
 **editMessage** — Edit a bot message:
 \`\`\`
