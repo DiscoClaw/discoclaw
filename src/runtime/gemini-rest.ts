@@ -5,6 +5,7 @@
 import type { RuntimeAdapter, EngineEvent, RuntimeCapability, RuntimeInvokeParams } from './types.js';
 import { splitSystemPrompt } from './openai-compat.js';
 import { createRuntimeErrorEvent } from './runtime-failure.js';
+import { validateGeminiModelId } from '../gemini-model-validation.js';
 
 export type GeminiRestOpts = {
   apiKey: string;
@@ -23,6 +24,16 @@ function parseSSEData(line: string): string | undefined {
 }
 
 export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
+  // Validate defaultModel eagerly so configuration errors surface at startup,
+  // not on the first request.  Empty string is allowed (caller must always
+  // supply params.model); non-empty values must pass the model-ID check.
+  if (opts.defaultModel) {
+    const check = validateGeminiModelId(opts.defaultModel);
+    if (!check.ok) {
+      throw new Error(`gemini-rest: invalid defaultModel: ${check.error}`);
+    }
+  }
+
   const capabilities: ReadonlySet<RuntimeCapability> = new Set(['streaming_text']);
   const baseUrl = opts.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
 
@@ -33,6 +44,16 @@ export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
     invoke(params: RuntimeInvokeParams) {
       return (async function* (): AsyncGenerator<EngineEvent> {
         const model = params.model || opts.defaultModel;
+
+        const modelCheck = validateGeminiModelId(model);
+        if (!modelCheck.ok) {
+          yield createRuntimeErrorEvent(
+            `gemini-rest: ${modelCheck.error}`,
+          );
+          yield { type: 'done' };
+          return;
+        }
+
         const url = `${baseUrl}/models/${model}:streamGenerateContent?alt=sse`;
 
         const controller = new AbortController();

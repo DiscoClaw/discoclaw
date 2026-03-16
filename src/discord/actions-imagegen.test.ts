@@ -6,6 +6,7 @@ import {
   imagegenActionsPromptSection,
   resolveDefaultModel,
   resolveProvider,
+  validateGeminiModelId,
   TYPING_INTERVAL_MS,
   DOT_CYCLE_INTERVAL_MS,
   REQUEST_TIMEOUT_MS,
@@ -1297,6 +1298,171 @@ describe('generateImage — Gemini Native', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('geminiApiKey');
     expect(fetch).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gemini model ID validation
+// ---------------------------------------------------------------------------
+
+describe('validateGeminiModelId', () => {
+  it.each([
+    'imagen-4.0-generate-001',
+    'imagen-4.0-fast-generate-001',
+    'imagen-4.0-ultra-generate-001',
+    'gemini-3.1-flash-image-preview',
+    'gemini-3-pro-image-preview',
+    'dall-e-3',
+    'gpt-image-1',
+    'my_custom_model.v2',
+  ])('accepts valid model ID: %s', (model) => {
+    expect(validateGeminiModelId(model)).toEqual({ ok: true });
+  });
+
+  it.each([
+    ['../other-model', 'path traversal with ../'],
+    ['model/../secret', 'embedded traversal'],
+    ['model/subpath', 'slash in model'],
+    ['model:extra', 'colon in model'],
+    ['model%2F..', 'percent-encoded slash'],
+    ['', 'empty string'],
+    [' model', 'leading space'],
+    ['model name', 'space in model'],
+    ['model\ttab', 'tab in model'],
+    ['model\nline', 'newline in model'],
+    ['.hidden', 'leading dot'],
+    ['-start', 'leading hyphen'],
+    ['_start', 'leading underscore'],
+    ['a'.repeat(129), 'exceeds max length'],
+  ])('rejects invalid model ID: %s (%s)', (model) => {
+    const result = validateGeminiModelId(model);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('invalid Gemini model identifier');
+  });
+});
+
+describe('generateImage — Gemini model validation', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeGeminiSuccessResponse()));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects traversal payload before any network call (:predict branch)', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: '../evil-model', provider: 'gemini', size: '1:1' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('invalid Gemini model identifier');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects traversal payload before any network call (:generateContent branch)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeGeminiNativeSuccessResponse()));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'gemini-../../evil', provider: 'gemini' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('invalid Gemini model identifier');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'model/with/slashes',
+    'model:with:colons',
+    'model%2Fencoded',
+    '../traversal',
+    'model\nnewline',
+  ])('rejects reserved/special character model "%s" without network call', async (badModel) => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: badModel, provider: 'gemini', size: '1:1' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('invalid Gemini model identifier');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('accepts valid imagen model and reaches network layer', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'imagen-4.0-generate-001', size: '1:1' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fetch).toHaveBeenCalled();
+  });
+
+  it('accepts valid gemini native model and reaches network layer', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeGeminiNativeSuccessResponse()));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'gemini-3.1-flash-image-preview' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fetch).toHaveBeenCalled();
+  });
+
+  it('does not validate model for OpenAI provider (no Gemini URL involved)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSuccessResponse()));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    // A model with slashes would be invalid for Gemini, but should pass for OpenAI
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art', model: 'dall-e-3' },
+      ctx,
+      makeImagegenCtx({ apiKey: 'openai-key' }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fetch).toHaveBeenCalled();
+  });
+
+  it('preserves fallback behavior when model is omitted (Gemini default)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeGeminiNativeSuccessResponse()));
+    const ch = makeMockChannel({ id: 'origin-ch', name: 'general' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain' },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(fetch).toHaveBeenCalledWith(
+      expect.stringContaining('gemini-3.1-flash-image-preview:generateContent'),
+      expect.anything(),
+    );
   });
 });
 

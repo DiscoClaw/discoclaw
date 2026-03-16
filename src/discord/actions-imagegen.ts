@@ -4,6 +4,7 @@ import type { DiscordActionResult, ActionContext } from './actions.js';
 import { resolveChannel, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { downloadMessageImages, downloadImageUrl } from './image-download.js';
+import { validateGeminiModelId } from '../gemini-model-validation.js';
 
 /**
  * Maintainers: start with `docs/official-docs.md` before changing model IDs,
@@ -46,6 +47,9 @@ const GEMINI_VALID_SIZES = new Set(['1:1', '3:4', '4:3', '9:16', '16:9']);
 
 const VALID_QUALITY = new Set(['standard', 'hd']);
 const DISCORD_MAX_CONTENT = 2000;
+
+// Re-export so existing test imports continue to work.
+export { validateGeminiModelId } from '../gemini-model-validation.js';
 
 // Progress UX
 export const TYPING_INTERVAL_MS = 8_000;
@@ -144,6 +148,9 @@ async function callGemini(
   geminiApiKey: string,
   signal?: AbortSignal,
 ): Promise<{ ok: true; b64: string } | { ok: false; error: string }> {
+  const v = validateGeminiModelId(model);
+  if (!v.ok) return { ok: false, error: v.error };
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`;
 
   const body: Record<string, unknown> = {
@@ -204,6 +211,9 @@ async function callGeminiNative(
   sourceImage?: { base64: string; mediaType: string },
   signal?: AbortSignal,
 ): Promise<{ ok: true; b64: string } | { ok: false; error: string }> {
+  const v = validateGeminiModelId(model);
+  if (!v.ok) return { ok: false, error: v.error };
+
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
   const parts: Array<Record<string, unknown>> = [];
@@ -338,6 +348,12 @@ export async function executeImagegenAction(
       const provider = resolveProvider(model, action.provider);
       const defaultSize = provider === 'gemini' ? DEFAULT_SIZE_GEMINI : DEFAULT_SIZE_OPENAI;
       const size = action.size ?? defaultSize;
+
+      // Validate Gemini model ID before it can reach any URL interpolation
+      if (provider === 'gemini') {
+        const mv = validateGeminiModelId(model);
+        if (!mv.ok) return { ok: false, error: mv.error };
+      }
 
       // Per-provider size validation
       if (provider === 'gemini') {
