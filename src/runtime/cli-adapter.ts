@@ -547,6 +547,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       let mergedStdout = '';
       let merged = '';
       let resultText = '';
+      let lastStopReason: string | undefined;
       let inToolUse = false;
       const stdoutLineBuf = new LineBuffer();
       let stderrBuffered = '';
@@ -635,6 +636,11 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           if (evt) {
             parsedJsonLineCount++;
             lastJsonEventType = getJsonLineEventType(evt) ?? null;
+            // Capture stop_reason from result events for finish_metadata
+            const evtObj = evt as Record<string, unknown>;
+            if (typeof evtObj.stop_reason === 'string' && evtObj.stop_reason) {
+              lastStopReason = evtObj.stop_reason;
+            }
           } else {
             unparsableStdoutLineCount++;
             lastUnparsableStdoutLinePreview = summarizeCliLine(trimmed);
@@ -991,6 +997,12 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           push({ type: 'text_final', text: final });
         }
 
+        const cliTruncated = lastStopReason === 'max_tokens' || lastStopReason === 'length';
+        push({
+          type: 'finish_metadata',
+          truncated: cliTruncated,
+          ...(lastStopReason ? { finishReason: lastStopReason } : {}),
+        });
         push({ type: 'done' });
         finished = true;
         wake();

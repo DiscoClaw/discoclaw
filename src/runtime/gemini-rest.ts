@@ -199,6 +199,12 @@ export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
           }
 
           yield { type: 'text_final', text: accumulated };
+          const geminiTruncated = lastFinishReason === 'MAX_TOKENS' || lastFinishReason === 'STOP_LIMIT';
+          yield {
+            type: 'finish_metadata',
+            truncated: geminiTruncated,
+            ...(lastFinishReason ? { finishReason: lastFinishReason } : {}),
+          };
           yield { type: 'done' };
         } catch (err) {
           if (timer) clearTimeout(timer);

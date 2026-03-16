@@ -310,6 +310,7 @@ describe('createCliRuntime', () => {
 
     expect(events).toEqual([
       { type: 'text_final', text: '' },
+      { type: 'finish_metadata', truncated: false },
       { type: 'done' },
     ]);
   });
@@ -332,6 +333,7 @@ describe('createCliRuntime', () => {
 
     expect(events).toEqual([
       { type: 'text_final', text: '' },
+      { type: 'finish_metadata', truncated: false },
       { type: 'done' },
     ]);
   });
