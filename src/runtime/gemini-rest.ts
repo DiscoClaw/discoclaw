@@ -24,6 +24,16 @@ function parseSSEData(line: string): string | undefined {
 }
 
 export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
+  // Validate defaultModel eagerly so configuration errors surface at startup,
+  // not on the first request.  Empty string is allowed (caller must always
+  // supply params.model); non-empty values must pass the model-ID check.
+  if (opts.defaultModel) {
+    const check = validateGeminiModelId(opts.defaultModel);
+    if (!check.ok) {
+      throw new Error(`gemini-rest: invalid defaultModel: ${check.error}`);
+    }
+  }
+
   const capabilities: ReadonlySet<RuntimeCapability> = new Set(['streaming_text']);
   const baseUrl = opts.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
 

@@ -373,6 +373,18 @@ describe('Gemini REST runtime adapter', () => {
     expect(globalThis.fetch).toHaveBeenCalledOnce();
   });
 
+  it('throws at construction time if defaultModel is invalid', () => {
+    expect(() =>
+      createGeminiRestRuntime({ apiKey: 'test-key', defaultModel: '../evil' }),
+    ).toThrow('invalid defaultModel');
+  });
+
+  it('allows empty defaultModel at construction time', () => {
+    expect(() =>
+      createGeminiRestRuntime({ apiKey: 'test-key', defaultModel: '' }),
+    ).not.toThrow();
+  });
+
   it('supports custom baseUrl', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(
       makeSSEResponse([makeGeminiSSEData('ok')]),
