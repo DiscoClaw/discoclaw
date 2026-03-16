@@ -73,7 +73,7 @@
     "youtube-transcript-plus": "^1.2.0"
   },
   "simple-git-hooks": {
-    "pre-push": "pnpm build && pnpm test"
+    "pre-push": "bash scripts/pre-push-safety.sh && pnpm build && pnpm test"
   },
   "publishConfig": {
     "access": "public",

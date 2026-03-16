@@ -32,7 +32,9 @@ const TOOL_USE_NAME_LENGTH_GUIDANCE =
  */
 export const PHASE_SAFETY_REMINDER =
   'SAFETY (automated agent): Do not run rm -rf outside build artifact directories, ' +
-  'git push --force, git branch -D, DROP TABLE, or chmod 777. ' +
+  'git push --force, git branch -D, git init, git checkout --orphan, ' +
+  'git reset --hard <other-commit>, DROP TABLE, or chmod 777. ' +
+  'Do not switch branches or create new branches during implementation phases. ' +
   'Do not write to .env, root-policy.ts, ~/.ssh/, or ~/.claude/ paths. ' +
   'If a task requires any of these, report it instead of executing.';
 
