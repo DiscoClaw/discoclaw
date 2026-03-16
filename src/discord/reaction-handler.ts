@@ -350,11 +350,12 @@ function createReactionHandler(
           let historySection = '';
           if (params.messageHistoryBudget > 0) {
             try {
-              historySection = await fetchMessageHistory(
+              const historyResult = await fetchMessageHistory(
                 msg.channel as TextBasedChannel,
                 msg.id,
                 { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
               );
+              historySection = historyResult.text;
             } catch (err) {
               params.log?.warn({ err }, `${logPrefix}:history fetch failed`);
             }

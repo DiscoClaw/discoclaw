@@ -1,4 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
+
+import { downloadMessageImages } from './image-download.js';
+import type { AttachmentLike } from './image-download.js';
+
+vi.mock('./image-download.js', () => ({
+  downloadMessageImages: vi.fn(),
+}));
+
+const mockDownload = vi.mocked(downloadMessageImages);
 
 import { resolveThreadContext } from './thread-context.js';
 import type { ThreadLikeChannel, ThreadMessage } from './thread-context.js';
@@ -9,7 +18,7 @@ import type { ThreadLikeChannel, ThreadMessage } from './thread-context.js';
 
 function fakeMsg(
   id: string, content: string, username: string, bot = false,
-  extra?: { attachments?: { size: number }; embeds?: unknown[] },
+  extra?: { attachments?: ThreadMessage['attachments']; embeds?: unknown[] },
 ): ThreadMessage {
   return {
     id,
@@ -60,6 +69,10 @@ function fakeNonThread(): ThreadLikeChannel {
 // ---------------------------------------------------------------------------
 
 describe('resolveThreadContext', () => {
+  beforeEach(() => {
+    mockDownload.mockReset();
+  });
+
   it('returns null for non-thread channels', async () => {
     const result = await resolveThreadContext(fakeNonThread(), '100');
     expect(result).toBeNull();
@@ -459,5 +472,209 @@ describe('resolveThreadContext', () => {
     const charlieIdx = result!.section.indexOf('third');
     expect(aliceIdx).toBeLessThan(bobIdx);
     expect(bobIdx).toBeLessThan(charlieIdx);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Thread-history image tests
+  // ---------------------------------------------------------------------------
+
+  it('returns empty images array when historyImageBudget is not set', async () => {
+    const ch = fakeThread({
+      name: 'no-img-thread',
+      messages: [fakeMsg('2', 'hello', 'Alice')],
+    });
+
+    const result = await resolveThreadContext(ch, '100');
+    expect(result).not.toBeNull();
+    expect(result!.images).toEqual([]);
+    expect(mockDownload).not.toHaveBeenCalled();
+  });
+
+  it('supports AttachmentLike map in ThreadMessage attachments for hasMedia', async () => {
+    const att: AttachmentLike = {
+      url: 'https://cdn.discordapp.com/img.png',
+      name: 'img.png',
+      contentType: 'image/png',
+      size: 1024,
+    };
+    const attachments = new Map<string, AttachmentLike>([['1', att]]);
+
+    const ch = fakeThread({
+      name: 'att-test',
+      messages: [fakeMsg('2', '', 'Alice', false, { attachments })],
+    });
+
+    const result = await resolveThreadContext(ch, '100');
+    expect(result).not.toBeNull();
+    expect(result!.section).toContain('[Alice]: [attachment/embed]');
+  });
+
+  it('extracts and downloads images from thread history when historyImageBudget > 0', async () => {
+    const att: AttachmentLike = {
+      url: 'https://cdn.discordapp.com/img.png',
+      name: 'img.png',
+      contentType: 'image/png',
+      size: 1024,
+    };
+    const attachments = new Map<string, AttachmentLike>([['1', att]]);
+    const fakeImage = { base64: 'abc', mediaType: 'image/png' };
+
+    mockDownload.mockResolvedValueOnce({ images: [fakeImage], errors: [] });
+
+    const ch = fakeThread({
+      name: 'img-thread',
+      messages: [fakeMsg('2', 'check this', 'Alice', false, { attachments })],
+    });
+
+    const result = await resolveThreadContext(ch, '100', { historyImageBudget: 5 });
+    expect(result).not.toBeNull();
+    expect(result!.images).toEqual([fakeImage]);
+    expect(mockDownload).toHaveBeenCalledOnce();
+    expect(mockDownload).toHaveBeenCalledWith([att], 5);
+  });
+
+  it('passes all attachment types to downloadMessageImages for filtering', async () => {
+    const textAtt: AttachmentLike = {
+      url: 'https://cdn.discordapp.com/file.txt',
+      name: 'file.txt',
+      contentType: 'text/plain',
+      size: 100,
+    };
+    const imgAtt: AttachmentLike = {
+      url: 'https://cdn.discordapp.com/img.png',
+      name: 'img.png',
+      contentType: 'image/png',
+      size: 1024,
+    };
+    const attachments = new Map<string, AttachmentLike>([['1', textAtt], ['2', imgAtt]]);
+    const fakeImage = { base64: 'abc', mediaType: 'image/png' };
+
+    mockDownload.mockResolvedValueOnce({ images: [fakeImage], errors: [] });
+
+    const ch = fakeThread({
+      name: 'mixed-att-thread',
+      messages: [fakeMsg('2', 'mixed', 'Alice', false, { attachments })],
+    });
+
+    const result = await resolveThreadContext(ch, '100', { historyImageBudget: 5 });
+    expect(result).not.toBeNull();
+    expect(result!.images).toEqual([fakeImage]);
+    // Both attachments passed — downloadMessageImages handles filtering
+    expect(mockDownload).toHaveBeenCalledWith([textAtt, imgAtt], 5);
+  });
+
+  it('selects thread-history images newest-first', async () => {
+    const oldAtt: AttachmentLike = {
+      url: 'https://cdn.discordapp.com/old.png',
+      name: 'old.png',
+      contentType: 'image/png',
+      size: 1024,
+    };
+    const newAtt: AttachmentLike = {
+      url: 'https://cdn.discordapp.com/new.png',
+      name: 'new.png',
+      contentType: 'image/png',
+      size: 1024,
+    };
+
+    mockDownload.mockResolvedValueOnce({
+      images: [{ base64: 'new', mediaType: 'image/png' }],
+      errors: [],
+    });
+
+    const ch = fakeThread({
+      name: 'order-thread',
+      messages: [
+        fakeMsg('2', 'old msg', 'Alice', false, {
+          attachments: new Map([['1', oldAtt]]),
+        }),
+        fakeMsg('3', 'new msg', 'Bob', false, {
+          attachments: new Map([['2', newAtt]]),
+        }),
+      ],
+    });
+
+    const result = await resolveThreadContext(ch, '100', { historyImageBudget: 1 });
+    expect(result).not.toBeNull();
+    // downloadMessageImages receives new attachment first (newest-first)
+    expect(mockDownload).toHaveBeenCalledWith([newAtt, oldAtt], 1);
+  });
+
+  it('handles partial image download failures gracefully', async () => {
+    const att1: AttachmentLike = {
+      url: 'https://cdn.discordapp.com/good.png',
+      name: 'good.png',
+      contentType: 'image/png',
+      size: 1024,
+    };
+    const att2: AttachmentLike = {
+      url: 'https://cdn.discordapp.com/bad.png',
+      name: 'bad.png',
+      contentType: 'image/png',
+      size: 1024,
+    };
+    const attachments = new Map<string, AttachmentLike>([['1', att1], ['2', att2]]);
+    const fakeImage = { base64: 'abc', mediaType: 'image/png' };
+
+    mockDownload.mockResolvedValueOnce({
+      images: [fakeImage],
+      errors: ['bad.png: download failed'],
+    });
+
+    const log = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+    const ch = fakeThread({
+      name: 'partial-fail-thread',
+      messages: [fakeMsg('2', 'images here', 'Alice', false, { attachments })],
+    });
+
+    const result = await resolveThreadContext(ch, '100', { historyImageBudget: 5, log });
+    expect(result).not.toBeNull();
+    expect(result!.images).toEqual([fakeImage]);
+    expect(result!.section).toContain('[Alice]: images here');
+    expect(log.warn).toHaveBeenCalledWith(
+      { errors: ['bad.png: download failed'] },
+      'thread-context: image download errors',
+    );
+  });
+
+  it('handles complete image download failure gracefully', async () => {
+    const att: AttachmentLike = {
+      url: 'https://cdn.discordapp.com/img.png',
+      name: 'img.png',
+      contentType: 'image/png',
+      size: 1024,
+    };
+    const attachments = new Map<string, AttachmentLike>([['1', att]]);
+
+    mockDownload.mockRejectedValueOnce(new Error('network error'));
+
+    const log = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+
+    const ch = fakeThread({
+      name: 'crash-thread',
+      messages: [fakeMsg('2', 'oops', 'Alice', false, { attachments })],
+    });
+
+    const result = await resolveThreadContext(ch, '100', { historyImageBudget: 5, log });
+    expect(result).not.toBeNull();
+    expect(result!.images).toEqual([]);
+    expect(result!.section).toContain('[Alice]: oops');
+    expect(log.warn).toHaveBeenCalled();
+  });
+
+  it('skips image download when messages have no attachments', async () => {
+    const ch = fakeThread({
+      name: 'text-only-thread',
+      messages: [
+        fakeMsg('2', 'just text', 'Alice'),
+        fakeMsg('3', 'more text', 'Bob'),
+      ],
+    });
+
+    const result = await resolveThreadContext(ch, '100', { historyImageBudget: 5 });
+    expect(result).not.toBeNull();
+    expect(result!.images).toEqual([]);
+    expect(mockDownload).not.toHaveBeenCalled();
   });
 });

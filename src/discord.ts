@@ -17,6 +17,7 @@ export type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
 export { createMessageCreateHandler };
 export {
   fetchMessageHistory,
+  type MessageHistoryResult,
 } from './discord/message-history.js';
 export {
   ensureGroupDir,

@@ -621,8 +621,8 @@ async function gatherConversationContext(opts: ConversationContextOptions): Prom
         msg.id,
         { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
       );
-      if (history) {
-        contextParts.push(`Context (recent channel messages):\n${history}`);
+      if (history.text) {
+        contextParts.push(`Context (recent channel messages):\n${history.text}`);
       }
     } catch (err) {
       params.log?.warn({ err }, 'discord:context history fallback failed');
@@ -2877,6 +2877,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let stopReactionRemoved = false;
           // Declared before try so they remain accessible after the finally block closes.
           let historySection = '';
+          let historyAttachments: AttachmentLike[] = [];
           let summarySection = '';
           let existingSummaryText: string | null = null;
           let existingSummaryUpdatedAt: number | undefined;
@@ -2940,11 +2941,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           if (params.messageHistoryBudget > 0) {
             try {
-              historySection = await fetchMessageHistory(
+              const historyResult = await fetchMessageHistory(
                 msg.channel as TextBasedChannel,
                 msg.id,
                 { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
               );
+              historySection = historyResult.text;
+              historyAttachments = historyResult.historyAttachments;
             } catch (err) {
               params.log?.warn({ err }, 'discord:history fetch failed');
             }
@@ -3178,24 +3181,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             'invoke:start',
           );
 
-          // Collect images from reply reference (downloaded first, takes priority).
+          // Collect images across sources. Priority: direct > reply-ref > history.
+          // Each source fills the remaining MAX_IMAGES_PER_INVOCATION budget.
           let inputImages: ImageData[] | undefined;
-          const replyRefImages = replyRef?.images ?? [];
-          const replyRefImageCount = replyRefImages.length;
-          if (replyRefImageCount > 0) {
-            inputImages = [...replyRefImages];
-            params.log?.info({ imageCount: replyRefImageCount }, 'discord:reply-ref images downloaded');
-          }
 
-          // Download image attachments from the user message (remaining budget).
+          // 1. Direct message attachments (highest priority — full budget).
           if (msg.attachments && msg.attachments.size > 0) {
             try {
               const dlResult = await downloadMessageImages(
                 [...msg.attachments.values()],
-                MAX_IMAGES_PER_INVOCATION - replyRefImageCount,
+                MAX_IMAGES_PER_INVOCATION,
               );
               if (dlResult.images.length > 0) {
-                inputImages = [...(inputImages ?? []), ...dlResult.images];
+                inputImages = [...dlResult.images];
                 params.log?.info({ imageCount: dlResult.images.length }, 'discord:images downloaded');
               }
               if (dlResult.errors.length > 0) {
@@ -3227,6 +3225,18 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
+          // 2. Reply-reference images (remaining budget).
+          const replyRefImages = replyRef?.images ?? [];
+          if (replyRefImages.length > 0) {
+            const directCount = inputImages?.length ?? 0;
+            const refBudget = MAX_IMAGES_PER_INVOCATION - directCount;
+            if (refBudget > 0) {
+              const toAdd = replyRefImages.slice(0, refBudget);
+              inputImages = [...(inputImages ?? []), ...toAdd];
+              params.log?.info({ imageCount: toAdd.length }, 'discord:reply-ref images');
+            }
+          }
+
           // Fetch YouTube transcripts for URLs found in the message.
           try {
             const ytResult = await fetchYouTubeTranscripts(msg.content ?? '');
@@ -3243,6 +3253,36 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           } catch (err) {
             params.log?.warn({ err }, 'discord:youtube transcript fetch failed');
+          }
+
+          // 3. History images from thread/channel context (remaining budget).
+          if (historyAttachments.length > 0) {
+            const currentCount = inputImages?.length ?? 0;
+            const historyImageBudget = MAX_IMAGES_PER_INVOCATION - currentCount;
+            if (historyImageBudget > 0) {
+              try {
+                // Deduplicate: exclude attachment URLs already processed from the direct message.
+                const directUrls = new Set<string>();
+                if (msg.attachments) {
+                  for (const att of msg.attachments.values()) {
+                    directUrls.add(att.url);
+                  }
+                }
+                const deduped = historyAttachments.filter(a => !directUrls.has(a.url));
+                if (deduped.length > 0) {
+                  const dlResult = await downloadMessageImages(deduped, historyImageBudget);
+                  if (dlResult.images.length > 0) {
+                    inputImages = [...(inputImages ?? []), ...dlResult.images];
+                    params.log?.info({ imageCount: dlResult.images.length }, 'discord:history images downloaded');
+                  }
+                  if (dlResult.errors.length > 0) {
+                    params.log?.warn({ errors: dlResult.errors }, 'discord:history image download errors');
+                  }
+                }
+              } catch (err) {
+                params.log?.warn({ err }, 'discord:history image download failed');
+              }
+            }
           }
 
           let currentPrompt = prompt;

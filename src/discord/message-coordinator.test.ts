@@ -2,11 +2,16 @@
  * Tests guild-chat prompt assembly — verifies the capability-refusal grounding
  * rule is injected alongside the live action inventory so the model trusts
  * the per-turn inventory over generic product knowledge.
+ *
+ * Also tests image input precedence across direct, reply-reference, and
+ * history sources.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EngineEvent } from '../runtime/types.js';
+import type { EngineEvent, ImageData } from '../runtime/types.js';
+import { MAX_IMAGES_PER_INVOCATION } from '../runtime/types.js';
 import { _resetForTest as resetAbortRegistry } from './abort-registry.js';
 import { _resetForTest as resetInflightReplies } from './inflight-replies.js';
+import type { AttachmentLike } from './image-download.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -45,6 +50,22 @@ vi.mock('./transport-client.js', () => ({
   DiscordTransportClient: vi.fn(() => ({})),
 }));
 
+vi.mock('./image-download.js', () => ({
+  downloadMessageImages: vi.fn(async () => ({ images: [], errors: [] })),
+  resolveMediaType: vi.fn((att: any) => {
+    const ct = att?.contentType;
+    return ct && typeof ct === 'string' && ct.startsWith('image/') ? ct : null;
+  }),
+}));
+
+vi.mock('./message-history.js', () => ({
+  fetchMessageHistory: vi.fn(async () => ({ text: '', historyAttachments: [] })),
+}));
+
+vi.mock('./reply-reference.js', () => ({
+  resolveReplyReference: vi.fn(async () => null),
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -63,6 +84,25 @@ function makeCaptureRuntime() {
     get prompt() {
       return capturedPrompt;
     },
+  };
+  return runtime;
+}
+
+/** Runtime that captures both prompt and images passed to invoke. */
+function makeImageCaptureRuntime() {
+  let capturedPrompt = '';
+  let capturedImages: ImageData[] | undefined;
+  const runtime = {
+    id: 'test',
+    capabilities: new Set<string>(['streaming_text']),
+    async *invoke(opts: { prompt: string; images?: ImageData[] }): AsyncIterable<EngineEvent> {
+      capturedPrompt = opts.prompt;
+      capturedImages = opts.images;
+      yield { type: 'text_final', text: 'ok' };
+      yield { type: 'done' };
+    },
+    get prompt() { return capturedPrompt; },
+    get images() { return capturedImages; },
   };
   return runtime;
 }
@@ -129,7 +169,7 @@ function makeParams(runtime: any, overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
-function makeGuildMessage(reply: any) {
+function makeGuildMessage(reply: any, overrides: Record<string, unknown> = {}) {
   return {
     id: 'm1',
     type: 0,
@@ -150,6 +190,7 @@ function makeGuildMessage(reply: any) {
     embeds: [],
     mentions: { has: () => false },
     reply: vi.fn().mockResolvedValue(reply),
+    ...overrides,
   };
 }
 
@@ -165,6 +206,21 @@ function makeReply() {
 async function makeHandler(params: any, queue: any) {
   const { createMessageCreateHandler } = await import('./message-coordinator.js');
   return createMessageCreateHandler(params, queue);
+}
+
+/** Create a fake ImageData object with an identifiable label baked into base64. */
+function fakeImage(label: string): ImageData {
+  return { base64: Buffer.from(label).toString('base64'), mediaType: 'image/png' };
+}
+
+/** Create a fake AttachmentLike with a CDN URL. */
+function fakeAttachment(name: string, url?: string): AttachmentLike {
+  return {
+    url: url ?? `https://cdn.discordapp.com/${name}`,
+    name,
+    contentType: 'image/png',
+    size: 1024,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -213,5 +269,210 @@ describe('guild-chat prompt assembly — capability-refusal grounding', () => {
     await handler(msg as any);
 
     expect(runtime.prompt).not.toContain('Capability-refusal rule');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Image input precedence tests
+// ---------------------------------------------------------------------------
+
+describe('image input precedence — direct > reply-ref > history', () => {
+  let mockDownloadImages: ReturnType<typeof vi.fn>;
+  let mockFetchHistory: ReturnType<typeof vi.fn>;
+  let mockReplyRef: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    resetAbortRegistry();
+    resetInflightReplies();
+
+    const imgMod = await import('./image-download.js');
+    mockDownloadImages = vi.mocked(imgMod.downloadMessageImages);
+    // Reset to safe default — clearAllMocks only clears call history, not implementations.
+    mockDownloadImages.mockResolvedValue({ images: [], errors: [] });
+
+    const histMod = await import('./message-history.js');
+    mockFetchHistory = vi.mocked(histMod.fetchMessageHistory);
+    mockFetchHistory.mockResolvedValue({ text: '', historyAttachments: [] } as any);
+
+    const refMod = await import('./reply-reference.js');
+    mockReplyRef = vi.mocked(refMod.resolveReplyReference);
+    mockReplyRef.mockResolvedValue(null);
+  });
+
+  it('direct images appear before reply-ref images', async () => {
+    const directImg = fakeImage('direct-1');
+    const refImg = fakeImage('ref-1');
+
+    // downloadMessageImages is called once for direct attachments.
+    mockDownloadImages.mockResolvedValueOnce({ images: [directImg], errors: [] });
+    // resolveReplyReference already has downloaded images.
+    mockReplyRef.mockResolvedValue({ section: '[User]: hi', images: [refImg] });
+
+    const runtime = makeImageCaptureRuntime();
+    const reply = makeReply();
+    const att = fakeAttachment('pic.png');
+    const attachments = new Map([['1', att]]);
+    const msg = makeGuildMessage(reply, { attachments });
+    const params = makeParams(runtime);
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(runtime.images).toEqual([directImg, refImg]);
+  });
+
+  it('reply-ref images appear before history images', async () => {
+    const refImg = fakeImage('ref-1');
+    const histImg = fakeImage('hist-1');
+
+    // No direct attachments → downloadMessageImages not called for direct.
+    mockReplyRef.mockResolvedValue({ section: '[User]: hi', images: [refImg] });
+    // History returns attachments.
+    const histAtt = fakeAttachment('hist.png');
+    mockFetchHistory.mockResolvedValue({ text: 'history text', historyAttachments: [histAtt] });
+    // downloadMessageImages called once for history attachments.
+    mockDownloadImages.mockResolvedValueOnce({ images: [histImg], errors: [] });
+
+    const runtime = makeImageCaptureRuntime();
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply);
+    const params = makeParams(runtime, { messageHistoryBudget: 500 });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(runtime.images).toEqual([refImg, histImg]);
+  });
+
+  it('history images are downloaded newest-first (preserving fetchMessageHistory order)', async () => {
+    const histImgA = fakeImage('hist-a');
+    const histImgB = fakeImage('hist-b');
+
+    // History returns attachments in newest-first order.
+    const attNew = fakeAttachment('new.png');
+    const attOld = fakeAttachment('old.png');
+    mockFetchHistory.mockResolvedValue({
+      text: 'history',
+      historyAttachments: [attNew, attOld],
+    });
+    // downloadMessageImages receives them in the same order and returns both.
+    mockDownloadImages.mockResolvedValueOnce({ images: [histImgA, histImgB], errors: [] });
+
+    const runtime = makeImageCaptureRuntime();
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply);
+    const params = makeParams(runtime, { messageHistoryBudget: 500 });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    // Verify downloadMessageImages received attachments in newest-first order.
+    expect(mockDownloadImages).toHaveBeenCalledWith(
+      [attNew, attOld],
+      expect.any(Number),
+    );
+    expect(runtime.images).toEqual([histImgA, histImgB]);
+  });
+
+  it('duplicate URLs between direct and history are only counted once', async () => {
+    const directImg = fakeImage('direct-shared');
+    const histImg = fakeImage('hist-unique');
+
+    const sharedUrl = 'https://cdn.discordapp.com/shared.png';
+    const directAtt = fakeAttachment('shared.png', sharedUrl);
+    const histAttShared = fakeAttachment('shared.png', sharedUrl);
+    const histAttUnique = fakeAttachment('unique.png');
+
+    // Direct download returns one image.
+    mockDownloadImages
+      .mockResolvedValueOnce({ images: [directImg], errors: [] })
+      // History download receives only the unique attachment (deduped).
+      .mockResolvedValueOnce({ images: [histImg], errors: [] });
+
+    mockFetchHistory.mockResolvedValue({
+      text: 'history',
+      historyAttachments: [histAttShared, histAttUnique],
+    });
+
+    const runtime = makeImageCaptureRuntime();
+    const reply = makeReply();
+    const attachments = new Map([['1', directAtt]]);
+    const msg = makeGuildMessage(reply, { attachments });
+    const params = makeParams(runtime, { messageHistoryBudget: 500 });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    // The second downloadMessageImages call should only receive the unique attachment.
+    expect(mockDownloadImages).toHaveBeenCalledTimes(2);
+    const historyCall = mockDownloadImages.mock.calls[1];
+    expect(historyCall![0]).toEqual([histAttUnique]);
+    expect(runtime.images).toEqual([directImg, histImg]);
+  });
+
+  it('history download is skipped when higher-priority sources exhaust the cap', async () => {
+    // Fill budget with direct images (MAX_IMAGES_PER_INVOCATION).
+    const directImages = Array.from({ length: MAX_IMAGES_PER_INVOCATION }, (_, i) =>
+      fakeImage(`direct-${i}`),
+    );
+    mockDownloadImages.mockResolvedValueOnce({ images: directImages, errors: [] });
+
+    // History has attachments, but budget should be exhausted.
+    const histAtt = fakeAttachment('hist.png');
+    mockFetchHistory.mockResolvedValue({
+      text: 'history',
+      historyAttachments: [histAtt],
+    });
+
+    const runtime = makeImageCaptureRuntime();
+    const reply = makeReply();
+    const directAtts = Array.from({ length: MAX_IMAGES_PER_INVOCATION }, (_, i) =>
+      fakeAttachment(`img-${i}.png`),
+    );
+    const attachments = new Map(directAtts.map((a, i) => [String(i), a]));
+    const msg = makeGuildMessage(reply, { attachments });
+    const params = makeParams(runtime, { messageHistoryBudget: 500 });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    // downloadMessageImages should be called only once (for direct), not for history.
+    expect(mockDownloadImages).toHaveBeenCalledTimes(1);
+    expect(runtime.images).toEqual(directImages);
+  });
+
+  it('reply-ref images are truncated when direct images consume most of the budget', async () => {
+    // Direct fills budget minus 1 slot.
+    const directImages = Array.from({ length: MAX_IMAGES_PER_INVOCATION - 1 }, (_, i) =>
+      fakeImage(`direct-${i}`),
+    );
+    const refImages = [fakeImage('ref-0'), fakeImage('ref-1'), fakeImage('ref-2')];
+
+    mockDownloadImages.mockResolvedValueOnce({ images: directImages, errors: [] });
+    mockReplyRef.mockResolvedValue({ section: '[User]: hi', images: refImages });
+
+    const runtime = makeImageCaptureRuntime();
+    const reply = makeReply();
+    const directAtts = Array.from({ length: MAX_IMAGES_PER_INVOCATION - 1 }, (_, i) =>
+      fakeAttachment(`img-${i}.png`),
+    );
+    const attachments = new Map(directAtts.map((a, i) => [String(i), a]));
+    const msg = makeGuildMessage(reply, { attachments });
+    const params = makeParams(runtime);
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    // Only 1 slot remains for reply-ref — should get only the first ref image.
+    expect(runtime.images).toHaveLength(MAX_IMAGES_PER_INVOCATION);
+    expect(runtime.images![0]).toEqual(directImages[0]);
+    expect(runtime.images![runtime.images!.length - 1]).toEqual(refImages[0]);
   });
 });
