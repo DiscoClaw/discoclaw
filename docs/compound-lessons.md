@@ -121,6 +121,13 @@ Source: task/chat context - `cronCreate` was present in the per-turn Discord act
 Applied: docs/compound-lessons.md
 Status: active
 
+### 2026-03-15 - Derive prompt text from runtime-resolved config, not static literals
+Tags: #prompting #workflow #runtime
+Lesson: When generated action documentation or prompt sections describe runtime defaults (e.g. the default image-generation model), derive that text from the same runtime-resolved config that the execution path uses. Static literals in prompt text will drift after `!models set` overrides, env changes, or provider fallbacks, causing the AI to explicitly force a stale model name instead of omitting the field and letting the runtime default take effect.
+Source: task/chat context - `imagegenActionsPromptSection()` emitted static model guidance while `resolveDefaultModel()` and `!models set imagegen` used runtime config, causing the AI to hard-code `gpt-image-1` even when a different default was configured
+Applied: (PR implementing runtime-resolved imagegen default in prompt section and `!models set imagegen` persistence)
+Status: active
+
 ### 2026-03-10 - Keep interactive Discord trigger context in sync
 Tags: #workflow #task #discord
 Lesson: Interactive Discord trigger paths, including the message handler and reaction handler, must hydrate equivalent conversational context, including nearby channel history. When adding or changing an interactive trigger path, audit it against the main message handler's context-gathering steps so the AI does not ask for information that is already present in-channel; cron and webhook paths are non-interactive and exempt from this invariant.

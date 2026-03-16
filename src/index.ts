@@ -52,6 +52,7 @@ import type { CronContext } from './discord/actions-crons.js';
 import type { ForgeContext } from './discord/actions-forge.js';
 import type { PlanContext } from './discord/actions-plan.js';
 import type { MemoryContext } from './discord/actions-memory.js';
+import { resolveDefaultModel as resolveImagegenDefaultModel } from './discord/actions-imagegen.js';
 import type { ImagegenContext } from './discord/actions-imagegen.js';
 import type { SpawnContext } from './discord/actions-spawn.js';
 import { cancelAll as cancelAllSpawns } from './discord/spawn-registry.js';
@@ -185,6 +186,7 @@ const envModelDefaults: ModelConfig = {
 };
 if (cfg.forgeDrafterModel) envModelDefaults['forge-drafter'] = cfg.forgeDrafterModel;
 if (cfg.forgeAuditorModel) envModelDefaults['forge-auditor'] = cfg.forgeAuditorModel;
+if (cfg.imagegenDefaultModel) envModelDefaults['imagegen'] = cfg.imagegenDefaultModel;
 
 // --- PID lock: prevent duplicate bot instances ---
 const pidLockDir = dataDir ?? path.join(__dirname, '..', 'data');
@@ -1139,6 +1141,7 @@ const clearOverride = (role?: ModelRole): void => {
     'cron',
     'cron-exec',
     'voice',
+    'imagegen',
   ];
   if (!role) {
     // Reset all roles to env defaults
@@ -1747,6 +1750,11 @@ if (taskCtx) {
       geminiApiKey: cfg.imagegenGeminiApiKey,
       defaultModel: cfg.imagegenDefaultModel,
     };
+    // Apply persisted imagegen model from models.json (overrides env default).
+    if (currentModelConfig['imagegen']) {
+      botParams.imagegenCtx.defaultModel = currentModelConfig['imagegen'];
+      log.info({ imagegenModel: currentModelConfig['imagegen'] }, 'models: imagegen model applied');
+    }
     log.info('imagegen:action context initialized');
   }
 
@@ -1913,6 +1921,7 @@ if (taskCtx) {
             channelContextPath: voiceChannelContext?.contextPath,
             isThread: false,
             userText: text,
+            imagegenDefaultModel: botParams.imagegenCtx ? resolveImagegenDefaultModel(botParams.imagegenCtx) : undefined,
           },
         );
         actionSchemaSelection = {

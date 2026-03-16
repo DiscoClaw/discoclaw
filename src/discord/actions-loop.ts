@@ -138,6 +138,7 @@ type LoopActionsApi = {
       channelContextPath?: string | null;
       isThread?: boolean;
       userText?: string;
+      imagegenDefaultModel?: string;
     },
   ) => LoopPromptSelection;
   appendActionResults: (

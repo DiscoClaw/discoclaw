@@ -96,6 +96,7 @@ const ROLE_DESCRIPTIONS: Record<ModelRole, string> = {
   cron: 'Cron auto-tagging and model classification',
   'cron-exec': 'Default model for cron job execution (overridden by per-job settings)',
   voice: 'Voice channel AI responses',
+  imagegen: 'Default model for image generation',
 };
 
 // ---------------------------------------------------------------------------
@@ -301,6 +302,14 @@ export function executeConfigAction(
             return { ok: false, error: 'Voice subsystem not configured' };
           }
           break;
+        case 'imagegen':
+          if (bp.imagegenCtx) {
+            bp.imagegenCtx.defaultModel = model;
+            changes.push(`imagegen → ${model}`);
+          } else {
+            return { ok: false, error: 'Imagegen subsystem not configured' };
+          }
+          break;
         default:
           return { ok: false, error: `Unknown role: ${String((action as { role: unknown }).role)}` };
       }
@@ -408,6 +417,20 @@ export function executeConfigAction(
               }
             }
             break;
+          case 'imagegen':
+            if (bp.imagegenCtx) {
+              // Restore the fallback-resolved default (env setting or provider-based fallback).
+              const igEnvDefault = defaults['imagegen'];
+              if (igEnvDefault) {
+                bp.imagegenCtx.defaultModel = igEnvDefault;
+              } else {
+                // Clear override so resolveDefaultModel falls back to provider detection.
+                bp.imagegenCtx.defaultModel = undefined;
+              }
+              const resolvedIg = resolveDefaultModel(bp.imagegenCtx);
+              resetChanges.push(`imagegen → ${resolvedIg}`);
+            }
+            break;
         }
 
         // Clear the override marker regardless of whether we had a default.
@@ -460,7 +483,7 @@ export function executeConfigAction(
       if (bp.imagegenCtx) {
         const igModel = resolveDefaultModel(bp.imagegenCtx);
         const igProvider = resolveProvider(igModel);
-        rows.push(['imagegen', igModel, `Image generation (${igProvider})`, '']);
+        rows.push(['imagegen', igModel, `Image generation (${igProvider})`, ovr('imagegen')]);
       } else {
         rows.push(['imagegen', 'setup-required', 'Image generation (setup required)', '']);
       }
@@ -556,7 +579,7 @@ export function configActionsPromptSection(): string {
 <discord-action>{"type":"modelSet","role":"chat","model":"sonnet"}</discord-action>
 <discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
 \`\`\`
-- \`role\` (required): One of \`chat\`, \`plan-run\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`.
+- \`role\` (required): One of \`chat\`, \`plan-run\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`, \`imagegen\`.
 - \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini\` — for \`chat\` and \`voice\` roles, swaps the active runtime adapter independently), or \`default\` (for cron-exec only, to revert to the startup default for that role). For the \`voice\` role, setting a model name that belongs to a different provider's tier map (e.g. \`sonnet\` while voice is on Gemini) will auto-switch the voice runtime to match.
 
 **Roles:**
@@ -571,6 +594,7 @@ export function configActionsPromptSection(): string {
 | \`cron\` | Cron auto-tagging and model classification (overrides fast) |
 | \`cron-exec\` | Default model for cron job execution; per-job overrides (via \`cronUpdate\`) take priority |
 | \`voice\` | Voice channel AI responses |
+| \`imagegen\` | Default model for image generation |
 
 Changes are **persisted** to \`models.json\` and survive restart. Use \`!models reset\` to clear overrides and revert to defaults.
 

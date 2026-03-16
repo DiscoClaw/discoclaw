@@ -15,7 +15,7 @@ export type ModelsCommand =
 // Parser
 // ---------------------------------------------------------------------------
 
-const VALID_ROLES = new Set<string>(['chat', 'plan-run', 'fast', 'forge-drafter', 'forge-auditor', 'summary', 'cron', 'cron-exec', 'voice']);
+const VALID_ROLES = new Set<string>(['chat', 'plan-run', 'fast', 'forge-drafter', 'forge-auditor', 'summary', 'cron', 'cron-exec', 'voice', 'imagegen']);
 
 export function parseModelsCommand(content: string): ModelsCommand | null {
   const tokens = String(content ?? '').trim().split(/\s+/).filter(Boolean);
@@ -74,7 +74,7 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '- `!models reset <role>` — revert a specific role to its startup default',
       '- `!models help` — this message',
       '',
-      '**Roles:** `chat`, `plan-run`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`, `voice`',
+      '**Roles:** `chat`, `plan-run`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`, `voice`, `imagegen`',
       '',
       '**Runtime switching (chat and voice roles):**',
       'Setting the `chat` or `voice` role to a runtime name (`openrouter`, `openai`, `gemini`, `codex`, `claude`) switches the active runtime adapter so invocations route through that provider.',
@@ -93,7 +93,7 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '- `!models reset` — clear all overrides and revert to startup defaults',
       '- `!models reset chat` — revert only the chat model to its startup default',
       '',
-      '**Note:** Image generation (`imagegen`) is shown by default in `!models`, even when setup is still required. It is not switchable via `!models set` — configure it via environment variables instead.',
+      '**Note:** `!models set imagegen <model>` changes the default image generation model at runtime (persisted). Use `!models reset imagegen` to revert to the env/fallback default.',
       '',
       '**TTS voice:** Use `!voice set <name>` to switch the Deepgram TTS voice at runtime (e.g. `!voice set aura-2-luna-en`). See `!voice help` for details.',
     ].join('\n');
