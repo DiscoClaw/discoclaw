@@ -214,7 +214,7 @@ export function listKnownModelValues(): string[] {
  * Only runtimes / tiers that need an explicit effort are listed.
  */
 const reasoningEffortDefaults: Record<string, Partial<Record<ModelTier, string>>> = {
-  claude_code: { capable: 'medium', deep: 'max' },
+  claude_code: { capable: 'high', deep: 'max' },
   codex: { capable: 'high', deep: 'xhigh' },
 };
 

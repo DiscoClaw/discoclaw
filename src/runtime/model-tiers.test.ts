@@ -162,8 +162,8 @@ describe('resolveReasoningEffort', () => {
     expect(resolveReasoningEffort('fast', 'claude_code')).toBeUndefined();
   });
 
-  it('returns medium for claude_code capable tier', () => {
-    expect(resolveReasoningEffort('capable', 'claude_code')).toBe('medium');
+  it('returns high for claude_code capable tier', () => {
+    expect(resolveReasoningEffort('capable', 'claude_code')).toBe('high');
   });
 
   it('returns max for claude_code deep tier', () => {
