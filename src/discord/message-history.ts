@@ -1,5 +1,7 @@
 import type { TextBasedChannel } from 'discord.js';
 
+import type { AttachmentLike } from './image-download.js';
+
 export type MessageHistoryOpts = {
   budgetChars: number;
   fetchLimit?: number;
@@ -7,22 +9,32 @@ export type MessageHistoryOpts = {
   excludeMessageIds?: Iterable<string>;
 };
 
+export type MessageHistoryResult = {
+  /** Formatted text transcript in chronological order. */
+  text: string;
+  /** Attachments from history messages, ordered newest-first for budget trimming. */
+  historyAttachments: AttachmentLike[];
+};
+
+const EMPTY_RESULT: MessageHistoryResult = { text: '', historyAttachments: [] };
+
 /**
  * Fetch recent messages from a Discord channel and format them as conversation
  * history suitable for prepending to a prompt.
  *
- * Returns an empty string if no history is available or on any fetch error.
+ * Returns text in chronological order and attachments newest-first so the
+ * caller can trim to an image budget starting from the most recent.
  */
 export async function fetchMessageHistory(
   channel: TextBasedChannel,
   beforeMessageId: string | undefined,
   opts: MessageHistoryOpts,
-): Promise<string> {
-  if (opts.budgetChars <= 0) return '';
+): Promise<MessageHistoryResult> {
+  if (opts.budgetChars <= 0) return EMPTY_RESULT;
 
   const excludedMessageIds = new Set(opts.excludeMessageIds ?? []);
   const requestedLimit = Math.max(0, opts.fetchLimit ?? 10);
-  if (requestedLimit <= 0) return '';
+  if (requestedLimit <= 0) return EMPTY_RESULT;
 
   let messages;
   try {
@@ -33,17 +45,17 @@ export async function fetchMessageHistory(
         : { limit },
     );
   } catch {
-    return '';
+    return EMPTY_RESULT;
   }
 
-  if (!messages || messages.size === 0) return '';
+  if (!messages || messages.size === 0) return EMPTY_RESULT;
 
   // Discord API returns newest-first; convert to array and reverse to chronological order.
   const sorted = [...messages.values()]
     .filter((message) => !excludedMessageIds.has(message.id))
     .reverse();
 
-  if (sorted.length === 0) return '';
+  if (sorted.length === 0) return EMPTY_RESULT;
 
   // Build history from most recent backward so the most relevant context is kept.
   let remaining = opts.budgetChars;
@@ -71,6 +83,18 @@ export async function fetchMessageHistory(
     }
   }
 
-  if (selected.length === 0) return '';
-  return selected.join('\n');
+  // Extract attachments newest-first for downstream image budget trimming.
+  const historyAttachments: AttachmentLike[] = [];
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    const m = sorted[i]!;
+    const atts = (m as unknown as Record<string, unknown>).attachments;
+    if (atts && typeof (atts as Record<string, unknown>).values === 'function') {
+      for (const a of (atts as { values(): Iterable<AttachmentLike> }).values()) {
+        historyAttachments.push(a);
+      }
+    }
+  }
+
+  const text = selected.length > 0 ? selected.join('\n') : '';
+  return { text, historyAttachments };
 }

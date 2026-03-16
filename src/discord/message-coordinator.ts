@@ -621,8 +621,8 @@ async function gatherConversationContext(opts: ConversationContextOptions): Prom
         msg.id,
         { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
       );
-      if (history) {
-        contextParts.push(`Context (recent channel messages):\n${history}`);
+      if (history.text) {
+        contextParts.push(`Context (recent channel messages):\n${history.text}`);
       }
     } catch (err) {
       params.log?.warn({ err }, 'discord:context history fallback failed');
@@ -2940,11 +2940,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           if (params.messageHistoryBudget > 0) {
             try {
-              historySection = await fetchMessageHistory(
+              const historyResult = await fetchMessageHistory(
                 msg.channel as TextBasedChannel,
                 msg.id,
                 { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
               );
+              historySection = historyResult.text;
             } catch (err) {
               params.log?.warn({ err }, 'discord:history fetch failed');
             }
