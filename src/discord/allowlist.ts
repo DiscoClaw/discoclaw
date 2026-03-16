@@ -40,3 +40,16 @@ export function isTrustedBot(allow: Set<string>, botId: string): boolean {
   if (allow.size === 0) return false;
   return allow.has(botId);
 }
+
+/**
+ * Check whether a requester is authorized for config-mutating actions.
+ * Fail closed: missing or empty allowlist, or missing requesterId, denies.
+ */
+export function isConfigAuthorized(
+  allowUserIds: Set<string> | undefined,
+  requesterId: string | undefined,
+): boolean {
+  if (!requesterId) return false;
+  if (!allowUserIds || allowUserIds.size === 0) return false;
+  return allowUserIds.has(requesterId);
+}

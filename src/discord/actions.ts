@@ -44,10 +44,12 @@ import type { VoiceActionRequest, VoiceContext } from './actions-voice.js';
 import { SPAWN_ACTION_TYPES, executeSpawnActions, spawnActionsPromptSection } from './actions-spawn.js';
 import type { SpawnActionRequest, SpawnContext } from './actions-spawn.js';
 import { describeDestructiveConfirmationRequirement } from './destructive-confirmation.js';
+import { checkConfigAuthorization } from './action-dispatcher.js';
 import { computeMarkdownCodeRanges } from './markdown-code-ranges.js';
 import { parseCapsuleBlock } from './capsule.js';
 import type { ContinuationCapsule } from './capsule.js';
 export { computeMarkdownCodeRanges } from './markdown-code-ranges.js';
+export { withoutRequesterGatedActionFlags } from './action-flags.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,6 +61,8 @@ export type ActionContext = {
   channelId: string;
   messageId: string;
   requesterId?: string;
+  /** Allowlisted user IDs for config-mutation authorization. */
+  allowUserIds?: Set<string>;
   threadParentId?: string | null;
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
   deferDepth?: number;
@@ -120,17 +124,6 @@ export type RequesterDenyAll = { readonly __requesterDenyAll: true };
 export type RequesterMemberContext = GuildMember | RequesterDenyAll | undefined;
 
 export const REQUESTER_MEMBER_DENY_ALL: RequesterDenyAll = { __requesterDenyAll: true };
-
-export function withoutRequesterGatedActionFlags(flags: ActionCategoryFlags): ActionCategoryFlags {
-  return {
-    ...flags,
-    channels: false,
-    messaging: false,
-    guild: false,
-    moderation: false,
-    polls: false,
-  };
-}
 
 import { appendOutsideFence } from './output-utils.js';
 import type { LoggerLike } from '../logging/logger-like.js';
@@ -502,6 +495,13 @@ export async function executeDiscordActions(
       if (!destructiveCheck.allow) {
         result = { ok: false, error: destructiveCheck.error };
         results.push(result);
+        continue;
+      }
+
+      // Fail-fast: deny config-mutating actions from unauthorized requesters.
+      const configAuthResult = checkConfigAuthorization(action.type, ctx.requesterId, ctx.allowUserIds);
+      if (configAuthResult) {
+        results.push(configAuthResult);
         continue;
       }
 

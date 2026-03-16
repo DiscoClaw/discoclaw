@@ -992,6 +992,7 @@ function createReactionHandler(
                 guild: msg.guild,
                 client: msg.client,
                 requesterId: user.id,
+                allowUserIds: params.allowUserIds,
                 channelId: msg.channelId,
                 messageId: msg.id,
                 threadParentId,

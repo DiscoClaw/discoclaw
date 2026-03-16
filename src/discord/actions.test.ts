@@ -425,7 +425,7 @@ describe('withoutRequesterGatedActionFlags', () => {
       forge: true,
       plan: true,
       memory: true,
-      config: true,
+      config: false,
       defer: true,
       loop: true,
       imagegen: true,
