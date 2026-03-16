@@ -162,12 +162,12 @@ describe('resolveReasoningEffort', () => {
     expect(resolveReasoningEffort('fast', 'claude_code')).toBeUndefined();
   });
 
-  it('returns medium for claude_code capable tier', () => {
-    expect(resolveReasoningEffort('capable', 'claude_code')).toBe('medium');
+  it('returns high for claude_code capable tier', () => {
+    expect(resolveReasoningEffort('capable', 'claude_code')).toBe('high');
   });
 
-  it('returns high for claude_code deep tier', () => {
-    expect(resolveReasoningEffort('deep', 'claude_code')).toBe('high');
+  it('returns max for claude_code deep tier', () => {
+    expect(resolveReasoningEffort('deep', 'claude_code')).toBe('max');
   });
 
   it('returns undefined for runtimes without effort mappings', () => {
