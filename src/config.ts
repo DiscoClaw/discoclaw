@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { parseAllowBotIds, parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
+import { isAllowlisted, parseAllowBotIds, parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
 import { parseDashboardTrustedHosts } from './dashboard/options.js';
 
 export const KNOWN_TOOLS = new Set([
@@ -255,6 +255,15 @@ export type DiscoclawConfig = {
 
   serviceName: string;
 };
+
+/**
+ * Check whether a Discord user is authorized for config-mutating actions.
+ * Uses the DISCORD_ALLOW_USER_IDS allowlist as the sole authorization source.
+ * Fails closed: returns false when the allowlist is empty.
+ */
+export function isAuthorizedUser(config: DiscoclawConfig, userId: string): boolean {
+  return isAllowlisted(config.allowUserIds, userId);
+}
 
 function parseBoolean(
   env: NodeJS.ProcessEnv,
