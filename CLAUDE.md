@@ -30,6 +30,7 @@ Never auto-load all `.context/` modules. Read only what the task requires.
 | Architecture / system overview | `.context/architecture.md` |
 | Tool capabilities / browser automation | `.context/tools.md` |
 | Voice system (STT/TTS, audio pipeline, actions) | `.context/voice.md` |
+| Cron / scheduled tasks / automations | `.context/automations.md` |
 
 See `.context/README.md` for details.
 

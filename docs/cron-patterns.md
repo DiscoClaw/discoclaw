@@ -1,5 +1,7 @@
 # Cron Patterns & Recipes
 
+> **Quick-reference context module:** [`.context/automations.md`](../.context/automations.md) — compact cheat sheet with a pattern summary table. Load it instead of this full cookbook when you only need a reminder of which patterns exist.
+
 Worked examples showing how to compose the cron system's primitives into real workflows. Each pattern includes copy-pasteable action blocks and prompt templates.
 
 For primitive reference (state, silent mode, routing, chaining, etc.), see [docs/cron.md](cron.md).
