@@ -148,3 +148,10 @@ Lesson: Any new Discord action category that performs config mutations or privil
 Source: security audit of config-mutating bot actions — model selection, model reset, image-generation role, and voice settings were exposed to arbitrary requesters before requester gating was applied
 Applied: `src/discord/action-flags.ts`, `src/discord/actions.ts`, `src/config/config-actions.ts`, requester-gating checks in message-coordinator and cron executor
 Status: active
+
+### 2026-03-16 - Bound action-result payloads and surface model truncation explicitly
+Tags: #discord #prompting #runtime #workflow
+Lesson: Two reusable patterns for follow-up prompt reliability: (1) action-result payloads (e.g. `readMessages`, `cronShow`) must be bounded/truncated before they are injected into follow-up prompts — unbounded output crowds out the reasoning and action blocks the model needs to produce a useful next turn; (2) model response truncation caused by output-token limits must be surfaced as explicit runtime metadata (e.g. a `finish_reason` or `truncated` flag) rather than inferred from stream termination alone, so the orchestrator can detect incomplete responses and retry or inform the user instead of silently forwarding a cut-off answer.
+Source: task/chat context - oversized `readMessages`/`cronShow` action results caused follow-up prompt failures; silently truncated model responses were mistaken for complete answers
+Applied: docs/compound-lessons.md
+Status: active

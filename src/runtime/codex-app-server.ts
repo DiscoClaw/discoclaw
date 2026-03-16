@@ -2063,6 +2063,13 @@ function summarizeTraceEvent(event: EngineEvent): Record<string, unknown> {
         mediaType: event.image.mediaType,
       };
 
+    case 'finish_metadata':
+      return {
+        type: event.type,
+        truncated: event.truncated,
+        ...(event.finishReason ? { finishReason: event.finishReason } : {}),
+      };
+
     case 'done':
       return { type: event.type };
   }

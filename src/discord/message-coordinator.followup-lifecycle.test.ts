@@ -30,6 +30,7 @@ vi.mock('./actions.js', () => ({
   })),
   buildDisplayResultLines: vi.fn(() => ['Succeeded: general, random']),
   buildAllResultLines: vi.fn(() => ['Succeeded: general, random']),
+  buildCappedResultLines: vi.fn(() => ['Succeeded: general, random']),
   appendActionResults: vi.fn((body: string) => `${body}\n> general, random`),
   withoutRequesterGatedActionFlags: vi.fn((flags: unknown) => flags),
 }));

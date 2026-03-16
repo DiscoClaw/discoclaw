@@ -241,6 +241,12 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
                 const content: string = assistantMsg.content ?? '';
                 if (content) yield { type: 'text_delta', text: content };
                 yield { type: 'text_final', text: content };
+                const toolLoopFinishReason: string | undefined = choice?.finish_reason;
+                yield {
+                  type: 'finish_metadata',
+                  truncated: toolLoopFinishReason === 'length',
+                  ...(toolLoopFinishReason ? { finishReason: toolLoopFinishReason } : {}),
+                };
                 yield { type: 'done' };
                 return;
               }
@@ -304,6 +310,7 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
             });
 
             let accumulated = '';
+            let streamFinishReason: string | undefined;
 
             const response = await fetchWithOpenAIBearerAuth({
               url,
@@ -343,17 +350,25 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
 
               if (data === '[DONE]') {
                 yield { type: 'text_final', text: accumulated };
+                yield {
+                  type: 'finish_metadata',
+                  truncated: streamFinishReason === 'length',
+                  ...(streamFinishReason ? { finishReason: streamFinishReason } : {}),
+                };
                 yield { type: 'done' };
                 return true;
               }
 
               try {
                 const parsed = JSON.parse(data);
-                const content = parsed?.choices?.[0]?.delta?.content;
+                const choice = parsed?.choices?.[0];
+                const content = choice?.delta?.content;
                 if (content) {
                   accumulated += content;
                   yield { type: 'text_delta', text: content };
                 }
+                const chunkFinish: string | undefined = choice?.finish_reason;
+                if (chunkFinish) streamFinishReason = chunkFinish;
               } catch {
                 // Skip unparseable lines
               }
@@ -395,6 +410,11 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
 
             // Stream ended without [DONE] — emit what we have
             yield { type: 'text_final', text: accumulated };
+            yield {
+              type: 'finish_metadata',
+              truncated: streamFinishReason === 'length',
+              ...(streamFinishReason ? { finishReason: streamFinishReason } : {}),
+            };
             yield { type: 'done' };
           }
         } catch (err) {

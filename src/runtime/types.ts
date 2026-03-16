@@ -125,6 +125,7 @@ export type EngineEvent =
   | { type: 'usage'; inputTokens?: number; outputTokens?: number; totalTokens?: number; costUsd?: number }
   | RuntimeErrorEvent
   | RuntimeFailureEvent
+  | { type: 'finish_metadata'; truncated: boolean; finishReason?: string }
   | { type: 'done' };
 
 export type RuntimeCapability =
