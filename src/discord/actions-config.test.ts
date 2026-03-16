@@ -259,7 +259,7 @@ describe('modelShow imagegen row', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.summary).toContain('imagegen');
-    expect(result.summary).toContain('imagen-4.0-generate-001');
+    expect(result.summary).toContain('gemini-3.1-flash-image-preview');
     expect(result.summary).toContain('gemini');
   });
 
@@ -284,15 +284,15 @@ describe('modelShow imagegen row', () => {
     expect(result.summary).toContain('Image generation (setup required)');
   });
 
-  it('defaults to dall-e-3/openai when both apiKey and geminiApiKey are set', () => {
+  it('defaults to native Gemini when both apiKey and geminiApiKey are set', () => {
     const imagegenCtx: ImagegenContext = { apiKey: 'sk-test', geminiApiKey: 'gk-test' };
     const ctx = makeCtx({ imagegenCtx });
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.summary).toContain('imagegen');
-    expect(result.summary).toContain('dall-e-3');
-    expect(result.summary).toContain('openai');
+    expect(result.summary).toContain('gemini-3.1-flash-image-preview');
+    expect(result.summary).toContain('gemini');
   });
 });
 
