@@ -141,3 +141,10 @@ Lesson: Interactive Discord trigger paths, including the message handler and rea
 Source: task thread/chat context - reaction handler missed recent channel history that the main message handler already includes
 Applied: docs/compound-lessons.md
 Status: active
+
+### 2026-03-16 - New mutating action categories must opt into requester gating
+Tags: #audit #workflow #discord
+Lesson: Any new Discord action category that performs config mutations or privileged operations must be requester-gated behind the `DISCORD_ALLOW_USER_IDS` allowlist. When a new category is added, `withoutRequesterGatedActionFlags` in `src/discord/action-flags.ts` must be updated in lockstep to strip that category's flag for non-allowlisted requesters. Forgetting to add the category there means untrusted requesters (bot-triggered turns, non-allowlisted users, cron with untrusted authors) silently retain access to the mutating actions.
+Source: security audit of config-mutating bot actions — model selection, model reset, image-generation role, and voice settings were exposed to arbitrary requesters before requester gating was applied
+Applied: `src/discord/action-flags.ts`, `src/discord/actions.ts`, `src/config/config-actions.ts`, requester-gating checks in message-coordinator and cron executor
+Status: active
