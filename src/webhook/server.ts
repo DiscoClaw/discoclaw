@@ -18,6 +18,9 @@ import { sanitizeExternalContent } from '../sanitize-external.js';
 
 const WEBHOOK_MAX_BODY_BYTES = 256 * 1024;
 
+/** Property names that must never be used as config keys to prevent prototype-pollution crashes. */
+const PROTO_POLLUTION_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 export type WebhookSourceConfig = {
   /** HMAC-SHA256 secret used to verify the X-Hub-Signature-256 header. */
   secret: string;
@@ -172,6 +175,11 @@ export async function startWebhookServer(opts: WebhookServerOptions = {}): Promi
     try {
       source = decodeURIComponent(match[1]);
     } catch {
+      respondWebhook(res, 400, 'Bad request');
+      return;
+    }
+
+    if (PROTO_POLLUTION_KEYS.has(source)) {
       respondWebhook(res, 400, 'Bad request');
       return;
     }

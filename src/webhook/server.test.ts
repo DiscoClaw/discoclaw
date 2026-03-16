@@ -208,6 +208,24 @@ describe('startWebhookServer HTTP routing', () => {
     expect(res.status).toBe(400);
   });
 
+  it('returns 400 for __proto__ source (prototype pollution)', async () => {
+    const res = await makeRequest(port, { path: '/webhook/__proto__', body: '{}' });
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+  });
+
+  it('returns 400 for constructor source (prototype pollution)', async () => {
+    const res = await makeRequest(port, { path: '/webhook/constructor', body: '{}' });
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+  });
+
+  it('returns 400 for prototype source (prototype pollution)', async () => {
+    const res = await makeRequest(port, { path: '/webhook/prototype', body: '{}' });
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+  });
+
   it('returns 404 for an unknown source', async () => {
     const body = '{}';
     const res = await makeRequest(port, {
