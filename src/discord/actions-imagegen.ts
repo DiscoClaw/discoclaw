@@ -47,6 +47,12 @@ const GEMINI_VALID_SIZES = new Set(['1:1', '3:4', '4:3', '9:16', '16:9']);
 const VALID_QUALITY = new Set(['standard', 'hd']);
 const DISCORD_MAX_CONTENT = 2000;
 
+// Progress UX
+export const TYPING_INTERVAL_MS = 8_000;
+export const DOT_CYCLE_INTERVAL_MS = 3_000;
+export const REQUEST_TIMEOUT_MS = 120_000;
+const DOT_STATES = ['On it.', 'On it..', 'On it...'];
+
 // ---------------------------------------------------------------------------
 // Provider resolution
 // ---------------------------------------------------------------------------
@@ -75,6 +81,7 @@ async function callOpenAI(
   quality: string | undefined,
   apiKey: string,
   baseUrl: string,
+  signal?: AbortSignal,
 ): Promise<{ ok: true; b64: string } | { ok: false; error: string }> {
   const body: Record<string, unknown> = {
     model,
@@ -96,6 +103,7 @@ async function callOpenAI(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
+      signal,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -134,6 +142,7 @@ async function callGemini(
   model: string,
   size: string,
   geminiApiKey: string,
+  signal?: AbortSignal,
 ): Promise<{ ok: true; b64: string } | { ok: false; error: string }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`;
 
@@ -154,6 +163,7 @@ async function callGemini(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
+      signal,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -192,6 +202,7 @@ async function callGeminiNative(
   model: string,
   geminiApiKey: string,
   sourceImage?: { base64: string; mediaType: string },
+  signal?: AbortSignal,
 ): Promise<{ ok: true; b64: string } | { ok: false; error: string }> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
@@ -215,6 +226,7 @@ async function callGeminiNative(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
+      signal,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -373,50 +385,84 @@ export async function executeImagegenAction(
         }
       }
 
-      // Resolve source image if provided
-      let resolvedSourceImage: { base64: string; mediaType: string } | undefined;
-      if (action.sourceImage) {
-        if (!model.startsWith('gemini-')) {
-          return { ok: false, error: `generateImage: sourceImage is only supported with native Gemini models (gemini-*), not "${model}"` };
-        }
-        const srcResult = await resolveSourceImage(action.sourceImage, ctx);
-        if (!srcResult.ok) {
-          return { ok: false, error: srcResult.error };
-        }
-        resolvedSourceImage = { base64: srcResult.base64, mediaType: srcResult.mediaType };
+      // Source image model gate (sync check, before placeholder)
+      if (action.sourceImage && !model.startsWith('gemini-')) {
+        return { ok: false, error: `generateImage: sourceImage is only supported with native Gemini models (gemini-*), not "${model}"` };
       }
 
-      // Call provider
-      let result: { ok: true; b64: string } | { ok: false; error: string };
-      if (provider === 'gemini') {
-        if (model.startsWith('gemini-')) {
-          result = await callGeminiNative(action.prompt.trim(), model, imagegenCtx.geminiApiKey!, resolvedSourceImage);
+      // --- Progress UX lifecycle ---
+      const placeholder = await channel.send({ content: DOT_STATES[0], allowedMentions: NO_MENTIONS });
+      channel.sendTyping().catch(() => {});
+      let dotIndex = 0;
+      const typingInterval = setInterval(() => { channel.sendTyping().catch(() => {}); }, TYPING_INTERVAL_MS);
+      const dotInterval = setInterval(() => {
+        dotIndex = (dotIndex + 1) % DOT_STATES.length;
+        placeholder.edit(DOT_STATES[dotIndex]).catch(() => {});
+      }, DOT_CYCLE_INTERVAL_MS);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+      try {
+        // Resolve source image if provided
+        let resolvedSourceImage: { base64: string; mediaType: string } | undefined;
+        if (action.sourceImage) {
+          const srcResult = await resolveSourceImage(action.sourceImage, ctx);
+          if (!srcResult.ok) {
+            return { ok: false, error: srcResult.error };
+          }
+          resolvedSourceImage = { base64: srcResult.base64, mediaType: srcResult.mediaType };
+        }
+
+        // Call provider
+        let result: { ok: true; b64: string } | { ok: false; error: string };
+        if (provider === 'gemini') {
+          if (model.startsWith('gemini-')) {
+            result = await callGeminiNative(action.prompt.trim(), model, imagegenCtx.geminiApiKey!, resolvedSourceImage, controller.signal);
+          } else {
+            result = await callGemini(action.prompt.trim(), model, size, imagegenCtx.geminiApiKey!, controller.signal);
+          }
         } else {
-          result = await callGemini(action.prompt.trim(), model, size, imagegenCtx.geminiApiKey!);
+          const baseUrl = imagegenCtx.baseUrl ?? 'https://api.openai.com/v1';
+          result = await callOpenAI(action.prompt.trim(), model, size, quality, imagegenCtx.apiKey!, baseUrl, controller.signal);
         }
-      } else {
-        const baseUrl = imagegenCtx.baseUrl ?? 'https://api.openai.com/v1';
-        result = await callOpenAI(action.prompt.trim(), model, size, quality, imagegenCtx.apiKey!, baseUrl);
+
+        if (controller.signal.aborted) {
+          return { ok: false, error: 'generateImage: request timed out' };
+        }
+        if (!result.ok) {
+          return { ok: false, error: result.error };
+        }
+
+        // Stop progress before final Discord mutations
+        clearInterval(typingInterval);
+        clearInterval(dotInterval);
+        clearTimeout(timeoutId);
+        await placeholder.delete().catch(() => {});
+
+        const buf = Buffer.from(result.b64, 'base64');
+        const attachment = new AttachmentBuilder(buf, { name: 'image-1.png' });
+
+        const sendOpts: {
+          files: AttachmentBuilder[];
+          allowedMentions: typeof NO_MENTIONS;
+          content?: string;
+        } = { files: [attachment], allowedMentions: NO_MENTIONS };
+        if (action.caption) {
+          sendOpts.content = action.caption;
+        }
+
+        await channel.send(sendOpts);
+        return { ok: true, summary: `Generated image posted to #${channel.name}` };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: `generateImage: ${msg}` };
+      } finally {
+        clearInterval(typingInterval);
+        clearInterval(dotInterval);
+        clearTimeout(timeoutId);
+        await placeholder.delete().catch(() => {});
       }
-
-      if (!result.ok) {
-        return { ok: false, error: result.error };
-      }
-
-      const buf = Buffer.from(result.b64, 'base64');
-      const attachment = new AttachmentBuilder(buf, { name: 'image-1.png' });
-
-      const sendOpts: {
-        files: AttachmentBuilder[];
-        allowedMentions: typeof NO_MENTIONS;
-        content?: string;
-      } = { files: [attachment], allowedMentions: NO_MENTIONS };
-      if (action.caption) {
-        sendOpts.content = action.caption;
-      }
-
-      await channel.send(sendOpts);
-      return { ok: true, summary: `Generated image posted to #${channel.name}` };
     }
   }
 }

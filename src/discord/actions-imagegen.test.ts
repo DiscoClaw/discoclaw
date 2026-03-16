@@ -6,6 +6,9 @@ import {
   imagegenActionsPromptSection,
   resolveDefaultModel,
   resolveProvider,
+  TYPING_INTERVAL_MS,
+  DOT_CYCLE_INTERVAL_MS,
+  REQUEST_TIMEOUT_MS,
 } from './actions-imagegen.js';
 import type { ImagegenContext, SourceImageRef } from './actions-imagegen.js';
 import type { ActionContext, ActionCategoryFlags } from './actions.js';
@@ -29,7 +32,12 @@ function makeMockChannel(overrides: Partial<any> = {}) {
     id: overrides.id ?? 'ch1',
     name: overrides.name ?? 'art',
     type: overrides.type ?? ChannelType.GuildText,
-    send: vi.fn(async (_opts: any) => ({ id: 'sent-1' })),
+    send: vi.fn(async (_opts: any) => ({
+      id: 'sent-1',
+      edit: vi.fn(async () => {}),
+      delete: vi.fn(async () => {}),
+    })),
+    sendTyping: vi.fn(async () => {}),
   };
 }
 
@@ -365,7 +373,8 @@ describe('generateImage', () => {
       makeImagegenCtx(),
     );
 
-    const callArg = ch.send.mock.calls[0][0];
+    // calls[0] is the placeholder; calls[1] is the image post
+    const callArg = ch.send.mock.calls[1][0];
     expect(callArg).not.toHaveProperty('content');
   });
 
@@ -543,7 +552,7 @@ describe('generateImage', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('API request failed');
     expect((result as any).error).toContain('Network error');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it('returns error when API returns 400 with message', async () => {
@@ -560,7 +569,7 @@ describe('generateImage', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('API error 400');
     expect((result as any).error).toContain('Invalid prompt');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it('returns error when API returns 401 unauthorized', async () => {
@@ -576,7 +585,7 @@ describe('generateImage', () => {
 
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('401');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it('returns error when API returns no image data', async () => {
@@ -594,7 +603,7 @@ describe('generateImage', () => {
 
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('no image data');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it('returns error when API returns item without b64_json', async () => {
@@ -612,7 +621,7 @@ describe('generateImage', () => {
 
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('no image data');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it.each([
@@ -881,7 +890,7 @@ describe('generateImage — Gemini', () => {
 
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('no image data');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it('returns error on Gemini 401', async () => {
@@ -898,7 +907,7 @@ describe('generateImage — Gemini', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('401');
     expect((result as any).error).toContain('API key not valid');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it('returns error on Gemini 400', async () => {
@@ -915,7 +924,7 @@ describe('generateImage — Gemini', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('400');
     expect((result as any).error).toContain('Invalid prompt');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it('returns error on Gemini 500', async () => {
@@ -931,7 +940,7 @@ describe('generateImage — Gemini', () => {
 
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('500');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it('returns clear error when geminiApiKey is missing', async () => {
@@ -1042,7 +1051,7 @@ describe('generateImage — Gemini', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('API request failed');
     expect((result as any).error).toContain('Connection refused');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 });
 
@@ -1174,7 +1183,7 @@ describe('generateImage — Gemini Native', () => {
 
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('no image data');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it('returns error when candidates array is empty', async () => {
@@ -1208,7 +1217,7 @@ describe('generateImage — Gemini Native', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('API error 400');
     expect((result as any).error).toContain('Invalid request');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it('returns error on 401 response', async () => {
@@ -1225,7 +1234,7 @@ describe('generateImage — Gemini Native', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('401');
     expect((result as any).error).toContain('API key not valid');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it('returns error on 500 response', async () => {
@@ -1241,7 +1250,7 @@ describe('generateImage — Gemini Native', () => {
 
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('500');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it('returns error on network failure', async () => {
@@ -1258,7 +1267,7 @@ describe('generateImage — Gemini Native', () => {
     expect(result.ok).toBe(false);
     expect((result as any).error).toContain('API request failed');
     expect((result as any).error).toContain('Connection refused');
-    expect(ch.send).not.toHaveBeenCalled();
+    expect(ch.send).not.toHaveBeenCalledWith(expect.objectContaining({ files: expect.anything() }));
   });
 
   it('skips size validation for gemini- models (no error for any size string)', async () => {
@@ -1954,5 +1963,275 @@ describe('generateImage — actionable-guidance when imagegen is disabled', () =
     expect(selection.tierBuckets.keywordTriggered).toContain('imagegen');
     expect(selection.includedCategories).toContain('imagegen');
     expect(selection.prompt).toContain('### Image Generation');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Progress UX lifecycle
+// ---------------------------------------------------------------------------
+
+describe('generateImage — progress UX', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeSuccessResponse()));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it('sends placeholder before provider call completes', async () => {
+    let resolveFetch!: (r: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(r => { resolveFetch = r; })));
+
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const promise = executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    // Let placeholder send resolve
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Placeholder should have been sent before fetch resolves
+    expect(ch.send).toHaveBeenCalledWith(
+      expect.objectContaining({ content: 'On it.' }),
+    );
+
+    resolveFetch(makeSuccessResponse());
+    await vi.runAllTimersAsync();
+    await promise;
+  });
+
+  it('fires sendTyping immediately after placeholder', async () => {
+    let resolveFetch!: (r: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(r => { resolveFetch = r; })));
+
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const promise = executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ch.sendTyping).toHaveBeenCalledTimes(1);
+
+    resolveFetch(makeSuccessResponse());
+    await vi.runAllTimersAsync();
+    await promise;
+  });
+
+  it('fires sendTyping on interval', async () => {
+    let resolveFetch!: (r: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(r => { resolveFetch = r; })));
+
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const promise = executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ch.sendTyping).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(TYPING_INTERVAL_MS);
+    expect(ch.sendTyping).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(TYPING_INTERVAL_MS);
+    expect(ch.sendTyping).toHaveBeenCalledTimes(3);
+
+    resolveFetch(makeSuccessResponse());
+    await vi.runAllTimersAsync();
+    await promise;
+  });
+
+  it('cycles placeholder through dot states', async () => {
+    let resolveFetch!: (r: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(r => { resolveFetch = r; })));
+
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const promise = executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    await vi.advanceTimersByTimeAsync(0);
+    const placeholderMsg = await ch.send.mock.results[0].value;
+
+    await vi.advanceTimersByTimeAsync(DOT_CYCLE_INTERVAL_MS);
+    expect(placeholderMsg.edit).toHaveBeenCalledWith('On it..');
+
+    await vi.advanceTimersByTimeAsync(DOT_CYCLE_INTERVAL_MS);
+    expect(placeholderMsg.edit).toHaveBeenCalledWith('On it...');
+
+    await vi.advanceTimersByTimeAsync(DOT_CYCLE_INTERVAL_MS);
+    expect(placeholderMsg.edit).toHaveBeenLastCalledWith('On it.');
+
+    resolveFetch(makeSuccessResponse());
+    await vi.runAllTimersAsync();
+    await promise;
+  });
+
+  it('clears all timers and deletes placeholder on success', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    expect(result.ok).toBe(true);
+    const placeholderMsg = await ch.send.mock.results[0].value;
+    expect(placeholderMsg.delete).toHaveBeenCalled();
+
+    // Advance time — no more typing or edits should fire
+    const typingCount = ch.sendTyping.mock.calls.length;
+    const editCount = placeholderMsg.edit.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(TYPING_INTERVAL_MS * 2);
+    expect(ch.sendTyping).toHaveBeenCalledTimes(typingCount);
+    expect(placeholderMsg.edit).toHaveBeenCalledTimes(editCount);
+  });
+
+  it('clears all timers and deletes placeholder on provider error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Network error')));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    expect(result.ok).toBe(false);
+    const placeholderMsg = await ch.send.mock.results[0].value;
+    expect(placeholderMsg.delete).toHaveBeenCalled();
+
+    const typingCount = ch.sendTyping.mock.calls.length;
+    const editCount = placeholderMsg.edit.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(TYPING_INTERVAL_MS * 2);
+    expect(ch.sendTyping).toHaveBeenCalledTimes(typingCount);
+    expect(placeholderMsg.edit).toHaveBeenCalledTimes(editCount);
+  });
+
+  it('clears all timers and returns timeout error when request times out', async () => {
+    // Mock fetch that only resolves/rejects via AbortSignal
+    vi.stubGlobal('fetch', vi.fn((_url: string, opts?: { signal?: AbortSignal }) => {
+      return new Promise((_resolve, reject) => {
+        opts?.signal?.addEventListener('abort', () => {
+          reject(new DOMException('The operation was aborted', 'AbortError'));
+        });
+      });
+    }));
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const promise = executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+    const result = await promise;
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('timed out');
+
+    const placeholderMsg = await ch.send.mock.results[0].value;
+    expect(placeholderMsg.delete).toHaveBeenCalled();
+  });
+
+  it('does not surface placeholder edit errors as unhandled rejections', async () => {
+    let resolveFetch!: (r: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(r => { resolveFetch = r; })));
+
+    const ch = makeMockChannel({ name: 'art' });
+    ch.send.mockImplementation(async () => ({
+      id: 'placeholder',
+      edit: vi.fn().mockRejectedValue(new Error('Cannot edit')),
+      delete: vi.fn(async () => {}),
+    }));
+    const ctx = makeCtx([ch]);
+
+    const promise = executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    await vi.advanceTimersByTimeAsync(DOT_CYCLE_INTERVAL_MS);
+
+    resolveFetch(makeSuccessResponse());
+    await vi.runAllTimersAsync();
+    const result = await promise;
+
+    // Should complete without surfacing the edit error
+    expect(result.ok).toBe(true);
+  });
+
+  it('does not surface placeholder delete errors as unhandled rejections', async () => {
+    const ch = makeMockChannel({ name: 'art' });
+    ch.send.mockImplementation(async () => ({
+      id: 'placeholder',
+      edit: vi.fn(async () => {}),
+      delete: vi.fn().mockRejectedValue(new Error('Cannot delete')),
+    }));
+    const ctx = makeCtx([ch]);
+
+    const result = await executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    // Should complete without surfacing the delete error
+    expect(result.ok).toBe(true);
+  });
+
+  it('no further typing or edits after cleanup on success', async () => {
+    let resolveFetch!: (r: Response) => void;
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(r => { resolveFetch = r; })));
+
+    const ch = makeMockChannel({ name: 'art' });
+    const ctx = makeCtx([ch]);
+
+    const promise = executeImagegenAction(
+      { type: 'generateImage', prompt: 'A mountain', channel: '#art' },
+      ctx,
+      makeImagegenCtx(),
+    );
+
+    // Let intervals fire a few times
+    await vi.advanceTimersByTimeAsync(TYPING_INTERVAL_MS);
+
+    // Now resolve fetch and let the function complete
+    resolveFetch(makeSuccessResponse());
+    await vi.runAllTimersAsync();
+    await promise;
+
+    const placeholderMsg = await ch.send.mock.results[0].value;
+    const typingCount = ch.sendTyping.mock.calls.length;
+    const editCount = placeholderMsg.edit.mock.calls.length;
+
+    // Advance well past any interval — counts must not change
+    await vi.advanceTimersByTimeAsync(TYPING_INTERVAL_MS * 5);
+    expect(ch.sendTyping).toHaveBeenCalledTimes(typingCount);
+    expect(placeholderMsg.edit).toHaveBeenCalledTimes(editCount);
   });
 });
