@@ -4,6 +4,7 @@ import type { DiscordActionResult, ActionContext } from './actions.js';
 import { resolveChannel, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { downloadMessageImages, downloadImageUrl } from './image-download.js';
+import { validateGeminiModelId } from '../gemini-model-validation.js';
 
 /**
  * Maintainers: start with `docs/official-docs.md` before changing model IDs,
@@ -47,17 +48,8 @@ const GEMINI_VALID_SIZES = new Set(['1:1', '3:4', '4:3', '9:16', '16:9']);
 const VALID_QUALITY = new Set(['standard', 'hd']);
 const DISCORD_MAX_CONTENT = 2000;
 
-/**
- * Only alphanumerics, hyphens, dots, and underscores are legal in a Gemini
- * model path segment.  Anything else (slashes, colons, percent-encoding,
- * whitespace …) could alter the request URL.
- */
-const GEMINI_MODEL_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-
-export function validateGeminiModelId(model: string): { ok: true } | { ok: false; error: string } {
-  if (GEMINI_MODEL_RE.test(model)) return { ok: true };
-  return { ok: false, error: `generateImage: invalid Gemini model identifier "${model}"` };
-}
+// Re-export so existing test imports continue to work.
+export { validateGeminiModelId } from '../gemini-model-validation.js';
 
 // Progress UX
 export const TYPING_INTERVAL_MS = 8_000;

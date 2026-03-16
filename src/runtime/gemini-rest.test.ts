@@ -297,7 +297,7 @@ describe('Gemini REST runtime adapter', () => {
 
     const error = events.find((e) => e.type === 'error');
     expect(error).toBeDefined();
-    expect((error as { message: string }).message).toContain('invalid model identifier');
+    expect((error as { message: string }).message).toContain('invalid Gemini model identifier');
     expect(events.at(-1)?.type).toBe('done');
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
@@ -316,7 +316,7 @@ describe('Gemini REST runtime adapter', () => {
 
     const error = events.find((e) => e.type === 'error');
     expect(error).toBeDefined();
-    expect((error as { message: string }).message).toContain('invalid model identifier');
+    expect((error as { message: string }).message).toContain('invalid Gemini model identifier');
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 

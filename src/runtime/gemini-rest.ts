@@ -5,6 +5,7 @@
 import type { RuntimeAdapter, EngineEvent, RuntimeCapability, RuntimeInvokeParams } from './types.js';
 import { splitSystemPrompt } from './openai-compat.js';
 import { createRuntimeErrorEvent } from './runtime-failure.js';
+import { validateGeminiModelId } from '../gemini-model-validation.js';
 
 export type GeminiRestOpts = {
   apiKey: string;
@@ -22,13 +23,6 @@ function parseSSEData(line: string): string | undefined {
   return undefined;
 }
 
-/**
- * Only alphanumerics, hyphens, dots, and underscores are legal in a Gemini
- * model path segment.  Anything else (slashes, colons, percent-encoding,
- * whitespace …) could alter the request URL.
- */
-const GEMINI_MODEL_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
-
 export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
   const capabilities: ReadonlySet<RuntimeCapability> = new Set(['streaming_text']);
   const baseUrl = opts.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
@@ -41,9 +35,10 @@ export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
       return (async function* (): AsyncGenerator<EngineEvent> {
         const model = params.model || opts.defaultModel;
 
-        if (!GEMINI_MODEL_RE.test(model)) {
+        const modelCheck = validateGeminiModelId(model);
+        if (!modelCheck.ok) {
           yield createRuntimeErrorEvent(
-            `gemini-rest: invalid model identifier: ${model}`,
+            `gemini-rest: ${modelCheck.error}`,
           );
           yield { type: 'done' };
           return;
