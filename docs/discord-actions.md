@@ -445,7 +445,7 @@ Discoverability vs. readiness:
 |--------|-------------|-----------|
 | `generateImage` | Generate an image and post it to a channel | Yes |
 
-Fields: `prompt` (required), `channel` (optional — defaults to current channel), `model` (optional), `provider` (optional: `openai` or `gemini`, auto-detected from model prefix), `size` (optional), `quality` (optional: `standard` or `hd`, dall-e-3 only), `caption` (optional).
+Fields: `prompt` (required), `channel` (optional — defaults to current channel), `model` (optional), `provider` (optional: `openai` or `gemini`, auto-detected from model prefix), `size` (optional), `quality` (optional: `standard` or `hd`, dall-e-3 only), `caption` (optional), `sourceImage` (optional — see below).
 
 Available models:
 - OpenAI: `dall-e-3`, `gpt-image-1`
@@ -465,6 +465,22 @@ Unconfigured normal manual/follow-up invocations return a setup walkthrough inst
 Loop ticks do not use the manual setup-stub path. If a loop emits `generateImage` while image generation is unavailable there, the output is treated as unsupported for loop execution rather than receiving the interactive setup walkthrough.
 Reaction and deferred execution stay on their own current flag-driven contracts; this section does not imply those surfaces already advertise or suppress `imagegen` the same way as the normal manual/help path.
 
+**Source image (image-to-image editing):**
+
+The optional `sourceImage` field lets native Gemini image models perform image-to-image edits. When provided, the orchestrator builds a multipart `contents[].parts[]` payload containing the prompt text plus the source image as `inlineData`, enabling the model to edit the supplied image according to the prompt. When `sourceImage` is omitted, generation works exactly as before (text-only prompt).
+
+In this first cut, `sourceImage` only supports Discord message attachments. Generic URLs and local file paths are deferred to a future release.
+
+| Sub-field | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `messageId` | string | No | ID of the Discord message containing the attachment. Defaults to the message that triggered the current invocation. |
+| `channelId` | string | No | ID of the channel containing the source message. Defaults to the channel of the triggering message. |
+| `attachmentIndex` | number | No | Zero-based index into the message's `attachments` collection. Defaults to `0` (the first attachment). If the index is out of range, the action fails with a descriptive error. |
+
+When both `messageId` and `channelId` are omitted, the orchestrator resolves the attachment from the triggering Discord message — so a user can simply attach an image to their message and the AI can reference it without needing explicit IDs.
+
+> **Note:** `sourceImage` is currently supported only with Gemini-family models (those using the `gemini` provider). Supplying `sourceImage` with an OpenAI model will return an error.
+
 **Example action blocks:**
 
 ```xml
@@ -477,6 +493,18 @@ Reaction and deferred execution stay on their own current flag-driven contracts;
 
 ```xml
 <discord-action>{"type":"generateImage","prompt":"abstract geometric pattern","provider":"gemini","model":"imagen-4.0-generate-001","size":"16:9"}</discord-action>
+```
+
+Edit an image attached to the user's message using a Gemini model:
+
+```xml
+<discord-action>{"type":"generateImage","prompt":"remove the background and replace it with a starry night sky","provider":"gemini","model":"gemini-2.0-flash-preview-image-generation","sourceImage":{}}</discord-action>
+```
+
+The empty `sourceImage: {}` defaults to attachment index 0 on the triggering message. To reference a specific attachment on a different message:
+
+```xml
+<discord-action>{"type":"generateImage","prompt":"make this image look like a watercolor painting","provider":"gemini","model":"gemini-2.0-flash-preview-image-generation","sourceImage":{"messageId":"1234567890123456789","channelId":"9876543210987654321","attachmentIndex":1}}</discord-action>
 ```
 
 ### Voice Actions (`actions-voice.ts`)
