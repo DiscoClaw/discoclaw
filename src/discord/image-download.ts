@@ -2,9 +2,6 @@ import type { ImageData } from '../runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from '../runtime/types.js';
 import { maybeDownscale } from '../image/resize.js';
 
-/** Allowed Discord CDN hosts (SSRF protection). */
-const ALLOWED_HOSTS = new Set(['cdn.discordapp.com', 'media.discordapp.net']);
-
 /** Max bytes per individual image (20 MB). */
 const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
 
@@ -122,41 +119,32 @@ function safeName(attachment: AttachmentLike): string {
 }
 
 /**
- * Download a single Discord image attachment.
- * Returns the ImageData on success, or an error string on failure.
+ * Download an image from a public http(s) URL.
+ * Validates scheme, enforces size/timeout limits, sniffs format, and downscales if needed.
  */
-export async function downloadAttachment(
-  attachment: AttachmentLike,
-  mediaType: string,
+export async function downloadPublicImage(
+  url: string,
+  label: string = 'image',
 ): Promise<{ ok: true; image: ImageData } | { ok: false; error: string }> {
-  const name = safeName(attachment);
-
-  // SSRF protection: validate host.
   let parsedUrl: URL;
   try {
-    parsedUrl = new URL(attachment.url);
+    parsedUrl = new URL(url);
   } catch {
-    return { ok: false, error: `${name}: invalid URL` };
+    return { ok: false, error: `${label}: invalid URL` };
   }
 
-  if (parsedUrl.protocol !== 'https:' || !ALLOWED_HOSTS.has(parsedUrl.hostname)) {
-    return { ok: false, error: `${name}: blocked (non-Discord CDN host)` };
-  }
-
-  // Pre-check size from Discord metadata.
-  if (attachment.size != null && attachment.size > MAX_IMAGE_BYTES) {
-    const sizeMB = (attachment.size / (1024 * 1024)).toFixed(1);
-    return { ok: false, error: `${name}: too large (${sizeMB} MB, max 20 MB)` };
+  if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+    return { ok: false, error: `${label}: only http(s) URLs are allowed` };
   }
 
   try {
-    const response = await fetch(attachment.url, {
+    const response = await fetch(url, {
       signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
       redirect: 'error',
     });
 
     if (!response.ok) {
-      return { ok: false, error: `${name}: HTTP ${response.status}` };
+      return { ok: false, error: `${label}: HTTP ${response.status}` };
     }
 
     const buffer = Buffer.from(await response.arrayBuffer());
@@ -164,19 +152,19 @@ export async function downloadAttachment(
     // Post-download size check.
     if (buffer.length > MAX_IMAGE_BYTES) {
       const sizeMB = (buffer.length / (1024 * 1024)).toFixed(1);
-      return { ok: false, error: `${name}: too large (${sizeMB} MB, max 20 MB)` };
+      return { ok: false, error: `${label}: too large (${sizeMB} MB, max 20 MB)` };
     }
 
     // Sniff actual format from magic bytes — override declared MIME.
     const sniffed = sniffMediaType(buffer);
     if (!sniffed) {
-      return { ok: false, error: `${name}: unsupported image format (magic bytes don't match PNG, JPEG, GIF, or WebP)` };
+      return { ok: false, error: `${label}: unsupported image format (magic bytes don't match PNG, JPEG, GIF, or WebP)` };
     }
 
     // Reject truncated payloads below format structural minimums.
     const minBytes = MIN_BYTES_FOR_TYPE[sniffed];
     if (minBytes && buffer.length < minBytes) {
-      return { ok: false, error: `${name}: image too small to be valid ${sniffed} (${buffer.length} bytes, minimum ${minBytes})` };
+      return { ok: false, error: `${label}: image too small to be valid ${sniffed} (${buffer.length} bytes, minimum ${minBytes})` };
     }
 
     // Downscale oversized images to stay within Anthropic API dimension limits.
@@ -200,13 +188,42 @@ export async function downloadAttachment(
   } catch (err: unknown) {
     const errObj = err instanceof Error ? err : null;
     if (errObj?.name === 'TimeoutError' || errObj?.name === 'AbortError') {
-      return { ok: false, error: `${name}: download timed out` };
+      return { ok: false, error: `${label}: download timed out` };
     }
     if (errObj?.name === 'TypeError' && String(errObj.message).includes('redirect')) {
-      return { ok: false, error: `${name}: blocked (unexpected redirect)` };
+      return { ok: false, error: `${label}: blocked (unexpected redirect)` };
     }
-    return { ok: false, error: `${name}: download failed` };
+    return { ok: false, error: `${label}: download failed` };
   }
+}
+
+/**
+ * Download a single Discord image attachment.
+ * Delegates to downloadPublicImage after pre-checking Discord metadata.
+ */
+export async function downloadAttachment(
+  attachment: AttachmentLike,
+  mediaType: string,
+): Promise<{ ok: true; image: ImageData } | { ok: false; error: string }> {
+  const name = safeName(attachment);
+
+  // Pre-check size from Discord metadata.
+  if (attachment.size != null && attachment.size > MAX_IMAGE_BYTES) {
+    const sizeMB = (attachment.size / (1024 * 1024)).toFixed(1);
+    return { ok: false, error: `${name}: too large (${sizeMB} MB, max 20 MB)` };
+  }
+
+  return downloadPublicImage(attachment.url, name);
+}
+
+/**
+ * Download an image from a public URL for use as a source image.
+ * Thin wrapper around downloadPublicImage.
+ */
+export async function downloadImageUrl(
+  url: string,
+): Promise<{ ok: true; image: ImageData } | { ok: false; error: string }> {
+  return downloadPublicImage(url, 'sourceImage');
 }
 
 /**

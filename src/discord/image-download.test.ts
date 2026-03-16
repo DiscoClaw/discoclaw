@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import {
   resolveMediaType, downloadAttachment, downloadMessageImages,
+  downloadPublicImage, downloadImageUrl,
   sniffMediaType,
   MIN_PNG_BYTES, MIN_JPEG_BYTES, MIN_GIF_BYTES, MIN_WEBP_BYTES,
   type AttachmentLike,
@@ -204,28 +205,46 @@ describe('downloadAttachment', () => {
     }
   });
 
-  it('rejects non-Discord-CDN URLs (SSRF protection)', async () => {
+  it('accepts non-Discord-CDN https URLs (host restriction removed)', async () => {
+    const data = makePngBuffer();
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
     const result = await downloadAttachment(
-      { url: 'https://evil.com/malicious.png', name: 'malicious.png' },
+      { url: 'https://example.com/photo.png', name: 'photo.png', size: data.length },
       'image/png',
     );
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.error).toContain('blocked');
-      expect(result.error).not.toContain('evil.com'); // no raw URL
-    }
-    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalled();
   });
 
-  it('rejects HTTP URLs (non-HTTPS)', async () => {
+  it('accepts HTTP URLs (both http and https allowed)', async () => {
+    const data = makePngBuffer();
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
     const result = await downloadAttachment(
-      { url: 'http://cdn.discordapp.com/photo.png', name: 'photo.png' },
+      { url: 'http://cdn.discordapp.com/photo.png', name: 'photo.png', size: data.length },
+      'image/png',
+    );
+
+    expect(result.ok).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalled();
+  });
+
+  it('rejects non-http(s) URLs', async () => {
+    const result = await downloadAttachment(
+      { url: 'ftp://cdn.discordapp.com/photo.png', name: 'photo.png' },
       'image/png',
     );
 
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain('blocked');
+    if (!result.ok) expect(result.error).toContain('only http(s) URLs are allowed');
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
@@ -741,5 +760,101 @@ describe('downloadMessageImages', () => {
     expect(result.images).toHaveLength(1);
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toContain('HTTP 500');
+  });
+});
+
+describe('downloadPublicImage', () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('downloads and returns image from https URL', async () => {
+    const data = makePngBuffer();
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadPublicImage('https://example.com/photo.png', 'test');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.image.mediaType).toBe('image/png');
+      expect(result.image.base64).toBe(data.toString('base64'));
+    }
+  });
+
+  it('downloads and returns image from http URL', async () => {
+    const data = makeJpegBuffer();
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadPublicImage('http://example.com/photo.jpg', 'test');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.image.mediaType).toBe('image/jpeg');
+    }
+  });
+
+  it('rejects non-http(s) schemes', async () => {
+    const result = await downloadPublicImage('ftp://example.com/photo.png', 'test');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('only http(s) URLs are allowed');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects data: URLs', async () => {
+    const result = await downloadPublicImage('data:image/png;base64,abc', 'test');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('only http(s) URLs are allowed');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid URLs', async () => {
+    const result = await downloadPublicImage('not-a-url', 'test');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('invalid URL');
+  });
+});
+
+describe('downloadImageUrl', () => {
+  const originalFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    globalThis.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('delegates to downloadPublicImage with sourceImage label', async () => {
+    const data = makePngBuffer();
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)),
+    });
+
+    const result = await downloadImageUrl('https://example.com/photo.png');
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.image.mediaType).toBe('image/png');
+    }
+  });
+
+  it('uses sourceImage label in error messages', async () => {
+    const result = await downloadImageUrl('ftp://example.com/photo.png');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('sourceImage');
   });
 });

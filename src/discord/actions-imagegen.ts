@@ -3,7 +3,7 @@ import type { TextChannel } from 'discord.js';
 import type { DiscordActionResult, ActionContext } from './actions.js';
 import { resolveChannel, findChannelRaw, describeChannelType } from './action-utils.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
-import { downloadMessageImages } from './image-download.js';
+import { downloadMessageImages, downloadImageUrl } from './image-download.js';
 
 /**
  * Maintainers: start with `docs/official-docs.md` before changing model IDs,
@@ -14,12 +14,9 @@ import { downloadMessageImages } from './image-download.js';
 // Types
 // ---------------------------------------------------------------------------
 
-export type SourceImageRef = {
-  type: 'attachment';
-  channelId?: string;
-  messageId?: string;
-  attachmentIndex?: number;
-};
+export type SourceImageRef =
+  | { type: 'attachment'; channelId?: string; messageId?: string; attachmentIndex?: number }
+  | { type: 'url'; url: string };
 
 export type ImagegenActionRequest =
   | { type: 'generateImage'; prompt: string; channel?: string; size?: string; model?: string; quality?: string; caption?: string; provider?: 'openai' | 'gemini'; sourceImage?: SourceImageRef };
@@ -266,6 +263,14 @@ async function resolveSourceImage(
   sourceImage: SourceImageRef,
   ctx: ActionContext,
 ): Promise<{ ok: true; base64: string; mediaType: string } | { ok: false; error: string }> {
+  if (sourceImage.type === 'url') {
+    const dlResult = await downloadImageUrl(sourceImage.url);
+    if (!dlResult.ok) {
+      return { ok: false, error: `generateImage: ${dlResult.error}` };
+    }
+    return { ok: true, base64: dlResult.image.base64, mediaType: dlResult.image.mediaType };
+  }
+
   const channelId = sourceImage.channelId ?? ctx.channelId;
   const messageId = sourceImage.messageId ?? ctx.messageId;
   const attachmentIndex = sourceImage.attachmentIndex ?? 0;
@@ -444,17 +449,25 @@ ${modelFieldDoc}
   - Gemini (native): size/aspect-ratio params do not apply — omit \`size\` for these models
 - \`quality\` (optional): \`standard\` (default) or \`hd\` — applies to OpenAI dall-e-3 only.
 - \`caption\` (optional): Text message to accompany the image in the channel.
-- \`sourceImage\` (optional): Reference a Discord attachment as the source image for image-to-image editing. **Only supported with native Gemini models** (\`gemini-*\`).
-  - \`type\` (required): Must be \`"attachment"\`.
-  - \`channelId\` (optional): Channel ID of the message containing the image. Defaults to the current channel.
-  - \`messageId\` (optional): Message ID containing the image attachment. Defaults to the current message.
-  - \`attachmentIndex\` (optional): Zero-based index of the attachment to use. Defaults to \`0\` (first attachment).
-  - Example — edit the image from the current message:
-    \`\`\`
-    <discord-action>{"type":"generateImage","prompt":"Make this image look like a watercolor painting","model":"gemini-3.1-flash-image-preview","sourceImage":{"type":"attachment"}}</discord-action>
-    \`\`\`
-  - Example — edit an image from a specific message:
-    \`\`\`
-    <discord-action>{"type":"generateImage","prompt":"Add a sunset sky","model":"gemini-3.1-flash-image-preview","sourceImage":{"type":"attachment","channelId":"123","messageId":"456","attachmentIndex":1}}</discord-action>
-    \`\`\``;
+- \`sourceImage\` (optional): Provide a source image for image-to-image editing. **Only supported with native Gemini models** (\`gemini-*\`). Two forms:
+  - **Attachment form** — reference a Discord message attachment:
+    - \`type\` (required): \`"attachment"\`
+    - \`channelId\` (optional): Channel ID of the message containing the image. Defaults to the current channel.
+    - \`messageId\` (optional): Message ID containing the image attachment. Defaults to the current message.
+    - \`attachmentIndex\` (optional): Zero-based index of the attachment to use. Defaults to \`0\` (first attachment).
+    - Example — edit the image from the current message:
+      \`\`\`
+      <discord-action>{"type":"generateImage","prompt":"Make this image look like a watercolor painting","model":"gemini-3.1-flash-image-preview","sourceImage":{"type":"attachment"}}</discord-action>
+      \`\`\`
+    - Example — edit an image from a specific message:
+      \`\`\`
+      <discord-action>{"type":"generateImage","prompt":"Add a sunset sky","model":"gemini-3.1-flash-image-preview","sourceImage":{"type":"attachment","channelId":"123","messageId":"456","attachmentIndex":1}}</discord-action>
+      \`\`\`
+  - **URL form** — provide a public http(s) image URL directly:
+    - \`type\` (required): \`"url"\`
+    - \`url\` (required): A public \`http(s)\` image URL (PNG, JPEG, GIF, or WebP).
+    - Example:
+      \`\`\`
+      <discord-action>{"type":"generateImage","prompt":"Make this photo a pencil sketch","model":"gemini-3.1-flash-image-preview","sourceImage":{"type":"url","url":"https://example.com/photo.jpg"}}</discord-action>
+      \`\`\``;
 }

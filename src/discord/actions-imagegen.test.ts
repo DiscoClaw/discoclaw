@@ -14,10 +14,11 @@ import { buildUnavailableActionTypesNotice } from './output-common.js';
 
 vi.mock('./image-download.js', async (importOriginal) => {
   const orig = await importOriginal<typeof import('./image-download.js')>();
-  return { ...orig, downloadMessageImages: vi.fn() };
+  return { ...orig, downloadMessageImages: vi.fn(), downloadImageUrl: vi.fn() };
 });
-import { downloadMessageImages } from './image-download.js';
+import { downloadMessageImages, downloadImageUrl } from './image-download.js';
 const mockDownloadMessageImages = vi.mocked(downloadMessageImages);
+const mockDownloadImageUrl = vi.mocked(downloadImageUrl);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1402,6 +1403,7 @@ describe('generateImage — sourceImage', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(makeGeminiNativeSuccessResponse()));
     mockDownloadMessageImages.mockReset();
+    mockDownloadImageUrl.mockReset();
   });
 
   afterEach(() => {
@@ -1744,6 +1746,80 @@ describe('generateImage — sourceImage', () => {
       inlineData: { mimeType: 'image/png', data: 'aW1hZ2VkYXRh' },
     });
   });
+
+  // --- URL variant ---
+
+  it('resolves sourceImage with type url via downloadImageUrl', async () => {
+    mockDownloadImageUrl.mockResolvedValue({
+      ok: true,
+      image: { base64: 'dXJsaW1hZ2U=', mediaType: 'image/jpeg' },
+    });
+
+    const { ctx, ch } = setupSourceImageCtx();
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Make it a sketch',
+        model: geminiModel,
+        sourceImage: { type: 'url', url: 'https://example.com/photo.jpg' },
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(mockDownloadImageUrl).toHaveBeenCalledWith('https://example.com/photo.jpg');
+    expect(mockDownloadMessageImages).not.toHaveBeenCalled();
+
+    // Source image should be included in the request body
+    const callBody = JSON.parse((fetch as any).mock.calls[0][1].body);
+    expect(callBody.contents[0].parts[0]).toEqual({
+      inlineData: { mimeType: 'image/jpeg', data: 'dXJsaW1hZ2U=' },
+    });
+  });
+
+  it('returns error when downloadImageUrl fails for url sourceImage', async () => {
+    mockDownloadImageUrl.mockResolvedValue({
+      ok: false,
+      error: 'sourceImage: only http(s) URLs are allowed',
+    });
+
+    const { ctx } = setupSourceImageCtx();
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Make it a sketch',
+        model: geminiModel,
+        sourceImage: { type: 'url', url: 'ftp://example.com/photo.jpg' },
+      },
+      ctx,
+      makeImagegenCtx({ geminiApiKey: 'gemini-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('only http(s) URLs are allowed');
+  });
+
+  it('rejects url sourceImage with non-Gemini models', async () => {
+    const { ctx } = setupSourceImageCtx();
+
+    const result = await executeImagegenAction(
+      {
+        type: 'generateImage',
+        prompt: 'Make it a sketch',
+        model: 'dall-e-3',
+        sourceImage: { type: 'url', url: 'https://example.com/photo.jpg' },
+      },
+      ctx,
+      makeImagegenCtx({ apiKey: 'openai-key' }),
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('sourceImage is only supported with native Gemini models');
+    expect(mockDownloadImageUrl).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1759,6 +1835,13 @@ describe('imagegenActionsPromptSection — sourceImage docs', () => {
     expect(section).toContain('messageId');
     expect(section).toContain('attachmentIndex');
     expect(section).toContain('Only supported with native Gemini models');
+  });
+
+  it('documents the URL form of sourceImage', () => {
+    const section = imagegenActionsPromptSection();
+    expect(section).toContain('"url"');
+    expect(section).toContain('http(s)');
+    expect(section).toContain('URL form');
   });
 });
 
