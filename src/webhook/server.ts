@@ -8,6 +8,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import { executeCronJob, type CronExecutorContext } from '../cron/executor.js';
+import { isUnsafeKey, stripUnsafeKeys } from '../config/safe-key.js';
 import type { CronJob } from '../cron/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { sanitizeExternalContent } from '../sanitize-external.js';
@@ -77,7 +78,7 @@ export async function loadWebhookConfig(configPath: string): Promise<WebhookConf
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error('Webhook config must be a JSON object');
   }
-  return parsed as WebhookConfig;
+  return stripUnsafeKeys(parsed as WebhookConfig);
 }
 
 let webhookJobCounter = 0;
@@ -172,6 +173,11 @@ export async function startWebhookServer(opts: WebhookServerOptions = {}): Promi
     try {
       source = decodeURIComponent(match[1]);
     } catch {
+      respondWebhook(res, 400, 'Bad request');
+      return;
+    }
+
+    if (isUnsafeKey(source)) {
       respondWebhook(res, 400, 'Bad request');
       return;
     }
