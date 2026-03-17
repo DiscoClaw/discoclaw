@@ -13,7 +13,7 @@ const SUITES_DIR = join(import.meta.dirname, '../../test-suites/action-complianc
 describe('frozen action-compliance fixtures', () => {
   it('loads all fixtures without validation errors', async () => {
     const cases = await loadTestCasesFromDir(SUITES_DIR);
-    expect(cases.length).toBeGreaterThanOrEqual(90);
+    expect(cases.length).toBeGreaterThanOrEqual(120);
   });
 
   it('all IDs are unique', async () => {
@@ -62,6 +62,26 @@ describe('frozen action-compliance fixtures', () => {
     for (const tag of ['messaging', 'channels', 'guild', 'moderation', 'tasks', 'memory', 'config', 'crons', 'plans', 'voice', 'events', 'deferred', 'reaction-prompts', 'guardrails']) {
       expect(allTags.has(tag), `missing tag category: ${tag}`).toBe(true);
     }
+  });
+
+  it('no fixture has the same action type in both expectedActions and forbiddenActions', async () => {
+    const cases = await loadTestCasesFromDir(SUITES_DIR);
+    for (const c of cases) {
+      if (!c.forbiddenActions || c.forbiddenActions.length === 0) continue;
+      const expectedTypes = new Set(c.expectedActions.map((a) => a.type));
+      for (const fa of c.forbiddenActions) {
+        expect(expectedTypes.has(fa), `${c.id}: "${fa}" is in both expectedActions and forbiddenActions`).toBe(false);
+      }
+    }
+  });
+
+  it('guardrails have both positive and negative cases', async () => {
+    const cases = await loadTestCasesFromDir(SUITES_DIR);
+    const guardrails = filterByTags(cases, ['guardrails']);
+    const positive = guardrails.filter((c) => c.expectedActions.length > 0);
+    const negative = guardrails.filter((c) => c.expectedActions.length === 0);
+    expect(positive.length, 'guardrails should have positive (confirmed action) cases').toBeGreaterThanOrEqual(5);
+    expect(negative.length, 'guardrails should have negative (blocked action) cases').toBeGreaterThanOrEqual(5);
   });
 
   it('forbiddenActions are valid string arrays when present', async () => {

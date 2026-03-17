@@ -30,10 +30,11 @@
     "id": "multi-remember-and-reply",
     "prompt": "remember that standup is at 9am and let the user know you saved it",
     "expectedActions": [
-      { "type": "memoryRemember", "params": { "content": "standup is at 9am" } },
-      { "type": "sendMessage" }
+      { "type": "memoryRemember", "params": { "content": "standup is at 9am" } }
     ],
-    "tags": ["multi-action", "memory", "messaging"]
+    "forbiddenActions": ["sendMessage"],
+    "tags": ["multi-action", "memory", "messaging"],
+    "_comment": "Should use memoryRemember action + inline reply text. sendMessage is forbidden for replies to the current channel."
   },
   {
     "id": "multi-cron-and-confirm",
@@ -48,10 +49,11 @@
     "id": "multi-channel-and-topic",
     "prompt": "create a #design-feedback channel and set its topic to 'Post design reviews here'",
     "expectedActions": [
-      { "type": "channelCreate", "params": { "name": "design-feedback" } },
-      { "type": "channelEdit", "params": { "channel": "design-feedback", "topic": "Post design reviews here" } }
+      { "type": "channelCreate", "params": { "name": "design-feedback", "topic": "Post design reviews here" } }
     ],
-    "tags": ["multi-action", "channels"]
+    "forbiddenActions": ["channelEdit"],
+    "tags": ["multi-action", "channels"],
+    "_comment": "channelCreate accepts topic param — no need for a separate channelEdit"
   },
   {
     "id": "multi-plan-and-task",

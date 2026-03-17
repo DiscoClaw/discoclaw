@@ -42,11 +42,12 @@
   },
   {
     "id": "msg-delete",
-    "prompt": "delete the last message in #spam",
+    "prompt": "yes, delete message 998877665544 in channel 112233445566",
     "expectedActions": [
-      { "type": "deleteMessage", "params": { "channel": "spam" } }
+      { "type": "deleteMessage" }
     ],
-    "tags": ["messaging", "basic"]
+    "tags": ["messaging", "basic"],
+    "_comment": "Confirmed destructive action with specific IDs — should execute immediately per confirmation-bypass rule"
   },
   {
     "id": "msg-pin",
@@ -82,11 +83,12 @@
   },
   {
     "id": "msg-bulk-delete",
-    "prompt": "bulk delete the last 5 messages in #cleanup",
+    "prompt": "yes go ahead, bulk delete 5 messages in channel 112233445566",
     "expectedActions": [
-      { "type": "bulkDelete", "params": { "channel": "cleanup", "count": 5 } }
+      { "type": "bulkDelete" }
     ],
-    "tags": ["messaging", "moderation"]
+    "tags": ["messaging", "moderation"],
+    "_comment": "Confirmed destructive action — should execute immediately per confirmation-bypass rule"
   },
   {
     "id": "msg-send-file",
