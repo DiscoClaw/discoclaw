@@ -361,6 +361,25 @@ Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DEEPGRAM_STT_MODEL
 
 ---
 
+## 24. Self-Improvement Harness (`src/self-improve/`)
+
+Iterative instruction-tuning harness. Loads frozen test cases (prompt + expected-action pairs), runs them through a runtime adapter, scores actual vs expected actions, and optionally promotes mutations that improve scores. Invoked via CLI.
+
+**CLI usage:** `npx tsx src/self-improve/cli.ts --target workspace/AGENTS.md [--suite <dir>] [--iterations N] [--dry-run] [--model <id>] [--adapter claude_code]`
+
+| Component | File(s) | Status |
+|-----------|---------|--------|
+| Shared types (`FrozenTestCase`, `Mutation`, `RunResult`, `ScoreResult`, `Ledger`) | `src/self-improve/types.ts` | **done** |
+| Loader (reads JSON fixture files from a suite directory, validates shape, deduplicates IDs) | `src/self-improve/loader.ts` | **done** |
+| Mutator (applies line-level insert/delete/replace/swap ops to instruction text) | `src/self-improve/mutator.ts` | **done** |
+| Scorer (greedy best-match pairing of expected vs actual actions, type + param weighted scoring) | `src/self-improve/scorer.ts` | **done** |
+| Runner (invokes a `RuntimeAdapter` with instructions + test-case prompt, extracts actions) | `src/self-improve/runner.ts` | **done** |
+| Keeper (JSON ledger for best score, atomic promote-on-improvement) | `src/self-improve/keeper.ts` | **done** |
+| Reporter (console table + summary formatting for CLI output) | `src/self-improve/reporter.ts` | **done** |
+| CLI entry point (wires loader → runner → scorer → keeper → reporter into iterative loop) | `src/self-improve/cli.ts` | **done** |
+
+---
+
 ## MVP Gaps (what's left)
 
 ### Must-have for MVP
