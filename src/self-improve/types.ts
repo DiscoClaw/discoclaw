@@ -11,6 +11,8 @@ export interface FrozenTestCase {
   id: string;
   prompt: string;
   expectedActions: ExpectedAction[];
+  /** Action types the model must NOT emit for this prompt. */
+  forbiddenActions?: string[];
   tags?: string[];
 }
 
@@ -19,6 +21,8 @@ export interface FrozenTestCaseRaw {
   id: string;
   prompt: string;
   expectedActions: { type: string; params?: Record<string, unknown> }[];
+  /** Action types the model must NOT emit for this prompt. */
+  forbiddenActions?: string[];
   tags?: string[];
 }
 
@@ -91,10 +95,20 @@ export interface ActionMatch {
   score: number;
 }
 
+/** A forbidden action that was emitted (violation). */
+export interface ForbiddenViolation {
+  /** The forbidden action type. */
+  forbiddenType: string;
+  /** The actual action that violated the constraint. */
+  actual: ExpectedAction;
+}
+
 /** Aggregate score for one test case. */
 export interface ScoreResult {
   testCaseId: string;
   matches: ActionMatch[];
+  /** Forbidden actions that were emitted (should be empty for a perfect score). */
+  violations: ForbiddenViolation[];
   /** Overall score for the test case (0–1). */
   score: number;
 }

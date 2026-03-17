@@ -24,8 +24,12 @@ function validateRaw(raw: unknown, file: string, index: number): FrozenTestCaseR
   if (typeof raw.prompt !== 'string' || raw.prompt.length === 0) {
     throw new Error(`${file}[${index}]: "prompt" must be a non-empty string`);
   }
-  if (!Array.isArray(raw.expectedActions) || raw.expectedActions.length === 0) {
-    throw new Error(`${file}[${index}]: "expectedActions" must be a non-empty array`);
+  if (!Array.isArray(raw.expectedActions)) {
+    throw new Error(`${file}[${index}]: "expectedActions" must be an array`);
+  }
+  // expectedActions can be empty only if forbiddenActions is present (negative-only test case).
+  if (raw.expectedActions.length === 0 && (!Array.isArray(raw.forbiddenActions) || raw.forbiddenActions.length === 0)) {
+    throw new Error(`${file}[${index}]: "expectedActions" must be non-empty (or provide "forbiddenActions" for negative-only cases)`);
   }
   for (let i = 0; i < raw.expectedActions.length; i++) {
     const ea = raw.expectedActions[i];
@@ -34,6 +38,11 @@ function validateRaw(raw: unknown, file: string, index: number): FrozenTestCaseR
     }
     if (ea.params !== undefined && !isPlainObject(ea.params)) {
       throw new Error(`${file}[${index}].expectedActions[${i}]: "params" must be an object if present`);
+    }
+  }
+  if (raw.forbiddenActions !== undefined) {
+    if (!Array.isArray(raw.forbiddenActions) || !raw.forbiddenActions.every((t: unknown) => typeof t === 'string' && t.length > 0)) {
+      throw new Error(`${file}[${index}]: "forbiddenActions" must be an array of non-empty strings if present`);
     }
   }
   if (raw.tags !== undefined) {
@@ -52,6 +61,7 @@ function rawToTestCase(raw: FrozenTestCaseRaw): FrozenTestCase {
       type: ea.type,
       ...(ea.params ? { params: ea.params } : {}),
     })),
+    ...(raw.forbiddenActions ? { forbiddenActions: raw.forbiddenActions } : {}),
     ...(raw.tags ? { tags: raw.tags } : {}),
   };
 }

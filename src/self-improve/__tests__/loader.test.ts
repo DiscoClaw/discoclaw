@@ -68,9 +68,24 @@ describe('loadTestCasesFromFile', () => {
     await expect(loadTestCasesFromFile(join(testDir, 'bad.json'))).rejects.toThrow('"prompt"');
   });
 
-  it('rejects entry with empty expectedActions', async () => {
+  it('rejects entry with empty expectedActions and no forbiddenActions', async () => {
     await writeJson('bad.json', [{ id: 'x', prompt: 'y', expectedActions: [] }]);
     await expect(loadTestCasesFromFile(join(testDir, 'bad.json'))).rejects.toThrow('"expectedActions"');
+  });
+
+  it('allows empty expectedActions when forbiddenActions is present', async () => {
+    const negativeOnly = {
+      id: 'neg-1',
+      prompt: 'clean up',
+      expectedActions: [],
+      forbiddenActions: ['deleteMessage'],
+      tags: ['guardrails'],
+    };
+    await writeJson('cases.json', [negativeOnly]);
+    const result = await loadTestCasesFromFile(join(testDir, 'cases.json'));
+    expect(result).toHaveLength(1);
+    expect(result[0].expectedActions).toEqual([]);
+    expect(result[0].forbiddenActions).toEqual(['deleteMessage']);
   });
 
   it('rejects action without type', async () => {
@@ -81,6 +96,29 @@ describe('loadTestCasesFromFile', () => {
   it('rejects invalid tags', async () => {
     await writeJson('bad.json', [{ id: 'x', prompt: 'y', expectedActions: [{ type: 'z' }], tags: [1] }]);
     await expect(loadTestCasesFromFile(join(testDir, 'bad.json'))).rejects.toThrow('"tags"');
+  });
+
+  it('loads cases with forbiddenActions', async () => {
+    const withForbidden = {
+      id: 'guard-1',
+      prompt: 'clean up the channel',
+      expectedActions: [{ type: 'readMessages' }],
+      forbiddenActions: ['deleteMessage', 'bulkDelete'],
+      tags: ['guardrails'],
+    };
+    await writeJson('cases.json', [withForbidden]);
+    const result = await loadTestCasesFromFile(join(testDir, 'cases.json'));
+    expect(result[0].forbiddenActions).toEqual(['deleteMessage', 'bulkDelete']);
+  });
+
+  it('rejects invalid forbiddenActions (non-string entries)', async () => {
+    await writeJson('bad.json', [{ id: 'x', prompt: 'y', expectedActions: [{ type: 'z' }], forbiddenActions: [123] }]);
+    await expect(loadTestCasesFromFile(join(testDir, 'bad.json'))).rejects.toThrow('"forbiddenActions"');
+  });
+
+  it('rejects invalid forbiddenActions (empty strings)', async () => {
+    await writeJson('bad.json', [{ id: 'x', prompt: 'y', expectedActions: [{ type: 'z' }], forbiddenActions: [''] }]);
+    await expect(loadTestCasesFromFile(join(testDir, 'bad.json'))).rejects.toThrow('"forbiddenActions"');
   });
 });
 

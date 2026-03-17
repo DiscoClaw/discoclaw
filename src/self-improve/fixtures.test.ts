@@ -22,10 +22,12 @@ describe('frozen action-compliance fixtures', () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it('every case has at least one expectedAction', async () => {
+  it('every case has expectedActions or forbiddenActions', async () => {
     const cases = await loadTestCasesFromDir(SUITES_DIR);
     for (const c of cases) {
-      expect(c.expectedActions.length, `${c.id} has no expectedActions`).toBeGreaterThan(0);
+      const hasExpected = c.expectedActions.length > 0;
+      const hasForbidden = (c.forbiddenActions?.length ?? 0) > 0;
+      expect(hasExpected || hasForbidden, `${c.id} has neither expectedActions nor forbiddenActions`).toBe(true);
     }
   });
 
@@ -57,8 +59,20 @@ describe('frozen action-compliance fixtures', () => {
     const cases = await loadTestCasesFromDir(SUITES_DIR);
     const allTags = new Set(cases.flatMap((c) => c.tags ?? []));
     // Verify we cover the major categories
-    for (const tag of ['messaging', 'channels', 'guild', 'moderation', 'tasks', 'memory', 'config', 'crons', 'plans', 'voice', 'events', 'deferred', 'reaction-prompts']) {
+    for (const tag of ['messaging', 'channels', 'guild', 'moderation', 'tasks', 'memory', 'config', 'crons', 'plans', 'voice', 'events', 'deferred', 'reaction-prompts', 'guardrails']) {
       expect(allTags.has(tag), `missing tag category: ${tag}`).toBe(true);
+    }
+  });
+
+  it('forbiddenActions are valid string arrays when present', async () => {
+    const cases = await loadTestCasesFromDir(SUITES_DIR);
+    for (const c of cases) {
+      if (c.forbiddenActions) {
+        expect(Array.isArray(c.forbiddenActions), `${c.id}: forbiddenActions must be array`).toBe(true);
+        for (const fa of c.forbiddenActions) {
+          expect(typeof fa, `${c.id}: forbiddenActions entries must be strings`).toBe('string');
+        }
+      }
     }
   });
 });

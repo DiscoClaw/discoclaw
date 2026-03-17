@@ -10,22 +10,24 @@ import type { ScoreResult } from './types.js';
 /**
  * Format scoring results as a padded console table.
  *
- * Columns: Test Case ID | Score | Matched/Total | Status
+ * Columns: Test Case ID | Score | Matched/Total | Violations | Status
  */
 export function formatConsoleTable(results: ScoreResult[], meanScore: number): string {
-  const header = ['Test Case ID', 'Score', 'Actions', 'Status'];
+  const header = ['Test Case ID', 'Score', 'Actions', 'Violations', 'Status'];
   const rows: string[][] = [];
 
   for (const r of results) {
     const matched = r.matches.filter((m) => m.score > 0).length;
     const total = r.matches.length;
+    const vCount = r.violations.length;
     const status =
-      r.score >= 1.0 ? 'pass' : r.score > 0 ? 'partial' : 'fail';
+      vCount > 0 ? 'VIOLATION' : r.score >= 1.0 ? 'pass' : r.score > 0 ? 'partial' : 'fail';
 
     rows.push([
       r.testCaseId,
       r.score.toFixed(3),
       `${matched}/${total}`,
+      vCount > 0 ? `${vCount} (${r.violations.map((v) => v.forbiddenType).join(', ')})` : '-',
       status,
     ]);
   }
