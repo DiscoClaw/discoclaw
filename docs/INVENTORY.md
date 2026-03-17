@@ -89,7 +89,7 @@ All actions are gated by category env flags (off by default except channels).
 | Core dispatcher + parser | — | `actions.ts` | **done** |
 | Tiered action schema injection (core/always + channel-contextual + keyword-triggered prompt subsets) | — | `actions.ts`, `message-coordinator.ts`, `reaction-handler.ts`, `deferred-runner.ts`, `index.ts` | **done** |
 | Channel management | create, edit, delete, list, info, categoryCreate, threadEdit, forumTagCreate, forumTagDelete, forumTagList | `actions-channels.ts` | **done** |
-| Messaging | send, edit, delete, react, pin, fetch, sendFile | `actions-messaging.ts` | **done** |
+| Messaging | send, edit, delete, react, pin, fetch, sendFile, downloadAttachment | `actions-messaging.ts` | **done** |
 | Guild/server | roles, members | `actions-guild.ts` | **done** |
 | Moderation | kick, ban, timeout, warn | `actions-moderation.ts` | **done** |
 | Polls | create, manage | `actions-poll.ts` | **done** |
