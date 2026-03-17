@@ -74,7 +74,8 @@ import { ToolAwareQueue } from './tool-aware-queue.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, setStopReaction, isShuttingDown, markChannelPending } from './inflight-replies.js';
-import { registerAbort, tryAbortAll } from './abort-registry.js';
+import { registerAbort, tryAbortAll, setAbortMeta, snapshotAllAborts } from './abort-registry.js';
+import { buildStopSummary } from './stop-summary.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, closeFenceIfOpen, formatRuntimePreviewSignal } from './output-utils.js';
 import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, buildOpenTasksSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble, buildPromptSectionEstimates } from './prompt-common.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
@@ -942,15 +943,21 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
       // Handle !stop — abort all active AI streams and cancel any running forge.
       if (!isBotMessage && String(msg.content ?? '').trim().toLowerCase() === '!stop') {
+        // Snapshot active stream metadata before aborting so the summary captures live state.
+        const snapshots = snapshotAllAborts();
         const aborted = tryAbortAll();
         const orch = getActiveOrchestrator();
         const forgeRunning = Boolean(orch?.isRunning);
         if (forgeRunning && orch) orch.requestCancel('!stop');
-        const parts: string[] = [];
-        if (aborted > 0) parts.push(`Aborted ${aborted} active stream${aborted === 1 ? '' : 's'}.`);
-        if (forgeRunning) parts.push('Forge cancel requested.');
-        if (parts.length === 0) parts.push('Nothing active to stop.');
-        await msg.reply({ content: parts.join(' '), allowedMentions: NO_MENTIONS });
+        const headerParts: string[] = [];
+        if (aborted > 0) headerParts.push(`Aborted ${aborted} active stream${aborted === 1 ? '' : 's'}.`);
+        if (forgeRunning) headerParts.push('Forge cancel requested.');
+        if (headerParts.length === 0) headerParts.push('Nothing active to stop.');
+        const summary = buildStopSummary(snapshots, { forgeCancelled: forgeRunning });
+        const content = summary
+          ? `${headerParts.join(' ')}\n\n${summary}`
+          : headerParts.join(' ');
+        await msg.reply({ content, allowedMentions: NO_MENTIONS });
         return;
       }
 
@@ -2887,6 +2894,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let processedText = '';
           let effectiveContinuationCapsule: ContinuationCapsule | undefined;
           let emittedContinuationCapsule = false;
+          // Mutable ref for stop-summary metadata — updated by the streaming loop.
+          const _stopMeta = { deltaText: '', activityLabel: '' };
+          setAbortMeta(reply.id, {
+            channelId: msg.channelId,
+            userMessage: String(msg.content ?? '').slice(0, 200),
+            startedAt: Date.now(),
+            getPartialResponse: () => processedText || _stopMeta.deltaText,
+            getActivityLabel: () => _stopMeta.activityLabel,
+            sessionKey,
+          });
           try {
 
           const cwd = params.useGroupDirCwd
@@ -3367,6 +3384,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 }
                 dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}:followup-${followUpDepth}`);
                 ({ signal: abortSignal, dispose: abortDispose } = registerAbort(reply.id));
+                setAbortMeta(reply.id, {
+                  channelId: msg.channelId,
+                  userMessage: String(msg.content ?? '').slice(0, 200),
+                  startedAt: Date.now(),
+                  getPartialResponse: () => processedText || _stopMeta.deltaText,
+                  getActivityLabel: () => _stopMeta.activityLabel,
+                  sessionKey,
+                });
                 reactPromise = reply.react?.('🛑')?.catch(() => null);
                 if (reactPromise) setStopReaction(msg.channelId, reply.id, reactPromise);
                 stopReactionRemoved = false;
@@ -3410,6 +3435,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 force = false,
                 opts?: { consumeThrottle?: boolean },
               ) => {
+                // Keep stop-summary metadata current with streaming state.
+                _stopMeta.deltaText = deltaText;
+                _stopMeta.activityLabel = activityLabel;
                 const currentReply = reply;
                 if (!currentReply) return;
                 if (isShuttingDown()) return;

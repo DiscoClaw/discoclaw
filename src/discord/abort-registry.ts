@@ -7,6 +7,72 @@ const COOLDOWN_MS = 15_000;
 const active = new Map<string, AbortController>();
 const cooldown = new Set<string>();
 
+// ---------------------------------------------------------------------------
+// Abort metadata — tracks context about active streams for stop summaries
+// ---------------------------------------------------------------------------
+
+export type AbortMeta = {
+  channelId: string;
+  userMessage: string;
+  startedAt: number;
+  /** Callback to snapshot current partial response text. */
+  getPartialResponse: () => string;
+  /** Callback to snapshot current activity label. */
+  getActivityLabel: () => string;
+  sessionKey: string;
+};
+
+export type AbortSnapshot = {
+  messageId: string;
+  channelId: string;
+  userMessage: string;
+  partialResponse: string;
+  activityLabel: string;
+  sessionKey: string;
+  elapsedMs: number;
+};
+
+const metaStore = new Map<string, AbortMeta>();
+
+/** Attach metadata to an active abort entry for stop summary generation. */
+export function setAbortMeta(messageId: string, m: AbortMeta): void {
+  metaStore.set(messageId, m);
+}
+
+/** Remove metadata for a message (called alongside dispose). */
+export function clearAbortMeta(messageId: string): void {
+  metaStore.delete(messageId);
+}
+
+/** Snapshot the metadata for a single active stream. Returns null if not found. */
+export function snapshotAbort(messageId: string): AbortSnapshot | null {
+  const m = metaStore.get(messageId);
+  if (!m) return null;
+  return {
+    messageId,
+    channelId: m.channelId,
+    userMessage: m.userMessage,
+    partialResponse: m.getPartialResponse(),
+    activityLabel: m.getActivityLabel(),
+    sessionKey: m.sessionKey,
+    elapsedMs: Date.now() - m.startedAt,
+  };
+}
+
+/** Snapshot metadata for all actively streaming entries. */
+export function snapshotAllAborts(): AbortSnapshot[] {
+  const snapshots: AbortSnapshot[] = [];
+  for (const messageId of active.keys()) {
+    const snap = snapshotAbort(messageId);
+    if (snap) snapshots.push(snap);
+  }
+  return snapshots;
+}
+
+// ---------------------------------------------------------------------------
+// Core abort registry
+// ---------------------------------------------------------------------------
+
 /**
  * Register an AbortController for a message that is about to start streaming.
  *
@@ -21,6 +87,7 @@ export function registerAbort(messageId: string): { signal: AbortSignal; dispose
 
   function dispose() {
     active.delete(messageId);
+    metaStore.delete(messageId);
     cooldown.add(messageId);
     setTimeout(() => cooldown.delete(messageId), COOLDOWN_MS);
   }
@@ -76,4 +143,5 @@ export function tryAbortAll(): number {
 export function _resetForTest(): void {
   active.clear();
   cooldown.clear();
+  metaStore.clear();
 }

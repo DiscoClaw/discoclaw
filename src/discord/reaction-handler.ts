@@ -13,7 +13,8 @@ import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPr
 import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } from './actions.js';
 import { shouldTriggerFollowUp } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
-import { tryAbort, isActivelyStreaming } from './abort-registry.js';
+import { tryAbort, isActivelyStreaming, snapshotAbort } from './abort-registry.js';
+import { buildStopSummary } from './stop-summary.js';
 import { getActiveOrchestrator, getActiveForgeChannelId } from './forge-plan-registry.js';
 import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools, buildPromptPreamble, buildOpenTasksSection, buildPromptSectionEstimates } from './prompt-common.js';
 import {
@@ -224,12 +225,21 @@ function createReactionHandler(
       ) {
         if (mode === 'remove') return;
         // add mode: abort the stream for this specific message and cancel any running forge.
+        // Snapshot metadata before aborting so we capture live streaming state.
+        const stopSnap = snapshotAbort(reaction.message.id);
         const wasActive = isActivelyStreaming(reaction.message.id);
         tryAbort(reaction.message.id);
         if (wasActive) metrics.increment('discord.reaction.abort');
         const orch = getActiveOrchestrator();
-        if (orch?.isRunning && getActiveForgeChannelId() === reaction.message.channelId) {
-          orch.requestCancel('stop reaction');
+        const forgeCancelled = Boolean(orch?.isRunning && getActiveForgeChannelId() === reaction.message.channelId);
+        if (forgeCancelled && orch) orch.requestCancel('stop reaction');
+        // Post a follow-up stop summary (best-effort, non-blocking).
+        if (wasActive && stopSnap) {
+          const summary = buildStopSummary([stopSnap], { forgeCancelled });
+          if (summary) {
+            const sendCh = reaction.message.channel as unknown as ReactionChannelLike;
+            sendCh.send?.({ content: summary, allowedMentions: NO_MENTIONS })?.catch(() => {});
+          }
         }
         return;
       }
