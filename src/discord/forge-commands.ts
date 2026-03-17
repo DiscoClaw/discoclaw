@@ -15,7 +15,7 @@ import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js'
 import { buildPromptPreamble } from './prompt-common.js';
 import { createPhaseStatusHeartbeatController, resolvePlanHeaderHeartbeatPolicy } from './phase-status-heartbeat.js';
 import { resolveForgePlanPhaseGate, setForgePlanMetadata } from './forge-plan-registry.js';
-import { resolveForgeReResearchPhase, resolveForgeTurnRoute } from '../forge-phase.js';
+import { resolveForgeReResearchPhase } from '../forge-phase.js';
 import type { ForgeTurnPhase } from '../forge-phase.js';
 export { parseAuditVerdict };
 export type { AuditVerdict };
@@ -1114,7 +1114,10 @@ function isGlobalSupervisorCycleStartEvent(evt: EngineEvent): boolean {
 
 function assertPlanMarkdownOutput(output: string, phase: 'draft' | 'revision'): void {
   if (!normalizePlanOutputPrefix(output).startsWith(PLAN_MARKDOWN_PREFIX)) {
-    throw new Error(`${phase} output must start with # Plan:`);
+    const preview = output.length > 0
+      ? sanitizePlanOutputPreview(output)
+      : '(empty output)';
+    throw new Error(`${phase} output must start with # Plan: — got: ${preview}`);
   }
 }
 
@@ -1187,18 +1190,13 @@ function isGroundingOutputError(message: string): boolean {
   return message.toLowerCase().includes('grounding output must be repo-relative file paths');
 }
 
-function shouldDropToolsOnPlanRetry(message: string): boolean {
-  return message.toLowerCase().includes('native turn produced no text output');
-}
-
-function shouldDropToolsOnCodexPlanRetry(
-  runtime: RuntimeAdapter,
+function shouldDropToolsOnPlanPrefixRetry(
+  _runtime: RuntimeAdapter,
   message: string,
 ): boolean {
   const lower = message.toLowerCase();
-  return shouldDropToolsOnPlanRetry(message)
-    || isGroundingOutputError(message)
-    || (runtime.id === 'codex' && lower.includes('output must start with # plan:'));
+  return isGroundingOutputError(message)
+    || lower.includes('output must start with # plan:');
 }
 
 function wrapWithPlanPrefixGuard(
@@ -1273,6 +1271,20 @@ function wrapWithPlanPrefixGuard(
             continue;
           }
           yield transformed;
+        }
+
+        if (!prefixSatisfied && leadingText.length > 0) {
+          params.rawEventTap?.({
+            type: 'log_line',
+            stream: 'stderr',
+            line: JSON.stringify({
+              source: 'forge_prefix_guard',
+              phase,
+              reason: 'prefix_never_found',
+              suppressedChars: leadingText.length,
+              preview: sanitizePlanOutputPreview(leadingText),
+            }),
+          });
         }
       })();
     },
@@ -1838,14 +1850,14 @@ export class ForgeOrchestrator {
               throw new Error('drafter echoed the template');
             }
           }, (retryDef, retryCtx) => {
-            const allowCompactSalvage = shouldDropToolsOnCodexPlanRetry(drafterRuntimeBase, retryCtx.firstError);
+            const allowCompactSalvage = shouldDropToolsOnPlanPrefixRetry(drafterRuntimeBase, retryCtx.firstError);
             return addPlanRetryHints(retryDef, {
               includeTemplateEchoWarning: true,
               retrySessionSuffix: 'draft-retry',
               dropToolsOnRetry: allowCompactSalvage,
-              dropSessionOnRetry: allowCompactSalvage && drafterHasSessions && resolveForgeTurnRoute(draftArtifactPhase) === 'cli',
+              dropSessionOnRetry: allowCompactSalvage && drafterHasSessions,
               replacementPrompt: allowCompactSalvage ? compactDrafterRetryPrompt : undefined,
-              supervisorOverride: allowCompactSalvage && resolveForgeTurnRoute(draftArtifactPhase) === 'cli'
+              supervisorOverride: allowCompactSalvage
                 ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY
                 : undefined,
             });
@@ -2072,13 +2084,13 @@ export class ForgeOrchestrator {
             assertPlanMarkdownOutput(result.outputs[result.outputs.length - 1] ?? '', 'revision');
           },
           (retryDef, retryCtx) => {
-            const allowCompactSalvage = shouldDropToolsOnCodexPlanRetry(drafterRuntimeBase, retryCtx.firstError);
+            const allowCompactSalvage = shouldDropToolsOnPlanPrefixRetry(drafterRuntimeBase, retryCtx.firstError);
             return addPlanRetryHints(retryDef, {
               retrySessionSuffix: `revision-round-${round}-retry`,
               dropToolsOnRetry: allowCompactSalvage,
-              dropSessionOnRetry: allowCompactSalvage && drafterHasSessions && resolveForgeTurnRoute(revisionArtifactPhase) === 'cli',
+              dropSessionOnRetry: allowCompactSalvage && drafterHasSessions,
               replacementPrompt: allowCompactSalvage ? compactRevisionRetryPrompt : undefined,
-              supervisorOverride: allowCompactSalvage && resolveForgeTurnRoute(revisionArtifactPhase) === 'cli'
+              supervisorOverride: allowCompactSalvage
                 ? FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY
                 : undefined,
             });

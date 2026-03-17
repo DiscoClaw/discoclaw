@@ -10,7 +10,7 @@ export type ForgeTurnPhase = (typeof FORGE_TURN_PHASES)[number];
 
 export type ForgeTurnKind = 'research' | 'final';
 
-export type ForgeTurnRoute = 'native' | 'hybrid' | 'cli';
+export type ForgeTurnRoute = 'cli';
 
 const FORGE_TURN_PHASE_SET = new Set<ForgeTurnPhase>(FORGE_TURN_PHASES);
 
@@ -30,10 +30,7 @@ export function resolveForgeTurnKind(phase: ForgeTurnPhase): ForgeTurnKind {
   return isForgeResearchPhase(phase) ? 'research' : 'final';
 }
 
-export function resolveForgeTurnRoute(phase: ForgeTurnPhase): ForgeTurnRoute {
-  // Forge stays on CLI for every phase because it has been materially more
-  // reliable than the native/hybrid Codex transport in long-running draft and
-  // audit flows.
+export function resolveForgeTurnRoute(_phase: ForgeTurnPhase): ForgeTurnRoute {
   return 'cli';
 }
 
