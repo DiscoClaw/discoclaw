@@ -495,6 +495,18 @@ describe('executeCronJob', () => {
     );
   });
 
+  it('suppresses truncated HEARTBEAT variants (e.g. HEART)', async () => {
+    for (const variant of ['HEART', 'HEARTBEAT', 'Heartbeat_ok', 'heartbeat_ok']) {
+      const ctx = makeCtx({ runtime: makeMockRuntime(variant) });
+      const job = makeJob();
+      await executeCronJob(job, ctx);
+
+      const guild = (ctx.client as any).guilds.cache.get('guild-1');
+      const channel = guild.channels.cache.get('general');
+      expect(channel.send).not.toHaveBeenCalled();
+    }
+  });
+
   it('suppresses (no output) output', async () => {
     const ctx = makeCtx({ runtime: makeMockRuntime('(no output)') });
     const job = makeJob();
