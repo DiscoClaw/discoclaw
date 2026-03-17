@@ -487,7 +487,7 @@ export function guildActionsPromptSection(): string {
 
 **eventCreate** — Create a scheduled event:
 \`\`\`
-<discord-action>{"type":"eventCreate","name":"Team Meeting","startTime":"2025-02-01T15:00:00Z","description":"Weekly sync","location":"Zoom"}</discord-action>
+<discord-action>{"type":"eventCreate","name":"Team Meeting","startTime":"2026-04-01T15:00:00Z","description":"Weekly sync","location":"Zoom"}</discord-action>
 \`\`\`
 - \`name\` (required): Event name.
 - \`startTime\` (required): ISO 8601 datetime.
@@ -498,7 +498,7 @@ export function guildActionsPromptSection(): string {
 
 **eventEdit** — Edit a scheduled event:
 \`\`\`
-<discord-action>{"type":"eventEdit","eventId":"123","name":"New Name","startTime":"2025-03-01T10:00:00Z"}</discord-action>
+<discord-action>{"type":"eventEdit","eventId":"123","name":"New Name","startTime":"2027-04-01T10:00:00Z"}</discord-action>
 \`\`\`
 - \`eventId\` (required): Event ID (from eventList).
 - \`name\` (optional): New event name.
