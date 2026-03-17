@@ -31,6 +31,36 @@ import {
 let spawnCounter = 0;
 const REQUESTER_DENY_ALL = { __requesterDenyAll: true } as const;
 
+// Max characters to post from a spawned agent (prevents channel flooding).
+const MAX_SPAWN_OUTPUT_CHARS = 6000;
+
+/**
+ * Detect and sanitize problematic agent output before posting to the channel.
+ * Returns null if the output should be suppressed entirely (replaced with error).
+ */
+export function sanitizeSpawnOutput(text: string, label: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  // Detect raw JSONL output (CLI events leaked as text).
+  // Each line starting with { and containing "type": is likely a raw CLI event.
+  const lines = trimmed.split('\n');
+  const jsonLines = lines.filter((l) => {
+    const lt = l.trim();
+    return lt.startsWith('{') && lt.includes('"type"');
+  });
+  if (jsonLines.length > 0 && jsonLines.length >= lines.length * 0.5) {
+    return null; // Mostly raw JSON — suppress and report as error.
+  }
+
+  // Cap output length.
+  if (trimmed.length > MAX_SPAWN_OUTPUT_CHARS) {
+    return trimmed.slice(0, MAX_SPAWN_OUTPUT_CHARS) + `\n\n*(Agent "${label}" output truncated — ${trimmed.length} chars total)*`;
+  }
+
+  return trimmed;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -256,9 +286,18 @@ export async function executeSpawnAction(
           let outgoingText = appendActionResults(parsed.cleanText.trim(), parsed.actions, actionResults);
           outgoingText = appendUnavailableActionTypesNotice(outgoingText, parsed.strippedUnrecognizedTypes).trim();
           outgoingText = appendParseFailureNotice(outgoingText, parsed.parseFailures).trim();
-          const finalOutput = outgoingText || `Agent (${label}) completed with no output.`;
 
-          const chunks = splitDiscord(finalOutput);
+          const sanitized = outgoingText ? sanitizeSpawnOutput(outgoingText, label) : null;
+          if (sanitized === null && !outgoingText) {
+            // No output and no actions — skip posting.
+            return { ok: true, summary: `Agent (${label}) completed with no output.` };
+          }
+          if (sanitized === null) {
+            // Output was raw JSON / internal data — report as error, don't post.
+            return { ok: false, error: `Agent (${label}) produced internal/raw output instead of a response (suppressed)` };
+          }
+
+          const chunks = splitDiscord(sanitized);
           for (const chunk of chunks) {
             await targetChannel.send({ content: chunk, allowedMentions: NO_MENTIONS });
           }
@@ -270,8 +309,18 @@ export async function executeSpawnAction(
         }
 
         // --- No action flags: raw text post (backward compatible) ---
-        const outputText = text.trim() || `Agent (${label}) completed with no output.`;
-        const chunks = splitDiscord(outputText);
+        const rawOutput = text.trim();
+        let postText: string;
+        if (!rawOutput) {
+          postText = `Agent (${label}) completed with no output.`;
+        } else {
+          const sanitizedOutput = sanitizeSpawnOutput(rawOutput, label);
+          if (sanitizedOutput === null) {
+            return { ok: false, error: `Agent (${label}) produced internal/raw output instead of a response (suppressed)` };
+          }
+          postText = sanitizedOutput;
+        }
+        const chunks = splitDiscord(postText);
         for (const chunk of chunks) {
           await targetChannel.send({ content: chunk, allowedMentions: NO_MENTIONS });
         }

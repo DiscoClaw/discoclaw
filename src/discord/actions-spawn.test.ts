@@ -5,6 +5,7 @@ import {
   executeSpawnAction,
   executeSpawnActions,
   spawnActionsPromptSection,
+  sanitizeSpawnOutput,
 } from './actions-spawn.js';
 import type { SpawnContext } from './actions-spawn.js';
 import type { ActionContext, ActionCategoryFlags } from './actions.js';
@@ -1475,5 +1476,84 @@ describe('global limiter — cross-caller concurrency', () => {
     const results = await p;
     expect(results).toHaveLength(3);
     expect(results.every((r) => r.ok)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sanitizeSpawnOutput
+// ---------------------------------------------------------------------------
+
+describe('sanitizeSpawnOutput', () => {
+  it('returns null for empty string', () => {
+    expect(sanitizeSpawnOutput('', 'agent')).toBeNull();
+  });
+
+  it('returns null for whitespace-only string', () => {
+    expect(sanitizeSpawnOutput('   \n\t  ', 'agent')).toBeNull();
+  });
+
+  it('returns trimmed text for normal prose', () => {
+    expect(sanitizeSpawnOutput('  Hello world  ', 'agent')).toBe('Hello world');
+  });
+
+  it('returns null when majority of lines are raw JSON with "type"', () => {
+    const jsonDump = [
+      '{"type":"text_delta","text":"hello"}',
+      '{"type":"result","result":"done"}',
+      '{"type":"system","init":true}',
+    ].join('\n');
+    expect(sanitizeSpawnOutput(jsonDump, 'agent')).toBeNull();
+  });
+
+  it('returns null when exactly 50% of lines are JSON (threshold)', () => {
+    const mixed = [
+      '{"type":"text_delta","text":"hello"}',
+      'Some normal text',
+    ].join('\n');
+    expect(sanitizeSpawnOutput(mixed, 'agent')).toBeNull();
+  });
+
+  it('passes through text when JSON lines are below 50%', () => {
+    const mostlyProse = [
+      'Line one',
+      'Line two',
+      '{"type":"text_delta","text":"hello"}',
+      'Line four',
+      'Line five',
+    ].join('\n');
+    const result = sanitizeSpawnOutput(mostlyProse, 'agent');
+    expect(result).toContain('Line one');
+    expect(result).toContain('Line five');
+  });
+
+  it('does not flag JSON lines missing "type" key', () => {
+    const jsonNoType = [
+      '{"name":"value","count":1}',
+      '{"name":"other","count":2}',
+    ].join('\n');
+    // These are { lines but don't contain "type", so they should not be flagged.
+    const result = sanitizeSpawnOutput(jsonNoType, 'agent');
+    expect(result).not.toBeNull();
+  });
+
+  it('truncates output exceeding MAX_SPAWN_OUTPUT_CHARS and includes label', () => {
+    const longText = 'A'.repeat(7000);
+    const result = sanitizeSpawnOutput(longText, 'my-bot');
+    expect(result).not.toBeNull();
+    expect(result!.length).toBeLessThan(7000);
+    expect(result!).toContain('my-bot');
+    expect(result!).toContain('truncated');
+    expect(result!).toContain('7000');
+  });
+
+  it('does not truncate output at exactly MAX_SPAWN_OUTPUT_CHARS', () => {
+    const exactText = 'B'.repeat(6000);
+    const result = sanitizeSpawnOutput(exactText, 'agent');
+    expect(result).toBe(exactText);
+  });
+
+  it('preserves multiline non-JSON text', () => {
+    const text = 'First line\nSecond line\nThird line';
+    expect(sanitizeSpawnOutput(text, 'agent')).toBe(text);
   });
 });

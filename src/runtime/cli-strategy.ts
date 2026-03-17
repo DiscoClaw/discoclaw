@@ -30,6 +30,8 @@ export type ParsedLineResult = {
   resultText?: string | null;
   /** Images from result content block arrays. */
   resultImages?: ImageData[];
+  /** If true, the result event had is_error: true (CLI completed but produced an error). */
+  resultIsError?: boolean;
   /** If true, this event signals end-of-turn (for multi-turn mode). */
   endOfTurn?: boolean;
   /** Any extra events to emit (e.g. session-mapping for Codex). */

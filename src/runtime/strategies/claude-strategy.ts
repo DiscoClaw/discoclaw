@@ -351,10 +351,12 @@ export const claudeStrategy: CliAdapterStrategy = {
     if (obj.type === 'result') {
       const rt = extractResultText(evt);
       const blocks = extractResultContentBlocks(evt);
+      const isError = obj.is_error === true;
       if (rt || blocks) {
         return {
           resultText: rt ?? blocks?.text ?? null,
           resultImages: blocks?.images,
+          resultIsError: isError || undefined,
         };
       }
       return {};

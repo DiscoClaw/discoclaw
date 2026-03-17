@@ -12,6 +12,8 @@ import {
   extractResultContentBlocks,
   imageDedupeKey,
 } from './claude-code-cli.js';
+import { claudeStrategy } from './strategies/claude-strategy.js';
+import type { CliInvokeContext, ParsedLineResult } from './cli-strategy.js';
 
 beforeEach(() => {
   (execa as any).mockReset?.();
@@ -1560,6 +1562,84 @@ describe('tool_use.name length error detection', () => {
     expect(err.message).toContain('64 chars');
   });
 
+  it('result with is_error emits error instead of text_final (stream-json)', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessStreamJson({
+      lines: [
+        JSON.stringify({ type: 'result', result: 'Error: model "capable" not found', is_error: true }),
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({ prompt: 'p', model: 'capable', cwd: '/tmp' })) {
+      events.push(evt);
+    }
+
+    // Should emit an error event, NOT a text_final.
+    const errorEvt = events.find((e) => e.type === 'error');
+    expect(errorEvt).toBeDefined();
+    expect(errorEvt.message).toContain('model "capable" not found');
+    expect(events.find((e) => e.type === 'text_final')).toBeUndefined();
+  });
+
+  it('result with is_error: false still yields text_final normally', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessStreamJson({
+      lines: [
+        JSON.stringify({ type: 'result', result: 'All good', is_error: false }),
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      events.push(evt);
+    }
+
+    expect(events.find((e) => e.type === 'text_final')?.text).toBe('All good');
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+  });
+
+  it('result with is_error but empty result text falls through to normal path', async () => {
+    const execaMock = execa as any;
+    execaMock.mockImplementation(() => makeProcessStreamJson({
+      lines: [
+        JSON.stringify({ type: 'message_delta', text: 'Some output before error' }),
+        JSON.stringify({ type: 'result', result: '', is_error: true }),
+      ],
+      exitCode: 0,
+    }));
+
+    const rt = createClaudeCliRuntime({
+      claudeBin: 'claude',
+      dangerouslySkipPermissions: true,
+      outputFormat: 'stream-json',
+    });
+
+    const events: any[] = [];
+    for await (const evt of rt.invoke({ prompt: 'p', model: 'opus', cwd: '/tmp' })) {
+      events.push(evt);
+    }
+
+    // Empty resultText + resultIsError: the guard `resultIsError && resultText` is false,
+    // so it falls through to the normal finalization (merged deltas).
+    expect(events.find((e) => e.type === 'text_final')?.text).toBe('Some output before error');
+    expect(events.find((e) => e.type === 'error')).toBeUndefined();
+  });
+
   it('passes through unrelated API errors unchanged (text mode)', async () => {
     const execaMock = execa as any;
     const otherError = 'Error: 429 rate limit exceeded';
@@ -1582,5 +1662,50 @@ describe('tool_use.name length error detection', () => {
     expect(err).toBeDefined();
     expect(err.message).toContain('rate limit');
     expect(err.message).not.toContain('MCP tool name too long');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// claudeStrategy.parseLine — resultIsError
+// ---------------------------------------------------------------------------
+
+describe('claudeStrategy.parseLine — resultIsError', () => {
+  function makeCtx(): CliInvokeContext {
+    return {
+      params: { prompt: 'p', model: 'opus', cwd: '/tmp' },
+      useStdin: false,
+      hasImages: false,
+    } as CliInvokeContext;
+  }
+
+  it('sets resultIsError when result event has is_error: true', () => {
+    const evt = { type: 'result', result: 'Error: model not found', is_error: true };
+    const parsed = claudeStrategy.parseLine!(evt, makeCtx());
+    expect(parsed).not.toBeNull();
+    expect(parsed!.resultIsError).toBe(true);
+    expect(parsed!.resultText).toBe('Error: model not found');
+  });
+
+  it('does not set resultIsError when is_error is false', () => {
+    const evt = { type: 'result', result: 'All good', is_error: false };
+    const parsed = claudeStrategy.parseLine!(evt, makeCtx());
+    expect(parsed).not.toBeNull();
+    expect(parsed!.resultIsError).toBeUndefined();
+    expect(parsed!.resultText).toBe('All good');
+  });
+
+  it('does not set resultIsError when is_error is absent', () => {
+    const evt = { type: 'result', result: 'Normal result' };
+    const parsed = claudeStrategy.parseLine!(evt, makeCtx());
+    expect(parsed).not.toBeNull();
+    expect(parsed!.resultIsError).toBeUndefined();
+    expect(parsed!.resultText).toBe('Normal result');
+  });
+
+  it('uses strict equality — is_error: "true" (string) does not set resultIsError', () => {
+    const evt = { type: 'result', result: 'Some text', is_error: 'true' };
+    const parsed = claudeStrategy.parseLine!(evt, makeCtx());
+    expect(parsed).not.toBeNull();
+    expect(parsed!.resultIsError).toBeUndefined();
   });
 });
