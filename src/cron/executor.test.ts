@@ -495,6 +495,18 @@ describe('executeCronJob', () => {
     );
   });
 
+  it('suppresses heart emoji output (model interprets HEARTBEAT_OK as emoji)', async () => {
+    for (const variant of ['\u2764\uFE0F', '\u2764', '\u2764\uFE0F\u2764\uFE0F']) {
+      const ctx = makeCtx({ runtime: makeMockRuntime(variant) });
+      const job = makeJob();
+      await executeCronJob(job, ctx);
+
+      const guild = (ctx.client as any).guilds.cache.get('guild-1');
+      const channel = guild.channels.cache.get('general');
+      expect(channel.send).not.toHaveBeenCalled();
+    }
+  });
+
   it('suppresses truncated HEARTBEAT variants (e.g. HEART)', async () => {
     for (const variant of ['HEART', 'HEARTBEAT', 'Heartbeat_ok', 'heartbeat_ok']) {
       const ctx = makeCtx({ runtime: makeMockRuntime(variant) });
