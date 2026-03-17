@@ -1,0 +1,58 @@
+[
+  {
+    "id": "guild-member-info",
+    "prompt": "show me info about the user @alice",
+    "expectedActions": [
+      { "type": "memberInfo", "params": { "user": "alice" } }
+    ],
+    "tags": ["guild", "basic"]
+  },
+  {
+    "id": "guild-role-info",
+    "prompt": "what permissions does the Moderator role have?",
+    "expectedActions": [
+      { "type": "roleInfo", "params": { "role": "Moderator" } }
+    ],
+    "tags": ["guild", "roles"]
+  },
+  {
+    "id": "guild-role-add",
+    "prompt": "give @bob the Developer role",
+    "expectedActions": [
+      { "type": "roleAdd", "params": { "user": "bob", "role": "Developer" } }
+    ],
+    "tags": ["guild", "roles"]
+  },
+  {
+    "id": "guild-role-remove",
+    "prompt": "remove the Tester role from @charlie",
+    "expectedActions": [
+      { "type": "roleRemove", "params": { "user": "charlie", "role": "Tester" } }
+    ],
+    "tags": ["guild", "roles"]
+  },
+  {
+    "id": "guild-search",
+    "prompt": "search for messages containing 'deploy failed' in #ops",
+    "expectedActions": [
+      { "type": "searchMessages", "params": { "query": "deploy failed", "channel": "ops" } }
+    ],
+    "tags": ["guild", "search"]
+  },
+  {
+    "id": "guild-event-list",
+    "prompt": "list all upcoming events in the server",
+    "expectedActions": [
+      { "type": "eventList" }
+    ],
+    "tags": ["guild", "events"]
+  },
+  {
+    "id": "guild-event-create",
+    "prompt": "create a server event called 'Game Night' for Saturday at 8pm",
+    "expectedActions": [
+      { "type": "eventCreate", "params": { "name": "Game Night" } }
+    ],
+    "tags": ["guild", "events"]
+  }
+]

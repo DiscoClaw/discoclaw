@@ -1,0 +1,38 @@
+[
+  {
+    "id": "multi-create-and-announce",
+    "prompt": "create a #release-notes channel and post 'v2.0 is live!' there",
+    "expectedActions": [
+      { "type": "channelCreate", "params": { "name": "release-notes" } },
+      { "type": "sendMessage", "params": { "channel": "release-notes", "content": "v2.0 is live!" } }
+    ],
+    "tags": ["multi-action", "channels", "messaging"]
+  },
+  {
+    "id": "multi-role-and-notify",
+    "prompt": "give @dave the Admin role and send a message to #staff saying 'dave is now admin'",
+    "expectedActions": [
+      { "type": "roleAdd", "params": { "user": "dave", "role": "Admin" } },
+      { "type": "sendMessage", "params": { "channel": "staff", "content": "dave is now admin" } }
+    ],
+    "tags": ["multi-action", "guild", "messaging"]
+  },
+  {
+    "id": "multi-task-and-react",
+    "prompt": "create a task for the login bug and react with ✅ to confirm",
+    "expectedActions": [
+      { "type": "taskCreate", "params": { "title": "login bug" } },
+      { "type": "react", "params": { "emoji": "✅" } }
+    ],
+    "tags": ["multi-action", "tasks", "messaging"]
+  },
+  {
+    "id": "multi-remember-and-reply",
+    "prompt": "remember that standup is at 9am and let the user know you saved it",
+    "expectedActions": [
+      { "type": "memoryRemember", "params": { "content": "standup is at 9am" } },
+      { "type": "sendMessage" }
+    ],
+    "tags": ["multi-action", "memory", "messaging"]
+  }
+]

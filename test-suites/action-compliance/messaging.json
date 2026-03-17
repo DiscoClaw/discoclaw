@@ -1,0 +1,107 @@
+[
+  {
+    "id": "msg-send-basic",
+    "prompt": "send 'hello world' to the general channel",
+    "expectedActions": [
+      { "type": "sendMessage", "params": { "channel": "general", "content": "hello world" } }
+    ],
+    "tags": ["messaging", "basic"]
+  },
+  {
+    "id": "msg-send-thread",
+    "prompt": "create a new thread called 'Bug Report' in #dev and post 'tracking issue' there",
+    "expectedActions": [
+      { "type": "threadCreate", "params": { "channel": "dev", "name": "Bug Report" } },
+      { "type": "sendMessage", "params": { "content": "tracking issue" } }
+    ],
+    "tags": ["messaging", "threads"]
+  },
+  {
+    "id": "msg-react",
+    "prompt": "react to the last message in #announcements with a thumbs up",
+    "expectedActions": [
+      { "type": "react", "params": { "channel": "announcements", "emoji": "👍" } }
+    ],
+    "tags": ["messaging", "reactions"]
+  },
+  {
+    "id": "msg-read",
+    "prompt": "read the last 10 messages from #support",
+    "expectedActions": [
+      { "type": "readMessages", "params": { "channel": "support", "limit": 10 } }
+    ],
+    "tags": ["messaging", "basic"]
+  },
+  {
+    "id": "msg-edit",
+    "prompt": "edit my last message in #general to say 'corrected text'",
+    "expectedActions": [
+      { "type": "editMessage", "params": { "channel": "general", "content": "corrected text" } }
+    ],
+    "tags": ["messaging", "basic"]
+  },
+  {
+    "id": "msg-delete",
+    "prompt": "delete the last message in #spam",
+    "expectedActions": [
+      { "type": "deleteMessage", "params": { "channel": "spam" } }
+    ],
+    "tags": ["messaging", "basic"]
+  },
+  {
+    "id": "msg-pin",
+    "prompt": "pin the latest message in #rules",
+    "expectedActions": [
+      { "type": "pinMessage", "params": { "channel": "rules" } }
+    ],
+    "tags": ["messaging", "pins"]
+  },
+  {
+    "id": "msg-unpin",
+    "prompt": "unpin the last pinned message in #rules",
+    "expectedActions": [
+      { "type": "unpinMessage", "params": { "channel": "rules" } }
+    ],
+    "tags": ["messaging", "pins"]
+  },
+  {
+    "id": "msg-list-pins",
+    "prompt": "show me all pinned messages in #announcements",
+    "expectedActions": [
+      { "type": "listPins", "params": { "channel": "announcements" } }
+    ],
+    "tags": ["messaging", "pins"]
+  },
+  {
+    "id": "msg-crosspost",
+    "prompt": "crosspost the latest message in #announcements",
+    "expectedActions": [
+      { "type": "crosspost", "params": { "channel": "announcements" } }
+    ],
+    "tags": ["messaging"]
+  },
+  {
+    "id": "msg-bulk-delete",
+    "prompt": "bulk delete the last 5 messages in #cleanup",
+    "expectedActions": [
+      { "type": "bulkDelete", "params": { "channel": "cleanup", "count": 5 } }
+    ],
+    "tags": ["messaging", "moderation"]
+  },
+  {
+    "id": "msg-send-file",
+    "prompt": "send the log file to #debug",
+    "expectedActions": [
+      { "type": "sendFile", "params": { "channel": "debug" } }
+    ],
+    "tags": ["messaging", "files"]
+  },
+  {
+    "id": "msg-unreact",
+    "prompt": "remove my thumbs up reaction from the last message in #general",
+    "expectedActions": [
+      { "type": "unreact", "params": { "channel": "general", "emoji": "👍" } }
+    ],
+    "tags": ["messaging", "reactions"]
+  }
+]

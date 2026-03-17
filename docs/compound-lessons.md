@@ -155,3 +155,10 @@ Lesson: Two reusable patterns for follow-up prompt reliability: (1) action-resul
 Source: task/chat context - oversized `readMessages`/`cronShow` action results caused follow-up prompt failures; silently truncated model responses were mistaken for complete answers
 Applied: docs/compound-lessons.md
 Status: active
+
+### 2026-03-16 - Design self-improvement pipelines as a frozen-input data pipeline before wiring orchestration
+Tags: #workflow #prompting #architecture
+Lesson: When building a self-improvement or prompt-tuning harness, implement the core data pipeline (load frozen test cases → mutate instruction text → score against expected output) as standalone pure-function modules with full test coverage before wiring CLI runners, keep/revert logic, or reporting. Frozen test suites (`action-compliance.json`) must be schema-validated at load time and test cases must carry stable IDs so scoring results are reproducible across mutation iterations. Separating the pipeline from the orchestrator prevents the scoring logic from coupling to execution concerns and makes each stage independently testable.
+Source: plan-587 Phase A implementation — self-improve harness built as loader/mutator/scorer modules with frozen action-compliance test suite, validated by dedicated test files before any CLI or Discord integration
+Applied: `src/self-improve/` (types, loader, mutator, scorer), `test-suites/action-compliance.json`
+Status: active

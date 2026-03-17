@@ -1,0 +1,455 @@
+[
+  {
+    "id": "msg-send-basic",
+    "prompt": "send 'hello world' to the general channel",
+    "expectedActions": [
+      { "type": "sendMessage", "params": { "channel": "general", "content": "hello world" } }
+    ],
+    "tags": ["messaging", "basic"]
+  },
+  {
+    "id": "msg-send-thread",
+    "prompt": "create a new thread called 'Bug Report' in #dev and post 'tracking issue' there",
+    "expectedActions": [
+      { "type": "threadCreate", "params": { "channel": "dev", "name": "Bug Report" } },
+      { "type": "sendMessage", "params": { "content": "tracking issue" } }
+    ],
+    "tags": ["messaging", "threads"]
+  },
+  {
+    "id": "msg-react",
+    "prompt": "react to the last message in #announcements with a thumbs up",
+    "expectedActions": [
+      { "type": "react", "params": { "channel": "announcements", "emoji": "\ud83d\udc4d" } }
+    ],
+    "tags": ["messaging", "reactions"]
+  },
+  {
+    "id": "msg-read",
+    "prompt": "read the last 10 messages from #support",
+    "expectedActions": [
+      { "type": "readMessages", "params": { "channel": "support", "limit": 10 } }
+    ],
+    "tags": ["messaging", "basic"]
+  },
+  {
+    "id": "msg-edit",
+    "prompt": "edit my last message in #general to say 'corrected text'",
+    "expectedActions": [
+      { "type": "editMessage", "params": { "channel": "general", "content": "corrected text" } }
+    ],
+    "tags": ["messaging", "basic"]
+  },
+  {
+    "id": "msg-delete",
+    "prompt": "delete the last message in #spam",
+    "expectedActions": [
+      { "type": "deleteMessage", "params": { "channel": "spam" } }
+    ],
+    "tags": ["messaging", "basic"]
+  },
+  {
+    "id": "msg-pin",
+    "prompt": "pin the latest message in #rules",
+    "expectedActions": [
+      { "type": "pinMessage", "params": { "channel": "rules" } }
+    ],
+    "tags": ["messaging", "pins"]
+  },
+  {
+    "id": "msg-unpin",
+    "prompt": "unpin the last pinned message in #rules",
+    "expectedActions": [
+      { "type": "unpinMessage", "params": { "channel": "rules" } }
+    ],
+    "tags": ["messaging", "pins"]
+  },
+  {
+    "id": "msg-list-pins",
+    "prompt": "show me all pinned messages in #announcements",
+    "expectedActions": [
+      { "type": "listPins", "params": { "channel": "announcements" } }
+    ],
+    "tags": ["messaging", "pins"]
+  },
+  {
+    "id": "msg-crosspost",
+    "prompt": "crosspost the latest message in #announcements",
+    "expectedActions": [
+      { "type": "crosspost", "params": { "channel": "announcements" } }
+    ],
+    "tags": ["messaging"]
+  },
+  {
+    "id": "msg-bulk-delete",
+    "prompt": "bulk delete the last 5 messages in #cleanup",
+    "expectedActions": [
+      { "type": "bulkDelete", "params": { "channel": "cleanup", "count": 5 } }
+    ],
+    "tags": ["messaging", "moderation"]
+  },
+  {
+    "id": "msg-send-file",
+    "prompt": "send the log file to #debug",
+    "expectedActions": [
+      { "type": "sendFile", "params": { "channel": "debug" } }
+    ],
+    "tags": ["messaging", "files"]
+  },
+  {
+    "id": "msg-unreact",
+    "prompt": "remove my thumbs up reaction from the last message in #general",
+    "expectedActions": [
+      { "type": "unreact", "params": { "channel": "general", "emoji": "\ud83d\udc4d" } }
+    ],
+    "tags": ["messaging", "reactions"]
+  },
+  {
+    "id": "chan-list",
+    "prompt": "list all channels in this server",
+    "expectedActions": [
+      { "type": "channelList" }
+    ],
+    "tags": ["channels", "basic"]
+  },
+  {
+    "id": "chan-info",
+    "prompt": "show me info about the #general channel",
+    "expectedActions": [
+      { "type": "channelInfo", "params": { "channel": "general" } }
+    ],
+    "tags": ["channels", "basic"]
+  },
+  {
+    "id": "chan-create",
+    "prompt": "create a new text channel called 'project-updates'",
+    "expectedActions": [
+      { "type": "channelCreate", "params": { "name": "project-updates" } }
+    ],
+    "tags": ["channels", "management"]
+  },
+  {
+    "id": "chan-edit",
+    "prompt": "rename the #old-name channel to #new-name",
+    "expectedActions": [
+      { "type": "channelEdit", "params": { "channel": "old-name", "name": "new-name" } }
+    ],
+    "tags": ["channels", "management"]
+  },
+  {
+    "id": "chan-delete",
+    "prompt": "delete the #temp-channel",
+    "expectedActions": [
+      { "type": "channelDelete", "params": { "channel": "temp-channel" } }
+    ],
+    "tags": ["channels", "management"]
+  },
+  {
+    "id": "chan-move",
+    "prompt": "move #off-topic under the Social category",
+    "expectedActions": [
+      { "type": "channelMove", "params": { "channel": "off-topic", "category": "Social" } }
+    ],
+    "tags": ["channels", "management"]
+  },
+  {
+    "id": "chan-category-create",
+    "prompt": "create a new category called 'Archive'",
+    "expectedActions": [
+      { "type": "categoryCreate", "params": { "name": "Archive" } }
+    ],
+    "tags": ["channels", "management"]
+  },
+  {
+    "id": "chan-thread-list-archived",
+    "prompt": "show all archived threads in #dev",
+    "expectedActions": [
+      { "type": "threadListArchived", "params": { "channel": "dev" } }
+    ],
+    "tags": ["channels", "threads"]
+  },
+  {
+    "id": "chan-thread-edit",
+    "prompt": "rename the current thread to 'Fixed Issue'",
+    "expectedActions": [
+      { "type": "threadEdit", "params": { "name": "Fixed Issue" } }
+    ],
+    "tags": ["channels", "threads"]
+  },
+  {
+    "id": "chan-forum-tag-create",
+    "prompt": "add a new forum tag 'bug' to #help-forum",
+    "expectedActions": [
+      { "type": "forumTagCreate", "params": { "channel": "help-forum", "name": "bug" } }
+    ],
+    "tags": ["channels", "forums"]
+  },
+  {
+    "id": "guild-member-info",
+    "prompt": "show me info about the user @alice",
+    "expectedActions": [
+      { "type": "memberInfo", "params": { "user": "alice" } }
+    ],
+    "tags": ["guild", "basic"]
+  },
+  {
+    "id": "guild-role-info",
+    "prompt": "what permissions does the Moderator role have?",
+    "expectedActions": [
+      { "type": "roleInfo", "params": { "role": "Moderator" } }
+    ],
+    "tags": ["guild", "roles"]
+  },
+  {
+    "id": "guild-role-add",
+    "prompt": "give @bob the Developer role",
+    "expectedActions": [
+      { "type": "roleAdd", "params": { "user": "bob", "role": "Developer" } }
+    ],
+    "tags": ["guild", "roles"]
+  },
+  {
+    "id": "guild-role-remove",
+    "prompt": "remove the Tester role from @charlie",
+    "expectedActions": [
+      { "type": "roleRemove", "params": { "user": "charlie", "role": "Tester" } }
+    ],
+    "tags": ["guild", "roles"]
+  },
+  {
+    "id": "guild-search",
+    "prompt": "search for messages containing 'deploy failed' in #ops",
+    "expectedActions": [
+      { "type": "searchMessages", "params": { "query": "deploy failed", "channel": "ops" } }
+    ],
+    "tags": ["guild", "search"]
+  },
+  {
+    "id": "guild-event-list",
+    "prompt": "list all upcoming events in the server",
+    "expectedActions": [
+      { "type": "eventList" }
+    ],
+    "tags": ["guild", "events"]
+  },
+  {
+    "id": "guild-event-create",
+    "prompt": "create a server event called 'Game Night' for Saturday at 8pm",
+    "expectedActions": [
+      { "type": "eventCreate", "params": { "name": "Game Night" } }
+    ],
+    "tags": ["guild", "events"]
+  },
+  {
+    "id": "mod-timeout",
+    "prompt": "timeout @spammer for 10 minutes",
+    "expectedActions": [
+      { "type": "timeout", "params": { "user": "spammer", "duration": 600 } }
+    ],
+    "tags": ["moderation"]
+  },
+  {
+    "id": "mod-kick",
+    "prompt": "kick @troll from the server for being disruptive",
+    "expectedActions": [
+      { "type": "kick", "params": { "user": "troll", "reason": "being disruptive" } }
+    ],
+    "tags": ["moderation"]
+  },
+  {
+    "id": "mod-ban",
+    "prompt": "ban @badactor permanently for repeated violations",
+    "expectedActions": [
+      { "type": "ban", "params": { "user": "badactor", "reason": "repeated violations" } }
+    ],
+    "tags": ["moderation"]
+  },
+  {
+    "id": "task-create",
+    "prompt": "create a task to fix the login bug, priority high",
+    "expectedActions": [
+      { "type": "taskCreate", "params": { "title": "fix the login bug", "priority": "high" } }
+    ],
+    "tags": ["tasks", "basic"]
+  },
+  {
+    "id": "task-list",
+    "prompt": "show all open tasks",
+    "expectedActions": [
+      { "type": "taskList" }
+    ],
+    "tags": ["tasks", "basic"]
+  },
+  {
+    "id": "task-update",
+    "prompt": "update task #42 status to 'in progress'",
+    "expectedActions": [
+      { "type": "taskUpdate", "params": { "id": "42", "status": "in progress" } }
+    ],
+    "tags": ["tasks", "basic"]
+  },
+  {
+    "id": "task-close",
+    "prompt": "close task #42, it's done",
+    "expectedActions": [
+      { "type": "taskClose", "params": { "id": "42" } }
+    ],
+    "tags": ["tasks", "basic"]
+  },
+  {
+    "id": "task-show",
+    "prompt": "show me the details of task #15",
+    "expectedActions": [
+      { "type": "taskShow", "params": { "id": "15" } }
+    ],
+    "tags": ["tasks", "basic"]
+  },
+  {
+    "id": "mem-remember",
+    "prompt": "remember that the deploy key is in 1Password under 'prod-deploy'",
+    "expectedActions": [
+      { "type": "memoryRemember", "params": { "content": "the deploy key is in 1Password under 'prod-deploy'" } }
+    ],
+    "tags": ["memory"]
+  },
+  {
+    "id": "mem-forget",
+    "prompt": "forget what I told you about the old API key",
+    "expectedActions": [
+      { "type": "memoryForget", "params": { "query": "old API key" } }
+    ],
+    "tags": ["memory"]
+  },
+  {
+    "id": "mem-show",
+    "prompt": "what do you remember about deployment?",
+    "expectedActions": [
+      { "type": "memoryShow", "params": { "query": "deployment" } }
+    ],
+    "tags": ["memory"]
+  },
+  {
+    "id": "cfg-model-set",
+    "prompt": "switch to using claude-sonnet-4-20250514 as the AI model",
+    "expectedActions": [
+      { "type": "modelSet", "params": { "model": "claude-sonnet-4-20250514" } }
+    ],
+    "tags": ["config"]
+  },
+  {
+    "id": "cfg-model-reset",
+    "prompt": "reset the AI model to the default",
+    "expectedActions": [
+      { "type": "modelReset" }
+    ],
+    "tags": ["config"]
+  },
+  {
+    "id": "cfg-model-show",
+    "prompt": "what model are you currently using?",
+    "expectedActions": [
+      { "type": "modelShow" }
+    ],
+    "tags": ["config"]
+  },
+  {
+    "id": "multi-create-and-announce",
+    "prompt": "create a #release-notes channel and post 'v2.0 is live!' there",
+    "expectedActions": [
+      { "type": "channelCreate", "params": { "name": "release-notes" } },
+      { "type": "sendMessage", "params": { "channel": "release-notes", "content": "v2.0 is live!" } }
+    ],
+    "tags": ["multi-action", "channels", "messaging"]
+  },
+  {
+    "id": "multi-role-and-notify",
+    "prompt": "give @dave the Admin role and send a message to #staff saying 'dave is now admin'",
+    "expectedActions": [
+      { "type": "roleAdd", "params": { "user": "dave", "role": "Admin" } },
+      { "type": "sendMessage", "params": { "channel": "staff", "content": "dave is now admin" } }
+    ],
+    "tags": ["multi-action", "guild", "messaging"]
+  },
+  {
+    "id": "multi-task-and-react",
+    "prompt": "create a task for the login bug and react with \u2705 to confirm",
+    "expectedActions": [
+      { "type": "taskCreate", "params": { "title": "login bug" } },
+      { "type": "react", "params": { "emoji": "\u2705" } }
+    ],
+    "tags": ["multi-action", "tasks", "messaging"]
+  },
+  {
+    "id": "multi-remember-and-reply",
+    "prompt": "remember that standup is at 9am and let the user know you saved it",
+    "expectedActions": [
+      { "type": "memoryRemember", "params": { "content": "standup is at 9am" } },
+      { "type": "sendMessage" }
+    ],
+    "tags": ["multi-action", "memory", "messaging"]
+  },
+  {
+    "id": "poll-create",
+    "prompt": "create a poll asking 'What day for game night?' with options Monday, Wednesday, Friday",
+    "expectedActions": [
+      { "type": "poll", "params": { "question": "What day for game night?" } }
+    ],
+    "tags": ["polls"]
+  },
+  {
+    "id": "cron-create",
+    "prompt": "create a daily cron job at 9am to post 'good morning' in #general",
+    "expectedActions": [
+      { "type": "cronCreate", "params": { "channel": "general", "content": "good morning" } }
+    ],
+    "tags": ["crons"]
+  },
+  {
+    "id": "cron-list",
+    "prompt": "list all scheduled cron jobs",
+    "expectedActions": [
+      { "type": "cronList" }
+    ],
+    "tags": ["crons"]
+  },
+  {
+    "id": "voice-join",
+    "prompt": "join the Music voice channel",
+    "expectedActions": [
+      { "type": "voiceJoin", "params": { "channel": "Music" } }
+    ],
+    "tags": ["voice"]
+  },
+  {
+    "id": "voice-leave",
+    "prompt": "leave the current voice channel",
+    "expectedActions": [
+      { "type": "voiceLeave" }
+    ],
+    "tags": ["voice"]
+  },
+  {
+    "id": "bot-set-status",
+    "prompt": "set your status to 'online'",
+    "expectedActions": [
+      { "type": "botSetStatus", "params": { "status": "online" } }
+    ],
+    "tags": ["bot-profile"]
+  },
+  {
+    "id": "bot-set-activity",
+    "prompt": "set your activity to 'Playing chess'",
+    "expectedActions": [
+      { "type": "botSetActivity", "params": { "type": "Playing", "name": "chess" } }
+    ],
+    "tags": ["bot-profile"]
+  },
+  {
+    "id": "imagegen-basic",
+    "prompt": "generate an image of a sunset over mountains",
+    "expectedActions": [
+      { "type": "generateImage", "params": { "prompt": "a sunset over mountains" } }
+    ],
+    "tags": ["imagegen"]
+  }
+]
