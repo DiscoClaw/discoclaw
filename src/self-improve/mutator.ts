@@ -4,7 +4,7 @@
 // Each MutationOp targets a zero-based line index.
 // Operations are applied in sequence, so later ops see the result of earlier ones.
 
-import type { Mutation, MutationOp, MutationResult } from './types.js';
+import type { Mutation, MutationKind, MutationOp, MutationResult } from './types.js';
 
 // ── Errors ──────────────────────────────────────────────────────────
 
@@ -116,4 +116,57 @@ export function singleOp(op: MutationOp, description?: string): Mutation {
     ops: [op],
     description: description ?? `${op.kind} at line ${op.target}`,
   };
+}
+
+/**
+ * Generate a random single-op mutation for the given instruction text.
+ *
+ * Picks from safe, content-preserving operations:
+ *   - `swap`   (reorder two lines — no information loss)
+ *   - `delete` (remove one line)
+ *
+ * Accepts an optional RNG function (returns values in [0, 1)) for
+ * deterministic testing.
+ */
+export function generateRandomMutation(
+  text: string,
+  rng: () => number = Math.random,
+): Mutation {
+  const lines = text.split('\n');
+  const n = lines.length;
+
+  // Degenerate case: empty or single-empty-line text — insert so the op is valid.
+  if (n === 0 || (n === 1 && lines[0] === '')) {
+    return {
+      ops: [{ kind: 'insert', target: 0, content: '' }],
+      description: 'insert line into empty text',
+    };
+  }
+
+  // Build available mutation kinds based on line count.
+  const kinds: MutationKind[] = ['delete'];
+  if (n >= 2) kinds.push('swap');
+
+  const kind = kinds[Math.floor(rng() * kinds.length)];
+
+  switch (kind) {
+    case 'swap': {
+      const a = Math.floor(rng() * n);
+      // Pick b ≠ a by drawing from [0, n-1) then skipping past a.
+      let b = Math.floor(rng() * (n - 1));
+      if (b >= a) b++;
+      return {
+        ops: [{ kind: 'swap', target: a, swapWith: b }],
+        description: `swap lines ${a} and ${b}`,
+      };
+    }
+    case 'delete':
+    default: {
+      const target = Math.floor(rng() * n);
+      return {
+        ops: [{ kind: 'delete', target }],
+        description: `delete line ${target}`,
+      };
+    }
+  }
 }

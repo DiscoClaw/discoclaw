@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import type { EngineEvent, RuntimeAdapter, RuntimeCapability, RuntimeId } from '../../runtime/types.js';
 import type { FrozenTestCase, Ledger } from '../types.js';
 import { loadTestCasesFromFile } from '../loader.js';
+import { applyMutation, generateRandomMutation } from '../mutator.js';
 import { runSuite } from '../runner.js';
 import { scoreBatch } from '../scorer.js';
 import { loadLedger, shouldPromote, promote, saveLedger } from '../keeper.js';
@@ -171,5 +172,47 @@ describe('cli integration (end-to-end)', () => {
     const { results: scoreResults, meanScore } = scoreBatch(testCases, actionsMap);
     expect(scoreResults).toEqual([]);
     expect(meanScore).toBe(0);
+  });
+
+  it('wires mutator into the improvement loop (mutate → run → score → promote)', async () => {
+    // 1. Write fixture suite
+    const suiteDir = join(testDir, 'suite-mutate');
+    await mkdir(suiteDir);
+    const fixture: FrozenTestCase[] = [
+      { id: 'mut-1', prompt: 'list channels', expectedActions: [{ type: 'channelList' }] },
+    ];
+    await writeFile(join(suiteDir, 'cases.json'), JSON.stringify(fixture));
+
+    // 2. Write multi-line instruction file
+    const targetPath = join(testDir, 'instructions.md');
+    const originalInstructions = 'Line A\nLine B\nLine C\nLine D';
+    await writeFile(targetPath, originalInstructions);
+
+    const ledgerPath = join(testDir, 'instructions.md.ledger.json');
+    const testCases = await loadTestCasesFromFile(join(suiteDir, 'cases.json'));
+
+    // 3. Generate and apply mutation
+    const mutation = generateRandomMutation(originalInstructions, () => 0.5);
+    const { mutated } = applyMutation(originalInstructions, mutation);
+    expect(mutated).not.toBe(originalInstructions);
+
+    // 4. Run suite with mutated instructions
+    const adapter = cannedAdapter(
+      '<discord-action>{"type":"channelList"}</discord-action>',
+    );
+    const { actionsMap } = await runSuite(testCases, mutated, adapter);
+    const { results: scoreResults, meanScore } = scoreBatch(testCases, actionsMap);
+    expect(meanScore).toBeGreaterThan(0);
+
+    // 5. Promote mutated text
+    const ledger = await loadLedger(ledgerPath);
+    expect(shouldPromote(ledger, meanScore)).toBe(true);
+    const updated = await promote(targetPath, mutated, ledgerPath, meanScore);
+    expect(updated.bestScore).toBe(meanScore);
+
+    // 6. Verify the promoted file contains the mutated (not original) text
+    const promoted = await readFile(targetPath, 'utf-8');
+    expect(promoted).toBe(mutated);
+    expect(promoted).not.toBe(originalInstructions);
   });
 });

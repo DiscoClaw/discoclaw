@@ -13,9 +13,10 @@ import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { loadTestCasesFromDir } from './loader.js';
+import { applyMutation, generateRandomMutation } from './mutator.js';
 import { runSuite } from './runner.js';
 import { scoreBatch } from './scorer.js';
-import { loadLedger, shouldPromote, promote } from './keeper.js';
+import { loadLedger, saveLedger, shouldPromote, promote } from './keeper.js';
 import { formatConsoleTable, formatSummary } from './reporter.js';
 import { createClaudeCliRuntime } from '../runtime/claude-code-cli.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
@@ -87,21 +88,41 @@ async function main(): Promise<void> {
   }
   console.log(`Loaded ${testCases.length} test case(s) from ${suitePath}`);
 
+  const runOpts = { model: modelOverride, cwd: process.cwd() };
   const ledgerPath = targetPath + '.ledger.json';
   let ledger = await loadLedger(ledgerPath);
 
+  // ── Establish baseline score if no prior run exists ──
+  if (ledger.iteration === 0 && ledger.bestScore === 0) {
+    console.log('\n── Establishing baseline ──');
+    const instructions = await readFile(targetPath, 'utf-8');
+    const { actionsMap } = await runSuite(testCases, instructions, adapter, runOpts);
+    const { results: scoreResults, meanScore } = scoreBatch(testCases, actionsMap);
+    console.log('\n' + formatConsoleTable(scoreResults, meanScore));
+    console.log(`Baseline score: ${meanScore.toFixed(3)}`);
+
+    ledger = { bestScore: meanScore, iteration: 0, promotedAt: new Date().toISOString() };
+    await saveLedger(ledgerPath, ledger);
+  }
+
+  // ── Mutation iterations ──
   for (let i = 1; i <= iterations; i++) {
     console.log(`\n── Iteration ${i}/${iterations} ──`);
 
-    // Read current instruction text.
+    // Read the current best instruction text.
     const instructions = await readFile(targetPath, 'utf-8');
 
-    // Run the suite.
+    // Generate and apply a random mutation.
+    const mutation = generateRandomMutation(instructions);
+    const { mutated } = applyMutation(instructions, mutation);
+    console.log(`Mutation: ${mutation.description}`);
+
+    // Run the suite with mutated instructions.
     const { results: runResults, actionsMap } = await runSuite(
       testCases,
-      instructions,
+      mutated,
       adapter,
-      { model: modelOverride, cwd: process.cwd() },
+      runOpts,
     );
 
     // Score.
@@ -110,11 +131,11 @@ async function main(): Promise<void> {
     // Report.
     console.log('\n' + formatConsoleTable(scoreResults, meanScore));
 
-    // Keep / revert decision.
+    // Keep / revert decision — promote the mutated text only if it improves.
     const promoted = !dryRun && shouldPromote(ledger, meanScore);
 
     if (promoted) {
-      ledger = await promote(targetPath, instructions, ledgerPath, meanScore);
+      ledger = await promote(targetPath, mutated, ledgerPath, meanScore);
     }
 
     console.log(formatSummary(meanScore, ledger.bestScore, promoted));

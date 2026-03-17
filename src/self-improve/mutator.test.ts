@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { applyMutation, singleOp, MutationError } from './mutator.js';
+import { applyMutation, singleOp, generateRandomMutation, MutationError } from './mutator.js';
 import type { Mutation } from './types.js';
 
 const SAMPLE = 'line 0\nline 1\nline 2\nline 3';
@@ -139,5 +139,61 @@ describe('singleOp', () => {
   it('uses custom description', () => {
     const m = singleOp({ kind: 'insert', target: 0, content: 'x' }, 'custom desc');
     expect(m.description).toBe('custom desc');
+  });
+});
+
+// ── generateRandomMutation ─────────────────────────────────────────
+
+describe('generateRandomMutation', () => {
+  it('generates a valid delete mutation for single-line text', () => {
+    // Single line → only delete is available
+    const m = generateRandomMutation('only line', () => 0);
+    expect(m.ops).toHaveLength(1);
+    expect(m.ops[0].kind).toBe('delete');
+    expect(m.ops[0].target).toBe(0);
+  });
+
+  it('generates a swap mutation when rng selects it', () => {
+    // Multi-line text: kinds = ['delete', 'swap']
+    // rng returning 0.5 → floor(0.5 * 2) = 1 → 'swap'
+    const m = generateRandomMutation('line 0\nline 1\nline 2', () => 0.5);
+    expect(m.ops).toHaveLength(1);
+    expect(m.ops[0].kind).toBe('swap');
+    expect(m.ops[0].swapWith).toBeDefined();
+    expect(m.ops[0].target).not.toBe(m.ops[0].swapWith);
+  });
+
+  it('generates a delete mutation when rng selects it', () => {
+    // Multi-line text: kinds = ['delete', 'swap']
+    // rng returning 0 → floor(0 * 2) = 0 → 'delete'
+    const m = generateRandomMutation('line 0\nline 1\nline 2', () => 0);
+    expect(m.ops).toHaveLength(1);
+    expect(m.ops[0].kind).toBe('delete');
+    expect(m.ops[0].target).toBe(0);
+  });
+
+  it('handles empty text gracefully', () => {
+    const m = generateRandomMutation('', () => 0);
+    expect(m.ops).toHaveLength(1);
+    expect(m.ops[0].kind).toBe('insert');
+  });
+
+  it('produces mutations that applyMutation can execute', () => {
+    const text = 'line 0\nline 1\nline 2\nline 3';
+    // Run several deterministic seeds and verify each is applicable
+    for (const seed of [0, 0.1, 0.25, 0.5, 0.75, 0.99]) {
+      const m = generateRandomMutation(text, () => seed);
+      const result = applyMutation(text, m);
+      expect(result.mutated).toBeDefined();
+      expect(result.original).toBe(text);
+    }
+  });
+
+  it('swap always picks two different lines', () => {
+    const text = 'a\nb';
+    // kinds = ['delete','swap'], rng=0.5 → swap, then a=floor(0.5*2)=1, b=floor(0.5*1)=0
+    const m = generateRandomMutation(text, () => 0.5);
+    expect(m.ops[0].kind).toBe('swap');
+    expect(m.ops[0].target).not.toBe(m.ops[0].swapWith);
   });
 });
