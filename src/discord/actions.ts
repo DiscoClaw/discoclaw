@@ -1041,3 +1041,66 @@ export function buildTieredDiscordActionsPromptSection(
 export function discordActionsPromptSection(flags: ActionCategoryFlags, botDisplayName?: string): string {
   return buildTieredDiscordActionsPromptSection(flags, botDisplayName).prompt;
 }
+
+// ---------------------------------------------------------------------------
+// Self-improvement harness helpers
+// ---------------------------------------------------------------------------
+
+import type { ExpectedAction } from '../self-improve/types.js';
+
+/** ActionCategoryFlags with every category enabled — for evaluation runs. */
+export function allActionCategoryFlags(): ActionCategoryFlags {
+  return {
+    channels: true,
+    messaging: true,
+    guild: true,
+    moderation: true,
+    polls: true,
+    tasks: true,
+    crons: true,
+    botProfile: true,
+    forge: true,
+    plan: true,
+    memory: true,
+    defer: true,
+    config: true,
+    loop: true,
+    imagegen: true,
+    voice: true,
+    spawn: true,
+  };
+}
+
+/** All known action type strings across every category. */
+export function allKnownActionTypes(): ReadonlySet<string> {
+  return buildValidTypes(allActionCategoryFlags());
+}
+
+/**
+ * Convert a DiscordActionRequest to the ExpectedAction format used by the
+ * self-improvement scorer.  Extracts `type` and collects all remaining
+ * fields into `params`.
+ */
+export function actionRequestToExpectedAction(action: DiscordActionRequest): ExpectedAction {
+  const { type, ...rest } = action as { type: string; [k: string]: unknown };
+  const keys = Object.keys(rest);
+  return keys.length > 0
+    ? { type, params: rest as Record<string, unknown> }
+    : { type };
+}
+
+/**
+ * Parse raw AI output text with all action categories enabled and return
+ * the extracted actions in the `ExpectedAction[]` format consumed by the
+ * self-improvement scorer.
+ */
+export function parseActionsForScoring(text: string): {
+  actions: ExpectedAction[];
+  parseFailures: number;
+} {
+  const { actions, parseFailures } = parseDiscordActions(text, allActionCategoryFlags());
+  return {
+    actions: actions.map(actionRequestToExpectedAction),
+    parseFailures,
+  };
+}
