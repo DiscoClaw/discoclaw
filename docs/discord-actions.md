@@ -55,7 +55,7 @@ Channel action types (in `src/discord/actions-channels.ts`):
 - `forumTagCreate`, `forumTagDelete`, `forumTagList`
 
 Messaging action types (in `src/discord/actions-messaging.ts`):
-- `sendMessage`, `sendFile`, `react`, `unreact`, `readMessages`, `fetchMessage`
+- `sendMessage`, `sendFile`, `react`, `unreact`, `readMessages`, `fetchMessage`, `downloadAttachment`
 - `editMessage`, `deleteMessage`, `bulkDelete`, `crosspost`, `threadCreate`
 - `pinMessage`, `unpinMessage`, `listPins`
 
@@ -200,18 +200,18 @@ Capability/gating note (important):
 `readMessages` and `fetchMessage` include compact image attachment metadata in their returned text summaries. Each attachment is rendered as:
 
 ```
-[Attachment: filename.png (image/png, 1024x768)]
+[Attachment: filename.png (image/png, 1024x768) url:https://cdn.discordapp.com/attachments/...]
 ```
 
-The metadata includes the filename, content type, and dimensions (when available). This makes image attachments visible in historical reads without requiring multimodal image content — the model can see that images exist, what type they are, and their dimensions, even though the actual image pixels are not included in the action result.
+The metadata includes the filename, content type, dimensions (when available), and the Discord CDN URL. The URL enables downstream actions — use `downloadAttachment` with the message's channel and message IDs to fetch the file to a local temp path for processing.
 
 This applies to all attachment types (images, videos, documents), not just images. Non-image attachments that lack dimensions render without the size component:
 
 ```
-[Attachment: notes.txt (text/plain)]
+[Attachment: notes.txt (text/plain) url:https://cdn.discordapp.com/attachments/...]
 ```
 
-> **Note:** This is text-level metadata only. True multimodal action-result images (where the model receives actual image content for vision analysis) are not part of this mechanism.
+> **Note:** This is text-level metadata only. True multimodal action-result images (where the model receives actual image content for vision analysis) are not part of this mechanism. To download an attachment for local processing, use the `downloadAttachment` action.
 
 ## Autonomous Action Categories
 

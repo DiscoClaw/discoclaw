@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChannelType, PermissionFlagsBits } from 'discord.js';
 import * as fsMod from 'node:fs/promises';
 import { executeMessagingAction, _setSendFileAllowedDirs } from './actions-messaging.js';
@@ -10,6 +10,7 @@ vi.mock('node:fs/promises', () => ({
   stat: vi.fn(),
   readFile: vi.fn(),
   realpath: vi.fn(),
+  writeFile: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
@@ -800,6 +801,28 @@ describe('readMessages', () => {
     const summary = (result as any).summary as string;
     expect(summary).toContain('[Attachment: photo.webp (640x480)]');
   });
+
+  it('includes attachment URL when present', async () => {
+    const msg = makeMockMessage('m1', {
+      content: '',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'photo.png', contentType: 'image/png', url: 'https://cdn.discordapp.com/attachments/123/456/photo.png' }),
+      ]),
+    });
+    const fetchedMessages = new Map([['m1', msg]]);
+    const ch = makeMockChannel({ name: 'general', fetchedMessages });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'readMessages', channel: '#general', limit: 5 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('url:https://cdn.discordapp.com/attachments/123/456/photo.png');
+  });
 });
 
 describe('fetchMessage', () => {
@@ -1157,6 +1180,255 @@ describe('fetchMessage', () => {
     const summary = (result as any).summary as string;
     expect(summary).toContain('[Attachment: unknown]');
     expect(summary).not.toContain('null');
+  });
+
+  it('includes attachment URL when present', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: 'Check this image',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'photo.png', contentType: 'image/png', width: 800, height: 600, url: 'https://cdn.discordapp.com/attachments/123/456/photo.png' }),
+      ]),
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'fetchMessage', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    const summary = (result as any).summary as string;
+    expect(summary).toContain('url:https://cdn.discordapp.com/attachments/123/456/photo.png');
+  });
+});
+
+describe('downloadAttachment', () => {
+  let mockFetch: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockFetch = vi.fn();
+    vi.stubGlobal('fetch', mockFetch);
+    vi.mocked(fsMod.writeFile).mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('downloads attachment to temp file', async () => {
+    const imageData = Buffer.from('fake-png-data');
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'photo.png', contentType: 'image/png', url: 'https://cdn.discordapp.com/attachments/123/456/photo.png' }),
+      ]),
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => imageData.buffer.slice(imageData.byteOffset, imageData.byteOffset + imageData.byteLength),
+    });
+
+    const result = await executeMessagingAction(
+      { type: 'downloadAttachment', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('Downloaded "photo.png"');
+    expect((result as any).summary).toContain('/tmp/discoclaw-att-msg1-0.png');
+    expect(mockFetch).toHaveBeenCalledWith('https://cdn.discordapp.com/attachments/123/456/photo.png');
+    expect(fsMod.writeFile).toHaveBeenCalled();
+  });
+
+  it('uses attachmentIndex to select a specific attachment', async () => {
+    const imageData = Buffer.from('fake-jpg-data');
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'first.png', contentType: 'image/png', url: 'https://cdn.discordapp.com/first.png' }),
+        makeAttachment({ name: 'second.jpg', contentType: 'image/jpeg', url: 'https://cdn.discordapp.com/second.jpg' }),
+      ]),
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => imageData.buffer.slice(imageData.byteOffset, imageData.byteOffset + imageData.byteLength),
+    });
+
+    const result = await executeMessagingAction(
+      { type: 'downloadAttachment', channelId: 'ch1', messageId: 'msg1', attachmentIndex: 1 },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('second.jpg');
+    expect((result as any).summary).toContain('/tmp/discoclaw-att-msg1-1.jpg');
+    expect(mockFetch).toHaveBeenCalledWith('https://cdn.discordapp.com/second.jpg');
+  });
+
+  it('rejects empty channelId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'downloadAttachment', channelId: '', messageId: 'msg1' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'downloadAttachment requires a non-empty channelId' });
+  });
+
+  it('rejects empty messageId', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'downloadAttachment', channelId: 'ch1', messageId: '' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'downloadAttachment requires a non-empty messageId' });
+  });
+
+  it('fails when channel not found', async () => {
+    const ctx = makeCtx([]);
+    const result = await executeMessagingAction(
+      { type: 'downloadAttachment', channelId: 'missing', messageId: 'msg1' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'Channel "missing" not found' });
+  });
+
+  it('fails when message has no attachments', async () => {
+    const msg = makeMockMessage('msg1', { content: 'No images here' });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'downloadAttachment', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'Message has no attachments' });
+  });
+
+  it('fails when attachment index is out of range', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'photo.png', url: 'https://cdn.discordapp.com/photo.png' }),
+      ]),
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'downloadAttachment', channelId: 'ch1', messageId: 'msg1', attachmentIndex: 5 },
+      ctx,
+    );
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('out of range');
+    expect((result as any).error).toContain('1 attachment(s)');
+  });
+
+  it('fails when attachment has no URL', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'photo.png' }),
+      ]),
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'downloadAttachment', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'Attachment has no URL' });
+  });
+
+  it('fails on HTTP error from fetch', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'photo.png', url: 'https://cdn.discordapp.com/photo.png' }),
+      ]),
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 404 });
+
+    const result = await executeMessagingAction(
+      { type: 'downloadAttachment', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+    expect(result.ok).toBe(false);
+    expect((result as any).error).toContain('HTTP 404');
+  });
+
+  it('fails on network error from fetch', async () => {
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: 'photo.png', url: 'https://cdn.discordapp.com/photo.png' }),
+      ]),
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    mockFetch.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+    const result = await executeMessagingAction(
+      { type: 'downloadAttachment', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+    expect(result).toEqual({ ok: false, error: 'Failed to download attachment: network error' });
+  });
+
+  it('uses .bin extension when attachment has no name', async () => {
+    const imageData = Buffer.from('data');
+    const msg = makeMockMessage('msg1', {
+      content: '',
+      author: 'alice',
+      attachments: makeAttachmentsCollection([
+        makeAttachment({ name: null, contentType: null, url: 'https://cdn.discordapp.com/data' }),
+      ]),
+    });
+    const ch = makeMockChannel({ id: 'ch1', name: 'general' });
+    ch.messages.fetch = vi.fn(async () => msg);
+    const ctx = makeCtx([ch]);
+
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      arrayBuffer: async () => imageData.buffer.slice(imageData.byteOffset, imageData.byteOffset + imageData.byteLength),
+    });
+
+    const result = await executeMessagingAction(
+      { type: 'downloadAttachment', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('.bin');
   });
 });
 
@@ -1965,5 +2237,23 @@ describe('requester permission gating', () => {
 
     expect(result).toEqual({ ok: false, error: 'Permission denied for sendFile' });
     expect(ch.send).not.toHaveBeenCalled();
+  });
+
+  it('requires ReadMessageHistory for downloadAttachment', async () => {
+    const ch = makeMockChannel({
+      id: 'ch1',
+      name: 'general',
+      permissionsBitfield: PermissionFlagsBits.ViewChannel,
+    });
+    const ctx = makeCtx([ch]);
+
+    const result = await executeMessagingAction(
+      { type: 'downloadAttachment', channelId: 'ch1', messageId: 'msg1' },
+      ctx,
+      { id: 'requester' } as any,
+    );
+
+    expect(result).toEqual({ ok: false, error: 'Permission denied for downloadAttachment' });
+    expect(ch.messages.fetch).not.toHaveBeenCalled();
   });
 });
