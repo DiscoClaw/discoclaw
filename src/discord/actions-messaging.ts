@@ -12,6 +12,7 @@ interface AttachmentRecord {
   contentType?: string | null;
   width?: number | null;
   height?: number | null;
+  url?: string | null;
 }
 
 /** Serialize Discord attachments into compact image metadata lines. */
@@ -23,7 +24,8 @@ function formatAttachments(attachments: Iterable<AttachmentRecord> | undefined):
     if (a.contentType) tag.push(a.contentType);
     if (a.width && a.height) tag.push(`${a.width}x${a.height}`);
     const detail = tag.length ? ` (${tag.join(', ')})` : '';
-    parts.push(`[Attachment: ${a.name || 'unknown'}${detail}]`);
+    const url = a.url ? ` url:${a.url}` : '';
+    parts.push(`[Attachment: ${a.name || 'unknown'}${detail}${url}]`);
   }
   return parts.join(' ');
 }
@@ -65,12 +67,13 @@ export type MessagingActionRequest =
   | { type: 'pinMessage'; channelId: string; messageId: string }
   | { type: 'unpinMessage'; channelId: string; messageId: string }
   | { type: 'listPins'; channel: string }
-  | { type: 'sendFile'; channel: string; filePath: string; content?: string };
+  | { type: 'sendFile'; channel: string; filePath: string; content?: string }
+  | { type: 'downloadAttachment'; channelId: string; messageId: string; attachmentIndex?: number };
 
 const MESSAGING_TYPE_MAP: Record<MessagingActionRequest['type'], true> = {
   sendMessage: true, react: true, unreact: true, readMessages: true, fetchMessage: true,
   editMessage: true, deleteMessage: true, bulkDelete: true, crosspost: true, threadCreate: true,
-  pinMessage: true, unpinMessage: true, listPins: true, sendFile: true,
+  pinMessage: true, unpinMessage: true, listPins: true, sendFile: true, downloadAttachment: true,
 };
 export const MESSAGING_ACTION_TYPES = new Set<string>(Object.keys(MESSAGING_TYPE_MAP));
 
@@ -80,6 +83,7 @@ export const MESSAGING_ACTION_TYPES = new Set<string>(Object.keys(MESSAGING_TYPE
 
 const DISCORD_MAX_CONTENT = 2000;
 const SENDFILE_MAX_BYTES = 25 * 1024 * 1024; // 25 MB — Discord standard upload limit
+const DOWNLOAD_ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024; // 25 MB
 const THREAD_AUTO_ARCHIVE_MINUTES = new Set([60, 1440, 4320, 10080]);
 const SENDFILE_ALLOWED_EXTENSIONS = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'pdf',
@@ -683,6 +687,55 @@ export async function executeMessagingAction(
       await channel.send(opts);
       return { ok: true, summary: `Sent file "${path.basename(trimmedPath)}" to #${channel.name}` };
     }
+
+    case 'downloadAttachment': {
+      if (!action.channelId?.trim()) return { ok: false, error: 'downloadAttachment requires a non-empty channelId' };
+      if (!action.messageId?.trim()) return { ok: false, error: 'downloadAttachment requires a non-empty messageId' };
+      const channel = guild.channels.cache.get(action.channelId);
+      const messageChannel = asMessageChannelRecord(channel);
+      if (!messageChannel) return { ok: false, error: `Channel "${action.channelId}" not found` };
+      if (enforcingRequester && !hasChannelPermissions(
+        channel,
+        enforcingRequester,
+        PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ReadMessageHistory,
+      )) {
+        return permissionDenied(action.type);
+      }
+      const message = await messageChannel.messages.fetch(action.messageId);
+      const attachments = message.attachments ? [...message.attachments.values()] : [];
+      if (attachments.length === 0) {
+        return { ok: false, error: 'Message has no attachments' };
+      }
+      const index = action.attachmentIndex ?? 0;
+      if (index < 0 || index >= attachments.length) {
+        return { ok: false, error: `Attachment index ${index} out of range (message has ${attachments.length} attachment(s))` };
+      }
+      const att = attachments[index] as AttachmentRecord;
+      if (!att.url) {
+        return { ok: false, error: 'Attachment has no URL' };
+      }
+
+      let response: Response;
+      try {
+        response = await fetch(att.url);
+      } catch {
+        return { ok: false, error: 'Failed to download attachment: network error' };
+      }
+      if (!response.ok) {
+        return { ok: false, error: `Failed to download attachment: HTTP ${response.status}` };
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      if (buffer.length > DOWNLOAD_ATTACHMENT_MAX_BYTES) {
+        const sizeMB = (buffer.length / (1024 * 1024)).toFixed(1);
+        return { ok: false, error: `Attachment too large (${sizeMB} MB, max ${DOWNLOAD_ATTACHMENT_MAX_BYTES / (1024 * 1024)} MB)` };
+      }
+
+      const ext = path.extname(att.name || '').toLowerCase() || '.bin';
+      const tmpFile = path.join('/tmp', `discoclaw-att-${action.messageId}-${index}${ext}`);
+      await fs.writeFile(tmpFile, buffer);
+
+      return { ok: true, summary: `Downloaded "${att.name || 'attachment'}" to ${tmpFile}` };
+    }
   }
 }
 
@@ -731,7 +784,7 @@ export function messagingActionsPromptSection(): string {
 - \`channel\` (required): Channel name or ID.
 - \`limit\` (optional): 1–20, default 10.
 - \`before\` (optional): Message ID to fetch messages before.
-- Summaries include image attachment metadata (filename, content type, dimensions) when present.
+- Summaries include image attachment metadata (filename, content type, dimensions, URL) when present.
 
 **fetchMessage** — Fetch a single message by ID:
 \`\`\`
@@ -739,7 +792,18 @@ export function messagingActionsPromptSection(): string {
 \`\`\`
 - Use \`fetchMessage\` to retrieve the full content of any Discord message by channel and message ID. This works for pinned prompts, status messages, and any other message you have the IDs for.
 - \`full\` (optional): When true, returns the complete message content without truncation. Default: false (content truncated to 2000 chars).
-- Includes image attachment metadata (filename, content type, dimensions) when present.
+- Includes image attachment metadata (filename, content type, dimensions, URL) when present.
+
+**downloadAttachment** — Download an image attachment from a message to a local temp file:
+\`\`\`
+<discord-action>{"type":"downloadAttachment","channelId":"123","messageId":"456","attachmentIndex":0}</discord-action>
+\`\`\`
+- \`channelId\` (required): Channel ID.
+- \`messageId\` (required): Message ID containing the attachment.
+- \`attachmentIndex\` (optional): Zero-based index of the attachment to download. Default: 0 (first attachment).
+- Downloads the file to \`/tmp/discoclaw-att-<messageId>-<index>.<ext>\` and returns the path.
+- Maximum file size: 25 MB.
+- Use after \`readMessages\` or \`fetchMessage\` to download image attachments for processing.
 
 **editMessage** — Edit a bot message:
 \`\`\`
