@@ -547,6 +547,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       let mergedStdout = '';
       let merged = '';
       let resultText = '';
+      let resultIsError = false;
       let lastStopReason: string | undefined;
       let inToolUse = false;
       const stdoutLineBuf = new LineBuffer();
@@ -680,6 +681,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
                   recordFirstParsedRuntimeEvent('strategy_parser', 'text_final');
                 }
                 resultText = typeof parsed.resultText === 'string' ? parsed.resultText : '';
+                if (parsed.resultIsError) resultIsError = true;
               }
 
               // Handle images.
@@ -880,6 +882,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
                     recordFirstParsedRuntimeEvent('strategy_parser', 'text_final');
                   }
                   resultText = typeof parsed.resultText === 'string' ? parsed.resultText : '';
+                  if (parsed.resultIsError) resultIsError = true;
                 }
                 if (parsed.image && imageCount < MAX_IMAGES_PER_INVOCATION) {
                   recordFirstParsedRuntimeEvent('strategy_parser', 'image_data');
@@ -982,7 +985,19 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           return;
         }
 
-        // Success.
+        // Success — but check if the result flagged is_error (CLI exited 0 but
+        // the response was an error, e.g. invalid model). Emit a runtime error
+        // so consumers (like spawnAgent) handle it cleanly instead of posting
+        // the error message as if it were normal output.
+        if (resultIsError && resultText) {
+          pushRuntimeError(resultText.trimEnd());
+          push({ type: 'done' });
+          finished = true;
+          wake();
+          settleAttempt({ kind: 'complete' }, 'result_is_error');
+          return;
+        }
+
         if (outputMode === 'text') {
           const final = (stdout || mergedStdout).trimEnd();
           if (final) emittedUserOutput = true;
