@@ -536,6 +536,8 @@ describe('isRetryableError', () => {
   it('matches plan output prefix contract failures', () => {
     expect(isRetryableError('draft output must start with # Plan:')).toBe(true);
     expect(isRetryableError('revision output must start with # Plan:')).toBe(true);
+    expect(isRetryableError('draft output must start with # Plan: — got: I analyzed the codebase')).toBe(true);
+    expect(isRetryableError('revision output must start with # Plan: — got: (empty output)')).toBe(true);
   });
 
   it('matches grounding output contract failures', () => {
@@ -2227,7 +2229,7 @@ _Filled in during/after implementation._
     expect(systemPrompts[3]).toBe('');
   });
 
-  it('retries draft phase with a fresh session when output never reaches # Plan:', async () => {
+  it('escalates to compact salvage when output never reaches # Plan:', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
@@ -2235,6 +2237,7 @@ _Filled in during/after implementation._
     let callIndex = 0;
     const prompts: string[] = [];
     const sessionKeys: string[] = [];
+    const toolsSeen: Array<string[] | undefined> = [];
     const runtime: RuntimeAdapter = {
       id: 'claude_code' as const,
       capabilities: new Set(['streaming_text' as const, 'sessions' as const]),
@@ -2242,6 +2245,7 @@ _Filled in during/after implementation._
         const idx = callIndex++;
         prompts.push(params.prompt);
         sessionKeys.push(params.sessionKey ?? '');
+        toolsSeen.push(params.tools);
         return (async function* (): AsyncGenerator<EngineEvent> {
           if (idx === 0) {
             yield { type: 'text_delta', text: 'Inspecting the forge routing first.' };
@@ -2277,15 +2281,16 @@ _Filled in during/after implementation._
 
     expect(result.error).toBeUndefined();
     expect(callIndex).toBe(3);
-    expect(prompts[1]).toContain('Your previous attempt started with narration');
-    expect(prompts[1]).toContain('The very first line of your response MUST begin with `# Plan:`.');
-    expect(sessionKeys[0]).not.toBe('');
-    expect(sessionKeys[1]).toBe(`${sessionKeys[0]}:draft-retry`);
+    // Compact salvage: tools dropped, session dropped, compact prompt used
+    expect(toolsSeen[1]).toBeUndefined();
+    expect(sessionKeys[1]).toBe('');
+    expect(prompts[1]).toContain('You are salvaging a stalled plan draft.');
+    expect(prompts[1]).toContain('Do NOT use tools on this retry.');
     expect(progress.some((p) => p.includes('retrying'))).toBe(true);
     expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
   });
 
-  it('drops tools on plan retry after a native no-text progress stall', async () => {
+  it('drops tools on plan retry after a plan prefix failure', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditClean = '**Verdict:** Ready to approve.';
@@ -2312,7 +2317,7 @@ _Filled in during/after implementation._
           if (idx === 0) {
             yield {
               type: 'error',
-              message: 'progress stall: no runtime progress for 180000ms (native turn produced no text output)',
+              message: 'draft output must start with # Plan: — got: I analyzed the codebase and here are my thoughts',
             };
             return;
           }
@@ -2410,7 +2415,7 @@ _Filled in during/after implementation._
     expect(systemPrompts[1]).toContain('Do not use tools on this retry.');
   });
 
-  it('uses fresh sessionless salvage retries so revision fallback does not resume the draft retry thread', async () => {
+  it('uses fresh sessionless salvage retries so revision fallback does not resume the draft retry session', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const auditBlocking = '**Concern 1: Issue**\n**Severity: blocking**\n\n**Verdict:** Needs revision.';
@@ -2428,7 +2433,7 @@ _Filled in during/after implementation._
           if (idx === 0 || idx === 3) {
             yield {
               type: 'error',
-              message: 'progress stall: no runtime progress for 180000ms (native turn produced no text output)',
+              message: 'draft output must start with # Plan: — got: I analyzed the codebase and here are my thoughts',
             };
             return;
           }
@@ -2459,7 +2464,7 @@ _Filled in during/after implementation._
     expect(sessionKeys[5]).toBe(sessionKeys[2]);
   });
 
-  it('uses a compact no-tools prompt when revision salvage retries after a native no-text stall', async () => {
+  it('uses a compact no-tools prompt when revision salvage retries after a plan prefix failure', async () => {
     const tmpDir = await makeTmpDir();
     const draftPlan = `# Plan: Test feature\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something.\n\n## Scope\n\n## Changes\n\n## Risks\n\n## Testing\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
     const revisedPlan = `# Plan: Test feature revised\n\n**ID:** plan-test-001\n**Task:** task-test-001\n**Created:** 2026-01-01\n**Status:** DRAFT\n**Project:** discoclaw\n\n---\n\n## Objective\n\nDo something better.\n\n## Scope\n\n## Changes\n\n- \`src/foo.ts\` — refine the implementation.\n\n## Risks\n\n- None.\n\n## Testing\n\n- Add coverage.\n\n---\n\n## Audit Log\n\n---\n\n## Implementation Notes\n\n_Filled in during/after implementation._\n`;
@@ -2498,7 +2503,7 @@ _Filled in during/after implementation._
           if (idx === 2) {
             yield {
               type: 'error',
-              message: 'progress stall: no runtime progress for 180000ms (native turn produced no text output)',
+              message: 'draft output must start with # Plan: — got: I analyzed the codebase and here are my thoughts',
             };
             return;
           }

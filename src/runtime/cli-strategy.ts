@@ -106,10 +106,6 @@ export type ForgeCliRouteDecision = {
   reason?: string;
 };
 
-function defaultForgeFallbackRoute(route: ForgeTurnRoute): ForgeTurnRoute | null {
-  return route === 'hybrid' ? 'cli' : null;
-}
-
 function collectOutOfBoundsForgeCandidatePaths(guardrails: ForgePhaseGuardrails): string[] {
   if (guardrails.candidateBoundPolicy.candidatePaths.length === 0) return [];
   const allowlist = new Set(guardrails.candidateBoundPolicy.allowlistPaths);
@@ -134,7 +130,7 @@ function buildForgeScopeViolationDecision(
       nextPhase: reResearchPhase,
       turnKind: resolveForgeTurnKind(reResearchPhase),
       route: nextRoute,
-      fallbackRoute: defaultForgeFallbackRoute(nextRoute),
+      fallbackRoute: null,
       reason: `${reason} Re-enter ${reResearchPhase} before continuing.`,
     };
   }
@@ -161,7 +157,7 @@ export function resolveForgeCliRoute(
   const phaseRoute = resolveForgeTurnRoute(guardrails.phase);
   const requestedRoute = opts.requestedRoute ?? phaseRoute;
   const fallbackRoute = opts.fallbackRoute === undefined
-    ? defaultForgeFallbackRoute(requestedRoute)
+    ? null
     : opts.fallbackRoute;
 
   if (guardrails.turnKind !== expectedTurnKind) {
@@ -180,7 +176,7 @@ export function resolveForgeCliRoute(
       nextPhase: guardrails.phase,
       turnKind: guardrails.turnKind,
       route: phaseRoute,
-      fallbackRoute: defaultForgeFallbackRoute(phaseRoute),
+      fallbackRoute: null,
       reason: 'Research/discovery must complete before dispatching a bounded final forge turn.',
     };
   }
@@ -227,13 +223,10 @@ export function resolveForgeCliRoute(
     );
   }
 
-  const expectedFallbackRoute = defaultForgeFallbackRoute(requestedRoute);
-  if (fallbackRoute !== expectedFallbackRoute && guardrails.fallbackPolicy.noWidening) {
+  if (fallbackRoute !== null && guardrails.fallbackPolicy.noWidening) {
     return buildForgeScopeViolationDecision(
       guardrails,
-      expectedFallbackRoute
-        ? `Forge phase ${guardrails.phase} requires ${requestedRoute} routing with ${expectedFallbackRoute} fallback.`
-        : `Forge phase ${guardrails.phase} does not allow fallback routing from ${requestedRoute}.`,
+      `Forge phase ${guardrails.phase} does not allow fallback routing from ${requestedRoute}.`,
       requestedRoute,
       fallbackRoute,
     );
