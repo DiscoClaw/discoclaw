@@ -1,0 +1,26 @@
+[
+  {
+    "id": "mod-timeout",
+    "prompt": "timeout @spammer for 10 minutes",
+    "expectedActions": [
+      { "type": "timeout", "params": { "user": "spammer", "duration": 600 } }
+    ],
+    "tags": ["moderation"]
+  },
+  {
+    "id": "mod-kick",
+    "prompt": "kick @troll from the server for being disruptive",
+    "expectedActions": [
+      { "type": "kick", "params": { "user": "troll", "reason": "being disruptive" } }
+    ],
+    "tags": ["moderation"]
+  },
+  {
+    "id": "mod-ban",
+    "prompt": "ban @badactor permanently for repeated violations",
+    "expectedActions": [
+      { "type": "ban", "params": { "user": "badactor", "reason": "repeated violations" } }
+    ],
+    "tags": ["moderation"]
+  }
+]

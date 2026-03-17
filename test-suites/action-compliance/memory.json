@@ -1,0 +1,26 @@
+[
+  {
+    "id": "mem-remember",
+    "prompt": "remember that the deploy key is in 1Password under 'prod-deploy'",
+    "expectedActions": [
+      { "type": "memoryRemember", "params": { "content": "the deploy key is in 1Password under 'prod-deploy'" } }
+    ],
+    "tags": ["memory"]
+  },
+  {
+    "id": "mem-forget",
+    "prompt": "forget what I told you about the old API key",
+    "expectedActions": [
+      { "type": "memoryForget", "params": { "query": "old API key" } }
+    ],
+    "tags": ["memory"]
+  },
+  {
+    "id": "mem-show",
+    "prompt": "what do you remember about deployment?",
+    "expectedActions": [
+      { "type": "memoryShow", "params": { "query": "deployment" } }
+    ],
+    "tags": ["memory"]
+  }
+]

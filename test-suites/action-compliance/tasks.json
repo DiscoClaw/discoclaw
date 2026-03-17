@@ -1,0 +1,42 @@
+[
+  {
+    "id": "task-create",
+    "prompt": "create a task to fix the login bug, priority high",
+    "expectedActions": [
+      { "type": "taskCreate", "params": { "title": "fix the login bug", "priority": "high" } }
+    ],
+    "tags": ["tasks", "basic"]
+  },
+  {
+    "id": "task-list",
+    "prompt": "show all open tasks",
+    "expectedActions": [
+      { "type": "taskList" }
+    ],
+    "tags": ["tasks", "basic"]
+  },
+  {
+    "id": "task-update",
+    "prompt": "update task #42 status to 'in progress'",
+    "expectedActions": [
+      { "type": "taskUpdate", "params": { "id": "42", "status": "in progress" } }
+    ],
+    "tags": ["tasks", "basic"]
+  },
+  {
+    "id": "task-close",
+    "prompt": "close task #42, it's done",
+    "expectedActions": [
+      { "type": "taskClose", "params": { "id": "42" } }
+    ],
+    "tags": ["tasks", "basic"]
+  },
+  {
+    "id": "task-show",
+    "prompt": "show me the details of task #15",
+    "expectedActions": [
+      { "type": "taskShow", "params": { "id": "15" } }
+    ],
+    "tags": ["tasks", "basic"]
+  }
+]

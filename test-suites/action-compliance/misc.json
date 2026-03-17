@@ -1,0 +1,66 @@
+[
+  {
+    "id": "poll-create",
+    "prompt": "create a poll asking 'What day for game night?' with options Monday, Wednesday, Friday",
+    "expectedActions": [
+      { "type": "poll", "params": { "question": "What day for game night?" } }
+    ],
+    "tags": ["polls"]
+  },
+  {
+    "id": "cron-create",
+    "prompt": "create a daily cron job at 9am to post 'good morning' in #general",
+    "expectedActions": [
+      { "type": "cronCreate", "params": { "channel": "general", "content": "good morning" } }
+    ],
+    "tags": ["crons"]
+  },
+  {
+    "id": "cron-list",
+    "prompt": "list all scheduled cron jobs",
+    "expectedActions": [
+      { "type": "cronList" }
+    ],
+    "tags": ["crons"]
+  },
+  {
+    "id": "voice-join",
+    "prompt": "join the Music voice channel",
+    "expectedActions": [
+      { "type": "voiceJoin", "params": { "channel": "Music" } }
+    ],
+    "tags": ["voice"]
+  },
+  {
+    "id": "voice-leave",
+    "prompt": "leave the current voice channel",
+    "expectedActions": [
+      { "type": "voiceLeave" }
+    ],
+    "tags": ["voice"]
+  },
+  {
+    "id": "bot-set-status",
+    "prompt": "set your status to 'online'",
+    "expectedActions": [
+      { "type": "botSetStatus", "params": { "status": "online" } }
+    ],
+    "tags": ["bot-profile"]
+  },
+  {
+    "id": "bot-set-activity",
+    "prompt": "set your activity to 'Playing chess'",
+    "expectedActions": [
+      { "type": "botSetActivity", "params": { "type": "Playing", "name": "chess" } }
+    ],
+    "tags": ["bot-profile"]
+  },
+  {
+    "id": "imagegen-basic",
+    "prompt": "generate an image of a sunset over mountains",
+    "expectedActions": [
+      { "type": "generateImage", "params": { "prompt": "a sunset over mountains" } }
+    ],
+    "tags": ["imagegen"]
+  }
+]
