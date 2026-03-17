@@ -67,6 +67,10 @@ export async function runTestCase(
 /**
  * Run all test cases in a suite and collect actions per case.
  *
+ * When `opts.concurrency` > 1, test cases run in parallel using a pool.
+ * Results are returned in the original case order regardless of
+ * execution order.
+ *
  * Returns a `Map<testCaseId, ExpectedAction[]>` suitable for
  * passing directly to `scoreBatch`.
  */
@@ -76,14 +80,39 @@ export async function runSuite(
   adapter: RuntimeAdapter,
   opts?: RunnerOpts,
 ): Promise<{ results: RunResult[]; actionsMap: Map<string, ExpectedAction[]> }> {
-  const results: RunResult[] = [];
-  const actionsMap = new Map<string, ExpectedAction[]>();
+  const concurrency = Math.max(1, opts?.concurrency ?? 1);
 
-  for (const tc of cases) {
-    const result = await runTestCase(tc, instructions, adapter, opts);
-    results.push(result);
-    actionsMap.set(tc.id, result.actions);
+  if (concurrency <= 1 || cases.length <= 1) {
+    // Sequential path — original behaviour.
+    const results: RunResult[] = [];
+    const actionsMap = new Map<string, ExpectedAction[]>();
+    for (const tc of cases) {
+      const result = await runTestCase(tc, instructions, adapter, opts);
+      results.push(result);
+      actionsMap.set(tc.id, result.actions);
+    }
+    return { results, actionsMap };
   }
 
-  return { results, actionsMap };
+  // Parallel path — run up to `concurrency` cases at once.
+  const resultSlots: RunResult[] = new Array(cases.length);
+  let nextIdx = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIdx < cases.length) {
+      const idx = nextIdx++;
+      const tc = cases[idx];
+      resultSlots[idx] = await runTestCase(tc, instructions, adapter, opts);
+    }
+  }
+
+  const workers = Array.from({ length: Math.min(concurrency, cases.length) }, () => worker());
+  await Promise.all(workers);
+
+  const actionsMap = new Map<string, ExpectedAction[]>();
+  for (const r of resultSlots) {
+    actionsMap.set(r.testCaseId, r.actions);
+  }
+
+  return { results: resultSlots, actionsMap };
 }

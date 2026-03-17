@@ -61,6 +61,8 @@ export interface RunnerOpts {
   model?: string;
   cwd?: string;
   timeoutMs?: number;
+  /** Max test cases to run in parallel (default 1 = sequential). */
+  concurrency?: number;
 }
 
 /** Result of running a single test case through the runtime adapter. */
