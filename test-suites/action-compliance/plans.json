@@ -1,0 +1,82 @@
+[
+  {
+    "id": "plan-create",
+    "prompt": "create a plan for adding webhook retry logic",
+    "expectedActions": [
+      { "type": "planCreate", "params": { "title": "adding webhook retry logic" } }
+    ],
+    "tags": ["plans", "basic"]
+  },
+  {
+    "id": "plan-list",
+    "prompt": "list all plans",
+    "expectedActions": [
+      { "type": "planList" }
+    ],
+    "tags": ["plans", "basic"]
+  },
+  {
+    "id": "plan-show",
+    "prompt": "show me plan 42",
+    "expectedActions": [
+      { "type": "planShow", "params": { "id": "42" } }
+    ],
+    "tags": ["plans", "basic"]
+  },
+  {
+    "id": "plan-approve",
+    "prompt": "approve plan 42, looks good",
+    "expectedActions": [
+      { "type": "planApprove", "params": { "id": "42" } }
+    ],
+    "tags": ["plans", "workflow"]
+  },
+  {
+    "id": "plan-run",
+    "prompt": "run plan 42",
+    "expectedActions": [
+      { "type": "planRun", "params": { "id": "42" } }
+    ],
+    "tags": ["plans", "workflow"]
+  },
+  {
+    "id": "plan-close",
+    "prompt": "close plan 42, we decided not to do it",
+    "expectedActions": [
+      { "type": "planClose", "params": { "id": "42" } }
+    ],
+    "tags": ["plans", "workflow"]
+  },
+  {
+    "id": "forge-create",
+    "prompt": "forge a plan for refactoring the auth middleware",
+    "expectedActions": [
+      { "type": "forgeCreate", "params": { "title": "refactoring the auth middleware" } }
+    ],
+    "tags": ["plans", "forge"]
+  },
+  {
+    "id": "forge-resume",
+    "prompt": "resume the forge audit on plan 42",
+    "expectedActions": [
+      { "type": "forgeResume", "params": { "id": "42" } }
+    ],
+    "tags": ["plans", "forge"]
+  },
+  {
+    "id": "forge-status",
+    "prompt": "what's the status of the current forge run?",
+    "expectedActions": [
+      { "type": "forgeStatus" }
+    ],
+    "tags": ["plans", "forge"]
+  },
+  {
+    "id": "forge-cancel",
+    "prompt": "cancel the current forge run",
+    "expectedActions": [
+      { "type": "forgeCancel" }
+    ],
+    "tags": ["plans", "forge"]
+  }
+]

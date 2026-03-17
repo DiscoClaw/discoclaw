@@ -1,0 +1,34 @@
+[
+  {
+    "id": "event-create",
+    "prompt": "create a server event called 'Game Night' for Saturday at 8pm",
+    "expectedActions": [
+      { "type": "eventCreate", "params": { "name": "Game Night" } }
+    ],
+    "tags": ["events", "basic"]
+  },
+  {
+    "id": "event-list",
+    "prompt": "list all upcoming events in the server",
+    "expectedActions": [
+      { "type": "eventList" }
+    ],
+    "tags": ["events", "basic"]
+  },
+  {
+    "id": "event-edit",
+    "prompt": "change the Game Night event to start at 9pm instead",
+    "expectedActions": [
+      { "type": "eventEdit", "params": { "name": "Game Night" } }
+    ],
+    "tags": ["events", "management"]
+  },
+  {
+    "id": "event-delete",
+    "prompt": "cancel the Game Night event",
+    "expectedActions": [
+      { "type": "eventDelete", "params": { "name": "Game Night" } }
+    ],
+    "tags": ["events", "management"]
+  }
+]

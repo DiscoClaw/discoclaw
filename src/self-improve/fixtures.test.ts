@@ -13,7 +13,7 @@ const SUITES_DIR = join(import.meta.dirname, '../../test-suites/action-complianc
 describe('frozen action-compliance fixtures', () => {
   it('loads all fixtures without validation errors', async () => {
     const cases = await loadTestCasesFromDir(SUITES_DIR);
-    expect(cases.length).toBeGreaterThanOrEqual(50);
+    expect(cases.length).toBeGreaterThanOrEqual(90);
   });
 
   it('all IDs are unique', async () => {
@@ -57,7 +57,7 @@ describe('frozen action-compliance fixtures', () => {
     const cases = await loadTestCasesFromDir(SUITES_DIR);
     const allTags = new Set(cases.flatMap((c) => c.tags ?? []));
     // Verify we cover the major categories
-    for (const tag of ['messaging', 'channels', 'guild', 'moderation', 'tasks', 'memory', 'config']) {
+    for (const tag of ['messaging', 'channels', 'guild', 'moderation', 'tasks', 'memory', 'config', 'crons', 'plans', 'voice', 'events', 'deferred', 'reaction-prompts']) {
       expect(allTags.has(tag), `missing tag category: ${tag}`).toBe(true);
     }
   });

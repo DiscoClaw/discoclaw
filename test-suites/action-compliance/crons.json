@@ -1,0 +1,90 @@
+[
+  {
+    "id": "cron-create-daily",
+    "prompt": "create a daily cron job at 9am to post 'good morning' in #general",
+    "expectedActions": [
+      { "type": "cronCreate", "params": { "channel": "general", "content": "good morning" } }
+    ],
+    "tags": ["crons", "basic"]
+  },
+  {
+    "id": "cron-create-weekly",
+    "prompt": "set up a weekly cron every Monday at 10am to remind #team about standup",
+    "expectedActions": [
+      { "type": "cronCreate", "params": { "channel": "team" } }
+    ],
+    "tags": ["crons", "basic"]
+  },
+  {
+    "id": "cron-list",
+    "prompt": "list all scheduled cron jobs",
+    "expectedActions": [
+      { "type": "cronList" }
+    ],
+    "tags": ["crons", "basic"]
+  },
+  {
+    "id": "cron-show",
+    "prompt": "show me the details of the daily-digest cron",
+    "expectedActions": [
+      { "type": "cronShow", "params": { "name": "daily-digest" } }
+    ],
+    "tags": ["crons", "basic"]
+  },
+  {
+    "id": "cron-delete",
+    "prompt": "delete the old-reminder cron job",
+    "expectedActions": [
+      { "type": "cronDelete", "params": { "name": "old-reminder" } }
+    ],
+    "tags": ["crons", "management"]
+  },
+  {
+    "id": "cron-pause",
+    "prompt": "pause the daily-digest cron",
+    "expectedActions": [
+      { "type": "cronPause", "params": { "name": "daily-digest" } }
+    ],
+    "tags": ["crons", "management"]
+  },
+  {
+    "id": "cron-resume",
+    "prompt": "resume the daily-digest cron",
+    "expectedActions": [
+      { "type": "cronResume", "params": { "name": "daily-digest" } }
+    ],
+    "tags": ["crons", "management"]
+  },
+  {
+    "id": "cron-update",
+    "prompt": "update the standup-reminder cron to run at 10:30am instead",
+    "expectedActions": [
+      { "type": "cronUpdate", "params": { "name": "standup-reminder" } }
+    ],
+    "tags": ["crons", "management"]
+  },
+  {
+    "id": "cron-trigger",
+    "prompt": "trigger the weekly-report cron manually right now",
+    "expectedActions": [
+      { "type": "cronTrigger", "params": { "name": "weekly-report" } }
+    ],
+    "tags": ["crons", "management"]
+  },
+  {
+    "id": "cron-sync",
+    "prompt": "sync the cron jobs to make sure everything is up to date",
+    "expectedActions": [
+      { "type": "cronSync" }
+    ],
+    "tags": ["crons", "management"]
+  },
+  {
+    "id": "cron-export",
+    "prompt": "export all cron jobs to a file",
+    "expectedActions": [
+      { "type": "cronExport" }
+    ],
+    "tags": ["crons", "management"]
+  }
+]

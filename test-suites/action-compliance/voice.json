@@ -1,0 +1,42 @@
+[
+  {
+    "id": "voice-join",
+    "prompt": "join the Music voice channel",
+    "expectedActions": [
+      { "type": "voiceJoin", "params": { "channel": "Music" } }
+    ],
+    "tags": ["voice", "basic"]
+  },
+  {
+    "id": "voice-leave",
+    "prompt": "leave the current voice channel",
+    "expectedActions": [
+      { "type": "voiceLeave" }
+    ],
+    "tags": ["voice", "basic"]
+  },
+  {
+    "id": "voice-status",
+    "prompt": "what voice channel am I in?",
+    "expectedActions": [
+      { "type": "voiceStatus" }
+    ],
+    "tags": ["voice", "basic"]
+  },
+  {
+    "id": "voice-mute",
+    "prompt": "mute yourself in voice",
+    "expectedActions": [
+      { "type": "voiceMute" }
+    ],
+    "tags": ["voice", "management"]
+  },
+  {
+    "id": "voice-deafen",
+    "prompt": "deafen yourself in voice",
+    "expectedActions": [
+      { "type": "voiceDeafen" }
+    ],
+    "tags": ["voice", "management"]
+  }
+]
