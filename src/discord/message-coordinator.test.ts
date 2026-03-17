@@ -447,6 +447,27 @@ describe('image input precedence — direct > reply-ref > history', () => {
     expect(runtime.images).toEqual(directImages);
   });
 
+  it('history images are skipped for codex runtime to avoid session reset', async () => {
+    const histAtt = fakeAttachment('hist.png');
+    mockFetchHistory.mockResolvedValue({ text: 'history', historyAttachments: [histAtt] });
+    // Do NOT set mockResolvedValueOnce — download should never be called.
+
+    const runtime = makeImageCaptureRuntime();
+    // Override runtime id to 'codex'.
+    (runtime as any).id = 'codex';
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply);
+    const params = makeParams(runtime, { messageHistoryBudget: 500 });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    // History images should NOT be downloaded for codex runtime.
+    expect(mockDownloadImages).not.toHaveBeenCalled();
+    expect(runtime.images).toBeUndefined();
+  });
+
   it('reply-ref images are truncated when direct images consume most of the budget', async () => {
     // Direct fills budget minus 1 slot.
     const directImages = Array.from({ length: MAX_IMAGES_PER_INVOCATION - 1 }, (_, i) =>

@@ -3274,7 +3274,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           }
 
           // 3. History images from thread/channel context (remaining budget).
-          if (historyAttachments.length > 0) {
+          // Skip for Codex runtime: `codex exec resume` does not support --image,
+          // so history images would force a session reset on every turn that has
+          // any image in recent channel history. Direct-message images (from the
+          // user's current message) still work — they trigger a fresh session.
+          const skipHistoryImages = params.runtime.id === 'codex';
+          if (!skipHistoryImages && historyAttachments.length > 0) {
             const currentCount = inputImages?.length ?? 0;
             const historyImageBudget = MAX_IMAGES_PER_INVOCATION - currentCount;
             if (historyImageBudget > 0) {
