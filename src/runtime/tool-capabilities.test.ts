@@ -18,11 +18,6 @@ const COVERED_RUNTIME_CONFIGS = [
     expectedAdvertised: ['streaming_text', 'sessions'],
   },
   {
-    name: 'native app-server',
-    runtimeCapabilities: new Set([...CODEX_RUNTIME_CAPABILITIES, 'mid_turn_steering']),
-    expectedAdvertised: ['streaming_text', 'sessions', 'mid_turn_steering'],
-  },
-  {
     name: 'sessions disabled',
     runtimeCapabilities: new Set(CODEX_RUNTIME_CAPABILITIES.filter((capability) => capability !== 'sessions')),
     expectedAdvertised: ['streaming_text'],

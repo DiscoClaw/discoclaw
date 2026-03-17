@@ -80,46 +80,7 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
 ## Codex CLI Runtime
 
 - Adapter: `src/runtime/codex-cli.ts` (thin wrapper around `cli-adapter.ts` + `strategies/codex-strategy.ts`)
-- Default transport:
-  - The default Codex path is `codex exec` / `codex exec resume`.
-  - DiscoClaw currently prefers the CLI route for reliability, especially in forge flows.
-- Optional native transport:
-  - When explicitly enabled, DiscoClaw can use the Codex app-server websocket for `thread/start`, `turn/start`, streaming output, `turn/steer`, and `turn/interrupt`.
-  - The native path still uses Codex's local app-server auth/session state, so no public API key is required.
-- Activation and fallback:
-  - Native invoke is opt-in via `CODEX_APP_SERVER_NATIVE=1`.
-  - Native invoke also requires `CODEX_APP_SERVER_URL` to point at a reachable websocket endpoint.
-  - If the native flag is off, the URL is unset, or the turn hits an images / non-default `cwd` bypass gate, DiscoClaw uses the `codex exec` / `codex exec resume` transport instead.
-  - If native invoke is selected but the websocket connection cannot be established, DiscoClaw falls back to `codex exec` for that turn rather than failing closed.
-- Env vars:
-  | Var | Default | Purpose |
-  |-----|---------|---------|
-  | `CODEX_APP_SERVER_NATIVE` | `0` | Enables the app-server-native invoke path for eligible turns. |
-  | `CODEX_APP_SERVER_URL` | *(unset)* | Codex app-server websocket URL (for example `ws://127.0.0.1:4321`) used by the native path. |
-- Native bypass gates:
-  - **Images:** turns with `images` bypass native invoke and stay on `codex exec`, because image parity is not guaranteed on the app-server path.
-  - **Non-default `cwd`:** turns whose `cwd` differs from the process working directory bypass native invoke and stay on `codex exec`, which is the only path that can shape the subprocess working directory per turn.
-  - **`addDirs`:** native invoke passes extra readable roots through to the app-server sandbox as additional `readableRoots`, so standard Discord turns can still stay on the websocket path.
-  - **Connection failure:** if the runtime cannot connect/initialize against the app-server websocket, it immediately drops back to `codex exec` for that invocation.
-- Capability declaration:
-  - When native invoke is enabled and the app-server is configured, the runtime adds `mid_turn_steering` and exposes `RuntimeAdapter.steer()` + `RuntimeAdapter.interrupt()`.
-  - When native invoke is inactive, the Codex adapter behaves like the legacy CLI runtime: no control methods and no extra capability.
-- Lifecycle and streaming:
-  - For native turns, the runtime creates or reuses a thread with `thread/start`, starts the turn with `turn/start`, and tracks the active turn directly from the app-server response/notifications.
-  - Streaming reply text comes from agent-message delta/completed notifications; tool progress comes from item start/completion notifications; terminal turn notifications clear the active turn and finish the stream.
-  - Because the runtime receives the live `turnId` from the app-server itself, steering and interrupt can target the active turn reliably instead of depending on `codex exec --json` to surface it mid-turn.
-- Session semantics:
-  - Reusing the same `sessionKey` reuses the same native `threadId`, so repeated turns continue the same Codex thread.
-  - Omitting `sessionKey` creates an ephemeral native thread for that invocation only.
-  - `disableSessions` strips `sessionKey` before dispatch, so native turns become ephemeral and never reuse a prior thread.
-- Steering / interrupt semantics:
-  - `steer(sessionKey, message)` is best-effort and returns `false` instead of throwing when there is no tracked active turn or the app-server request fails.
-  - Successful steering sends `turn/steer` with `threadId` plus `expectedTurnId`; if the server returns a replacement `turnId`, the runtime updates its active-turn pointer.
-  - `interrupt(sessionKey)` is also best-effort and sends `turn/interrupt` with the active `threadId` + `turnId`, then clears local active-turn state.
-- Tradeoffs vs `codex exec`:
-  - Native invoke is useful when live control matters: it owns thread/turn lifecycle directly, exposes the active `turnId`, and supports steer/interrupt semantics.
-  - `codex exec` remains the default and preferred path for general reliability, plus any turns that need unsupported invocation shapes or when the app-server is unavailable.
-  - Keeping both paths preserves local Codex auth and session behavior without forcing the app-server path on day-to-day usage.
+- Transport: `codex exec` / `codex exec resume` exclusively.
 
 ## Gemini CLI Runtime
 

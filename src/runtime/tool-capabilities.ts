@@ -21,7 +21,6 @@ const CODEX_CAPABILITY_ORDER = [
   'tools_fs',
   'tools_web',
   'mcp',
-  'mid_turn_steering',
 ] as const satisfies readonly RuntimeCapability[];
 
 type CodexKnownCapability = (typeof CODEX_CAPABILITY_ORDER)[number];
@@ -72,13 +71,6 @@ export const CODEX_CAPABILITY_CONTRACT: Readonly<Record<CodexKnownCapability, Co
     availability: 'base',
     runtimeWording:
       'Grounded Codex turns may surface MCP tools, but that is not guaranteed across resumed, bypassed, or native turns.',
-  },
-  mid_turn_steering: {
-    exposure: 'advertised',
-    availability: 'conditional',
-    runtimeWording: 'Supports mid-turn steer and interrupt when the native app-server path is active.',
-    enforcementGate:
-      'createCodexCliRuntime: app-server native gating adds mid_turn_steering only when steer/interrupt are wired',
   },
 };
 

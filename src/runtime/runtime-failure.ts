@@ -94,7 +94,6 @@ const SUPERVISOR_TRANSIENT_ERROR_RE = /(timed?\s*out|timeout|rate\s*limit|429|ov
 const SUPERVISOR_HARD_ERROR_RE = /(invalid\s+api\s+key|unauthoriz|forbidden|permission\s+denied|outside\s+allowed\s+roots|malformed\s+json|output\s+must\s+start\s+with\s+#\s*plan:)/i;
 const SUPERVISOR_ABORTED_RE = /abort(ed)?/i;
 const CODEX_UNSUPPORTED_MODEL_RE = /the ['"`]?([^'"`\s]+)['"`]? model is not supported when using codex with a chatgpt account/i;
-const CODEX_APP_SERVER_DISCONNECT_RE = /codex app-server (?:websocket closed|websocket is closed)/i;
 const NATIVE_NO_TEXT_PROGRESS_STALL_RE = /native turn produced no text output/i;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -547,18 +546,6 @@ function classifyRawRuntimeFailure(rawMessage: string): RuntimeFailure {
     });
   }
 
-  if (CODEX_APP_SERVER_DISCONNECT_RE.test(message)) {
-    return createRuntimeFailure({
-      source: 'runtime',
-      code: 'CODEX_APP_SERVER_DISCONNECTED',
-      message,
-      rawMessage,
-      userMessage:
-        'The native Codex app-server disconnected during the run. ' +
-        'Check the app-server health and retry once the native path is healthy.',
-      retryable: false,
-    });
-  }
   if (lc.includes('unauthorized') || lc.includes('authentication') || lc.includes('not logged in')) {
     return createRuntimeFailure({
       source: 'runtime',

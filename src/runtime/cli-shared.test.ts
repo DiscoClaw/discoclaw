@@ -27,15 +27,6 @@ const COVERED_RUNTIME_CONFIGS = [
     ],
   },
   {
-    name: 'native app-server',
-    runtimeCapabilities: new Set([...CODEX_RUNTIME_CAPABILITIES, 'mid_turn_steering']),
-    expectedLines: [
-      'Streams reply text through the RuntimeAdapter event channel.',
-      'Supports retained Codex sessions when the runtime advertises sessions.',
-      'Supports mid-turn steer and interrupt when the native app-server path is active.',
-    ],
-  },
-  {
     name: 'sessions disabled',
     runtimeCapabilities: new Set(CODEX_RUNTIME_CAPABILITIES.filter((capability) => capability !== 'sessions')),
     expectedLines: [
@@ -207,7 +198,7 @@ describe('collectPromptSafeCodexOrchestrationWording', () => {
   });
 
   it('matches the same wording whether input is raw runtime state or the advertised capability set', () => {
-    const rawRuntimeCapabilities = new Set([...CODEX_RUNTIME_CAPABILITIES, 'mid_turn_steering'] as const);
+    const rawRuntimeCapabilities = new Set([...CODEX_RUNTIME_CAPABILITIES] as const);
     const rawWording = collectPromptSafeCodexOrchestrationWording(rawRuntimeCapabilities);
     const advertisedWording = collectPromptSafeCodexOrchestrationWording(
       createAdvertisedCodexCapabilities(rawRuntimeCapabilities),
@@ -218,13 +209,12 @@ describe('collectPromptSafeCodexOrchestrationWording', () => {
 
   it('keeps runtime-facing ordering tied to the audited capability order instead of input set order', () => {
     const wording = collectPromptSafeCodexOrchestrationWording(
-      new Set<RuntimeCapability>(['mid_turn_steering', 'sessions', 'streaming_text']),
+      new Set<RuntimeCapability>(['sessions', 'streaming_text']),
     );
 
     expect(wording).toEqual([
       'Streams reply text through the RuntimeAdapter event channel.',
       'Supports retained Codex sessions when the runtime advertises sessions.',
-      'Supports mid-turn steer and interrupt when the native app-server path is active.',
     ]);
   });
 
@@ -237,9 +227,6 @@ describe('collectPromptSafeCodexOrchestrationWording', () => {
     ]);
     expect(formatPromptSafeCodexOrchestrationWording(new Set(['streaming_text']))).not.toContain(
       'retained Codex sessions',
-    );
-    expect(formatPromptSafeCodexOrchestrationWording(new Set(['streaming_text', 'sessions']))).not.toContain(
-      'mid-turn steer and interrupt',
     );
   });
 });

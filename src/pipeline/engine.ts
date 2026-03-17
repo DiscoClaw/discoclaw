@@ -39,7 +39,6 @@ export type PromptStep = {
   timeoutMs?: number;
   streamStallTimeoutMs?: number;
   progressStallTimeoutMs?: number;
-  disableNativeAppServer?: boolean;
   sessionId?: string | null;
   sessionKey?: string | null;
   reasoningEffort?: string;
@@ -443,7 +442,6 @@ export async function runPipeline(def: PipelineDef): Promise<PipelineResult> {
       ...(step.timeoutMs !== undefined && { timeoutMs: step.timeoutMs }),
       ...(step.streamStallTimeoutMs !== undefined && { streamStallTimeoutMs: step.streamStallTimeoutMs }),
       ...(step.progressStallTimeoutMs !== undefined && { progressStallTimeoutMs: step.progressStallTimeoutMs }),
-      ...(step.disableNativeAppServer !== undefined && { disableNativeAppServer: step.disableNativeAppServer }),
       ...(step.sessionId !== undefined && { sessionId: step.sessionId }),
       ...(step.sessionKey !== undefined && { sessionKey: step.sessionKey }),
       ...(step.reasoningEffort !== undefined && { reasoningEffort: step.reasoningEffort }),

@@ -46,7 +46,6 @@ export type RuntimeFailureCode =
   | 'GEMINI_AUTH_MISSING'
   | 'CLAUDE_AUTH_MISSING'
   | 'CODEX_MODEL_UNSUPPORTED'
-  | 'CODEX_APP_SERVER_DISCONNECTED'
   | 'STREAM_STALL'
   | 'PROGRESS_STALL'
   | 'CHANNEL_CONTEXT_MISSING'
@@ -136,8 +135,7 @@ export type RuntimeCapability =
   | 'tools_fs'
   | 'tools_web'
   | 'mcp'
-  | 'multi_turn'
-  | 'mid_turn_steering';
+  | 'multi_turn';
 
 export type RuntimeId = 'claude_code' | 'openai' | 'openrouter' | 'codex' | 'gemini' | 'other';
 
@@ -234,7 +232,6 @@ export type RuntimeInvokeParams = {
   timeoutMs?: number;
   streamStallTimeoutMs?: number;
   progressStallTimeoutMs?: number;
-  disableNativeAppServer?: boolean;
   maxTokens?: number;
   images?: ImageData[];
   reasoningEffort?: string;
@@ -257,6 +254,4 @@ export interface RuntimeAdapter {
   /** The model used when params.model is empty (adapter-default sentinel). */
   defaultModel?: string;
   invoke(params: RuntimeInvokeParams): AsyncIterable<EngineEvent>;
-  steer?(sessionKey: string, message: string): Promise<boolean>;
-  interrupt?(sessionKey: string): Promise<boolean>;
 }

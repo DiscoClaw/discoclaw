@@ -152,13 +152,12 @@ describe('buildPromptPreamble', () => {
   it('renders audited Codex orchestration wording into the live prompt preamble', () => {
     const result = buildPromptPreamble('workspace context', {
       runtimeId: 'codex',
-      runtimeCapabilities: new Set([...CODEX_RUNTIME_CAPABILITIES, 'mid_turn_steering'] as const),
+      runtimeCapabilities: new Set([...CODEX_RUNTIME_CAPABILITIES] as const),
     });
 
     expect(result).toContain('--- Codex Runtime Guarantees ---');
     expect(result).toContain('Streams reply text through the RuntimeAdapter event channel.');
     expect(result).toContain('Supports retained Codex sessions when the runtime advertises sessions.');
-    expect(result).toContain('Supports mid-turn steer and interrupt when the native app-server path is active.');
   });
 });
 

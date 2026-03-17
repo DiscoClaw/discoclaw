@@ -43,29 +43,6 @@ export type InspectOptions = {
 
 type EnvMap = Record<string, string | undefined>;
 
-export type CodexAppServerStatus = 'dormant' | 'configured' | 'invalid';
-
-export type CodexAppServerBootReportState = {
-  configured: boolean;
-  state?: Exclude<CodexAppServerStatus, 'configured'>;
-};
-
-export function formatCodexAppServerUrl(rawValue: string | undefined | null): string | null {
-  const trimmed = trimValue(rawValue ?? undefined);
-  if (!trimmed) return null;
-
-  try {
-    const parsed = new URL(trimmed);
-    parsed.username = '';
-    parsed.password = '';
-    parsed.search = '';
-    parsed.hash = '';
-    return parsed.toString();
-  } catch {
-    return '[invalid URL redacted]';
-  }
-}
-
 export type EnvFileState = {
   exists: boolean;
   path: string;
@@ -151,74 +128,6 @@ function parseBoolean(value: string | undefined, defaultValue: boolean): boolean
   if (normalized === '1' || normalized === 'true') return true;
   if (normalized === '0' || normalized === 'false') return false;
   return defaultValue;
-}
-
-function isCodexAppServerNativeEnabled(env: EnvMap): boolean {
-  return parseBoolean(env.CODEX_APP_SERVER_NATIVE, false);
-}
-
-function isLoopbackHostname(hostname: string): boolean {
-  return (
-    hostname === 'localhost'
-    || hostname === '127.0.0.1'
-    || hostname.startsWith('127.')
-    || hostname === '::1'
-    || hostname === '[::1]'
-  );
-}
-
-function resolveCodexAppServerReadyzUrl(rawValue: string | undefined): string | null {
-  const trimmed = trimValue(rawValue);
-  if (!trimmed) return null;
-
-  try {
-    const parsed = new URL(trimmed);
-    if ((parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') || !isLoopbackHostname(parsed.hostname)) {
-      return null;
-    }
-    parsed.protocol = parsed.protocol === 'wss:' ? 'https:' : 'http:';
-    parsed.pathname = '/readyz';
-    parsed.search = '';
-    parsed.hash = '';
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
-
-export async function detectCodexAppServerReachability(
-  ctx: DoctorContext,
-  timeoutMs = 1_500,
-): Promise<DoctorFinding[]> {
-  if (getCodexAppServerStatus(ctx.env) !== 'configured') return [];
-
-  const readyzUrl = resolveCodexAppServerReadyzUrl(ctx.env.CODEX_APP_SERVER_URL);
-  if (!readyzUrl) return [];
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(readyzUrl, {
-      method: 'GET',
-      signal: controller.signal,
-    });
-    if (response.ok) return [];
-  } catch {
-    // Fall through to the unreachable finding below.
-  } finally {
-    clearTimeout(timeout);
-  }
-
-  const displayUrl = formatCodexAppServerUrl(ctx.env.CODEX_APP_SERVER_URL) ?? '[invalid URL redacted]';
-  return [{
-    id: 'codex-app-server:unreachable',
-    severity: 'warn',
-    message:
-      `CODEX_APP_SERVER_URL points at "${displayUrl}", but the local Codex app-server did not respond to ${readyzUrl}.`,
-    recommendation:
-      `Start or restart the local codex-app-server service, then confirm ${readyzUrl} returns HTTP 200 before relying on native Codex turns.`,
-    autoFixable: false,
-  }];
 }
 
 function resolvePath(cwd: string, maybeRelative: string | undefined, fallback: string): string {
@@ -497,103 +406,6 @@ export function detectWorkspaceBootstrapWarnings(ctx: DoctorContext): DoctorFind
   });
 }
 
-export function detectCodexAppServerStatus(ctx: DoctorContext): DoctorFinding[] {
-  const rawValue = ctx.env.CODEX_APP_SERVER_URL;
-  const nativeEnabled = isCodexAppServerNativeEnabled(ctx.env);
-  if (rawValue == null) {
-    if (!nativeEnabled) return [];
-    return [{
-      id: 'codex-app-server:missing-url',
-      severity: 'warn',
-      message: 'CODEX_APP_SERVER_NATIVE=1 is set, but CODEX_APP_SERVER_URL is missing, so the native Codex app-server transport cannot activate.',
-      recommendation: 'Set CODEX_APP_SERVER_URL to a valid ws(s) URL or remove CODEX_APP_SERVER_NATIVE=1 to keep the integration dormant.',
-      autoFixable: false,
-    }];
-  }
-
-  const trimmed = rawValue.trim();
-  if (trimmed === '') {
-    return [{
-      id: 'codex-app-server:empty-url',
-      severity: 'warn',
-      message: 'CODEX_APP_SERVER_URL is set but empty, so the Codex app-server integration cannot start cleanly.',
-      recommendation: 'Set CODEX_APP_SERVER_URL to a valid ws(s) URL or remove it to keep the integration dormant.',
-      autoFixable: false,
-    }];
-  }
-
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol === 'ws:' || parsed.protocol === 'wss:') {
-      const displayUrl = formatCodexAppServerUrl(trimmed) ?? '[invalid URL redacted]';
-      if (!nativeEnabled) {
-        return [{
-          id: 'codex-app-server:dormant',
-          severity: 'info',
-          message:
-            `CODEX_APP_SERVER_URL is configured as "${displayUrl}", but native Codex turns stay dormant until CODEX_APP_SERVER_NATIVE=1 is also set.`,
-          recommendation:
-            'Set CODEX_APP_SERVER_NATIVE=1 to activate the native app-server transport, or remove the URL to keep it dormant.',
-          autoFixable: false,
-        }];
-      }
-      return [{
-        id: 'codex-app-server:configured',
-        severity: 'info',
-        message: `CODEX_APP_SERVER_URL is configured as "${displayUrl}", so Codex turns will use the app-server transport at startup.`,
-        recommendation: 'No action required unless this install should leave the Codex app-server integration dormant.',
-        autoFixable: false,
-      }];
-    }
-  } catch {
-    // Fall through to the malformed URL finding below.
-  }
-
-  return [{
-    id: 'codex-app-server:invalid-url',
-    severity: 'warn',
-    message: 'CODEX_APP_SERVER_URL is malformed or uses an unsupported protocol.',
-    recommendation: 'Set CODEX_APP_SERVER_URL to a valid ws(s) URL or remove it to keep the integration dormant.',
-    autoFixable: false,
-  }];
-}
-
-export function getCodexAppServerStatus(env: EnvMap): CodexAppServerStatus {
-  const rawValue = env.CODEX_APP_SERVER_URL;
-  const nativeEnabled = isCodexAppServerNativeEnabled(env);
-  if (rawValue == null) return nativeEnabled ? 'invalid' : 'dormant';
-
-  const trimmed = rawValue.trim();
-  if (trimmed === '') return 'invalid';
-
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
-      return 'invalid';
-    }
-    return nativeEnabled ? 'configured' : 'dormant';
-  } catch {
-    return 'invalid';
-  }
-}
-
-export function deriveCodexAppServerBootReportState(opts: {
-  runtimeHasMidTurnSteering: boolean;
-  env: EnvMap;
-}): CodexAppServerBootReportState {
-  const status = getCodexAppServerStatus(opts.env);
-
-  if (opts.runtimeHasMidTurnSteering && status === 'configured') {
-    return { configured: true };
-  }
-
-  if (status === 'dormant' || status === 'invalid') {
-    return { configured: false, state: status };
-  }
-
-  return { configured: false };
-}
-
 export function detectConflictingOverrides(ctx: DoctorContext): DoctorFinding[] {
   const findings: DoctorFinding[] = [];
 
@@ -859,8 +671,6 @@ export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> 
     ...detectInstallDrift(ctx),
     ...detectWorkspaceBootstrapWarnings(ctx),
     ...detectDeprecatedEnvVars(ctx),
-    ...detectCodexAppServerStatus(ctx),
-    ...await detectCodexAppServerReachability(ctx),
     ...detectConflictingOverrides(ctx),
     ...detectStaleRuntimeAndModelOverrides(ctx),
     ...detectInvalidPersistedModelAssignments(ctx),

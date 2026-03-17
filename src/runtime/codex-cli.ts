@@ -1,11 +1,7 @@
-// Codex runtime adapter.
-// Uses the Codex app-server as the primary turn transport when configured,
-// and falls back to the CLI adapter when native transport is unavailable.
+// Codex runtime adapter — uses the CLI adapter (`codex exec`) exclusively.
 
-import path from 'node:path';
 import type { RuntimeAdapter, RuntimeInvokeParams } from './types.js';
 import { createCliRuntime, killAllSubprocesses } from './cli-adapter.js';
-import { CodexAppServerClient } from './codex-app-server.js';
 import { remapCrossRuntimeTierModel, resolveReasoningEffort } from './model-tiers.js';
 import { createRuntimeErrorEvent } from './runtime-failure.js';
 import { resolveForgeCliRoute } from './cli-strategy.js';
@@ -27,7 +23,6 @@ export type CodexCliRuntimeOpts = {
   disableSessions?: boolean;
   verbosePreview?: boolean;
   itemTypeDebug?: boolean;
-  traceNotifications?: boolean;
   appendSystemPrompt?: string;
   log?: {
     debug(...args: unknown[]): void;
@@ -35,8 +30,6 @@ export type CodexCliRuntimeOpts = {
     warn?(...args: unknown[]): void;
   };
 };
-
-const NATIVE_APP_SERVER_FALLBACK_NOTICE = 'App-server unavailable, falling back to CLI';
 
 function mergeSystemPrompt(
   systemPrompt: string | undefined,
@@ -80,16 +73,6 @@ function normalizeInvokeParams(
   };
 }
 
-function isTruthyEnv(raw: string | undefined): boolean {
-  if (!raw) return false;
-  const normalized = raw.trim().toLowerCase();
-  return normalized === '1' || normalized === 'true';
-}
-
-function hasNonDefaultCwd(cwd: string, defaultCwd: string): boolean {
-  return path.resolve(cwd) !== defaultCwd;
-}
-
 function buildForgePhaseRouteError(
   params: RuntimeInvokeParams,
   reason: string,
@@ -102,9 +85,6 @@ function buildForgePhaseRouteError(
 }
 
 export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter {
-  const appServerUrl = process.env.CODEX_APP_SERVER_URL?.trim();
-  const nativeEnabled = isTruthyEnv(process.env.CODEX_APP_SERVER_NATIVE);
-  const defaultCwd = process.cwd();
   const strategy = createCodexStrategy(opts.defaultModel, {
     verbosePreview: opts.verbosePreview,
     itemTypeDebug: opts.itemTypeDebug,
@@ -120,68 +100,10 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
   });
   const advertisedCapabilities = createAdvertisedCodexCapabilities(baseAdapter.capabilities);
 
-  if (!appServerUrl || !nativeEnabled) {
-    return {
-      ...baseAdapter,
-      capabilities: advertisedCapabilities,
-      groundedCapabilities: baseAdapter.capabilities,
-      invoke(params) {
-        return (async function* () {
-          const normalizedParams = normalizeInvokeParams(params, opts);
-          const forgeRoute = normalizedParams.forgePhase
-            ? resolveForgeCliRoute(normalizedParams.forgePhase)
-            : null;
-
-          if (forgeRoute && forgeRoute.status !== 'allow') {
-            yield* buildForgePhaseRouteError(
-              normalizedParams,
-              forgeRoute.reason ?? `Forge phase ${forgeRoute.requestedPhase} cannot dispatch on the current route.`,
-            );
-            return;
-          }
-
-          if (forgeRoute && forgeRoute.route === 'native') {
-            yield* buildForgePhaseRouteError(
-              normalizedParams,
-              `Forge phase ${forgeRoute.requestedPhase} requires native Codex routing, but the app-server is unavailable.`,
-            );
-            return;
-          }
-
-          if (forgeRoute && forgeRoute.route === 'hybrid') {
-            yield {
-              type: 'text_delta' as const,
-              text: NATIVE_APP_SERVER_FALLBACK_NOTICE,
-            };
-          }
-
-          for await (const event of baseAdapter.invoke(normalizedParams)) {
-            yield event;
-          }
-        })();
-      },
-    };
-  }
-
-  const appServerClient = new CodexAppServerClient({
-    baseUrl: appServerUrl,
-    streamStallTimeoutMs: opts.streamStallTimeoutMs,
-    progressStallTimeoutMs: opts.progressStallTimeoutMs,
-    verbosePreview: opts.verbosePreview,
-    itemTypeDebug: opts.itemTypeDebug,
-    traceNotifications: opts.traceNotifications,
-    dangerouslyBypassApprovalsAndSandbox: opts.dangerouslyBypassApprovalsAndSandbox,
-    log: opts.log,
-  });
-  const nativeCapabilities = new Set(baseAdapter.capabilities);
-  if (!opts.disableSessions) {
-    nativeCapabilities.add('mid_turn_steering');
-  }
-
   return {
     ...baseAdapter,
-    capabilities: createAdvertisedCodexCapabilities(nativeCapabilities),
-    groundedCapabilities: nativeCapabilities,
+    capabilities: advertisedCapabilities,
+    groundedCapabilities: baseAdapter.capabilities,
     invoke(params) {
       return (async function* () {
         const normalizedParams = normalizeInvokeParams(params, opts);
@@ -197,89 +119,10 @@ export function createCodexCliRuntime(opts: CodexCliRuntimeOpts): RuntimeAdapter
           return;
         }
 
-        const requiresDirectCli = Boolean(
-          normalizedParams.images?.length
-          || normalizedParams.disableNativeAppServer
-          || hasNonDefaultCwd(normalizedParams.cwd, defaultCwd),
-        );
-
-        if (requiresDirectCli) {
-          if (forgeRoute && forgeRoute.route !== 'cli') {
-            yield* buildForgePhaseRouteError(
-              normalizedParams,
-              `Forge phase ${forgeRoute.requestedPhase} cannot widen to direct CLI routing from ${forgeRoute.route}.`,
-            );
-            return;
-          }
-
-          for await (const event of baseAdapter.invoke(normalizedParams)) {
-            yield event;
-          }
-          return;
-        }
-
-        if (!forgeRoute && normalizedParams.images && normalizedParams.images.length > 0) {
-          for await (const event of baseAdapter.invoke(normalizedParams)) {
-            yield event;
-          }
-          return;
-        }
-
-        if (!forgeRoute && normalizedParams.disableNativeAppServer) {
-          for await (const event of baseAdapter.invoke(normalizedParams)) {
-            yield event;
-          }
-          return;
-        }
-
-        if (!forgeRoute && hasNonDefaultCwd(normalizedParams.cwd, defaultCwd)) {
-          for await (const event of baseAdapter.invoke(normalizedParams)) {
-            yield event;
-          }
-          return;
-        }
-
-        if (forgeRoute && forgeRoute.route === 'cli') {
-          for await (const event of baseAdapter.invoke(normalizedParams)) {
-            yield event;
-          }
-          return;
-        }
-
-        try {
-          for await (const event of appServerClient.invokeViaTurn(normalizedParams)) {
-            yield event;
-          }
-        } catch (err) {
-          opts.log?.warn?.(
-            {
-              err,
-              appServerUrl,
-            },
-            'codex-app-server: bootstrap failed; falling back to CLI',
-          );
-          if (forgeRoute && forgeRoute.fallbackRoute !== 'cli') {
-            yield* buildForgePhaseRouteError(
-              normalizedParams,
-              `Forge phase ${forgeRoute.requestedPhase} requires ${forgeRoute.route} routing and does not allow CLI fallback.`,
-            );
-            return;
-          }
-          yield {
-            type: 'text_delta' as const,
-            text: NATIVE_APP_SERVER_FALLBACK_NOTICE,
-          };
-          for await (const event of baseAdapter.invoke(normalizedParams)) {
-            yield event;
-          }
+        for await (const event of baseAdapter.invoke(normalizedParams)) {
+          yield event;
         }
       })();
-    },
-    steer(sessionKey: string, message: string): Promise<boolean> {
-      return appServerClient.steer(sessionKey, message);
-    },
-    interrupt(sessionKey: string): Promise<boolean> {
-      return appServerClient.interrupt(sessionKey);
     },
   };
 }
