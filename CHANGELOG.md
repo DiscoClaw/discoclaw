@@ -4,6 +4,10 @@ All notable changes to DiscoClaw are documented here.
 
 ## [Unreleased]
 
+### Removed
+- Codex app-server native transport path (`CODEX_APP_SERVER_URL` / `CODEX_APP_SERVER_NATIVE` env vars) — Codex now uses `codex exec` exclusively
+- Mid-turn steering / interrupt mechanism and two-stage Codex draft flow
+
 ## [0.8.1] — 2026-03-15
 
 4 commits. Vision support for chat history images, imagegen model switching, reasoning effort tuning.
