@@ -359,7 +359,6 @@ export function buildPromptSectionEstimates(input: {
   charsBySection.shortTermMemory = input.shortTermSection?.length ?? 0;
   charsBySection.tasks = (input.taskSection?.length ?? 0) + (input.openTasksSection?.length ?? 0);
   charsBySection.actionsReference = input.actionsReferenceSection?.length ?? 0;
-
   const sections = {} as PromptSectionEstimateMap;
   let totalChars = 0;
 
