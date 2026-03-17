@@ -286,7 +286,6 @@ const PLAN_OUTPUT_STEER_MESSAGE = [
   'Output only the final plan markdown.',
   'The first line must begin with `# Plan:`.',
 ].join(' ');
-const PLAN_OUTPUT_MAX_LEADING_CHARS = 512;
 const PLAN_OUTPUT_SILENT_STEER_DELAY_MS = 60_000;
 const PLAN_OUTPUT_DIAGNOSTIC_PREVIEW_CHARS = 160;
 const DRAFTER_CODEBASE_TOOLS_INSTRUCTION = '- **Read the codebase using your tools (Read, Glob, Grep) first**, then write the plan. Do not guess — base every section on what you find in the actual code.';
@@ -1681,28 +1680,10 @@ function wrapWithPlanPrefixGuard(
               void rt.steer(params.sessionKey, PLAN_OUTPUT_STEER_MESSAGE).catch(() => false);
             }
           }
-          if (
-            normalizedLeadingText.length >= PLAN_OUTPUT_MAX_LEADING_CHARS
-            && !PLAN_MARKDOWN_PREFIX.startsWith(normalizedLeadingText)
-          ) {
-            const preview = sanitizePlanOutputPreview(leadingText);
-            params.rawEventTap?.({
-              type: 'log_line',
-              stream: 'stderr',
-              line: JSON.stringify({
-                source: 'forge_plan_prefix_guard',
-                phase,
-                reason: 'invalid_leading_text',
-                leadingChars: leadingText.length,
-                previewChars: preview.length,
-                preview,
-              }),
-            });
-            if (params.sessionKey && typeof rt.interrupt === 'function') {
-              void rt.interrupt(params.sessionKey).catch(() => false);
-            }
-            throw new Error(errorMessage);
-          }
+          // No hard cap — keep scanning for `# Plan:` throughout the
+          // entire response.  The post-hoc assertPlanMarkdownOutput check
+          // will catch the case where the model finishes without ever
+          // emitting the header.  Throwing here just wastes the attempt.
           return null;
         }
 
