@@ -2790,7 +2790,11 @@ _Filled in during/after implementation._
   it('emits a diagnostic event before failing the plan prefix contract', async () => {
     const tmpDir = await makeTmpDir();
     const invalidLead = 'I checked the repo and here is the plan summary before the artifact starts. '
-      + 'This should trigger the prefix guard once it runs long enough.';
+      + 'This should trigger the prefix guard once it runs long enough. '
+      + 'Let me walk through the codebase structure first. The src directory contains several modules '
+      + 'including the pipeline engine, the forge orchestrator, and the runtime adapters. I also found '
+      + 'the task store and the Discord action handlers. Based on my analysis of these components, '
+      + 'here is what I think we should do for this feature request that was filed recently and needs attention.';
     const runtime: RuntimeAdapter = {
       id: 'codex' as const,
       capabilities: new Set(['streaming_text' as const, 'sessions' as const]),

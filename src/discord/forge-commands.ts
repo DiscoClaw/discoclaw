@@ -286,7 +286,7 @@ const PLAN_OUTPUT_STEER_MESSAGE = [
   'Output only the final plan markdown.',
   'The first line must begin with `# Plan:`.',
 ].join(' ');
-const PLAN_OUTPUT_MAX_LEADING_CHARS = 96;
+const PLAN_OUTPUT_MAX_LEADING_CHARS = 512;
 const PLAN_OUTPUT_SILENT_STEER_DELAY_MS = 60_000;
 const PLAN_OUTPUT_DIAGNOSTIC_PREVIEW_CHARS = 160;
 const DRAFTER_CODEBASE_TOOLS_INSTRUCTION = '- **Read the codebase using your tools (Read, Glob, Grep) first**, then write the plan. Do not guess — base every section on what you find in the actual code.';
