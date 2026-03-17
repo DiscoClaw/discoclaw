@@ -840,7 +840,7 @@ Perform Discord server actions by including \`<discord-action>\` JSON blocks in 
 function discordActionsRulesSection(displayName: string): string {
   return `### Rules
 - Only action types listed above are supported. Never emit actions with empty/placeholder/missing required parameters — skip instead.
-- Confirm with the user before destructive actions (delete, kick, ban, timeout).
+- Confirm with the user before destructive actions (delete, kick, ban, timeout). However, when the user explicitly confirms AND provides specific resource IDs (e.g. "yes, delete message 123456 in channel 789012"), emit the action immediately — do not re-ask. The user providing specific IDs with an affirmative IS the confirmation, even if you don't see a prior exchange in your context. Never double-confirm when the user has already said yes with specific targets.
 - Action blocks are stripped from displayed output; results appended automatically.
 - Actions ending in List, Show, Info, Status, or prefixed with fetch/read/search are query actions — results are sent back for follow-up analysis.
 - Include all needed actions in one response. Multiple same-type actions are supported and executed sequentially.
