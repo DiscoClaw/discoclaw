@@ -539,7 +539,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     // Suppress sentinel outputs (e.g. crons whose prompts say "output nothing if idle").
     // Mirrors the reaction handler's logic at reaction-handler.ts:662-674.
     const strippedText = processedText.replace(/\s+/g, ' ').trim();
-    const isSuppressible = strippedText === 'HEARTBEAT_OK' || strippedText === '(no output)';
+    const isSuppressible = /^heartbeat(_ok)?$/i.test(strippedText) || strippedText === 'HEART' || strippedText === '(no output)';
     if (isSuppressible && collectedImages.length === 0) {
       ctx.log?.info({ jobId: job.id, name: job.name, sentinel: strippedText }, 'cron:exec sentinel output suppressed');
       if (ctx.statsStore && job.cronId) {
