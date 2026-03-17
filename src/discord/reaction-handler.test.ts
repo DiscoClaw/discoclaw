@@ -1047,6 +1047,25 @@ describe('createReactionAddHandler', () => {
     );
   });
 
+  it('suppresses heart emoji responses (model interprets HEARTBEAT_OK as emoji)', async () => {
+    const params = makeParams({ runtime: makeMockRuntime('\u2764\uFE0F') });
+    const queue = mockQueue();
+    const handler = createReactionAddHandler(params, queue);
+
+    const replyObj = { edit: vi.fn().mockResolvedValue(undefined), delete: vi.fn().mockResolvedValue(undefined) };
+    const msg = mockMessage();
+    msg.reply = vi.fn().mockResolvedValue(replyObj);
+    const reaction = mockReaction({ message: msg });
+
+    await handler(reaction as any, mockUser() as any);
+
+    expect(replyObj.delete).toHaveBeenCalledOnce();
+    expect(params.log?.info).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionKey: expect.any(String), chars: expect.any(Number) }),
+      expect.stringContaining('trivial response suppressed'),
+    );
+  });
+
   it('does not suppress genuine short responses (e.g. "ok")', async () => {
     const shortResponse = 'ok';
     const params = makeParams({ runtime: makeMockRuntime(shortResponse) });

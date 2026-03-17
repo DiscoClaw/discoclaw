@@ -1081,7 +1081,7 @@ function createReactionHandler(
 
           // Suppress empty responses and the HEARTBEAT_OK sentinel — delete placeholder and bail.
           const strippedText = processedText.replace(/\s+/g, ' ').trim();
-          const isSuppressible = strippedText.length === 0 || /^heartbeat(_ok)?$/i.test(strippedText) || strippedText === 'HEART' || strippedText === '(no output)';
+          const isSuppressible = strippedText.length === 0 || /^heartbeat(_ok)?$/i.test(strippedText) || strippedText === 'HEART' || strippedText === '(no output)' || /^[\u2764\uFE0F]+$/.test(strippedText);
           if (parsedActionCount === 0 && collectedImages.length === 0 && isSuppressible) {
             if (followUpDepth > 0 && currentFollowUpToken) {
               processedText = '';
