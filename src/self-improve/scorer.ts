@@ -11,12 +11,15 @@
 //
 // Overall test-case score = mean of per-action combined scores.
 
-import type { ExpectedAction, ActionMatch, ScoreResult, FrozenTestCase } from './types.js';
+import type { ExpectedAction, ActionMatch, ForbiddenViolation, ScoreResult, FrozenTestCase } from './types.js';
 
 // ── Weights ─────────────────────────────────────────────────────────
 
 const TYPE_WEIGHT = 0.6;
 const PARAM_WEIGHT = 0.4;
+
+/** Penalty per forbidden action violation, deducted from the final score. */
+const FORBIDDEN_PENALTY = 0.5;
 
 // ── Param comparison ────────────────────────────────────────────────
 
@@ -83,6 +86,10 @@ function scorePair(expected: ExpectedAction, actual: ExpectedAction): number {
  * Uses greedy best-match: for each expected action, finds the
  * highest-scoring unmatched actual action. Unmatched expected
  * actions score 0.
+ *
+ * If the test case has `forbiddenActions`, any actual action whose
+ * type matches a forbidden entry incurs a penalty (FORBIDDEN_PENALTY
+ * per violation, deducted from the final score, floored at 0).
  */
 export function scoreTestCase(
   testCase: FrozenTestCase,
@@ -125,14 +132,34 @@ export function scoreTestCase(
     }
   }
 
-  const overall =
-    matches.length > 0
+  // Check for forbidden action violations.
+  const violations: ForbiddenViolation[] = [];
+  if (testCase.forbiddenActions && testCase.forbiddenActions.length > 0) {
+    const forbiddenSet = new Set(testCase.forbiddenActions);
+    for (const actual of actualActions) {
+      if (forbiddenSet.has(actual.type)) {
+        violations.push({ forbiddenType: actual.type, actual });
+      }
+    }
+  }
+
+  // For negative-only test cases (no expected actions, only forbidden),
+  // base score is 1.0 (perfect if nothing forbidden was emitted).
+  const isNegativeOnly = matches.length === 0 && (testCase.forbiddenActions?.length ?? 0) > 0;
+  const matchScore = isNegativeOnly
+    ? 1.0
+    : matches.length > 0
       ? matches.reduce((sum, m) => sum + m.score, 0) / matches.length
       : 0;
+
+  // Apply penalty: each violation deducts FORBIDDEN_PENALTY, floored at 0.
+  const penalty = violations.length * FORBIDDEN_PENALTY;
+  const overall = Math.max(0, matchScore - penalty);
 
   return {
     testCaseId: testCase.id,
     matches,
+    violations,
     score: overall,
   };
 }

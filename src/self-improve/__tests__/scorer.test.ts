@@ -128,6 +128,123 @@ describe('scoreTestCase', () => {
   });
 });
 
+// ── forbiddenActions ─────────────────────────────────────────────────
+
+describe('forbiddenActions scoring', () => {
+  it('returns no violations when no forbidden actions defined', () => {
+    const tc: FrozenTestCase = {
+      id: 'no-forbidden',
+      prompt: 'list channels',
+      expectedActions: [{ type: 'channelList' }],
+    };
+    const result = scoreTestCase(tc, [{ type: 'channelList' }]);
+    expect(result.violations).toEqual([]);
+    expect(result.score).toBe(1.0);
+  });
+
+  it('returns no violations when forbidden actions not emitted', () => {
+    const tc: FrozenTestCase = {
+      id: 'clean',
+      prompt: 'list channels',
+      expectedActions: [{ type: 'channelList' }],
+      forbiddenActions: ['deleteMessage', 'bulkDelete'],
+    };
+    const result = scoreTestCase(tc, [{ type: 'channelList' }]);
+    expect(result.violations).toEqual([]);
+    expect(result.score).toBe(1.0);
+  });
+
+  it('penalizes when a forbidden action is emitted', () => {
+    const tc: FrozenTestCase = {
+      id: 'violation',
+      prompt: 'list channels',
+      expectedActions: [{ type: 'channelList' }],
+      forbiddenActions: ['deleteMessage'],
+    };
+    const actual: ExpectedAction[] = [
+      { type: 'channelList' },
+      { type: 'deleteMessage', params: { channelId: '123', messageId: '456' } },
+    ];
+    const result = scoreTestCase(tc, actual);
+    expect(result.violations).toHaveLength(1);
+    expect(result.violations[0].forbiddenType).toBe('deleteMessage');
+    // Match score 1.0 minus 0.5 penalty = 0.5
+    expect(result.score).toBeCloseTo(0.5);
+  });
+
+  it('penalizes multiple forbidden violations', () => {
+    const tc: FrozenTestCase = {
+      id: 'multi-violation',
+      prompt: 'list channels',
+      expectedActions: [{ type: 'channelList' }],
+      forbiddenActions: ['deleteMessage', 'bulkDelete'],
+    };
+    const actual: ExpectedAction[] = [
+      { type: 'channelList' },
+      { type: 'deleteMessage' },
+      { type: 'bulkDelete' },
+    ];
+    const result = scoreTestCase(tc, actual);
+    expect(result.violations).toHaveLength(2);
+    // Match score 1.0 minus 2 * 0.5 = 0.0 (floored)
+    expect(result.score).toBe(0);
+  });
+
+  it('floors score at 0 when penalties exceed match score', () => {
+    const tc: FrozenTestCase = {
+      id: 'floor',
+      prompt: 'test',
+      expectedActions: [{ type: 'channelList' }],
+      forbiddenActions: ['deleteMessage', 'bulkDelete', 'channelDelete'],
+    };
+    const actual: ExpectedAction[] = [
+      { type: 'deleteMessage' },
+      { type: 'bulkDelete' },
+      { type: 'channelDelete' },
+    ];
+    const result = scoreTestCase(tc, actual);
+    expect(result.violations).toHaveLength(3);
+    expect(result.score).toBe(0);
+  });
+
+  it('scores 1.0 for negative-only case with no violations', () => {
+    const tc: FrozenTestCase = {
+      id: 'negative-clean',
+      prompt: 'clean up',
+      expectedActions: [],
+      forbiddenActions: ['deleteMessage', 'bulkDelete'],
+    };
+    const result = scoreTestCase(tc, []);
+    expect(result.violations).toEqual([]);
+    expect(result.score).toBe(1.0);
+  });
+
+  it('scores 1.0 for negative-only case when non-forbidden actions emitted', () => {
+    const tc: FrozenTestCase = {
+      id: 'negative-clean-with-actions',
+      prompt: 'clean up',
+      expectedActions: [],
+      forbiddenActions: ['deleteMessage'],
+    };
+    const result = scoreTestCase(tc, [{ type: 'readMessages' }]);
+    expect(result.violations).toEqual([]);
+    expect(result.score).toBe(1.0);
+  });
+
+  it('penalizes negative-only case when forbidden action emitted', () => {
+    const tc: FrozenTestCase = {
+      id: 'negative-violation',
+      prompt: 'clean up',
+      expectedActions: [],
+      forbiddenActions: ['deleteMessage'],
+    };
+    const result = scoreTestCase(tc, [{ type: 'deleteMessage' }]);
+    expect(result.violations).toHaveLength(1);
+    // Base 1.0 minus 0.5 penalty = 0.5
+    expect(result.score).toBeCloseTo(0.5);
+  });
+});
+
 // ── scoreBatch ──────────────────────────────────────────────────────
 
 describe('scoreBatch', () => {

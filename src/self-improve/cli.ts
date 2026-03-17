@@ -30,6 +30,8 @@ const { values } = parseArgs({
     target: { type: 'string' },
     iterations: { type: 'string', default: '1' },
     'dry-run': { type: 'boolean', default: false },
+    'baseline-only': { type: 'boolean', default: false },
+    'target-label': { type: 'string' },
     model: { type: 'string' },
     adapter: { type: 'string', default: 'claude_code' },
     tag: { type: 'string', multiple: true },
@@ -46,6 +48,8 @@ const suitePath = resolve(values.suite!);
 const targetPath = resolve(values.target);
 const iterations = Math.max(1, parseInt(values.iterations!, 10) || 1);
 const dryRun = values['dry-run']!;
+const baselineOnly = values['baseline-only']!;
+const targetLabel = values['target-label'] ?? targetPath.split('/').pop() ?? targetPath;
 const modelOverride = values.model;
 const adapterName = values.adapter!;
 const tagFilter = values.tag;
@@ -99,17 +103,22 @@ async function main(): Promise<void> {
   const ledgerPath = targetPath + '.ledger.json';
   let ledger = await loadLedger(ledgerPath);
 
-  // ── Establish baseline score if no prior run exists ──
-  if (ledger.iteration === 0 && ledger.bestScore === 0) {
-    console.log('\n── Establishing baseline ──');
+  // ── Establish baseline score ──
+  if (baselineOnly || (ledger.iteration === 0 && ledger.bestScore === 0)) {
+    console.log(`\n── Baseline: ${targetLabel} ──`);
     const instructions = await readFile(targetPath, 'utf-8');
     const { actionsMap } = await runSuite(testCases, instructions, adapter, runOpts);
     const { results: scoreResults, meanScore } = scoreBatch(testCases, actionsMap);
+    const totalViolations = scoreResults.reduce((sum, r) => sum + r.violations.length, 0);
     console.log('\n' + formatConsoleTable(scoreResults, meanScore));
-    console.log(`Baseline score: ${meanScore.toFixed(3)}`);
+    console.log(`Baseline score for ${targetLabel}: ${meanScore.toFixed(3)}${totalViolations > 0 ? ` (${totalViolations} violation(s))` : ''}`);
 
     ledger = { bestScore: meanScore, iteration: 0, promotedAt: new Date().toISOString() };
     await saveLedger(ledgerPath, ledger);
+
+    if (baselineOnly) {
+      return;
+    }
   }
 
   // ── Mutation iterations ──

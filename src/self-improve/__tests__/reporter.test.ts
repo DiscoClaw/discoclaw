@@ -11,6 +11,7 @@ describe('formatConsoleTable', () => {
       matches: [
         { expected: { type: 'channelList' }, actual: { type: 'channelList' }, typeMatch: true, paramScore: 1, score: 1.0 },
       ],
+      violations: [],
       score: 1.0,
     },
     {
@@ -18,6 +19,7 @@ describe('formatConsoleTable', () => {
       matches: [
         { expected: { type: 'sendMessage' }, actual: null, typeMatch: false, paramScore: 0, score: 0 },
       ],
+      violations: [],
       score: 0,
     },
   ];
@@ -28,6 +30,7 @@ describe('formatConsoleTable', () => {
     expect(lines[0]).toMatch(/Test Case ID/);
     expect(lines[0]).toMatch(/Score/);
     expect(lines[0]).toMatch(/Actions/);
+    expect(lines[0]).toMatch(/Violations/);
     expect(lines[0]).toMatch(/Status/);
   });
 
@@ -61,6 +64,7 @@ describe('formatConsoleTable', () => {
         matches: [
           { expected: { type: 'sendMessage' }, actual: { type: 'sendMessage' }, typeMatch: true, paramScore: 0.5, score: 0.8 },
         ],
+        violations: [],
         score: 0.8,
       },
     ];
@@ -82,6 +86,25 @@ describe('formatConsoleTable', () => {
   it('handles empty results', () => {
     const table = formatConsoleTable([], 0);
     expect(table).toContain('Mean score: 0.000');
+  });
+
+  it('shows VIOLATION status when violations exist', () => {
+    const withViolation: ScoreResult[] = [
+      {
+        testCaseId: 'tc-violated',
+        matches: [],
+        violations: [{ forbiddenType: 'deleteMessage', actual: { type: 'deleteMessage' } }],
+        score: 0.5,
+      },
+    ];
+    const table = formatConsoleTable(withViolation, 0.5);
+    expect(table).toContain('VIOLATION');
+    expect(table).toContain('deleteMessage');
+  });
+
+  it('shows dash for no violations', () => {
+    const table = formatConsoleTable(results, 0.5);
+    expect(table).toContain('-');
   });
 });
 
