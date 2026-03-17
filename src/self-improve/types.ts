@@ -50,6 +50,34 @@ export interface MutationResult {
   mutation: Mutation;
 }
 
+// ── Runner types ────────────────────────────────────────────────────
+
+/** Options for configuring the runtime adapter invocation. */
+export interface RunnerOpts {
+  model?: string;
+  cwd?: string;
+  timeoutMs?: number;
+}
+
+/** Result of running a single test case through the runtime adapter. */
+export interface RunResult {
+  testCaseId: string;
+  text: string;
+  actions: ExpectedAction[];
+  parseFailures: number;
+  events: import('../runtime/types.js').EngineEvent[];
+  durationMs: number;
+}
+
+// ── Keeper types ────────────────────────────────────────────────────
+
+/** Persisted ledger tracking the best-known score for an instruction file. */
+export interface Ledger {
+  bestScore: number;
+  iteration: number;
+  promotedAt: string;
+}
+
 // ── Scoring types ───────────────────────────────────────────────────
 
 /** Comparison of one expected action against the best-matching actual action. */
