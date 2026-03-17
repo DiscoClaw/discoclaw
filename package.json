@@ -12,6 +12,7 @@
   },
   "files": [
     "dist/",
+    "!dist/self-improve/",
     "dashboard/",
     "templates/",
     "docs/official-docs.md",
