@@ -2787,10 +2787,10 @@ _Filled in during/after implementation._
     expect(systemPrompts[3]).toContain('Do not use tools on this retry.');
   });
 
-  it('emits a diagnostic event before failing the plan prefix contract', async () => {
+  it('strips leading narration and fails via post-hoc check when # Plan: never appears', async () => {
     const tmpDir = await makeTmpDir();
     const invalidLead = 'I checked the repo and here is the plan summary before the artifact starts. '
-      + 'This should trigger the prefix guard once it runs long enough. '
+      + 'This should be silently stripped by the prefix guard while it scans for # Plan:. '
       + 'Let me walk through the codebase structure first. The src directory contains several modules '
       + 'including the pipeline engine, the forge orchestrator, and the runtime adapters. I also found '
       + 'the task store and the Discord action handlers. Based on my analysis of these components, '
@@ -2808,33 +2808,18 @@ _Filled in during/after implementation._
 
     const opts = await baseOpts(tmpDir, runtime);
     const orchestrator = new ForgeOrchestrator(opts);
-    const events: EngineEvent[] = [];
 
     const result = await orchestrator.run(
       'Test feature',
       async () => {},
-      undefined,
-      (evt) => {
-        events.push(evt);
-      },
     );
 
-    expect(result.error).toContain('draft output must start with # Plan:');
-    const diagnostic = events.find((evt) =>
-      evt.type === 'log_line'
-      && evt.stream === 'stderr'
-      && evt.line.includes('"source":"forge_plan_prefix_guard"'),
-    );
-    expect(diagnostic).toBeDefined();
-    expect(diagnostic).toMatchObject({
-      type: 'log_line',
-      stream: 'stderr',
-    });
-    const payload = JSON.parse((diagnostic as Extract<EngineEvent, { type: 'log_line' }>).line) as Record<string, unknown>;
-    expect(payload.source).toBe('forge_plan_prefix_guard');
-    expect(payload.phase).toBe('draft');
-    expect(payload.reason).toBe('invalid_leading_text');
-    expect(payload.preview).toContain('I checked the repo');
+    // The streaming guard silently suppresses leading narration instead of
+    // throwing at a fixed char limit.  The forge still fails because the
+    // model never emitted `# Plan:`, but the failure surfaces further
+    // downstream (post-hoc output check or audit metadata guard).
+    expect(result.error).toBeDefined();
+    expect(result.finalVerdict).toBe('error');
   });
 
   it('retries audit phase on failure and completes if retry succeeds', async () => {
