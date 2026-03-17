@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { applyMutation, singleOp, MutationError } from '../mutator.js';
+import {
+  applyMutation,
+  singleOp,
+  generateTargetedMutations,
+  generateMutation,
+  analyseStructure,
+  MutationError,
+} from '../mutator.js';
 import type { Mutation } from '../types.js';
 
 const SAMPLE = 'line 0\nline 1\nline 2\nline 3';
@@ -139,5 +146,63 @@ describe('singleOp', () => {
   it('uses custom description', () => {
     const m = singleOp({ kind: 'insert', target: 0, content: 'x' }, 'custom desc');
     expect(m.description).toBe('custom desc');
+  });
+});
+
+// ── analyseStructure ──────────────────────────────────────────────
+
+const STRUCTURED = `# Section A
+- Rule 1
+- Rule 2
+
+## Section B
+You MUST comply.
+
+## Section C
+- Item`;
+
+describe('analyseStructure', () => {
+  it('identifies sections and bullets', () => {
+    const s = analyseStructure(STRUCTURED);
+    expect(s.sections).toHaveLength(3);
+    expect(s.sections[0].heading).toBe('# Section A');
+    expect(s.bullets.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('handles headingless text', () => {
+    const s = analyseStructure('plain\ntext');
+    expect(s.sections).toHaveLength(0);
+  });
+});
+
+// ── generateTargetedMutations ─────────────────────────────────────
+
+describe('generateTargetedMutations', () => {
+  it('produces applicable mutations for structured markdown', () => {
+    const mutations = generateTargetedMutations(STRUCTURED, () => 0.3);
+    expect(mutations.length).toBeGreaterThanOrEqual(3);
+    for (const m of mutations) {
+      const result = applyMutation(STRUCTURED, m);
+      expect(result.mutated).toBeDefined();
+    }
+  });
+
+  it('returns empty for unstructured text', () => {
+    expect(generateTargetedMutations('hello', () => 0)).toEqual([]);
+  });
+});
+
+// ── generateMutation ──────────────────────────────────────────────
+
+describe('generateMutation', () => {
+  it('prefers targeted over random for structured text', () => {
+    const m = generateMutation(STRUCTURED, () => 0.5);
+    expect(m.ops.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('falls back to random for plain text', () => {
+    const m = generateMutation('one line', () => 0);
+    expect(m.ops).toHaveLength(1);
+    expect(m.ops[0].kind).toBe('delete');
   });
 });

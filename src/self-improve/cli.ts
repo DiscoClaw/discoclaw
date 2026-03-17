@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { loadTestCasesFromDir, filterByTags } from './loader.js';
-import { applyMutation, generateRandomMutation } from './mutator.js';
+import { applyMutation, generateRandomMutation, generateMutation } from './mutator.js';
 import { runSuite } from './runner.js';
 import { scoreBatch } from './scorer.js';
 import { loadLedger, saveLedger, shouldPromote, promote } from './keeper.js';
@@ -32,6 +32,8 @@ const { values } = parseArgs({
     'dry-run': { type: 'boolean', default: false },
     'baseline-only': { type: 'boolean', default: false },
     'target-label': { type: 'string' },
+    'random-only': { type: 'boolean', default: false },
+    concurrency: { type: 'string', default: '1' },
     model: { type: 'string' },
     adapter: { type: 'string', default: 'claude_code' },
     tag: { type: 'string', multiple: true },
@@ -50,6 +52,8 @@ const iterations = Math.max(1, parseInt(values.iterations!, 10) || 1);
 const dryRun = values['dry-run']!;
 const baselineOnly = values['baseline-only']!;
 const targetLabel = values['target-label'] ?? targetPath.split('/').pop() ?? targetPath;
+const randomOnly = values['random-only']!;
+const concurrency = Math.max(1, parseInt(values.concurrency!, 10) || 1);
 const modelOverride = values.model;
 const adapterName = values.adapter!;
 const tagFilter = values.tag;
@@ -98,8 +102,11 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   console.log(`Loaded ${testCases.length} test case(s) from ${suitePath}`);
+  if (concurrency > 1) {
+    console.log(`Concurrency: ${concurrency}`);
+  }
 
-  const runOpts = { model: modelOverride, cwd: process.cwd() };
+  const runOpts = { model: modelOverride, cwd: process.cwd(), concurrency };
   const ledgerPath = targetPath + '.ledger.json';
   let ledger = await loadLedger(ledgerPath);
 
@@ -128,8 +135,10 @@ async function main(): Promise<void> {
     // Read the current best instruction text.
     const instructions = await readFile(targetPath, 'utf-8');
 
-    // Generate and apply a random mutation.
-    const mutation = generateRandomMutation(instructions);
+    // Generate and apply a mutation (targeted unless --random-only).
+    const mutation = randomOnly
+      ? generateRandomMutation(instructions)
+      : generateMutation(instructions);
     const { mutated } = applyMutation(instructions, mutation);
     console.log(`Mutation: ${mutation.description}`);
 

@@ -151,3 +151,69 @@ describe('runSuite', () => {
     expect(actionsMap.size).toBe(0);
   });
 });
+
+// ── runSuite concurrency ────────────────────────────────────────
+
+describe('runSuite (parallel)', () => {
+  const cases: FrozenTestCase[] = [
+    { id: 'par-1', prompt: 'p1', expectedActions: [{ type: 'channelList' }] },
+    { id: 'par-2', prompt: 'p2', expectedActions: [{ type: 'sendMessage' }] },
+    { id: 'par-3', prompt: 'p3', expectedActions: [{ type: 'memberInfo' }] },
+    { id: 'par-4', prompt: 'p4', expectedActions: [{ type: 'taskList' }] },
+  ];
+
+  it('returns results in original order with concurrency > 1', async () => {
+    const adapter = mockAdapter([
+      { type: 'text_final', text: '<discord-action>{"type":"channelList"}</discord-action>' },
+      { type: 'done' },
+    ]);
+    const { results, actionsMap } = await runSuite(cases, 'instructions', adapter, { concurrency: 3 });
+    expect(results).toHaveLength(4);
+    expect(results[0].testCaseId).toBe('par-1');
+    expect(results[1].testCaseId).toBe('par-2');
+    expect(results[2].testCaseId).toBe('par-3');
+    expect(results[3].testCaseId).toBe('par-4');
+    expect(actionsMap.size).toBe(4);
+  });
+
+  it('handles concurrency greater than case count', async () => {
+    const adapter = mockAdapter([
+      { type: 'text_final', text: '<discord-action>{"type":"channelList"}</discord-action>' },
+      { type: 'done' },
+    ]);
+    const { results } = await runSuite(cases, 'instructions', adapter, { concurrency: 100 });
+    expect(results).toHaveLength(4);
+  });
+
+  it('concurrency=1 falls back to sequential', async () => {
+    const adapter = mockAdapter([
+      { type: 'text_final', text: '<discord-action>{"type":"channelList"}</discord-action>' },
+      { type: 'done' },
+    ]);
+    const { results } = await runSuite(cases, 'instructions', adapter, { concurrency: 1 });
+    expect(results).toHaveLength(4);
+    expect(results[0].testCaseId).toBe('par-1');
+  });
+
+  it('tracks concurrent execution', async () => {
+    let peak = 0;
+    let active = 0;
+    const trackingAdapter: RuntimeAdapter = {
+      id: 'other' as RuntimeId,
+      capabilities: new Set<RuntimeCapability>(['streaming_text']),
+      defaultModel: 'test-model',
+      invoke: async function* () {
+        active++;
+        if (active > peak) peak = active;
+        // Yield asynchronously to allow interleaving.
+        await new Promise((r) => setTimeout(r, 5));
+        yield { type: 'text_final', text: 'ok' } as EngineEvent;
+        yield { type: 'done' } as EngineEvent;
+        active--;
+      },
+    };
+    const { results } = await runSuite(cases, 'instructions', trackingAdapter, { concurrency: 2 });
+    expect(results).toHaveLength(4);
+    expect(peak).toBeGreaterThanOrEqual(2);
+  });
+});
