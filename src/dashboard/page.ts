@@ -434,6 +434,30 @@ export function renderDashboardPage(): string {
       padding: 8px 0;
     }
 
+    .findings-collapsible {
+      border-radius: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      background: var(--bg-soft);
+    }
+
+    .findings-collapsible summary {
+      cursor: pointer;
+      padding: 12px 14px;
+      color: var(--muted);
+      font-size: 13px;
+      letter-spacing: 0.06em;
+    }
+
+    .findings-collapsible[open] summary {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .findings-collapsible-inner {
+      padding: 10px;
+      display: grid;
+      gap: 10px;
+    }
+
     @media (max-width: 980px) {
       .span-4,
       .span-5,
@@ -938,22 +962,24 @@ export function renderDashboardPage(): string {
     function renderDoctor(report, summary) {
       const findings = Array.isArray(report.findings) ? report.findings : [];
       const autoFixableCount = findings.filter((finding) => finding.autoFixable).length;
-      const attentionFindings = findings.filter((finding) => finding.severity !== 'info');
+      const criticalFindings = findings.filter((finding) => finding.severity === 'error');
+      const warnFindings = findings.filter((finding) => finding.severity === 'warn');
       const cleanupFindings = findings.filter((finding) => finding.severity === 'info');
+      const nonCriticalFindings = findings.filter((finding) => finding.severity !== 'error');
 
       doctorFixButton.disabled = autoFixableCount === 0;
       doctorFixButton.dataset.autoFixableCount = String(autoFixableCount);
 
       if (findings.length === 0) {
         doctorHelper.textContent = 'Nothing needs attention. Config looks clean.';
-      } else if (autoFixableCount > 0) {
+      } else if (criticalFindings.length > 0 && autoFixableCount > 0) {
         doctorHelper.textContent = autoFixableCount + ' safe auto-fix'
           + (autoFixableCount === 1 ? ' is' : 'es are')
-          + ' available. Review-only items will stay listed below.';
-      } else if (attentionFindings.length === 0) {
-        doctorHelper.textContent = 'These are cleanup suggestions only. Nothing here can be changed automatically.';
+          + ' available.';
+      } else if (criticalFindings.length > 0) {
+        doctorHelper.textContent = 'Review the critical items below.';
       } else {
-        doctorHelper.textContent = 'Review the items below. None of them can be changed automatically.';
+        doctorHelper.textContent = 'No critical issues. Expand below for details.';
       }
 
       clearNode(doctorFindings);
@@ -963,18 +989,7 @@ export function renderDashboardPage(): string {
         empty.textContent = 'No doctor findings.';
         doctorFindings.append(empty);
       } else {
-        const renderSection = (title, sectionFindings) => {
-          if (!sectionFindings.length) return;
-
-          const section = document.createElement('div');
-          section.className = 'finding-section';
-
-          const heading = document.createElement('div');
-          heading.className = 'finding-section-title';
-          heading.textContent = title;
-          section.append(heading);
-
-          sectionFindings.forEach((finding) => {
+        const renderFinding = (parent, finding) => {
           const wrapper = document.createElement('div');
           wrapper.className = 'finding';
 
@@ -1022,14 +1037,45 @@ export function renderDashboardPage(): string {
 
           wrapper.append(header, message);
           if (finding.recommendation) wrapper.append(recommendation);
-          section.append(wrapper);
-          });
-
-          doctorFindings.append(section);
+          parent.append(wrapper);
         };
 
-        renderSection('Needs attention', attentionFindings);
-        renderSection('Cleanup suggestions', cleanupFindings);
+        const renderSection = (parent, title, sectionFindings) => {
+          if (!sectionFindings.length) return;
+
+          const section = document.createElement('div');
+          section.className = 'finding-section';
+
+          const heading = document.createElement('div');
+          heading.className = 'finding-section-title';
+          heading.textContent = title;
+          section.append(heading);
+
+          sectionFindings.forEach((finding) => renderFinding(section, finding));
+          parent.append(section);
+        };
+
+        renderSection(doctorFindings, 'Needs attention', criticalFindings);
+
+        if (nonCriticalFindings.length > 0) {
+          const details = document.createElement('details');
+          details.className = 'findings-collapsible';
+
+          const summaryEl = document.createElement('summary');
+          const parts = [];
+          if (warnFindings.length > 0) parts.push(warnFindings.length + ' warning' + (warnFindings.length === 1 ? '' : 's'));
+          if (cleanupFindings.length > 0) parts.push(cleanupFindings.length + ' suggestion' + (cleanupFindings.length === 1 ? '' : 's'));
+          summaryEl.textContent = parts.join(', ');
+          details.append(summaryEl);
+
+          const inner = document.createElement('div');
+          inner.className = 'findings-collapsible-inner';
+          renderSection(inner, 'Warnings', warnFindings);
+          renderSection(inner, 'Cleanup suggestions', cleanupFindings);
+          details.append(inner);
+
+          doctorFindings.append(details);
+        }
       }
 
       const tone = findings.some((finding) => finding.severity === 'error')
