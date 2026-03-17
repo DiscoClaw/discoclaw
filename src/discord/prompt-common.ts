@@ -30,7 +30,6 @@ import type { RuntimeCapability } from '../runtime/types.js';
 import { collectPromptSafeCodexOrchestrationWording } from '../runtime/cli-shared.js';
 import { filterToolsByCapabilities } from '../runtime/tool-capabilities.js';
 import { inferModelTier, filterToolsByTier } from '../runtime/tool-tiers.js';
-import type { AbortSnapshot } from './abort-registry.js';
 
 // ---------------------------------------------------------------------------
 // Root policy preamble
@@ -140,8 +139,7 @@ export type PromptSectionKey =
   | 'shortTermMemory'
   | 'channelContext'
   | 'tasks'
-  | 'actionsReference'
-  | 'stopContext';
+  | 'actionsReference';
 
 export type PromptSectionEstimate = {
   chars: number;
@@ -175,7 +173,6 @@ const PROMPT_SECTION_KEYS: PromptSectionKey[] = [
   'channelContext',
   'tasks',
   'actionsReference',
-  'stopContext',
 ];
 
 function estimateForChars(chars: number): PromptSectionEstimate {
@@ -324,7 +321,6 @@ export function buildPromptSectionEstimates(input: {
   taskSection?: string;
   openTasksSection?: string;
   actionsReferenceSection?: string;
-  stopContextSection?: string;
 }): { sections: PromptSectionEstimateMap; totalChars: number; totalEstTokens: number } {
   const charsBySection: Record<PromptSectionKey, number> = {
     rootPolicy: ROOT_POLICY.length,
@@ -343,7 +339,6 @@ export function buildPromptSectionEstimates(input: {
     channelContext: 0,
     tasks: 0,
     actionsReference: 0,
-    stopContext: 0,
   };
 
   const normalizedChannelContextPath = input.channelContextPath
@@ -364,8 +359,6 @@ export function buildPromptSectionEstimates(input: {
   charsBySection.shortTermMemory = input.shortTermSection?.length ?? 0;
   charsBySection.tasks = (input.taskSection?.length ?? 0) + (input.openTasksSection?.length ?? 0);
   charsBySection.actionsReference = input.actionsReferenceSection?.length ?? 0;
-  charsBySection.stopContext = input.stopContextSection?.length ?? 0;
-
   const sections = {} as PromptSectionEstimateMap;
   let totalChars = 0;
 
@@ -722,7 +715,6 @@ const SECTION_ZONE_MAP: Record<string, { zone: PromptZone; order: number }> = {
   history:          { zone: 'recency', order: 1 },
   replyRef:         { zone: 'recency', order: 2 },
   actionsReference: { zone: 'recency', order: 3 },
-  stopContext:      { zone: 'primacy', order: 3 },
 };
 
 const ZONE_PRIORITY: Record<PromptZone, number> = {
@@ -776,55 +768,6 @@ export function assemblePostPreambleSections(
   const ordered = orderPostPreambleSections(sections);
   if (ordered.length === 0) return '';
   return ordered.map(formatOrderedSection).join('\n\n');
-}
-
-// ---------------------------------------------------------------------------
-// Stop context — injected after an abort so the AI knows what was interrupted
-// ---------------------------------------------------------------------------
-
-const STOP_CONTEXT_USER_MSG_MAX = 120;
-
-/**
- * Build a prompt section summarizing what was interrupted by a recent stop
- * command (`!stop` or 🛑 reaction). Injected into the next prompt so the AI
- * can acknowledge the interruption and offer to resume or adjust.
- *
- * Returns an empty string when there are no snapshots to summarize.
- */
-export function buildStopContextSection(
-  snapshots: AbortSnapshot[],
-  opts?: { forgeCancelled?: boolean },
-): string {
-  if (snapshots.length === 0 && !opts?.forgeCancelled) return '';
-
-  const lines: string[] = [
-    'The user just stopped the previous request. Here is what was interrupted:',
-  ];
-
-  for (const snap of snapshots) {
-    const userMsg = snap.userMessage.replace(/[\r\n]+/g, ' ').trim();
-    const truncatedMsg = userMsg.length > STOP_CONTEXT_USER_MSG_MAX
-      ? userMsg.slice(0, STOP_CONTEXT_USER_MSG_MAX - 1) + '\u2026'
-      : userMsg;
-    lines.push(`- Request: "${truncatedMsg}"`);
-    if (snap.activityLabel) {
-      lines.push(`  Activity at interruption: ${snap.activityLabel}`);
-    }
-    const responseLen = snap.partialResponse.trim().length;
-    if (responseLen > 0) {
-      lines.push(`  Partial output: ${responseLen} chars streamed`);
-    } else {
-      lines.push('  No output had been produced yet');
-    }
-  }
-
-  if (opts?.forgeCancelled) {
-    lines.push('- A forge (multi-phase plan execution) was also cancelled.');
-  }
-
-  lines.push('Acknowledge the interruption briefly and ask if the user wants to continue, retry, or do something else.');
-
-  return lines.join('\n');
 }
 
 // ---------------------------------------------------------------------------
