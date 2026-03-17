@@ -5,7 +5,11 @@
 
 import type { EngineEvent, RuntimeAdapter, RuntimeInvokeParams } from '../runtime/types.js';
 import { buildPromptPreamble } from '../discord/prompt-common.js';
-import { parseActionsForScoring } from '../discord/actions.js';
+import {
+  parseActionsForScoring,
+  allActionCategoryFlags,
+  discordActionsPromptSection,
+} from '../discord/actions.js';
 import type { FrozenTestCase, ExpectedAction, RunResult, RunnerOpts } from './types.js';
 
 // ── Single test case ────────────────────────────────────────────────
@@ -24,7 +28,15 @@ export async function runTestCase(
   adapter: RuntimeAdapter,
   opts?: RunnerOpts,
 ): Promise<RunResult> {
-  const systemPrompt = buildPromptPreamble(instructions, { skipTrackedTools: true });
+  let systemPrompt = buildPromptPreamble(instructions, { skipTrackedTools: true });
+
+  // Inject the full Discord action schema so the model can emit actions.
+  // Without this, positive tests (expecting actions) fail trivially and
+  // negative tests (forbidding actions) pass vacuously.
+  if (opts?.injectActionSchema !== false) {
+    const actionSchema = discordActionsPromptSection(allActionCategoryFlags());
+    systemPrompt += '\n\n---\n' + actionSchema;
+  }
 
   const invokeParams: RuntimeInvokeParams = {
     prompt: testCase.prompt,

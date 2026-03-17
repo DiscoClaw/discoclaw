@@ -63,6 +63,8 @@ export interface RunnerOpts {
   timeoutMs?: number;
   /** Max test cases to run in parallel (default 1 = sequential). */
   concurrency?: number;
+  /** Inject the Discord action schema into the system prompt (default true). */
+  injectActionSchema?: boolean;
 }
 
 /** Result of running a single test case through the runtime adapter. */
