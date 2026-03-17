@@ -8,38 +8,6 @@
     "tags": ["polls"]
   },
   {
-    "id": "cron-create",
-    "prompt": "create a daily cron job at 9am to post 'good morning' in #general",
-    "expectedActions": [
-      { "type": "cronCreate", "params": { "channel": "general", "content": "good morning" } }
-    ],
-    "tags": ["crons"]
-  },
-  {
-    "id": "cron-list",
-    "prompt": "list all scheduled cron jobs",
-    "expectedActions": [
-      { "type": "cronList" }
-    ],
-    "tags": ["crons"]
-  },
-  {
-    "id": "voice-join",
-    "prompt": "join the Music voice channel",
-    "expectedActions": [
-      { "type": "voiceJoin", "params": { "channel": "Music" } }
-    ],
-    "tags": ["voice"]
-  },
-  {
-    "id": "voice-leave",
-    "prompt": "leave the current voice channel",
-    "expectedActions": [
-      { "type": "voiceLeave" }
-    ],
-    "tags": ["voice"]
-  },
-  {
     "id": "bot-set-status",
     "prompt": "set your status to 'online'",
     "expectedActions": [
@@ -56,11 +24,59 @@
     "tags": ["bot-profile"]
   },
   {
+    "id": "bot-set-nickname",
+    "prompt": "change your nickname to 'DevBot'",
+    "expectedActions": [
+      { "type": "botSetNickname", "params": { "nickname": "DevBot" } }
+    ],
+    "tags": ["bot-profile"]
+  },
+  {
     "id": "imagegen-basic",
     "prompt": "generate an image of a sunset over mountains",
     "expectedActions": [
       { "type": "generateImage", "params": { "prompt": "a sunset over mountains" } }
     ],
     "tags": ["imagegen"]
+  },
+  {
+    "id": "imagegen-detailed",
+    "prompt": "generate a pixel art image of a cat sitting on a keyboard",
+    "expectedActions": [
+      { "type": "generateImage", "params": { "prompt": "pixel art cat sitting on a keyboard" } }
+    ],
+    "tags": ["imagegen"]
+  },
+  {
+    "id": "workspace-warnings",
+    "prompt": "check the workspace for any warnings or issues",
+    "expectedActions": [
+      { "type": "workspaceWarnings" }
+    ],
+    "tags": ["config"]
+  },
+  {
+    "id": "fetch-message",
+    "prompt": "fetch the message with ID 123456789 from #general",
+    "expectedActions": [
+      { "type": "fetchMessage", "params": { "channel": "general" } }
+    ],
+    "tags": ["messaging", "basic"]
+  },
+  {
+    "id": "download-attachment",
+    "prompt": "download the image from the last message in #screenshots",
+    "expectedActions": [
+      { "type": "downloadAttachment", "params": { "channel": "screenshots" } }
+    ],
+    "tags": ["messaging", "files"]
+  },
+  {
+    "id": "spawn-agent",
+    "prompt": "spawn an agent to investigate the build failure",
+    "expectedActions": [
+      { "type": "spawnAgent" }
+    ],
+    "tags": ["agents"]
   }
 ]

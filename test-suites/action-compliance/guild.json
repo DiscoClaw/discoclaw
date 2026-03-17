@@ -40,19 +40,11 @@
     "tags": ["guild", "search"]
   },
   {
-    "id": "guild-event-list",
-    "prompt": "list all upcoming events in the server",
+    "id": "guild-search-global",
+    "prompt": "search all channels for messages mentioning 'production outage'",
     "expectedActions": [
-      { "type": "eventList" }
+      { "type": "searchMessages", "params": { "query": "production outage" } }
     ],
-    "tags": ["guild", "events"]
-  },
-  {
-    "id": "guild-event-create",
-    "prompt": "create a server event called 'Game Night' for Saturday at 8pm",
-    "expectedActions": [
-      { "type": "eventCreate", "params": { "name": "Game Night" } }
-    ],
-    "tags": ["guild", "events"]
+    "tags": ["guild", "search"]
   }
 ]

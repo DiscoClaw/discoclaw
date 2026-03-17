@@ -7,12 +7,13 @@
 // Usage:
 //   npx tsx src/self-improve/cli.ts --target workspace/AGENTS.md
 //   npx tsx src/self-improve/cli.ts --suite test-suites/action-compliance --iterations 3
+//   npx tsx src/self-improve/cli.ts --target workspace/AGENTS.md --tag crons --tag plans
 
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { loadTestCasesFromDir } from './loader.js';
+import { loadTestCasesFromDir, filterByTags } from './loader.js';
 import { applyMutation, generateRandomMutation } from './mutator.js';
 import { runSuite } from './runner.js';
 import { scoreBatch } from './scorer.js';
@@ -31,6 +32,7 @@ const { values } = parseArgs({
     'dry-run': { type: 'boolean', default: false },
     model: { type: 'string' },
     adapter: { type: 'string', default: 'claude_code' },
+    tag: { type: 'string', multiple: true },
   },
   strict: true,
 });
@@ -46,6 +48,7 @@ const iterations = Math.max(1, parseInt(values.iterations!, 10) || 1);
 const dryRun = values['dry-run']!;
 const modelOverride = values.model;
 const adapterName = values.adapter!;
+const tagFilter = values.tag;
 
 // ── Preflight: git clean check ──────────────────────────────────────
 
@@ -81,9 +84,13 @@ function resolveAdapter(name: string): RuntimeAdapter {
 
 async function main(): Promise<void> {
   const adapter = resolveAdapter(adapterName);
-  const testCases = await loadTestCasesFromDir(suitePath);
+  let testCases = await loadTestCasesFromDir(suitePath);
+  if (tagFilter && tagFilter.length > 0) {
+    testCases = filterByTags(testCases, tagFilter);
+    console.log(`Filtered to ${testCases.length} case(s) matching tags: ${tagFilter.join(', ')}`);
+  }
   if (testCases.length === 0) {
-    console.error(`No test cases found in ${suitePath}`);
+    console.error(`No test cases found in ${suitePath}${tagFilter ? ` (tags: ${tagFilter.join(', ')})` : ''}`);
     process.exit(1);
   }
   console.log(`Loaded ${testCases.length} test case(s) from ${suitePath}`);

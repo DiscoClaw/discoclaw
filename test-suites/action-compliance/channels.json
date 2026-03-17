@@ -78,5 +78,37 @@
       { "type": "forumTagCreate", "params": { "channel": "help-forum", "name": "bug" } }
     ],
     "tags": ["channels", "forums"]
+  },
+  {
+    "id": "chan-forum-tag-list",
+    "prompt": "list all forum tags on #help-forum",
+    "expectedActions": [
+      { "type": "forumTagList", "params": { "channel": "help-forum" } }
+    ],
+    "tags": ["channels", "forums"]
+  },
+  {
+    "id": "chan-forum-tag-delete",
+    "prompt": "delete the 'resolved' tag from #help-forum",
+    "expectedActions": [
+      { "type": "forumTagDelete", "params": { "channel": "help-forum", "name": "resolved" } }
+    ],
+    "tags": ["channels", "forums"]
+  },
+  {
+    "id": "chan-create-announcement",
+    "prompt": "create an announcement channel called 'updates' under the News category",
+    "expectedActions": [
+      { "type": "channelCreate", "params": { "name": "updates", "parent": "News", "channelType": "announcement" } }
+    ],
+    "tags": ["channels", "management"]
+  },
+  {
+    "id": "chan-create-voice",
+    "prompt": "create a voice channel called 'team-call'",
+    "expectedActions": [
+      { "type": "channelCreate", "params": { "name": "team-call", "channelType": "voice" } }
+    ],
+    "tags": ["channels", "management"]
   }
 ]
