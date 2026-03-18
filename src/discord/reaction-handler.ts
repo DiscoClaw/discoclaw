@@ -516,6 +516,7 @@ function createReactionHandler(
             imagegen: params.discordActionsImagegen ?? false,
             voice: params.discordActionsVoice ?? false,
             spawn: params.discordActionsSpawn ?? false,
+            archive: params.discordActionsArchive ?? false,
           };
 
           if (params.discordActionsEnabled && !isDm) {

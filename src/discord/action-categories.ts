@@ -39,6 +39,8 @@ export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   'loopList',
   // Spawn
   'spawnAgent',
+  // Archive
+  'archiveList',
 ]);
 
 export function hasQueryAction(actionTypes: string[]): boolean {

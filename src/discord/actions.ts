@@ -43,6 +43,8 @@ import { VOICE_ACTION_TYPES, executeVoiceAction, voiceActionsPromptSection } fro
 import type { VoiceActionRequest, VoiceContext } from './actions-voice.js';
 import { SPAWN_ACTION_TYPES, executeSpawnActions, spawnActionsPromptSection } from './actions-spawn.js';
 import type { SpawnActionRequest, SpawnContext } from './actions-spawn.js';
+import { ARCHIVE_ACTION_TYPES, executeArchiveAction, archiveActionsPromptSection } from './actions-archive.js';
+import type { ArchiveActionRequest } from './actions-archive.js';
 import { describeDestructiveConfirmationRequirement } from './destructive-confirmation.js';
 import { checkConfigAuthorization } from './action-dispatcher.js';
 import { computeMarkdownCodeRanges } from './markdown-code-ranges.js';
@@ -93,6 +95,7 @@ export type ActionCategoryFlags = {
   imagegen?: boolean;
   voice?: boolean;
   spawn?: boolean;
+  archive?: boolean;
 };
 
 export type DiscordActionRequest =
@@ -114,7 +117,8 @@ export type DiscordActionRequest =
   | ReactionPromptRequest
   | ImagegenActionRequest
   | VoiceActionRequest
-  | SpawnActionRequest;
+  | SpawnActionRequest
+  | ArchiveActionRequest;
 
 export type DiscordActionResult =
   | { ok: true; summary: string }
@@ -182,6 +186,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.imagegen) for (const t of IMAGEGEN_ACTION_TYPES) types.add(t);
   if (flags.voice) for (const t of VOICE_ACTION_TYPES) types.add(t);
   if (flags.spawn) for (const t of SPAWN_ACTION_TYPES) types.add(t);
+  if (flags.archive) for (const t of ARCHIVE_ACTION_TYPES) types.add(t);
   return types;
 }
 
@@ -581,6 +586,8 @@ export async function executeDiscordActions(
       } else if (SPAWN_ACTION_TYPES.has(action.type)) {
         // spawnCtx not configured — would have been handled in pre-pass otherwise.
         result = { ok: false, error: 'Spawn subsystem not configured' };
+      } else if (ARCHIVE_ACTION_TYPES.has(action.type)) {
+        result = await executeArchiveAction(action as ArchiveActionRequest, ctx, requesterMember);
       } else {
         result = { ok: false, error: `Unknown action type: ${String(action.type ?? 'unknown')}` };
       }
@@ -697,7 +704,8 @@ type ActionSchemaCategory =
   | 'config'
   | 'imagegen'
   | 'voice'
-  | 'spawn';
+  | 'spawn'
+  | 'archive';
 
 const ACTION_SCHEMA_CATEGORY_ORDER: ActionSchemaCategory[] = [
   'messaging',
@@ -717,6 +725,7 @@ const ACTION_SCHEMA_CATEGORY_ORDER: ActionSchemaCategory[] = [
   'imagegen',
   'voice',
   'spawn',
+  'archive',
 ];
 
 const ACTION_SCHEMA_CORE_CATEGORIES: ActionSchemaCategory[] = ['messaging', 'channels'];
@@ -756,6 +765,7 @@ const ACTION_SCHEMA_KEYWORD_RULES: ActionSchemaKeywordRule[] = [
   { hit: 'guild', pattern: /\b(guild|server|member|role|event)\b/i, categories: ['guild'] },
   { hit: 'botProfile', pattern: /\b(bot profile|bot name|persona)\b/i, categories: ['botProfile'] },
   { hit: 'spawn', pattern: /\b(spawn|agent)\b/i, categories: ['spawn'] },
+  { hit: 'archive', pattern: /\b(archive|archiv|housekeep)\b/i, categories: ['archive'] },
 ];
 
 function estimateTokensFromChars(chars: number): number {
@@ -786,6 +796,7 @@ function isActionSchemaCategoryEnabled(flags: ActionCategoryFlags, category: Act
     case 'imagegen': return Boolean(flags.imagegen);
     case 'voice': return Boolean(flags.voice);
     case 'spawn': return Boolean(flags.spawn);
+    case 'archive': return Boolean(flags.archive);
   }
 }
 
@@ -827,6 +838,8 @@ function renderActionSchemaCategorySection(category: ActionSchemaCategory, rende
       return voiceActionsPromptSection();
     case 'spawn':
       return spawnActionsPromptSection();
+    case 'archive':
+      return archiveActionsPromptSection();
     case 'defer':
       return '';
   }
@@ -1068,6 +1081,7 @@ export function allActionCategoryFlags(): ActionCategoryFlags {
     imagegen: true,
     voice: true,
     spawn: true,
+    archive: true,
   };
 }
 

@@ -986,11 +986,11 @@ export function resolveVoiceRuntime(
 if (cfg.anthropicApiKey) {
   const anthropicRestRaw = createAnthropicRestRuntime({
     apiKey: cfg.anthropicApiKey,
-    defaultModel: 'claude-sonnet-4-6',
+    defaultModel: 'claude-sonnet-4-20250514',
     log,
   });
   const anthropicRuntime = registerRuntime('anthropic', anthropicRestRaw);
-  log.info({ adapter: 'rest', model: 'claude-sonnet-4-6' }, 'runtime:anthropic registered (Messages API)');
+  log.info({ adapter: 'rest', model: 'claude-sonnet-4-20250514' }, 'runtime:anthropic registered (Messages API)');
 
   // Auto-wire as voice runtime to eliminate CLI cold-start latency
   if (cfg.voiceEnabled) {
@@ -1249,6 +1249,7 @@ const botParams = {
   discordActionsImagegen: cfg.discordActionsImagegen,
   discordActionsVoice: cfg.discordActionsVoice && cfg.voiceEnabled,
   discordActionsSpawn: cfg.discordActionsSpawn,
+  discordActionsArchive: cfg.discordActionsArchive,
   discordActionsConfig: discordActionsEnabled, // Always enabled when actions are on — model switching is a core capability.
   discordActionsDefer: cfg.discordActionsDefer,
   discordActionsLoop: cfg.discordActionsLoop,
@@ -2211,6 +2212,7 @@ if (cronEnabled && effectiveCronForum) {
     imagegen: Boolean(botParams.imagegenCtx), // Follows env flag (DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN + API key) — cron jobs may generate images if explicitly configured.
     voice: Boolean(botParams.voiceCtx), // Follows env flag (DISCOCLAW_DISCORD_ACTIONS_VOICE + VOICE_ENABLED) — cron jobs may use voice if configured.
     spawn: false, // Spawn is excluded from cron flows to prevent recursive agent spawning from scheduled jobs.
+    archive: false, // Archive is excluded from cron flows — channel reorganisation should be user-initiated.
   };
   const cronRunControl = new CronRunControl();
 
@@ -2404,6 +2406,7 @@ if (botParams.spawnCtx) {
     imagegen: Boolean(botParams.discordActionsImagegen),
     voice: Boolean(botParams.discordActionsVoice),
     spawn: false, // Prevent recursive spawn (also enforced by depth check).
+    archive: false, // Spawned agents should not reorganise channels.
   };
   botParams.spawnCtx.deferScheduler = botParams.deferScheduler;
   botParams.spawnCtx.subsystems = {
@@ -2517,6 +2520,7 @@ const actionCategoriesEnabled = buildActionCategoriesEnabled({
   discordActionsImagegen: cfg.discordActionsImagegen,
   discordActionsVoice: cfg.discordActionsVoice,
   voiceEnabled: cfg.voiceEnabled,
+  discordActionsArchive: cfg.discordActionsArchive,
 });
 const npmLatestVersion = await npmLatestVersionPromise;
 publishBootReport({

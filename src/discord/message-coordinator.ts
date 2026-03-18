@@ -251,6 +251,7 @@ export type BotParams = {
   discordActionsImagegen?: boolean;
   discordActionsVoice?: boolean;
   discordActionsSpawn?: boolean;
+  discordActionsArchive?: boolean;
   deferMaxDelaySeconds?: number;
   deferMaxConcurrent?: number;
   deferScheduler?: DeferScheduler<DeferActionRequest, ActionContext>;
@@ -890,6 +891,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         imagegen: !isBotMessage || (params.discordActionsImagegen ?? false),
         voice: params.discordActionsVoice ?? false,
         spawn: params.discordActionsSpawn ?? false,
+        archive: params.discordActionsArchive ?? false,
       };
 
       if (isBotMessage) {
@@ -906,6 +908,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         actionFlags.imagegen = false;
         actionFlags.voice = false;
         actionFlags.spawn = false;
+        actionFlags.archive = false;
       }
 
       if (!isDm && params.allowChannelIds) {

@@ -65,6 +65,7 @@ type DeferredRunnerState = {
   discordActionsImagegen?: boolean;
   discordActionsVoice?: boolean;
   discordActionsSpawn?: boolean;
+  discordActionsArchive?: boolean;
   taskCtx?: TaskContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
@@ -157,6 +158,7 @@ function buildDeferredActionFlags(state: DeferredRunnerState, depth: number, max
     imagegen: Boolean(state.discordActionsImagegen),
     voice: Boolean(state.discordActionsVoice),
     spawn: Boolean(state.discordActionsSpawn),
+    archive: Boolean(state.discordActionsArchive),
   };
 }
 
