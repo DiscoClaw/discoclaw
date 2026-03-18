@@ -16,5 +16,6 @@ export function withoutRequesterGatedActionFlags(flags: ActionCategoryFlags): Ac
     moderation: false,
     polls: false,
     config: false,
+    archive: false,
   };
 }

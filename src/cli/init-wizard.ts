@@ -383,7 +383,7 @@ export async function runInitWizard(): Promise<void> {
       'OpenRouter API key: ',
       (val) => (val ? null : 'API key is required'),
     );
-    values.OPENROUTER_MODEL = 'anthropic/claude-sonnet-4-20250514';
+    values.OPENROUTER_MODEL = 'anthropic/claude-sonnet-4-6';
   }
 
   values.DISCOCLAW_DISCORD_ACTIONS = '1';

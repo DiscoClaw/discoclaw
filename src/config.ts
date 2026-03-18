@@ -57,6 +57,7 @@ export type DiscoclawConfig = {
   discordActionsImagegen: boolean;
   discordActionsVoice: boolean;
   discordActionsSpawn: boolean;
+  discordActionsArchive: boolean;
 
   deferMaxDelaySeconds: number;
   deferMaxDepth: number;
@@ -494,6 +495,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsImagegen = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN', false);
   const discordActionsVoice = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_VOICE', false);
   const discordActionsSpawn = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_SPAWN', true);
+  const discordActionsArchive = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_ARCHIVE', false);
   const spawnMaxConcurrent = parsePositiveInt(env, 'DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT', 4);
   const deferMaxDelaySeconds = parsePositiveNumber(
     env,
@@ -697,7 +699,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
   const openrouterApiKey = parseTrimmedString(env, 'OPENROUTER_API_KEY');
   const openrouterBaseUrl = parseTrimmedString(env, 'OPENROUTER_BASE_URL');
-  const openrouterModel = parseTrimmedString(env, 'OPENROUTER_MODEL') ?? 'anthropic/claude-sonnet-4-20250514';
+  const openrouterModel = parseTrimmedString(env, 'OPENROUTER_MODEL') ?? 'anthropic/claude-sonnet-4-6';
   if (primaryRuntime === 'openrouter' && !openrouterApiKey) {
     warnings.push('PRIMARY_RUNTIME=openrouter but OPENROUTER_API_KEY is not set; startup will fail unless another runtime is selected.');
   }
@@ -798,6 +800,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       discordActionsImagegen,
       discordActionsVoice,
       discordActionsSpawn,
+      discordActionsArchive,
 
       deferMaxDelaySeconds,
       deferMaxDepth,

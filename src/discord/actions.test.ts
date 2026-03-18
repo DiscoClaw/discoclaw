@@ -413,6 +413,7 @@ describe('withoutRequesterGatedActionFlags', () => {
       imagegen: true,
       voice: true,
       spawn: true,
+      archive: true,
     })).toEqual({
       channels: false,
       messaging: false,
@@ -431,6 +432,7 @@ describe('withoutRequesterGatedActionFlags', () => {
       imagegen: true,
       voice: true,
       spawn: true,
+      archive: false,
     });
   });
 });
