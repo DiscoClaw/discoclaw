@@ -12,11 +12,11 @@ import type { ScoreResult, Mutation, MutationOp } from './types.js';
 // ── Types ───────────────────────────────────────────────────────────
 
 export interface AiMutatorOpts {
-  /** Anthropic API key for the mutation-proposing LLM. */
+  /** API key for the mutation-proposing LLM (OpenAI-compatible). */
   apiKey: string;
-  /** Model to use for mutation proposals. Defaults to claude-sonnet-4-20250514. */
+  /** Model to use for mutation proposals. Defaults to anthropic/claude-sonnet-4-20250514. */
   model?: string;
-  /** Base URL for the API. Defaults to https://api.anthropic.com. */
+  /** Base URL for the API. Defaults to https://openrouter.ai/api. */
   baseUrl?: string;
   /** Maximum tokens for the LLM response. Defaults to 2048. */
   maxTokens?: number;
@@ -123,8 +123,8 @@ async function callLlm(
   prompt: string,
   opts: AiMutatorOpts,
 ): Promise<string> {
-  const model = opts.model ?? 'claude-sonnet-4-20250514';
-  const baseUrl = opts.baseUrl ?? 'https://api.anthropic.com';
+  const model = opts.model ?? 'anthropic/claude-sonnet-4-20250514';
+  const baseUrl = opts.baseUrl ?? 'https://openrouter.ai/api';
   const maxTokens = opts.maxTokens ?? 2048;
   const timeoutMs = opts.timeoutMs ?? 30000;
 
@@ -132,11 +132,11 @@ async function callLlm(
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(`${baseUrl}/v1/messages`, {
+    // OpenAI-compatible chat completions format (works with OpenRouter, OpenAI, etc.)
+    const response = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: 'POST',
       headers: {
-        'x-api-key': opts.apiKey,
-        'anthropic-version': '2023-06-01',
+        'Authorization': `Bearer ${opts.apiKey}`,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
@@ -153,19 +153,19 @@ async function callLlm(
         const errBody = (await response.json()) as { error?: { message?: string } };
         detail = errBody.error?.message ?? '';
       } catch { /* ignore */ }
-      throw new Error(`Anthropic API error: ${response.status} ${response.statusText}${detail ? `: ${detail}` : ''}`);
+      throw new Error(`LLM API error: ${response.status} ${response.statusText}${detail ? `: ${detail}` : ''}`);
     }
 
     const body = (await response.json()) as {
-      content?: Array<{ type: string; text?: string }>;
+      choices?: Array<{ message?: { content?: string } }>;
     };
 
-    const textBlock = body.content?.find((b) => b.type === 'text');
-    if (!textBlock?.text) {
+    const content = body.choices?.[0]?.message?.content;
+    if (!content) {
       throw new Error('No text content in LLM response');
     }
 
-    return textBlock.text;
+    return content;
   } finally {
     clearTimeout(timer);
   }
