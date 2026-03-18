@@ -28,7 +28,7 @@ import { closeFenceIfOpen, formatBoldLabel, thinkingLabel, selectStreamingOutput
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, isShuttingDown } from './inflight-replies.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
-import { downloadTextAttachments } from './file-download.js';
+import { downloadTextAttachments, classifyAttachments, downloadDocumentAttachments } from './file-download.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
 import { resolveModel } from '../runtime/model-tiers.js';
@@ -462,7 +462,7 @@ function createReactionHandler(
               params.log?.warn({ err }, `${logPrefix}:image download failed`);
             }
 
-            // Download non-image text attachments.
+            // Download non-image text and document attachments.
             try {
               const nonImageAtts = [...msg.attachments.values()].filter(a => !resolveMediaType(a));
               if (nonImageAtts.length > 0) {
@@ -476,6 +476,23 @@ function createReactionHandler(
                 if (textResult.errors.length > 0) {
                   userContent += '\n(' + textResult.errors.join('; ') + ')';
                   params.log?.info({ errors: textResult.errors }, `${logPrefix}:text attachment notes`);
+                }
+
+                // Download document attachments (PDFs etc.) to /tmp for Claude Code's Read tool.
+                const { documents } = classifyAttachments(nonImageAtts);
+                if (documents.length > 0) {
+                  const docResult = await downloadDocumentAttachments(documents, msg.id);
+                  if (docResult.docs.length > 0) {
+                    const sections = docResult.docs.map(d =>
+                      `[Attached document: ${d.name}]\nDownloaded to: ${d.path}\nUse the Read tool to access this file.`,
+                    );
+                    userContent += '\n\n' + sections.join('\n\n');
+                    params.log?.info({ docCount: docResult.docs.length }, `${logPrefix}:document attachments downloaded`);
+                  }
+                  if (docResult.errors.length > 0) {
+                    userContent += '\n(' + docResult.errors.join('; ') + ')';
+                    params.log?.info({ errors: docResult.errors }, `${logPrefix}:document attachment notes`);
+                  }
                 }
               }
             } catch (err) {

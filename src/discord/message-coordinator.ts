@@ -88,7 +88,7 @@ import { resolveReplyReference } from './reply-reference.js';
 import type { MessageWithReference } from './reply-reference.js';
 import { resolveThreadContext } from './thread-context.js';
 import type { ThreadLikeChannel } from './thread-context.js';
-import { downloadTextAttachments } from './file-download.js';
+import { downloadTextAttachments, classifyAttachments, downloadDocumentAttachments } from './file-download.js';
 import { fetchYouTubeTranscripts } from './youtube-transcript.js';
 import { buildCronPrefetchSection } from './cron-prefetch.js';
 import { messageContentIntentHint, mapRuntimeErrorToUserMessage } from './user-errors.js';
@@ -3226,7 +3226,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               params.log?.warn({ err }, 'discord:image download failed');
             }
 
-            // Download non-image text attachments.
+            // Download non-image text and document attachments.
             try {
               const nonImageAtts = [...msg.attachments.values()].filter(a => !resolveMediaType(a));
               if (nonImageAtts.length > 0) {
@@ -3239,6 +3239,23 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 if (textResult.errors.length > 0) {
                   prompt += '\n(' + textResult.errors.join('; ') + ')';
                   params.log?.info({ errors: textResult.errors }, 'discord:text attachment notes');
+                }
+
+                // Download document attachments (PDFs etc.) to /tmp for Claude Code's Read tool.
+                const { documents } = classifyAttachments(nonImageAtts);
+                if (documents.length > 0) {
+                  const docResult = await downloadDocumentAttachments(documents, msg.id);
+                  if (docResult.docs.length > 0) {
+                    const sections = docResult.docs.map(d =>
+                      `[Attached document: ${d.name}]\nDownloaded to: ${d.path}\nUse the Read tool to access this file.`,
+                    );
+                    prompt += '\n\n' + sections.join('\n\n');
+                    params.log?.info({ docCount: docResult.docs.length }, 'discord:document attachments downloaded');
+                  }
+                  if (docResult.errors.length > 0) {
+                    prompt += '\n(' + docResult.errors.join('; ') + ')';
+                    params.log?.info({ errors: docResult.errors }, 'discord:document attachment notes');
+                  }
                 }
               }
             } catch (err) {
