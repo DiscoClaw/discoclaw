@@ -65,7 +65,21 @@ export interface RunnerOpts {
   concurrency?: number;
   /** Inject the Discord action schema into the system prompt (default true). */
   injectActionSchema?: boolean;
+  /** Called after each test case completes or fails. */
+  onProgress?: ProgressCallback;
+  /** AbortSignal — when aborted, pending cases are skipped. */
+  signal?: AbortSignal;
 }
+
+/** Called after each test case completes (or fails) during a suite run. */
+export type ProgressCallback = (info: {
+  index: number;
+  total: number;
+  testCaseId: string;
+  status: 'pass' | 'error';
+  durationMs: number;
+  error?: string;
+}) => void;
 
 /** Result of running a single test case through the runtime adapter. */
 export interface RunResult {
@@ -75,6 +89,8 @@ export interface RunResult {
   parseFailures: number;
   events: import('../runtime/types.js').EngineEvent[];
   durationMs: number;
+  /** Non-null when the test case threw instead of completing normally. */
+  error?: string;
 }
 
 // ── Keeper types ────────────────────────────────────────────────────
