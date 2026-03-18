@@ -986,11 +986,11 @@ export function resolveVoiceRuntime(
 if (cfg.anthropicApiKey) {
   const anthropicRestRaw = createAnthropicRestRuntime({
     apiKey: cfg.anthropicApiKey,
-    defaultModel: 'claude-sonnet-4-6',
+    defaultModel: 'claude-sonnet-4-20250514',
     log,
   });
   const anthropicRuntime = registerRuntime('anthropic', anthropicRestRaw);
-  log.info({ adapter: 'rest', model: 'claude-sonnet-4-6' }, 'runtime:anthropic registered (Messages API)');
+  log.info({ adapter: 'rest', model: 'claude-sonnet-4-20250514' }, 'runtime:anthropic registered (Messages API)');
 
   // Auto-wire as voice runtime to eliminate CLI cold-start latency
   if (cfg.voiceEnabled) {

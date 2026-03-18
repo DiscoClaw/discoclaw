@@ -41,7 +41,7 @@ function makeMessageStart(inputTokens: number): string {
       type: 'message',
       role: 'assistant',
       content: [],
-      model: 'claude-sonnet-4-6',
+      model: 'claude-sonnet-4-20250514',
       usage: { input_tokens: inputTokens, output_tokens: 1 },
     },
   })}`;
@@ -82,7 +82,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     const events = await collectEvents(
@@ -107,7 +107,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'my-secret-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     await collectEvents(runtime.invoke({ prompt: 'test', model: '', cwd: '/tmp' }));
@@ -127,7 +127,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     await collectEvents(
@@ -145,14 +145,14 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     await collectEvents(runtime.invoke({ prompt: 'test', model: '', cwd: '/tmp' }));
 
     const [, init] = vi.mocked(globalThis.fetch).mock.calls[0];
     const body = JSON.parse(init?.body as string);
-    expect(body.model).toBe('claude-sonnet-4-6');
+    expect(body.model).toBe('claude-sonnet-4-20250514');
   });
 
   it('sends stream: true and max_tokens in request body', async () => {
@@ -162,7 +162,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     await collectEvents(runtime.invoke({ prompt: 'test', model: '', cwd: '/tmp' }));
@@ -180,7 +180,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     await collectEvents(
@@ -199,7 +199,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
       defaultMaxTokens: 2048,
     });
 
@@ -217,7 +217,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     const prompt =
@@ -239,7 +239,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     await collectEvents(
@@ -265,7 +265,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     await collectEvents(runtime.invoke({ prompt: 'just a question', model: '', cwd: '/tmp' }));
@@ -288,7 +288,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     const events = await collectEvents(
@@ -311,7 +311,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     const events = await collectEvents(
@@ -336,7 +336,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     const events = await collectEvents(
@@ -363,7 +363,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     const events = await collectEvents(
@@ -380,7 +380,7 @@ describe('Anthropic REST runtime adapter', () => {
   it('has runtime id "claude_code"', () => {
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
     expect(runtime.id).toBe('claude_code');
   });
@@ -396,7 +396,7 @@ describe('Anthropic REST runtime adapter', () => {
   it('has streaming_text capability', () => {
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
     expect(runtime.capabilities.has('streaming_text')).toBe(true);
     expect(runtime.capabilities.size).toBe(1);
@@ -409,7 +409,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
       baseUrl: 'https://custom.api.example.com',
     });
 
@@ -426,7 +426,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
       apiVersion: '2024-01-01',
     });
 
@@ -453,7 +453,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     const events = await collectEvents(
@@ -476,7 +476,7 @@ describe('Anthropic REST runtime adapter', () => {
 
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
-      defaultModel: 'claude-sonnet-4-6',
+      defaultModel: 'claude-sonnet-4-20250514',
     });
 
     const events = await collectEvents(

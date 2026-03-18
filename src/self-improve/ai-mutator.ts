@@ -14,7 +14,7 @@ import type { ScoreResult, Mutation, MutationOp } from './types.js';
 export interface AiMutatorOpts {
   /** Anthropic API key for the mutation-proposing LLM. */
   apiKey: string;
-  /** Model to use for mutation proposals. Defaults to claude-sonnet-4-6. */
+  /** Model to use for mutation proposals. Defaults to claude-sonnet-4-20250514. */
   model?: string;
   /** Base URL for the API. Defaults to https://api.anthropic.com. */
   baseUrl?: string;
@@ -123,7 +123,7 @@ async function callLlm(
   prompt: string,
   opts: AiMutatorOpts,
 ): Promise<string> {
-  const model = opts.model ?? 'claude-sonnet-4-6';
+  const model = opts.model ?? 'claude-sonnet-4-20250514';
   const baseUrl = opts.baseUrl ?? 'https://api.anthropic.com';
   const maxTokens = opts.maxTokens ?? 2048;
   const timeoutMs = opts.timeoutMs ?? 30000;
