@@ -16,6 +16,7 @@ import {
   SubprocessTracker,
   cliExecaEnv,
   LineBuffer,
+  killProcessTree,
 } from './cli-shared.js';
 import {
   extractTextFromUnknownEvent,
@@ -487,6 +488,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           pushRuntimeError(`stream stall: no output for ${ms}ms — increase DISCOCLAW_STREAM_STALL_TIMEOUT_MS to allow longer gaps (current: ${ms}ms)`);
           push({ type: 'done' });
           finished = true;
+          if (subprocess.pid) killProcessTree(subprocess.pid, 'SIGTERM');
           subprocess.kill('SIGTERM');
           wake();
           settleAttempt({ kind: 'complete' }, 'stream_stall');
@@ -514,6 +516,7 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
           pushRuntimeError(`progress stall: no text output for ${ms}ms (possible thinking spiral)`);
           push({ type: 'done' });
           finished = true;
+          if (subprocess.pid) killProcessTree(subprocess.pid, 'SIGTERM');
           subprocess.kill('SIGTERM');
           wake();
           settleAttempt({ kind: 'complete' }, 'progress_stall');
@@ -521,6 +524,10 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       };
 
       const onAbort = () => {
+        // Kill the entire process tree — not just the top-level subprocess.
+        // Without this, grandchild processes (e.g. harness spawned via Bash tool)
+        // survive and become orphans that burn API credits with no parent collecting results.
+        if (subprocess.pid) killProcessTree(subprocess.pid, 'SIGKILL');
         subprocess.kill('SIGKILL');
         if (attemptSettled || finished) return;
         pushRuntimeError('aborted');
@@ -1101,6 +1108,8 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       }
     } finally {
       if (!finished && activeSubprocess) {
+        const pid = (activeSubprocess as unknown as { pid?: number }).pid;
+        if (pid) killProcessTree(pid, 'SIGKILL');
         (activeSubprocess as unknown as { kill(signal: string): void }).kill('SIGKILL');
       }
       await imageCleanup?.().catch(() => {});
