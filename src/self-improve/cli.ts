@@ -12,14 +12,14 @@
 
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
+import { readFile, appendFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { loadTestCasesFromDir, filterByTags } from './loader.js';
 import { applyMutation, generateRandomMutation, generateMutation } from './mutator.js';
 import { generateAiMutation } from './ai-mutator.js';
 import { runSuite } from './runner.js';
 import { scoreBatch } from './scorer.js';
-import { loadLedger, saveLedger, shouldPromote, promote, cleanupStagingFiles, cleanupOrphanedStagingFiles } from './keeper.js';
+import { loadLedger, saveLedger, shouldPromote, promote, cleanupStagingFiles, cleanupOrphanedStagingFiles, computeCaseSetHash, caseSetChanged, recordIteration } from './keeper.js';
 import { formatConsoleTable, formatSummary } from './reporter.js';
 import { createClaudeCliRuntime } from '../runtime/claude-code-cli.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
@@ -64,6 +64,18 @@ const concurrency = Math.max(1, parseInt(values.concurrency!, 10) || 1);
 const modelOverride = values.model;
 const adapterName = values.adapter!;
 const tagFilter = values.tag;
+
+// ── Log file ────────────────────────────────────────────────────────
+// Always tee output to a log file next to the ledger so background runs
+// leave evidence.
+
+const logFilePath = targetPath + '.harness.log';
+
+async function log(msg: string): Promise<void> {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  process.stdout.write(line);
+  await appendFile(logFilePath, line, 'utf-8');
+}
 
 // ── Signal handling ─────────────────────────────────────────────────
 
@@ -152,22 +164,22 @@ async function main(): Promise<void> {
   // Clean orphaned staging files from prior interrupted runs.
   const orphans = await cleanupOrphanedStagingFiles(dirname(targetPath));
   if (orphans > 0) {
-    console.log(`Cleaned up ${orphans} orphaned staging file(s)`);
+    await log(`Cleaned up ${orphans} orphaned staging file(s)`);
   }
 
   const adapter = resolveAdapter(adapterName);
   let testCases = await loadTestCasesFromDir(suitePath);
   if (tagFilter && tagFilter.length > 0) {
     testCases = filterByTags(testCases, tagFilter);
-    console.log(`Filtered to ${testCases.length} case(s) matching tags: ${tagFilter.join(', ')}`);
+    await log(`Filtered to ${testCases.length} case(s) matching tags: ${tagFilter.join(', ')}`);
   }
   if (testCases.length === 0) {
     console.error(`No test cases found in ${suitePath}${tagFilter ? ` (tags: ${tagFilter.join(', ')})` : ''}`);
     process.exit(1);
   }
-  console.log(`Loaded ${testCases.length} test case(s) from ${suitePath}`);
+  await log(`Loaded ${testCases.length} test case(s) from ${suitePath}`);
   if (concurrency > 1) {
-    console.log(`Concurrency: ${concurrency}`);
+    await log(`Concurrency: ${concurrency}`);
   }
 
   // ── AI mutator setup ──
@@ -198,9 +210,20 @@ async function main(): Promise<void> {
   let lastScoreResults: ScoreResult[] | null = null;
   let lastMeanScore = 0;
 
+  // ── Case-set change detection ──
+  // Hash the current test-case IDs so we can detect when a stale ledger
+  // from a different tag filter or suite is being reused.
+  const currentCaseHash = computeCaseSetHash(testCases.map((tc) => tc.id));
+  const caseSetStale = caseSetChanged(ledger, currentCaseHash);
+  if (caseSetStale) {
+    await log(`Case set changed (ledger hash: ${ledger.caseSetHash}, current: ${currentCaseHash}) — forcing fresh baseline`);
+  }
+
   // ── Establish baseline score ──
-  if (baselineOnly || (ledger.iteration === 0 && ledger.bestScore === 0)) {
-    console.log(`\n── Baseline: ${targetLabel} ──`);
+  // Run baseline when: explicitly requested, first run (no score), or case set changed.
+  const needsBaseline = baselineOnly || (ledger.iteration === 0 && ledger.bestScore === 0) || caseSetStale;
+  if (needsBaseline) {
+    await log(`\n── Baseline: ${targetLabel} ──`);
     const instructions = await readFile(targetPath, 'utf-8');
     const { results: runResults, actionsMap } = await runSuite(testCases, instructions, adapter, runOpts);
 
@@ -210,18 +233,32 @@ async function main(): Promise<void> {
     const totalViolations = scoreResults.reduce((sum, r) => sum + r.violations.length, 0);
     const errorCount = runResults.filter((r) => r.error).length;
     console.log('\n' + formatConsoleTable(scoreResults, meanScore));
-    console.log(
+    await log(
       `Baseline score for ${targetLabel}: ${meanScore.toFixed(3)}` +
       (totalViolations > 0 ? ` (${totalViolations} violation(s))` : '') +
       (errorCount > 0 ? ` (${errorCount} error(s))` : ''),
     );
 
-    ledger = { bestScore: meanScore, iteration: 0, promotedAt: new Date().toISOString() };
-    await saveLedger(ledgerPath, ledger);
+    ledger = {
+      bestScore: meanScore,
+      iteration: 0,
+      promotedAt: new Date().toISOString(),
+      caseSetHash: currentCaseHash,
+      history: [],
+    };
+    // Record baseline in history.
+    ledger = await recordIteration(ledgerPath, ledger, {
+      iteration: 0,
+      score: meanScore,
+      promoted: true,
+      mutationDescription: 'baseline',
+      timestamp: new Date().toISOString(),
+    });
     lastScoreResults = scoreResults;
     lastMeanScore = meanScore;
 
     if (baselineOnly) {
+      await log('Baseline-only mode — done.');
       return;
     }
   }
@@ -229,11 +266,11 @@ async function main(): Promise<void> {
   // ── Mutation iterations ──
   for (let i = 1; i <= iterations; i++) {
     if (abortController.signal.aborted) {
-      console.log('\nAborted — stopping iterations.');
+      await log('\nAborted — stopping iterations.');
       break;
     }
 
-    console.log(`\n── Iteration ${i}/${iterations} ──`);
+    await log(`\n── Iteration ${i}/${iterations} ──`);
 
     // Read the current best instruction text.
     const instructions = await readFile(targetPath, 'utf-8');
@@ -259,7 +296,7 @@ async function main(): Promise<void> {
     }
 
     const { mutated } = applyMutation(instructions, mutation);
-    console.log(`Mutation: ${mutation.description}`);
+    await log(`Mutation: ${mutation.description}`);
 
     // Run the suite with mutated instructions.
     const { results: runResults, actionsMap } = await runSuite(
@@ -288,16 +325,28 @@ async function main(): Promise<void> {
       ledger = await promote(targetPath, mutated, ledgerPath, meanScore);
     }
 
-    console.log(formatSummary(meanScore, ledger.bestScore, promoted));
+    // Always record the iteration outcome — even when not promoted.
+    ledger = await recordIteration(ledgerPath, ledger, {
+      iteration: i,
+      score: meanScore,
+      promoted,
+      mutationDescription: mutation.description,
+      timestamp: new Date().toISOString(),
+    });
+
+    const summary = formatSummary(meanScore, ledger.bestScore, promoted);
+    await log(summary);
 
     // Log durations and error count.
     const totalMs = runResults.reduce((sum, r) => sum + r.durationMs, 0);
     const errorCount = runResults.filter((r) => r.error).length;
-    console.log(
+    await log(
       `Total runtime: ${(totalMs / 1000).toFixed(1)}s across ${runResults.length} case(s)` +
       (errorCount > 0 ? ` (${errorCount} errored)` : ''),
     );
   }
+
+  await log(`\n── Run complete. Final best score: ${ledger.bestScore.toFixed(3)} ──`);
 }
 
 main().catch((err) => {

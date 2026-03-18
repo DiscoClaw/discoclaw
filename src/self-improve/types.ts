@@ -95,11 +95,24 @@ export interface RunResult {
 
 // ── Keeper types ────────────────────────────────────────────────────
 
+/** Record of a single iteration's outcome (persisted regardless of promotion). */
+export interface IterationRecord {
+  iteration: number;
+  score: number;
+  promoted: boolean;
+  mutationDescription: string;
+  timestamp: string;
+}
+
 /** Persisted ledger tracking the best-known score for an instruction file. */
 export interface Ledger {
   bestScore: number;
   iteration: number;
   promotedAt: string;
+  /** Hash of sorted test-case IDs — detects when the case set has changed. */
+  caseSetHash?: string;
+  /** Full history of every iteration (baseline + mutations). */
+  history?: IterationRecord[];
 }
 
 // ── Scoring types ───────────────────────────────────────────────────

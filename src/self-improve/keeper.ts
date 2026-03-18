@@ -9,8 +9,8 @@
 
 import { readFile, writeFile, rename, unlink, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { randomBytes } from 'node:crypto';
-import type { Ledger } from './types.js';
+import { createHash, randomBytes } from 'node:crypto';
+import type { Ledger, IterationRecord } from './types.js';
 
 const STAGING_PREFIX = '.self-improve-staging-';
 
@@ -79,6 +79,34 @@ export async function loadLedger(path: string): Promise<Ledger> {
 /** Write the ledger to disk (pretty-printed for auditability). */
 export async function saveLedger(path: string, ledger: Ledger): Promise<void> {
   await writeFile(path, JSON.stringify(ledger, null, 2) + '\n', 'utf-8');
+}
+
+// ── Case-set hashing ────────────────────────────────────────────
+
+/** Compute a short hash of sorted test-case IDs to detect case-set changes. */
+export function computeCaseSetHash(caseIds: string[]): string {
+  const sorted = [...caseIds].sort().join('\n');
+  return createHash('sha256').update(sorted).digest('hex').slice(0, 12);
+}
+
+/** Returns true when the ledger's case-set hash differs from the current run. */
+export function caseSetChanged(ledger: Ledger, currentHash: string): boolean {
+  return !!ledger.caseSetHash && ledger.caseSetHash !== currentHash;
+}
+
+// ── Iteration history ───────────────────────────────────────────
+
+/** Append an iteration record to the ledger's history and save. */
+export async function recordIteration(
+  ledgerPath: string,
+  ledger: Ledger,
+  record: IterationRecord,
+): Promise<Ledger> {
+  const history = ledger.history ?? [];
+  history.push(record);
+  const updated = { ...ledger, history };
+  await saveLedger(ledgerPath, updated);
+  return updated;
 }
 
 // ── Promotion logic ─────────────────────────────────────────────────
