@@ -72,6 +72,7 @@
     "sharp": "^0.34.5",
     "sodium-native": "^4.3.1",
     "sqlite-vec": "0.1.7-alpha.2",
+    "unpdf": "^1.4.0",
     "ws": "^8.19.0",
     "youtube-transcript-plus": "^1.2.0"
   },

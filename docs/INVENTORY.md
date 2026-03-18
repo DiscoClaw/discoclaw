@@ -22,6 +22,8 @@ Legend: **done** | *stub* | ~~cut~~
 | Message batching (combine queued messages into single prompt during active invocation) | `src/discord/message-batching.ts` | **done** |
 | Startup self-healing (missing workspace files, stale cron/task thread refs, corrupted JSON stores) | `src/health/startup-healing.ts`, `src/workspace-bootstrap.ts` | **done** |
 | YouTube transcript fetching (auto-fetch transcripts from YouTube URLs in messages, inject into prompt) | `src/discord/youtube-transcript.ts` | **done** |
+| File attachment download (text + document classification, SSRF-safe download, per-file/total size limits) | `src/discord/file-download.ts`, `src/discord/file-download.test.ts` | **done** |
+| PDF text extraction for non-Claude runtimes (`unpdf`-based; extracts text from PDF attachments and injects into prompt when runtime ≠ `claude_code`; Claude Code keeps file-path + Read tool approach) | `src/util/pdf-extract.ts`, `src/util/pdf-extract.test.ts`, `src/discord/file-download.ts` | **done** |
 | Prompt section token-estimate logging (per-section `chars` + `Math.ceil(chars / 4)` estimates at prompt assembly time across message/reaction/defer/voice flows) | `src/discord/prompt-common.ts`, `src/discord/message-coordinator.ts`, `src/discord/reaction-handler.ts`, `src/discord/deferred-runner.ts`, `src/voice/voice-prompt-builder.ts`, `src/index.ts` | **done** |
 
 ## 2. Security
@@ -195,6 +197,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Integration (fail-closed, prompt-context, status, channel-context) | 4 tests | **done** |
 | Pipeline engine | 51 tests | **done** |
 | Runtime-event text adapter coverage (runtime signal redaction/truncation and plan phase lifecycle phrasing) | `src/discord/runtime-event-text-adapter.test.ts` | **done** |
+| PDF text extraction (`unpdf` buffer/file extraction, size limits, corrupt input handling) | `src/util/pdf-extract.test.ts` | **done** |
 
 ## 15. Documentation
 

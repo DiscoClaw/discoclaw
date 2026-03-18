@@ -1,6 +1,8 @@
 import { writeFile } from 'node:fs/promises';
 import type { AttachmentLike } from './image-download.js';
 import { sanitizeExternalContent } from '../sanitize-external.js';
+import type { RuntimeId } from '../runtime/types.js';
+import { extractPdfText } from '../util/pdf-extract.js';
 
 // Keep in sync with image-download.ts
 const ALLOWED_HOSTS = new Set(['cdn.discordapp.com', 'media.discordapp.net']);
@@ -203,7 +205,7 @@ export type TextDownloadResult = {
 };
 
 export type DocumentDownloadResult = {
-  docs: Array<{ name: string; path: string }>;
+  docs: Array<{ name: string; path: string; extractedText?: string }>;
   errors: string[];
 };
 
@@ -401,8 +403,9 @@ export async function downloadTextAttachments(
 export async function downloadDocumentAttachments(
   documents: Array<{ attachment: AttachmentLike; mime: string }>,
   messageId: string,
+  runtimeId?: RuntimeId,
 ): Promise<DocumentDownloadResult> {
-  const docs: Array<{ name: string; path: string }> = [];
+  const docs: Array<{ name: string; path: string; extractedText?: string }> = [];
   const errors: string[] = [];
 
   for (let i = 0; i < documents.length; i++) {
@@ -454,7 +457,18 @@ export async function downloadDocumentAttachments(
 
       const localPath = `/tmp/discoclaw-doc-${messageId}-${i}.${ext}`;
       await writeFile(localPath, buffer);
-      docs.push({ name, path: localPath });
+
+      // For non-Claude runtimes, extract text from PDFs since they can't use the Read tool.
+      let extractedText: string | undefined;
+      if (runtimeId && runtimeId !== 'claude_code' && ext === 'pdf') {
+        try {
+          const result = await extractPdfText(localPath);
+          extractedText = sanitizeExternalContent(result.text, `PDF document: ${name}`);
+        } catch {
+          // Text extraction is best-effort; the file is still available on disk.
+        }
+      }
+      docs.push({ name, path: localPath, extractedText });
     } catch (err: unknown) {
       const errObj = err instanceof Error ? err : null;
       if (errObj?.name === 'TimeoutError' || errObj?.name === 'AbortError') {
