@@ -152,8 +152,8 @@ describe('modelShow', () => {
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // 'capable' resolves to 'claude-sonnet-4-20250514' for claude_code
-    expect(result.summary).toContain('claude-sonnet-4-20250514');
+    // 'capable' resolves to 'claude-opus-4-6' for claude_code
+    expect(result.summary).toContain('claude-opus-4-6');
     // 'fast' resolves to 'haiku' for claude_code
     expect(result.summary).toContain('haiku');
   });
@@ -390,7 +390,7 @@ describe('modelSet', () => {
     const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'capable' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.summary).toContain('resolves to claude-sonnet-4-20250514');
+    expect(result.summary).toContain('resolves to claude-opus-4-6');
   });
 
   it('persistOverride receives the tier string, not the resolved model', () => {

@@ -758,21 +758,21 @@ describe('startDashboardServer', () => {
     const response = await makeRequest(port, {
       path: '/api/model',
       method: 'POST',
-      body: JSON.stringify({ role: 'chat', model: 'claude-sonnet-4-20250514' }),
+      body: JSON.stringify({ role: 'chat', model: 'claude-opus-4-6' }),
     });
     const body = parseJson<DashboardModelApiResponse>(response.text);
 
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
-    expect(body.message).toBe('Saved chat override: claude-sonnet-4-20250514. Changes take effect on next service restart.');
+    expect(body.message).toBe('Saved chat override: claude-opus-4-6. Changes take effect on next service restart.');
     expect(body.snapshot.modelRows).toContainEqual({
       role: 'chat',
-      effectiveModel: 'claude-sonnet-4-20250514',
+      effectiveModel: 'claude-opus-4-6',
       source: 'override',
-      overrideValue: 'claude-sonnet-4-20250514',
+      overrideValue: 'claude-opus-4-6',
     });
     expect(saveModelConfig).toHaveBeenCalledWith('/repo/data/models.json', {
-      chat: 'claude-sonnet-4-20250514',
+      chat: 'claude-opus-4-6',
     });
     expect(loadDoctorContext).toHaveBeenCalled();
   });
