@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { execa, type ResultPromise } from 'execa';
 import { MAX_IMAGES_PER_INVOCATION, type EngineEvent, type ImageData, type RuntimeTelemetryEvent } from './types.js';
-import { tryParseJsonLine, cliExecaEnv } from './cli-shared.js';
+import { tryParseJsonLine, cliExecaEnv, killProcessTree } from './cli-shared.js';
 import {
   extractTextFromUnknownEvent,
   extractResultText,
@@ -764,12 +764,18 @@ export class LongRunningProcess {
       this.pushDoneOnce();
     }
 
+    // Kill the entire process tree so grandchild processes (e.g. harness runs
+    // spawned via the AI's Bash tool) don't survive as orphans.
+    // Belt-and-suspenders: tree kill first, then execa's handle as fallback.
+    const pid = this.subprocess?.pid;
+    if (pid) killProcessTree(pid, opts.signal);
     try {
       this.subprocess?.kill(opts.signal);
     } catch { /* ignore */ }
 
     if (opts.signal === 'SIGTERM' && opts.forceKillAfterMs && opts.forceKillAfterMs > 0) {
       this.killAfterTimer = setTimeout(() => {
+        if (pid) killProcessTree(pid, 'SIGKILL');
         try {
           this.subprocess?.kill('SIGKILL');
         } catch { /* ignore */ }

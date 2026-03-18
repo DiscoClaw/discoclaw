@@ -1,6 +1,7 @@
 // Shared CLI runtime utilities — extracted from claude-code-cli.ts and codex-cli.ts
 // to eliminate duplication across CLI-based runtime adapters.
 
+import { execFileSync } from 'node:child_process';
 import process from 'node:process';
 import { stripVTControlCharacters } from 'node:util';
 import type { ResultPromise } from 'execa';
@@ -93,6 +94,67 @@ export function formatPromptSafeCodexOrchestrationWording(
 }
 
 // ---------------------------------------------------------------------------
+// killProcessTree — recursively kill a process and all its descendants
+// ---------------------------------------------------------------------------
+
+/**
+ * Recursively collect all descendant PIDs of the given PID using /proc.
+ * Falls back to `pgrep -P` if /proc is unavailable.
+ */
+function collectDescendantPids(pid: number): number[] {
+  const descendants: number[] = [];
+  const queue = [pid];
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    try {
+      const children = execFileSync('pgrep', ['-P', String(current)], {
+        encoding: 'utf-8',
+        timeout: 2000,
+      }).trim();
+      if (children) {
+        for (const line of children.split('\n')) {
+          const childPid = parseInt(line.trim(), 10);
+          if (Number.isFinite(childPid) && childPid > 0) {
+            descendants.push(childPid);
+            queue.push(childPid);
+          }
+        }
+      }
+    } catch {
+      // pgrep exits non-zero when no children found — that's fine.
+    }
+  }
+  return descendants;
+}
+
+/**
+ * Kill a process and all its descendants. Walks the process tree bottom-up
+ * (deepest descendants first) so children don't get orphaned and re-parented
+ * before we can signal them.
+ *
+ * Best-effort: silently ignores already-dead PIDs.
+ */
+export function killProcessTree(pid: number, signal: NodeJS.Signals = 'SIGKILL'): void {
+  const descendants = collectDescendantPids(pid);
+
+  // Kill deepest descendants first (reverse order since BFS collected top-down).
+  for (let i = descendants.length - 1; i >= 0; i--) {
+    try {
+      process.kill(descendants[i], signal);
+    } catch {
+      // Already dead — ignore.
+    }
+  }
+
+  // Finally kill the root.
+  try {
+    process.kill(pid, signal);
+  } catch {
+    // Already dead — ignore.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // SubprocessTracker — tracks active subprocesses + pools for shutdown
 // ---------------------------------------------------------------------------
 export class SubprocessTracker {
@@ -114,12 +176,15 @@ export class SubprocessTracker {
     this.pools.add(pool);
   }
 
-  /** SIGKILL all tracked subprocesses and pools (e.g. on SIGTERM). */
+  /** SIGKILL all tracked subprocesses and their entire process trees (e.g. on SIGTERM). */
   killAll(): void {
     for (const pool of this.pools) {
       pool.killAll();
     }
     for (const p of this.subprocesses) {
+      // Kill the entire process tree first (catches grandchildren like harness runs),
+      // then also signal via execa's handle as a fallback.
+      if (p.pid) killProcessTree(p.pid, 'SIGKILL');
       p.kill('SIGKILL');
     }
     this.subprocesses.clear();
