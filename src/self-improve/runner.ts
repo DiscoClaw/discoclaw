@@ -74,10 +74,32 @@ export async function runTestCase(
   };
 }
 
+// ── Error result factory ────────────────────────────────────────────
+
+/** Build a RunResult representing a test case that threw. */
+function errorResult(testCaseId: string, err: unknown, durationMs: number): RunResult {
+  const message =
+    err instanceof Error ? err.message : typeof err === 'string' ? err : String(err);
+  return {
+    testCaseId,
+    text: '',
+    actions: [],
+    parseFailures: 0,
+    events: [],
+    durationMs,
+    error: message,
+  };
+}
+
 // ── Suite runner ────────────────────────────────────────────────────
 
 /**
  * Run all test cases in a suite and collect actions per case.
+ *
+ * Individual test case failures are captured as error results —
+ * they do **not** abort the rest of the suite. The optional
+ * `opts.onProgress` callback fires after each case, and
+ * `opts.signal` can abort remaining work early.
  *
  * When `opts.concurrency` > 1, test cases run in parallel using a pool.
  * Results are returned in the original case order regardless of
@@ -93,15 +115,48 @@ export async function runSuite(
   opts?: RunnerOpts,
 ): Promise<{ results: RunResult[]; actionsMap: Map<string, ExpectedAction[]> }> {
   const concurrency = Math.max(1, opts?.concurrency ?? 1);
+  let completedCount = 0;
+
+  /** Run a single case with error isolation and progress reporting. */
+  async function safeSingle(tc: FrozenTestCase, idx: number): Promise<RunResult> {
+    // Abort early if signal is already raised.
+    if (opts?.signal?.aborted) {
+      return errorResult(tc.id, 'Aborted', 0);
+    }
+
+    const start = Date.now();
+    let result: RunResult;
+    try {
+      result = await runTestCase(tc, instructions, adapter, opts);
+    } catch (err) {
+      result = errorResult(tc.id, err, Date.now() - start);
+    }
+
+    completedCount++;
+    opts?.onProgress?.({
+      index: completedCount,
+      total: cases.length,
+      testCaseId: tc.id,
+      status: result.error ? 'error' : 'pass',
+      durationMs: result.durationMs,
+      error: result.error,
+    });
+
+    return result;
+  }
 
   if (concurrency <= 1 || cases.length <= 1) {
-    // Sequential path — original behaviour.
+    // Sequential path.
     const results: RunResult[] = [];
     const actionsMap = new Map<string, ExpectedAction[]>();
-    for (const tc of cases) {
-      const result = await runTestCase(tc, instructions, adapter, opts);
+    for (let i = 0; i < cases.length; i++) {
+      if (opts?.signal?.aborted) {
+        results.push(errorResult(cases[i].id, 'Aborted', 0));
+        continue;
+      }
+      const result = await safeSingle(cases[i], i);
       results.push(result);
-      actionsMap.set(tc.id, result.actions);
+      actionsMap.set(cases[i].id, result.actions);
     }
     return { results, actionsMap };
   }
@@ -112,18 +167,23 @@ export async function runSuite(
 
   async function worker(): Promise<void> {
     while (nextIdx < cases.length) {
+      if (opts?.signal?.aborted) break;
       const idx = nextIdx++;
       const tc = cases[idx];
-      resultSlots[idx] = await runTestCase(tc, instructions, adapter, opts);
+      resultSlots[idx] = await safeSingle(tc, idx);
     }
   }
 
   const workers = Array.from({ length: Math.min(concurrency, cases.length) }, () => worker());
   await Promise.all(workers);
 
+  // Fill any remaining slots that were skipped due to abort.
   const actionsMap = new Map<string, ExpectedAction[]>();
-  for (const r of resultSlots) {
-    actionsMap.set(r.testCaseId, r.actions);
+  for (let i = 0; i < resultSlots.length; i++) {
+    if (!resultSlots[i]) {
+      resultSlots[i] = errorResult(cases[i].id, 'Aborted', 0);
+    }
+    actionsMap.set(resultSlots[i].testCaseId, resultSlots[i].actions);
   }
 
   return { results: resultSlots, actionsMap };

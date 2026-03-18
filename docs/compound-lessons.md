@@ -162,3 +162,10 @@ Lesson: When building a self-improvement or prompt-tuning harness, implement the
 Source: plan-587 Phase A implementation — self-improve harness built as loader/mutator/scorer modules with frozen action-compliance test suite, validated by dedicated test files before any CLI or Discord integration
 Applied: `src/self-improve/` (types, loader, mutator, scorer), `test-suites/action-compliance.json`
 Status: active
+
+### 2026-03-18 - Harden long-running test harnesses with isolation, diagnostics, progress, and cleanup
+Tags: #workflow #architecture #task
+Lesson: Long-running test suite runners must implement four hardening layers: (1) error isolation — wrap each test case in try/catch so individual failures produce error results instead of aborting the suite; (2) actionable diagnostics — surface per-case error messages at the end of the run so operators can triage without re-running; (3) progress feedback — emit per-case status callbacks (index, total, ID, pass/error, duration) so operators see forward motion during multi-minute runs; (4) interrupt cleanup — register signal handlers that abort in-flight work, clean up staging artifacts, and sweep orphaned files from prior interrupted runs on startup. These layers are independent and should be designed as composable concerns (callback hooks, error-result factories, orphan sweepers) rather than monolithic try/catch blocks.
+Source: plan-589 self-improve harness hardening — runner `safeSingle()` isolation, CLI `printFailureDiagnostics()`, `logProgress()` progress callback, and SIGINT/SIGTERM signal handling with `cleanupStagingFiles`/`cleanupOrphanedStagingFiles`
+Applied: `src/self-improve/runner.ts` (error isolation, progress, abort signal), `src/self-improve/cli.ts` (diagnostics, progress logging, signal handling, orphan cleanup), `src/self-improve/keeper.ts` (staging file cleanup)
+Status: active

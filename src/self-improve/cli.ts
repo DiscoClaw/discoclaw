@@ -13,17 +13,17 @@
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { loadTestCasesFromDir, filterByTags } from './loader.js';
 import { applyMutation, generateRandomMutation, generateMutation } from './mutator.js';
 import { generateAiMutation } from './ai-mutator.js';
 import { runSuite } from './runner.js';
 import { scoreBatch } from './scorer.js';
-import { loadLedger, saveLedger, shouldPromote, promote } from './keeper.js';
+import { loadLedger, saveLedger, shouldPromote, promote, cleanupStagingFiles, cleanupOrphanedStagingFiles } from './keeper.js';
 import { formatConsoleTable, formatSummary } from './reporter.js';
 import { createClaudeCliRuntime } from '../runtime/claude-code-cli.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
-import type { ScoreResult } from './types.js';
+import type { RunResult, ScoreResult } from './types.js';
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
@@ -65,6 +65,29 @@ const modelOverride = values.model;
 const adapterName = values.adapter!;
 const tagFilter = values.tag;
 
+// ── Signal handling ─────────────────────────────────────────────────
+
+const abortController = new AbortController();
+let interrupted = false;
+
+async function handleInterrupt(): Promise<void> {
+  if (interrupted) return; // Second signal → hard exit below.
+  interrupted = true;
+  console.error('\nInterrupted — cleaning up staging files…');
+  abortController.abort();
+  await cleanupStagingFiles();
+  await cleanupOrphanedStagingFiles(dirname(targetPath));
+  process.exit(130);
+}
+
+process.on('SIGINT', () => {
+  handleInterrupt().catch(() => process.exit(130));
+  // If cleanup takes too long, second SIGINT force-kills.
+});
+process.on('SIGTERM', () => {
+  handleInterrupt().catch(() => process.exit(143));
+});
+
 // ── Preflight: git clean check ──────────────────────────────────────
 
 if (!dryRun) {
@@ -95,9 +118,43 @@ function resolveAdapter(name: string): RuntimeAdapter {
   throw new Error(`Unknown adapter: ${name}. Currently only "claude_code" is supported.`);
 }
 
+// ── Progress callback ───────────────────────────────────────────────
+
+function logProgress(info: {
+  index: number;
+  total: number;
+  testCaseId: string;
+  status: 'pass' | 'error';
+  durationMs: number;
+  error?: string;
+}): void {
+  const tag = info.status === 'error' ? 'ERR' : 'OK';
+  const dur = (info.durationMs / 1000).toFixed(1);
+  const suffix = info.error ? ` — ${info.error}` : '';
+  console.log(`  [${info.index}/${info.total}] ${info.testCaseId} ${tag} (${dur}s)${suffix}`);
+}
+
+// ── Failure diagnostics ─────────────────────────────────────────────
+
+function printFailureDiagnostics(results: RunResult[]): void {
+  const failures = results.filter((r) => r.error);
+  if (failures.length === 0) return;
+
+  console.log(`\n── ${failures.length} test case(s) failed with errors ──`);
+  for (const f of failures) {
+    console.log(`  • ${f.testCaseId}: ${f.error}`);
+  }
+}
+
 // ── Main loop ───────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  // Clean orphaned staging files from prior interrupted runs.
+  const orphans = await cleanupOrphanedStagingFiles(dirname(targetPath));
+  if (orphans > 0) {
+    console.log(`Cleaned up ${orphans} orphaned staging file(s)`);
+  }
+
   const adapter = resolveAdapter(adapterName);
   let testCases = await loadTestCasesFromDir(suitePath);
   if (tagFilter && tagFilter.length > 0) {
@@ -120,7 +177,13 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const runOpts = { model: modelOverride, cwd: process.cwd(), concurrency };
+  const runOpts = {
+    model: modelOverride,
+    cwd: process.cwd(),
+    concurrency,
+    onProgress: logProgress,
+    signal: abortController.signal,
+  };
   const ledgerPath = targetPath + '.ledger.json';
   let ledger = await loadLedger(ledgerPath);
 
@@ -132,11 +195,19 @@ async function main(): Promise<void> {
   if (baselineOnly || (ledger.iteration === 0 && ledger.bestScore === 0)) {
     console.log(`\n── Baseline: ${targetLabel} ──`);
     const instructions = await readFile(targetPath, 'utf-8');
-    const { actionsMap } = await runSuite(testCases, instructions, adapter, runOpts);
+    const { results: runResults, actionsMap } = await runSuite(testCases, instructions, adapter, runOpts);
+
+    printFailureDiagnostics(runResults);
+
     const { results: scoreResults, meanScore } = scoreBatch(testCases, actionsMap);
     const totalViolations = scoreResults.reduce((sum, r) => sum + r.violations.length, 0);
+    const errorCount = runResults.filter((r) => r.error).length;
     console.log('\n' + formatConsoleTable(scoreResults, meanScore));
-    console.log(`Baseline score for ${targetLabel}: ${meanScore.toFixed(3)}${totalViolations > 0 ? ` (${totalViolations} violation(s))` : ''}`);
+    console.log(
+      `Baseline score for ${targetLabel}: ${meanScore.toFixed(3)}` +
+      (totalViolations > 0 ? ` (${totalViolations} violation(s))` : '') +
+      (errorCount > 0 ? ` (${errorCount} error(s))` : ''),
+    );
 
     ledger = { bestScore: meanScore, iteration: 0, promotedAt: new Date().toISOString() };
     await saveLedger(ledgerPath, ledger);
@@ -150,6 +221,11 @@ async function main(): Promise<void> {
 
   // ── Mutation iterations ──
   for (let i = 1; i <= iterations; i++) {
+    if (abortController.signal.aborted) {
+      console.log('\nAborted — stopping iterations.');
+      break;
+    }
+
     console.log(`\n── Iteration ${i}/${iterations} ──`);
 
     // Read the current best instruction text.
@@ -185,6 +261,8 @@ async function main(): Promise<void> {
       runOpts,
     );
 
+    printFailureDiagnostics(runResults);
+
     // Score.
     const { results: scoreResults, meanScore } = scoreBatch(testCases, actionsMap);
 
@@ -204,13 +282,18 @@ async function main(): Promise<void> {
 
     console.log(formatSummary(meanScore, ledger.bestScore, promoted));
 
-    // Log durations.
+    // Log durations and error count.
     const totalMs = runResults.reduce((sum, r) => sum + r.durationMs, 0);
-    console.log(`Total runtime: ${(totalMs / 1000).toFixed(1)}s across ${runResults.length} case(s)`);
+    const errorCount = runResults.filter((r) => r.error).length;
+    console.log(
+      `Total runtime: ${(totalMs / 1000).toFixed(1)}s across ${runResults.length} case(s)` +
+      (errorCount > 0 ? ` (${errorCount} errored)` : ''),
+    );
   }
 }
 
 main().catch((err) => {
   console.error('Fatal:', err);
-  process.exit(1);
+  // Best-effort cleanup before exit.
+  cleanupStagingFiles().finally(() => process.exit(1));
 });
