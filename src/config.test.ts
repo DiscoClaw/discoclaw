@@ -491,9 +491,9 @@ describe('parseConfig', () => {
     expect(config.openrouterApiKey).toBe('sk-or-test');
   });
 
-  it('defaults openrouterModel to "anthropic/claude-sonnet-4"', () => {
+  it('defaults openrouterModel to "anthropic/claude-sonnet-4-20250514"', () => {
     const { config } = parseConfig(env());
-    expect(config.openrouterModel).toBe('anthropic/claude-sonnet-4');
+    expect(config.openrouterModel).toBe('anthropic/claude-sonnet-4-20250514');
   });
 
   it('warns when PRIMARY_RUNTIME=openrouter without OPENROUTER_API_KEY', () => {
