@@ -21,7 +21,7 @@ const stubRuntime: RuntimeAdapter = {
 const openrouterRuntime: RuntimeAdapter = {
   id: 'openrouter',
   capabilities: new Set(),
-  defaultModel: 'anthropic/claude-sonnet-4',
+  defaultModel: 'anthropic/claude-sonnet-4-20250514',
   async *invoke() { /* no-op */ },
 };
 
@@ -152,8 +152,8 @@ describe('modelShow', () => {
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // 'capable' resolves to 'claude-opus-4-6' for claude_code
-    expect(result.summary).toContain('claude-opus-4-6');
+    // 'capable' resolves to 'claude-sonnet-4-20250514' for claude_code
+    expect(result.summary).toContain('claude-sonnet-4-20250514');
     // 'fast' resolves to 'haiku' for claude_code
     expect(result.summary).toContain('haiku');
   });
@@ -390,7 +390,7 @@ describe('modelSet', () => {
     const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'capable' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.summary).toContain('resolves to claude-opus-4-6');
+    expect(result.summary).toContain('resolves to claude-sonnet-4-20250514');
   });
 
   it('persistOverride receives the tier string, not the resolved model', () => {
@@ -518,13 +518,13 @@ describe('modelSet runtime swap', () => {
     expect(ctx.botParams.runtime).toBe(openrouterRuntime);
     expect(ctx.runtime).toBe(openrouterRuntime);
     expect(ctx.runtimeName).toBe('openrouter');
-    expect(ctx.botParams.runtimeModel).toBe('anthropic/claude-sonnet-4');
+    expect(ctx.botParams.runtimeModel).toBe('anthropic/claude-sonnet-4-20250514');
     expect(ctx.botParams.planCtx!.runtime).toBe(openrouterRuntime);
     expect(ctx.botParams.planCtx!.model).toBe('capable');
     expect(ctx.botParams.planRunModel).toBe('capable');
     expect(ctx.botParams.cronCtx!.runtime).toBe(openrouterRuntime);
     expect(ctx.botParams.cronCtx!.executorCtx!.runtime).toBe(openrouterRuntime);
-    expect(ctx.botParams.cronCtx!.executorCtx!.model).toBe('anthropic/claude-sonnet-4');
+    expect(ctx.botParams.cronCtx!.executorCtx!.model).toBe('anthropic/claude-sonnet-4-20250514');
     expect(ctx.botParams.deferOpts!.runtime).toBe(openrouterRuntime);
     expect(result.summary).toContain('runtime → openrouter');
     expect(result.summary).toContain('adapter default');
