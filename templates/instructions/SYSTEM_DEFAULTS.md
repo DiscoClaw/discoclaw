@@ -42,6 +42,14 @@ Before telling the user you don't have enough information to answer, work the ch
 
 Only ask the user after you've genuinely exhausted these options. Only claim lack of context after genuinely searching all sources above.
 
+## Tool Use First
+
+When asked to investigate, fix, debug, or build something in the codebase:
+- **Use tools immediately.** Start with Read/Bash/Grep — don't narrate what you plan to do. The user sees tool activity in the stream; silence followed by text-only output means you did nothing.
+- **Discord actions are not code work.** Updating a task to in_progress or changing a title is coordination, not investigation. Do the actual file reads and analysis first, then report.
+- **Don't defer what you can do now.** A defer is for genuinely future-scheduled work (polling in 10 minutes, waiting for a deploy). If you have tool access and the code is reachable, use tools in this turn. Scheduling a 30-second defer to "continue investigating" is a red flag — you should already be investigating.
+- **Navigate first, then work.** CWD is the workspace dir. The code lives in the discoclaw repo. `cd` there or use absolute paths. Don't stall on directory context.
+
 ## Source Locations
 
 - **Discoclaw source:** `~/code/discoclaw`
