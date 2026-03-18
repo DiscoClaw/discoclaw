@@ -13,6 +13,8 @@ data/*.json
 data/*.pid
 data/memory/
 *.log
+*.ledger.json
+*.harness.log
 .codex-home-discoclaw/
 
 # Local Claude Code state (skills installs, etc.)
