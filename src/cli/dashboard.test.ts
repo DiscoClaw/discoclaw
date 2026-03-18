@@ -350,7 +350,7 @@ describe('collectDashboardSnapshot', () => {
     expect(snapshot.modelOptions.chat).toContain('default');
     expect(snapshot.modelOptions.chat).toContain('env-chat-model');
     expect(snapshot.modelOptions.chat).toContain('opus');
-    expect(snapshot.modelOptions.chat).toContain('claude-opus-4-6');
+    expect(snapshot.modelOptions.chat).toContain('claude-sonnet-4-20250514');
     expect(snapshot.modelOptions.chat).toContain('gpt-5.4');
     expect(snapshot.modelOptions['plan-run']).toContain('default');
     expect(snapshot.modelOptions['plan-run']).toContain('capable');

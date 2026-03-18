@@ -1,0 +1,195 @@
+{
+  "exportedAt": "2026-03-17",
+  "instances": {
+    "discoclaw-personal": {
+      "statsFile": "~/Dropbox/discoclaw-personal/data/cron/cron-run-stats.json",
+      "jobs": [
+        {
+          "cronId": "cron-f38497e1",
+          "schedule": "0 8 * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "daily",
+          "channel": "1475646799904637021",
+          "prompt": "Send a morning check-in message with: (1) greeting 'Time for your daily check-in.', (2) today's weather for Escondido CA 92025 including high/low temperatures and conditions, (3) any relevant San Diego area alerts or notices",
+          "model": "capable",
+          "disabled": false,
+          "purposeTags": ["monitor"]
+        },
+        {
+          "cronId": "cron-1028f755",
+          "schedule": "0 9 8-15 * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "monthly",
+          "channel": "finance",
+          "prompt": "Check Gmail for a new Fidelity credit card statement. If state.processedThisMonth is true and state.month matches the current month, respond with 'HEARTBEAT…'. Otherwise, post the full pinned prompt.",
+          "model": "capable",
+          "disabled": false,
+          "silent": true,
+          "purposeTags": ["finance", "monitor"]
+        },
+        {
+          "cronId": "cron-6fb94475",
+          "schedule": "0 7 * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "daily",
+          "channel": "sports",
+          "prompt": "Search for San Diego FC and San Diego Padres news published in the last 24 hours. Focus on trades, signings, injuries, coaching changes, playoff/tournament news, and notable results. Post a summary of the most relevant findings.",
+          "model": "capable",
+          "disabled": false,
+          "purposeTags": ["report", "monitor"]
+        },
+        {
+          "cronId": "cron-441fd81c",
+          "schedule": "0 23 * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "daily",
+          "channel": "helpdesk",
+          "prompt": "Run the system health check script at workspace/scripts/system-healthcheck.sh and report any problems found. If the script produces no output or reports no issues, respond with exactly: HEARTBEAT_OK",
+          "model": "fast",
+          "disabled": false,
+          "purposeTags": ["silent", "system"]
+        },
+        {
+          "cronId": "cron-0f1cdc3d",
+          "schedule": "0 * * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "hourly",
+          "channel": "general",
+          "prompt": "Execute ~/Dropbox/discoclaw-personal/data/workspace/scripts/email-check.sh to get new unread emails as a JSON array and report all emails returned.",
+          "model": "capable",
+          "disabled": false,
+          "silent": true,
+          "routingMode": "json",
+          "purposeTags": ["silent"]
+        },
+        {
+          "cronId": "cron-b5f67c1b",
+          "schedule": "0 6 * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "daily",
+          "channel": "health",
+          "prompt": "Run: cd ~/Dropbox/discoclaw-personal/data/workspace/scripts/garmin && python3 fetch_daily.py\n\nPost the script's stdout output verbatim as your response — do not summarize, reformat, or add commentary. If the script fails, report the error instead.",
+          "model": "fast",
+          "disabled": false,
+          "purposeTags": ["report", "monitor"]
+        },
+        {
+          "cronId": "cron-3f636616",
+          "schedule": "0 6 * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "daily",
+          "channel": "helpdesk",
+          "prompt": "You are selecting today's quote for a house dashboard displayed on an e-ink screen.\n\n**Step 1 — Gather context:**\n- Read the quote collection: /home/davidmarsh/Dropbox/discoclaw-personal/data/workspace/dashboard/quotes.json\n- Read the quote history (recent selections): /home/davidmarsh/Dropbox/discoclaw-personal/data/workspace/context/quote-history.json\n- Check today's weather forecast for Escondido, CA using a web search (current conditions at 6 AM aren't useful — you want the day's forecast)\n- Note today's date, day of week, and season.\n\n**Step 2 — Pick a quote:**\nChoose a quote from the collection that feels timely and resonant. Consider:\n- The current season (spring renewal, summer energy, autumn reflection, winter stillness)\n- Today's weather forecast (rainy day? beautiful morning? hot? stormy?)\n- Day of week (Monday motivation, Friday lightness, weekend ease)\n- General cultural moment or time of year (holidays, equinox, back to school, etc.)\n- Do NOT repeat any quote from the history file. If a quote by the same author appeared in the last 7 days, prefer a different author.\n- Favor variety in tone — don't serve three inspirational quotes in a row if a funny or reflective one fits.\n\n**Step 3 — Verify the quote:**\nBefore committing, do a quick web search to confirm:\n- The quote is correctly attributed to the stated author\n- The wording matches the commonly accepted version\nIf you find a discrepancy, use the corrected version and note the fix.\n\n**Step 4 — Write the output:**\nWrite the selected quote as JSON to: /home/davidmarsh/Dropbox/discoclaw-personal/data/workspace/context/quote.json\nFormat: {\"quote\": \"...\", \"author\": \"...\"}\n\n**Step 5 — Update history:**\nAppend today's selection to: /home/davidmarsh/Dropbox/discoclaw-personal/data/workspace/context/quote-history.json\nAdd an object with \"date\" (YYYY-MM-DD), \"quote\", and \"author\" to the array.\n\nRespond with HEARTBEAT_OK when done. If you corrected a quote's wording or attribution, briefly note what changed instead.",
+          "model": "capable",
+          "disabled": false,
+          "purposeTags": ["maintenance"]
+        },
+        {
+          "cronId": "cron-e41de7c5",
+          "schedule": "0 */4 * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "hourly",
+          "channel": "home",
+          "prompt": "Execute ~/Dropbox/discoclaw-personal/data/workspace/scripts/parcel-pipeline.sh to scan for shipping emails and auto-add tracking numbers to Parcel. If the script produces no output, respond with HEARTBEAT_OK.",
+          "model": "capable",
+          "disabled": false,
+          "purposeTags": ["silent"]
+        }
+      ]
+    },
+    "discoclaw-data": {
+      "statsFile": "~/Dropbox/discoclaw-data/cron/cron-run-stats.json",
+      "jobs": [
+        {
+          "cronId": "cron-5aa903d7",
+          "schedule": "0 15 * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "daily",
+          "channel": "1465054973057568830",
+          "prompt": "Search for a recent article related to photography and photogravure printing, AI-assisted tooling and personal agent development, game design, or their intersections. Select the most timely and interesting topic. Find a genuine, in-depth article (not a listicle or ad). Post the URL followed by a first paragraph summarizing the article's content and a second paragraph explaining its relevance to David's current work. Conclude with a brief section titled \"Action Items\" listing initial, prudent action items that emerge from the analysis—concrete next steps David could take based on the article's insights. Include no introduction, fluff, or sign-off.",
+          "model": "capable",
+          "disabled": false,
+          "purposeTags": ["discovery", "research", "daily"]
+        },
+        {
+          "cronId": "cron-b44fc4ba",
+          "schedule": "0 7 * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "daily",
+          "channel": "general",
+          "prompt": "Give a friendly, brief morning greeting.",
+          "model": "fast",
+          "disabled": false,
+          "purposeTags": ["test"]
+        },
+        {
+          "cronId": "cron-9e4a642d",
+          "schedule": "0 21 * * 0",
+          "timezone": "America/Los_Angeles",
+          "cadence": "weekly",
+          "channel": "general",
+          "prompt": "Do a comprehensive web search on recent AI agent orchestrator news, frameworks, and developments. Cast a wide net and check for new releases, funding rounds, open-source projects, blog posts, and announcements, following the full pinned prompt below.",
+          "model": "deep",
+          "disabled": false,
+          "purposeTags": ["research", "ai", "daily"]
+        },
+        {
+          "cronId": "cron-bb0aadd1",
+          "schedule": "0 8 * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "daily",
+          "channel": "general",
+          "prompt": "Search the web for recent mentions of 'discoclaw' on GitHub, npm, Reddit, blogs, forums, and social media. Compare against what you already know from durable memory and conversation history. Report your findings.",
+          "model": "capable",
+          "disabled": false,
+          "purposeTags": ["report", "monitor"]
+        },
+        {
+          "cronId": "cron-4a44777d",
+          "schedule": "0 3 * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "daily",
+          "channel": "weston-dev",
+          "prompt": "You are a red-team security auditor. Your target: the discoclaw codebase at ~/code/discoclaw.\n\nThreat model: A single person running discoclaw on a private Discord server from their personal Linux workstation. The attacker could be: a malicious Discord user who somehow joins the server, a compromised dependency, a prompt injection via external content (web fetches, RSS feeds, etc.), or an attacker who gains access to any input surface discoclaw exposes.\n\nYour job: Find real, exploitable security weaknesses — not theoretical hand-waving. Read actual source files. Trace data flows. Look at how user input reaches shell commands, file operations, and external calls. Check for:\n\n- Command injection (Discord messages → shell execution paths)\n- Prompt injection (external content influencing AI behavior to exfiltrate data or take unauthorized actions)\n- Path traversal (user-controlled strings reaching file system operations)\n- Credential exposure (tokens, keys, secrets in logs, error messages, or accessible files)\n- Excessive permissions (what can an attacker do if they compromise one component?)\n- Dependency risks (known vulnerable packages, unnecessary attack surface)\n- Network exposure (what listens on ports? what's accessible without auth?)\n- Sandbox escapes (can AI tool use be leveraged to break out of intended boundaries?)\n\nState tracking: {{state}} contains your previous audit state as JSON. Use it to rotate focus areas so you cover different parts of the codebase each night. Track which directories/files you've audited and what you found.\n\nOutput rules:\n- Only report findings with specific file paths and line numbers\n- Rate each finding: CRITICAL / HIGH / MEDIUM / LOW\n- For each finding, describe the attack scenario concretely\n- If you find nothing new today, say so briefly (one line)\n- End by emitting <cron-state>{...}</cron-state> with updated audit tracking\n\nStart by checking your state to see what you've covered before, then pick an unaudited area to focus on today.",
+          "model": "deep",
+          "disabled": false,
+          "purposeTags": ["report"]
+        },
+        {
+          "cronId": "cron-f1525c2a",
+          "schedule": "30 2 * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "daily",
+          "channel": "general",
+          "prompt": "Work in /home/davidmarsh/code/discoclaw. Review the current state: {{state}}. Track only documentation and instruction files: README.md, CLAUDE.md, docs/, .env.example, .env.example.full, and template files.",
+          "model": "capable",
+          "disabled": false,
+          "silent": true,
+          "purposeTags": ["maintenance", "monitor"]
+        },
+        {
+          "cronId": "cron-da80e68d",
+          "schedule": "0 9 * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "daily",
+          "channel": "general",
+          "prompt": "Post the message: Good morning!",
+          "model": null,
+          "disabled": false,
+          "purposeTags": []
+        },
+        {
+          "cronId": "cron-131db3e6",
+          "schedule": "0 9 * * *",
+          "timezone": "America/Los_Angeles",
+          "cadence": "daily",
+          "channel": "general",
+          "prompt": "Post 'Good morning!' to the channel",
+          "model": null,
+          "disabled": false,
+          "purposeTags": []
+        }
+      ]
+    }
+  }
+}
