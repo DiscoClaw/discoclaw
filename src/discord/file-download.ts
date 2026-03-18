@@ -1,3 +1,4 @@
+import { writeFile } from 'node:fs/promises';
 import type { AttachmentLike } from './image-download.js';
 import { sanitizeExternalContent } from '../sanitize-external.js';
 
@@ -5,7 +6,10 @@ import { sanitizeExternalContent } from '../sanitize-external.js';
 const ALLOWED_HOSTS = new Set(['cdn.discordapp.com', 'media.discordapp.net']);
 
 /** Max bytes per individual text file (100 KB). Files exceeding this are truncated. */
-const MAX_FILE_BYTES = 100 * 1024;
+const MAX_TEXT_FILE_BYTES = 100 * 1024;
+
+/** Max bytes per individual document file (25 MB). */
+const MAX_DOC_FILE_BYTES = 25 * 1024 * 1024;
 
 /** Max total bytes across all text files in one message (200 KB). */
 const MAX_TOTAL_BYTES = 200 * 1024;
@@ -26,6 +30,14 @@ const TEXT_APPLICATION_TYPES = new Set([
   'application/x-sh',
   'application/x-yaml',
 ]);
+
+/** MIME types that are treated as documents (binary files readable by Claude's Read tool). */
+const DOCUMENT_MIME_TYPES = new Set(['application/pdf']);
+
+/** Extension-to-MIME fallback map for document types. */
+const EXT_TO_DOC_MIME: Record<string, string> = {
+  pdf: 'application/pdf',
+};
 
 /** Extension-to-MIME fallback map for text types. */
 const EXT_TO_TEXT_MIME: Record<string, string> = {
@@ -190,6 +202,11 @@ export type TextDownloadResult = {
   errors: string[];
 };
 
+export type DocumentDownloadResult = {
+  docs: Array<{ name: string; path: string }>;
+  errors: string[];
+};
+
 /**
  * Resolve a text MIME type from contentType or file extension.
  * Returns the MIME string if it's a supported text type, null otherwise.
@@ -206,6 +223,27 @@ export function resolveTextType(attachment: AttachmentLike): string | null {
   if (dotIdx >= 0) {
     const ext = name.slice(dotIdx + 1).toLowerCase();
     const mime = EXT_TO_TEXT_MIME[ext];
+    if (mime) return mime;
+  }
+
+  return null;
+}
+
+/**
+ * Resolve a document MIME type from contentType or file extension.
+ * Returns the MIME string if it's a supported document type, null otherwise.
+ */
+export function resolveDocumentType(attachment: AttachmentLike): string | null {
+  if (attachment.contentType) {
+    const mime = attachment.contentType.split(';')[0].trim().toLowerCase();
+    if (DOCUMENT_MIME_TYPES.has(mime)) return mime;
+  }
+
+  const name = attachment.name ?? '';
+  const dotIdx = name.lastIndexOf('.');
+  if (dotIdx >= 0) {
+    const ext = name.slice(dotIdx + 1).toLowerCase();
+    const mime = EXT_TO_DOC_MIME[ext];
     if (mime) return mime;
   }
 
@@ -229,28 +267,35 @@ function safeName(attachment: AttachmentLike): string {
  */
 export function classifyAttachments(attachments: Iterable<AttachmentLike>): {
   text: Array<{ attachment: AttachmentLike; mime: string }>;
+  documents: Array<{ attachment: AttachmentLike; mime: string }>;
   unsupported: AttachmentLike[];
 } {
   const text: Array<{ attachment: AttachmentLike; mime: string }> = [];
+  const documents: Array<{ attachment: AttachmentLike; mime: string }> = [];
   const unsupported: AttachmentLike[] = [];
 
   for (const att of attachments) {
     const textMime = resolveTextType(att);
     if (textMime) {
       text.push({ attachment: att, mime: textMime });
-    } else {
-      unsupported.push(att);
+      continue;
     }
+    const docMime = resolveDocumentType(att);
+    if (docMime) {
+      documents.push({ attachment: att, mime: docMime });
+      continue;
+    }
+    unsupported.push(att);
   }
 
-  return { text, unsupported };
+  return { text, documents, unsupported };
 }
 
 /**
  * Download non-image text attachments from a Discord message.
  *
  * - Filters for text-like MIME types
- * - Truncates files exceeding MAX_FILE_BYTES with a marker
+ * - Truncates files exceeding MAX_TEXT_FILE_BYTES with a marker
  * - Skips files once MAX_TOTAL_BYTES is reached
  * - Notes unsupported attachment types in errors
  */
@@ -328,8 +373,8 @@ export async function downloadTextAttachments(
       }
 
       // Truncate if exceeding per-file limit (sanitizeExternalContent will add [truncated] marker)
-      if (buffer.length > MAX_FILE_BYTES) {
-        content = content.slice(0, MAX_FILE_BYTES);
+      if (buffer.length > MAX_TEXT_FILE_BYTES) {
+        content = content.slice(0, MAX_TEXT_FILE_BYTES);
       }
       texts.push({ name, content: sanitizeExternalContent(content, `Attached file: ${name}`) });
     } catch (err: unknown) {
@@ -345,4 +390,82 @@ export async function downloadTextAttachments(
   }
 
   return { texts, errors };
+}
+
+/**
+ * Download document attachments to /tmp for Claude Code's Read tool.
+ *
+ * Applies the same SSRF protections as text downloads: host allowlist,
+ * https-only, redirect rejection, and per-file size limit (25 MB).
+ */
+export async function downloadDocumentAttachments(
+  documents: Array<{ attachment: AttachmentLike; mime: string }>,
+  messageId: string,
+): Promise<DocumentDownloadResult> {
+  const docs: Array<{ name: string; path: string }> = [];
+  const errors: string[] = [];
+
+  for (let i = 0; i < documents.length; i++) {
+    const { attachment } = documents[i];
+    const name = safeName(attachment);
+
+    // SSRF protection
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(attachment.url);
+    } catch {
+      errors.push(`${name}: invalid URL`);
+      continue;
+    }
+
+    if (parsedUrl.protocol !== 'https:' || !ALLOWED_HOSTS.has(parsedUrl.hostname)) {
+      errors.push(`${name}: blocked (non-Discord CDN host)`);
+      continue;
+    }
+
+    // Pre-check size from Discord metadata
+    const metaSize = attachment.size ?? 0;
+    if (metaSize > MAX_DOC_FILE_BYTES) {
+      errors.push(`${name}: skipped (exceeds 25 MB limit)`);
+      continue;
+    }
+
+    // Derive file extension from original filename
+    const dotIdx = name.lastIndexOf('.');
+    const ext = dotIdx >= 0 ? name.slice(dotIdx + 1).toLowerCase() : 'pdf';
+
+    try {
+      const response = await fetch(attachment.url, {
+        signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+        redirect: 'error',
+      });
+
+      if (!response.ok) {
+        errors.push(`${name}: HTTP ${response.status}`);
+        continue;
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+
+      if (buffer.length > MAX_DOC_FILE_BYTES) {
+        errors.push(`${name}: skipped (exceeds 25 MB limit)`);
+        continue;
+      }
+
+      const localPath = `/tmp/discoclaw-doc-${messageId}-${i}.${ext}`;
+      await writeFile(localPath, buffer);
+      docs.push({ name, path: localPath });
+    } catch (err: unknown) {
+      const errObj = err instanceof Error ? err : null;
+      if (errObj?.name === 'TimeoutError' || errObj?.name === 'AbortError') {
+        errors.push(`${name}: download timed out`);
+      } else if (errObj?.name === 'TypeError' && String(errObj.message).includes('redirect')) {
+        errors.push(`${name}: blocked (unexpected redirect)`);
+      } else {
+        errors.push(`${name}: download failed`);
+      }
+    }
+  }
+
+  return { docs, errors };
 }

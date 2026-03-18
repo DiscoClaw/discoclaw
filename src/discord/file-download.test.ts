@@ -1,6 +1,10 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { resolveTextType, isTextType, classifyAttachments, downloadTextAttachments } from './file-download.js';
+import { resolveTextType, resolveDocumentType, isTextType, classifyAttachments, downloadTextAttachments, downloadDocumentAttachments } from './file-download.js';
 import type { AttachmentLike } from './image-download.js';
+
+vi.mock('node:fs/promises', () => ({
+  writeFile: vi.fn().mockResolvedValue(undefined),
+}));
 
 function makeAtt(name: string, contentType: string | null, size: number = 100): AttachmentLike {
   return { url: `https://cdn.discordapp.com/attachments/1/2/${name}`, name, contentType, size };
@@ -194,22 +198,28 @@ describe('isTextType', () => {
 });
 
 describe('classifyAttachments', () => {
-  it('separates text from unsupported', () => {
+  it('separates text, documents, and unsupported into three buckets', () => {
     const atts = [
       makeAtt('code.js', 'application/javascript'),
       makeAtt('doc.pdf', 'application/pdf'),
       makeAtt('notes.txt', 'text/plain'),
+      makeAtt('archive.zip', 'application/zip'),
     ];
-    const { text, unsupported } = classifyAttachments(atts);
+    const { text, documents, unsupported } = classifyAttachments(atts);
 
     expect(text).toHaveLength(2);
+    expect(text.map(t => t.attachment.name)).toEqual(['code.js', 'notes.txt']);
+    expect(documents).toHaveLength(1);
+    expect(documents[0].attachment.name).toBe('doc.pdf');
+    expect(documents[0].mime).toBe('application/pdf');
     expect(unsupported).toHaveLength(1);
-    expect(unsupported[0].name).toBe('doc.pdf');
+    expect(unsupported[0].name).toBe('archive.zip');
   });
 
   it('handles empty input', () => {
-    const { text, unsupported } = classifyAttachments([]);
+    const { text, documents, unsupported } = classifyAttachments([]);
     expect(text).toHaveLength(0);
+    expect(documents).toHaveLength(0);
     expect(unsupported).toHaveLength(0);
   });
 });
@@ -245,14 +255,14 @@ describe('downloadTextAttachments', () => {
 
   it('notes unsupported attachment types', async () => {
     const result = await downloadTextAttachments([
-      makeAtt('doc.pdf', 'application/pdf', 100),
+      makeAtt('archive.zip', 'application/zip', 100),
     ]);
 
     expect(result.texts).toHaveLength(0);
     expect(result.errors).toHaveLength(1);
     expect(result.errors[0]).toContain('Unsupported attachment');
-    expect(result.errors[0]).toContain('doc.pdf');
-    expect(result.errors[0]).toContain('application/pdf');
+    expect(result.errors[0]).toContain('archive.zip');
+    expect(result.errors[0]).toContain('application/zip');
   });
 
   it('blocks non-Discord CDN URLs (SSRF)', async () => {
@@ -383,5 +393,160 @@ describe('downloadTextAttachments', () => {
     expect(result.texts).toHaveLength(1);
     expect(result.texts[0].content).toContain('[EXTERNAL CONTENT:');
     expect(result.texts[0].content).toContain('{"key":"value"}');
+  });
+});
+
+describe('resolveDocumentType', () => {
+  it('returns MIME for application/pdf', () => {
+    expect(resolveDocumentType(makeAtt('doc.pdf', 'application/pdf'))).toBe('application/pdf');
+  });
+
+  it('falls back to extension for .pdf', () => {
+    expect(resolveDocumentType(makeAtt('report.pdf', null))).toBe('application/pdf');
+  });
+
+  it('returns null for non-document types', () => {
+    expect(resolveDocumentType(makeAtt('code.js', 'application/javascript'))).toBeNull();
+    expect(resolveDocumentType(makeAtt('photo.png', 'image/png'))).toBeNull();
+    expect(resolveDocumentType(makeAtt('data.xyz', null))).toBeNull();
+  });
+});
+
+describe('downloadDocumentAttachments', () => {
+  const originalFetch = globalThis.fetch;
+  let mockWriteFile: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    globalThis.fetch = vi.fn();
+    const fsMod = await import('node:fs/promises');
+    mockWriteFile = fsMod.writeFile as ReturnType<typeof vi.fn>;
+    mockWriteFile.mockClear();
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it('downloads PDF and writes to /tmp', async () => {
+    const pdfBytes = Buffer.from('%PDF-1.4 fake content');
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(pdfBytes.buffer.slice(pdfBytes.byteOffset, pdfBytes.byteOffset + pdfBytes.byteLength)),
+    });
+
+    const docs = [{ attachment: makeAtt('report.pdf', 'application/pdf', 100), mime: 'application/pdf' }];
+    const result = await downloadDocumentAttachments(docs, 'msg123');
+
+    expect(result.docs).toHaveLength(1);
+    expect(result.docs[0].name).toBe('report.pdf');
+    expect(result.docs[0].path).toBe('/tmp/discoclaw-doc-msg123-0.pdf');
+    expect(result.errors).toHaveLength(0);
+    expect(mockWriteFile).toHaveBeenCalledWith('/tmp/discoclaw-doc-msg123-0.pdf', expect.any(Buffer));
+  });
+
+  it('blocks non-Discord CDN URLs (SSRF)', async () => {
+    const att: AttachmentLike = {
+      url: 'https://evil.com/secret.pdf',
+      name: 'secret.pdf',
+      contentType: 'application/pdf',
+      size: 10,
+    };
+
+    const result = await downloadDocumentAttachments(
+      [{ attachment: att, mime: 'application/pdf' }],
+      'msg456',
+    );
+
+    expect(result.docs).toHaveLength(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('blocked');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('blocks HTTP URLs', async () => {
+    const att: AttachmentLike = {
+      url: 'http://cdn.discordapp.com/attachments/1/2/doc.pdf',
+      name: 'doc.pdf',
+      contentType: 'application/pdf',
+      size: 10,
+    };
+
+    const result = await downloadDocumentAttachments(
+      [{ attachment: att, mime: 'application/pdf' }],
+      'msg789',
+    );
+
+    expect(result.docs).toHaveLength(0);
+    expect(result.errors[0]).toContain('blocked');
+  });
+
+  it('rejects files exceeding 25 MB via metadata', async () => {
+    const att = makeAtt('huge.pdf', 'application/pdf', 26 * 1024 * 1024);
+
+    const result = await downloadDocumentAttachments(
+      [{ attachment: att, mime: 'application/pdf' }],
+      'msgBig',
+    );
+
+    expect(result.docs).toHaveLength(0);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toContain('25 MB');
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects files exceeding 25 MB after download', async () => {
+    const bigBuf = Buffer.alloc(26 * 1024 * 1024);
+    (globalThis.fetch as any).mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(bigBuf.buffer.slice(bigBuf.byteOffset, bigBuf.byteOffset + bigBuf.byteLength)),
+    });
+
+    // metadata size=0 so pre-check doesn't fire
+    const att = makeAtt('huge.pdf', 'application/pdf', 0);
+    const result = await downloadDocumentAttachments(
+      [{ attachment: att, mime: 'application/pdf' }],
+      'msgBig2',
+    );
+
+    expect(result.docs).toHaveLength(0);
+    expect(result.errors[0]).toContain('25 MB');
+  });
+
+  it('handles HTTP errors', async () => {
+    (globalThis.fetch as any).mockResolvedValue({ ok: false, status: 403 });
+
+    const result = await downloadDocumentAttachments(
+      [{ attachment: makeAtt('secret.pdf', 'application/pdf', 100), mime: 'application/pdf' }],
+      'msgErr',
+    );
+
+    expect(result.docs).toHaveLength(0);
+    expect(result.errors[0]).toContain('HTTP 403');
+  });
+
+  it('handles download timeout', async () => {
+    const timeoutErr = new DOMException('signal timed out', 'TimeoutError');
+    (globalThis.fetch as any).mockRejectedValue(timeoutErr);
+
+    const result = await downloadDocumentAttachments(
+      [{ attachment: makeAtt('slow.pdf', 'application/pdf', 100), mime: 'application/pdf' }],
+      'msgTimeout',
+    );
+
+    expect(result.docs).toHaveLength(0);
+    expect(result.errors[0]).toContain('timed out');
+  });
+
+  it('handles redirect rejection', async () => {
+    const redirectErr = new TypeError('fetch failed: redirect');
+    (globalThis.fetch as any).mockRejectedValue(redirectErr);
+
+    const result = await downloadDocumentAttachments(
+      [{ attachment: makeAtt('redir.pdf', 'application/pdf', 100), mime: 'application/pdf' }],
+      'msgRedir',
+    );
+
+    expect(result.docs).toHaveLength(0);
+    expect(result.errors[0]).toContain('redirect');
   });
 });
