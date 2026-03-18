@@ -3241,13 +3241,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   params.log?.info({ errors: textResult.errors }, 'discord:text attachment notes');
                 }
 
-                // Download document attachments (PDFs etc.) to /tmp for Claude Code's Read tool.
+                // Download document attachments (PDFs etc.) to /tmp.
+                // Claude Code can use the Read tool; other runtimes get pre-extracted text.
                 const { documents } = classifyAttachments(nonImageAtts);
                 if (documents.length > 0) {
-                  const docResult = await downloadDocumentAttachments(documents, msg.id);
+                  const docResult = await downloadDocumentAttachments(documents, msg.id, params.runtime.id);
                   if (docResult.docs.length > 0) {
                     const sections = docResult.docs.map(d =>
-                      `[Attached document: ${d.name}]\nDownloaded to: ${d.path}\nUse the Read tool to access this file.`,
+                      d.extractedText
+                        ? `[Attached document: ${d.name}]\n${d.extractedText}`
+                        : `[Attached document: ${d.name}]\nDownloaded to: ${d.path}\nUse the Read tool to access this file.`,
                     );
                     prompt += '\n\n' + sections.join('\n\n');
                     params.log?.info({ docCount: docResult.docs.length }, 'discord:document attachments downloaded');
