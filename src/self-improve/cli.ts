@@ -9,10 +9,12 @@
 //   npx tsx src/self-improve/cli.ts --suite test-suites/action-compliance --iterations 3
 //   npx tsx src/self-improve/cli.ts --target workspace/AGENTS.md --tag crons --tag plans
 //   npx tsx src/self-improve/cli.ts --target workspace/AGENTS.md --ai-mutate
+//   npx tsx src/self-improve/cli.ts --target workspace/AGENTS.md --detach   # run as detached process
+//   npx tsx src/self-improve/cli.ts --target workspace/AGENTS.md --status   # check if a run is alive
 
 import { parseArgs } from 'node:util';
-import { execFileSync } from 'node:child_process';
-import { readFile, appendFile } from 'node:fs/promises';
+import { execFileSync, spawn } from 'node:child_process';
+import { readFile, appendFile, writeFile, unlink, open } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { loadTestCasesFromDir, filterByTags } from './loader.js';
 import { applyMutation, generateRandomMutation, generateMutation } from './mutator.js';
@@ -42,6 +44,8 @@ const { values } = parseArgs({
     model: { type: 'string' },
     adapter: { type: 'string', default: 'claude_code' },
     tag: { type: 'string', multiple: true },
+    detach: { type: 'boolean', default: false },
+    status: { type: 'boolean', default: false },
   },
   strict: true,
 });
@@ -49,6 +53,99 @@ const { values } = parseArgs({
 if (!values.target) {
   console.error('Error: --target <path to instruction file> is required');
   process.exit(1);
+}
+
+// ── PID file helpers ────────────────────────────────────────────────
+
+const pidFilePath = resolve(values.target) + '.harness.pid';
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0); // signal 0 = existence check, no actual signal
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readPidFile(): Promise<number | null> {
+  try {
+    const raw = await readFile(pidFilePath, 'utf-8');
+    const pid = parseInt(raw.trim(), 10);
+    return Number.isFinite(pid) && pid > 0 ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── --status: check if a detached run is alive ──────────────────────
+
+if (values.status) {
+  const pid = await readPidFile();
+  if (!pid) {
+    console.log('No harness run found (no PID file).');
+    process.exit(1);
+  }
+  if (isProcessAlive(pid)) {
+    console.log(`Harness is running (PID ${pid}).`);
+    // Show last few lines of log if available.
+    try {
+      const logPath = resolve(values.target) + '.harness.log';
+      const logContent = await readFile(logPath, 'utf-8');
+      const lines = logContent.trimEnd().split('\n');
+      const tail = lines.slice(-5);
+      console.log('Recent log:');
+      for (const line of tail) console.log(`  ${line}`);
+    } catch { /* no log yet */ }
+    process.exit(0);
+  } else {
+    console.log(`Harness is NOT running (stale PID ${pid}).`);
+    await unlink(pidFilePath).catch(() => {});
+    process.exit(1);
+  }
+}
+
+// ── --detach: re-exec as a fully detached process ───────────────────
+// Spawns a child in a new session (detached: true) with stdout/stderr
+// piped to the log file, writes PID file, then exits immediately.
+// The child is immune to parent process death and idle timeouts.
+
+if (values.detach) {
+  // Check for an already-running instance.
+  const existingPid = await readPidFile();
+  if (existingPid && isProcessAlive(existingPid)) {
+    console.error(`Harness is already running (PID ${existingPid}). Use --status to check progress.`);
+    process.exit(1);
+  }
+
+  // Rebuild argv without --detach.
+  const childArgs = process.argv.slice(1).filter((a) => a !== '--detach');
+  const logPath = resolve(values.target) + '.harness.log';
+
+  // Truncate the log file for a fresh run.
+  const logFd = await open(logPath, 'w');
+
+  const child = spawn(process.argv[0], childArgs, {
+    detached: true,
+    stdio: ['ignore', logFd.fd, logFd.fd],
+    cwd: process.cwd(),
+    env: process.env,
+  });
+
+  child.unref();
+  const childPid = child.pid;
+  if (!childPid) {
+    console.error('Failed to spawn detached harness process.');
+    await logFd.close();
+    process.exit(1);
+  }
+
+  await writeFile(pidFilePath, String(childPid), 'utf-8');
+  await logFd.close();
+
+  console.log(`Harness detached (PID ${childPid}). Log: ${logPath}`);
+  console.log(`Check status: pnpm self-improve --target ${values.target} --status`);
+  process.exit(0);
 }
 
 const suitePath = resolve(values.suite!);
@@ -89,6 +186,7 @@ async function handleInterrupt(): Promise<void> {
   abortController.abort();
   await cleanupStagingFiles();
   await cleanupOrphanedStagingFiles(dirname(targetPath));
+  await unlink(pidFilePath).catch(() => {});
   process.exit(130);
 }
 
@@ -347,10 +445,16 @@ async function main(): Promise<void> {
   }
 
   await log(`\n── Run complete. Final best score: ${ledger.bestScore.toFixed(3)} ──`);
+
+  // Clean up PID file so --status / --detach know we're done.
+  await unlink(pidFilePath).catch(() => {});
 }
 
 main().catch((err) => {
   console.error('Fatal:', err);
   // Best-effort cleanup before exit.
-  cleanupStagingFiles().finally(() => process.exit(1));
+  Promise.all([
+    cleanupStagingFiles(),
+    unlink(pidFilePath).catch(() => {}),
+  ]).finally(() => process.exit(1));
 });
