@@ -15,7 +15,8 @@
 import { parseArgs } from 'node:util';
 import { execFileSync, spawn } from 'node:child_process';
 import { readFile, appendFile, writeFile, unlink, open } from 'node:fs/promises';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadTestCasesFromDir, filterByTags } from './loader.js';
 import { applyMutation, generateRandomMutation, generateMutation } from './mutator.js';
 import { generateAiMutation } from './ai-mutator.js';
@@ -118,14 +119,23 @@ if (values.detach) {
     process.exit(1);
   }
 
-  // Rebuild argv without --detach.
-  const childArgs = process.argv.slice(1).filter((a) => a !== '--detach');
+  // Use the compiled JS entrypoint so the detached child works with bare node
+  // (tsx isn't available in the detached process tree).
+  const thisFile = fileURLToPath(import.meta.url);
+  const repoRoot = resolve(dirname(thisFile), '..', '..');
+  const distCli = join(repoRoot, 'dist', 'self-improve', 'cli.js');
+
+  // Rebuild argv: replace the source .ts path with the compiled .js path,
+  // drop --detach, keep everything else.
+  const childArgs = process.argv.slice(1)
+    .filter((a) => a !== '--detach')
+    .map((a) => (resolve(a) === thisFile ? distCli : a));
   const logPath = resolve(values.target) + '.harness.log';
 
   // Truncate the log file for a fresh run.
   const logFd = await open(logPath, 'w');
 
-  const child = spawn(process.argv[0], childArgs, {
+  const child = spawn(process.execPath, childArgs, {
     detached: true,
     stdio: ['ignore', logFd.fd, logFd.fd],
     cwd: process.cwd(),
