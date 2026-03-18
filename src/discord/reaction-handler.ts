@@ -586,7 +586,7 @@ function createReactionHandler(
             userContent;
 
           // Session continuity.
-          const sessionId = params.useRuntimeSessions
+          let sessionId = params.useRuntimeSessions
             ? await params.sessionManager.getOrCreate(sessionKey)
             : null;
 
@@ -624,6 +624,10 @@ function createReactionHandler(
           let currentFollowUpToken: string | null = null;
           let currentFollowUpRunId: string | null = null;
           if (followUpDepth > 0) {
+            // Fresh session ID for each follow-up to avoid "Session ID already in use".
+            if (params.useRuntimeSessions) {
+              sessionId = await params.sessionManager.getOrCreate(sessionKey);
+            }
             const plannedFollowUp = pendingFollowUp;
             if (!plannedFollowUp) break;
             dispose();
