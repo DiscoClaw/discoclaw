@@ -171,11 +171,18 @@ async function main(): Promise<void> {
   }
 
   // ── AI mutator setup ──
-  const aiMutatorApiKey = aiMutate ? (process.env.ANTHROPIC_API_KEY ?? '') : '';
+  // Uses OpenAI-compatible API (OpenRouter by default). Falls back to OPENAI_API_KEY if no OpenRouter key.
+  const aiMutatorApiKey = aiMutate
+    ? (process.env.OPENROUTER_API_KEY ?? process.env.OPENAI_API_KEY ?? '')
+    : '';
   if (aiMutate && !aiMutatorApiKey) {
-    console.error('Error: --ai-mutate requires ANTHROPIC_API_KEY environment variable');
+    console.error('Error: --ai-mutate requires OPENROUTER_API_KEY or OPENAI_API_KEY environment variable');
     process.exit(1);
   }
+  // Auto-detect base URL: OpenRouter if using that key, otherwise OpenAI-compatible default.
+  const aiMutatorBaseUrl = process.env.OPENROUTER_API_KEY
+    ? 'https://openrouter.ai/api'
+    : 'https://api.openai.com';
 
   const runOpts = {
     model: modelOverride,
@@ -240,6 +247,7 @@ async function main(): Promise<void> {
         lastMeanScore,
         {
           apiKey: aiMutatorApiKey,
+          baseUrl: aiMutatorBaseUrl,
           model: mutatorModel,
         },
       );
