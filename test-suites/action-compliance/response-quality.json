@@ -1,0 +1,90 @@
+[
+  {
+    "id": "rq-no-sendmessage-for-question",
+    "prompt": "how does the cron system work?",
+    "expectedActions": [],
+    "forbiddenActions": ["sendMessage"],
+    "tags": ["response-quality", "messaging"],
+    "_comment": "Answering a knowledge question should use inline reply, not sendMessage to current channel"
+  },
+  {
+    "id": "rq-no-sendmessage-for-status",
+    "prompt": "what's the current build status?",
+    "expectedActions": [],
+    "forbiddenActions": ["sendMessage"],
+    "tags": ["response-quality", "messaging"],
+    "_comment": "Status questions should be answered via inline reply"
+  },
+  {
+    "id": "rq-no-sendmessage-for-opinion",
+    "prompt": "should we use Redis or Postgres for session storage?",
+    "expectedActions": [],
+    "forbiddenActions": ["sendMessage"],
+    "tags": ["response-quality", "messaging"],
+    "_comment": "Opinion/recommendation requests should be answered via inline reply"
+  },
+  {
+    "id": "rq-no-sendmessage-for-explanation",
+    "prompt": "explain what the runtime adapter registry does",
+    "expectedActions": [],
+    "forbiddenActions": ["sendMessage"],
+    "tags": ["response-quality", "messaging"],
+    "_comment": "Explanations should be inline replies, not sendMessage"
+  },
+  {
+    "id": "rq-sendmessage-to-different-channel",
+    "prompt": "post a summary of today's changes to #changelog",
+    "expectedActions": [
+      { "type": "sendMessage", "params": { "channel": "changelog" } }
+    ],
+    "forbiddenActions": [],
+    "tags": ["response-quality", "messaging"],
+    "_comment": "Positive case: posting to a DIFFERENT channel should use sendMessage"
+  },
+  {
+    "id": "rq-no-sendmessage-for-ack",
+    "prompt": "thanks for fixing that",
+    "expectedActions": [],
+    "forbiddenActions": ["sendMessage"],
+    "tags": ["response-quality", "messaging"],
+    "_comment": "Acknowledgment of thanks should be inline reply, not sendMessage"
+  },
+  {
+    "id": "rq-no-sendmessage-for-error-report",
+    "prompt": "I'm getting a 404 error on the webhook endpoint",
+    "expectedActions": [],
+    "forbiddenActions": ["sendMessage"],
+    "tags": ["response-quality", "messaging"],
+    "_comment": "Bug reports should be discussed via inline reply first, not broadcast via sendMessage"
+  },
+  {
+    "id": "rq-sendmessage-cross-channel-notify",
+    "prompt": "let the team in #ops know that the deploy is complete",
+    "expectedActions": [
+      { "type": "sendMessage", "params": { "channel": "ops" } }
+    ],
+    "forbiddenActions": [],
+    "tags": ["response-quality", "messaging"],
+    "_comment": "Positive case: explicit request to notify a different channel"
+  },
+  {
+    "id": "rq-query-before-action",
+    "prompt": "what tasks are assigned to me?",
+    "expectedActions": [
+      { "type": "taskList" }
+    ],
+    "forbiddenActions": [],
+    "tags": ["response-quality", "tasks"],
+    "_comment": "Information-gathering queries should trigger the appropriate query action"
+  },
+  {
+    "id": "rq-no-double-action",
+    "prompt": "remember that deploys happen on Tuesdays",
+    "expectedActions": [
+      { "type": "memoryRemember" }
+    ],
+    "forbiddenActions": ["sendMessage"],
+    "tags": ["response-quality", "memory"],
+    "_comment": "Memory save should not also trigger sendMessage — the confirmation is the inline reply"
+  }
+]

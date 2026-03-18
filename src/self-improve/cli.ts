@@ -8,6 +8,7 @@
 //   npx tsx src/self-improve/cli.ts --target workspace/AGENTS.md
 //   npx tsx src/self-improve/cli.ts --suite test-suites/action-compliance --iterations 3
 //   npx tsx src/self-improve/cli.ts --target workspace/AGENTS.md --tag crons --tag plans
+//   npx tsx src/self-improve/cli.ts --target workspace/AGENTS.md --ai-mutate
 
 import { parseArgs } from 'node:util';
 import { execFileSync } from 'node:child_process';
@@ -15,12 +16,14 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { loadTestCasesFromDir, filterByTags } from './loader.js';
 import { applyMutation, generateRandomMutation, generateMutation } from './mutator.js';
+import { generateAiMutation } from './ai-mutator.js';
 import { runSuite } from './runner.js';
 import { scoreBatch } from './scorer.js';
 import { loadLedger, saveLedger, shouldPromote, promote } from './keeper.js';
 import { formatConsoleTable, formatSummary } from './reporter.js';
 import { createClaudeCliRuntime } from '../runtime/claude-code-cli.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
+import type { ScoreResult } from './types.js';
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
@@ -33,6 +36,8 @@ const { values } = parseArgs({
     'baseline-only': { type: 'boolean', default: false },
     'target-label': { type: 'string' },
     'random-only': { type: 'boolean', default: false },
+    'ai-mutate': { type: 'boolean', default: false },
+    'mutator-model': { type: 'string' },
     concurrency: { type: 'string', default: '1' },
     model: { type: 'string' },
     adapter: { type: 'string', default: 'claude_code' },
@@ -53,6 +58,8 @@ const dryRun = values['dry-run']!;
 const baselineOnly = values['baseline-only']!;
 const targetLabel = values['target-label'] ?? targetPath.split('/').pop() ?? targetPath;
 const randomOnly = values['random-only']!;
+const aiMutate = values['ai-mutate']!;
+const mutatorModel = values['mutator-model'];
 const concurrency = Math.max(1, parseInt(values.concurrency!, 10) || 1);
 const modelOverride = values.model;
 const adapterName = values.adapter!;
@@ -106,9 +113,20 @@ async function main(): Promise<void> {
     console.log(`Concurrency: ${concurrency}`);
   }
 
+  // ── AI mutator setup ──
+  const aiMutatorApiKey = aiMutate ? (process.env.ANTHROPIC_API_KEY ?? '') : '';
+  if (aiMutate && !aiMutatorApiKey) {
+    console.error('Error: --ai-mutate requires ANTHROPIC_API_KEY environment variable');
+    process.exit(1);
+  }
+
   const runOpts = { model: modelOverride, cwd: process.cwd(), concurrency };
   const ledgerPath = targetPath + '.ledger.json';
   let ledger = await loadLedger(ledgerPath);
+
+  // Track last score results for AI mutator feedback loop.
+  let lastScoreResults: ScoreResult[] | null = null;
+  let lastMeanScore = 0;
 
   // ── Establish baseline score ──
   if (baselineOnly || (ledger.iteration === 0 && ledger.bestScore === 0)) {
@@ -122,6 +140,8 @@ async function main(): Promise<void> {
 
     ledger = { bestScore: meanScore, iteration: 0, promotedAt: new Date().toISOString() };
     await saveLedger(ledgerPath, ledger);
+    lastScoreResults = scoreResults;
+    lastMeanScore = meanScore;
 
     if (baselineOnly) {
       return;
@@ -135,10 +155,25 @@ async function main(): Promise<void> {
     // Read the current best instruction text.
     const instructions = await readFile(targetPath, 'utf-8');
 
-    // Generate and apply a mutation (targeted unless --random-only).
-    const mutation = randomOnly
-      ? generateRandomMutation(instructions)
-      : generateMutation(instructions);
+    // Generate mutation: AI-guided → structural → random
+    let mutation;
+    if (aiMutate && lastScoreResults) {
+      const aiMutation = await generateAiMutation(
+        instructions,
+        lastScoreResults,
+        lastMeanScore,
+        {
+          apiKey: aiMutatorApiKey,
+          model: mutatorModel,
+        },
+      );
+      mutation = aiMutation ?? (randomOnly ? generateRandomMutation(instructions) : generateMutation(instructions));
+    } else {
+      mutation = randomOnly
+        ? generateRandomMutation(instructions)
+        : generateMutation(instructions);
+    }
+
     const { mutated } = applyMutation(instructions, mutation);
     console.log(`Mutation: ${mutation.description}`);
 
@@ -152,6 +187,10 @@ async function main(): Promise<void> {
 
     // Score.
     const { results: scoreResults, meanScore } = scoreBatch(testCases, actionsMap);
+
+    // Update feedback for next iteration's AI mutator.
+    lastScoreResults = scoreResults;
+    lastMeanScore = meanScore;
 
     // Report.
     console.log('\n' + formatConsoleTable(scoreResults, meanScore));
