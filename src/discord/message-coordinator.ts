@@ -2837,7 +2837,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             return;
           }
 
-          const sessionId = params.useRuntimeSessions
+          let sessionId = params.useRuntimeSessions
             ? await params.sessionManager.getOrCreate(sessionKey)
             : null;
 
@@ -3357,8 +3357,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               let currentFollowUpToken: string | null = null;
               let currentFollowUpRunId: string | null = null;
 
-              // On follow-up iterations, send a new placeholder message.
+              // On follow-up iterations, generate a fresh session ID so the CLI
+              // doesn't reject it ("Session ID already in use" — the previous
+              // iteration's JSONL transcript file still exists for the old UUID).
               if (followUpDepth > 0) {
+                if (params.useRuntimeSessions) {
+                  sessionId = await params.sessionManager.getOrCreate(sessionKey);
+                }
                 const plannedFollowUp = pendingFollowUp;
                 if (!plannedFollowUp) break;
                 const previousReply = reply;
