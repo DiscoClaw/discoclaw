@@ -206,10 +206,10 @@ DiscoClaw assumes reliable structured output for several runtime paths (for exam
 3. Under **Bot** -> **Privileged Gateway Intents**, enable **Message Content Intent**.
 4. Copy the bot token and set it in `.env` as `DISCORD_TOKEN=...`.
 5. Invite the bot to your server:
-   - Go to **OAuth2** -> **URL Generator**
-   - Under **Scopes**, tick `bot`
-   - A **Bot Permissions** grid appears below. For a private server, tick `Administrator` (top-left, under General Permissions) — it's one checkbox and covers everything. For tighter permissions, see the [permission profiles](docs/discord-bot-setup.md#permission-profiles-choose-intentionally) in the full guide.
-   - Copy the generated URL at the bottom, open it, pick your server, and authorize
+   - Go to **Installation** (left sidebar) → set **Install Link** to **Discord Provided Link**
+   - Under **Default Install Settings**, add scope `bot` under Guild Install
+   - A **Permissions** selector appears. For a private server, pick `Administrator` — it's one selection and covers everything. For tighter permissions, see the [permission profiles](docs/discord-bot-setup.md#permission-profiles-choose-intentionally) in the full guide.
+   - **Save Changes**, then open the install link, pick your server, and authorize
 6. In Discord, enable **Developer Mode** (User Settings -> Advanced), then copy IDs and set:
    - `DISCORD_ALLOW_USER_IDS=<your user id>` (required; fail-closed if empty)
    - `DISCORD_GUILD_ID=<server id>` (recommended; required for auto-creating forum channels)

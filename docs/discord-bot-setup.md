@@ -32,16 +32,35 @@ If you don't have a private Discord server yet, click the **+** button at the bo
 
 ## 2) Invite The Bot To Your Server
 
-In the Developer Portal:
+The simplest way to invite the bot is the **quick invite URL** — just replace `YOUR_CLIENT_ID` with your Application ID from the Developer Portal's General Information page:
 
-1. Go to **OAuth2** -> **URL Generator**
-2. Under **Scopes**, tick `bot` (optional: `applications.commands` for slash commands)
-3. A **Bot Permissions** grid appears below — tick the checkboxes for the permission level you want (see profiles below)
-4. Copy the generated URL at the bottom, open it in your browser, pick your server, and authorize
+```
+https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot&permissions=0
+```
+
+This adds the bot with the `bot` scope and no special permissions. Discord will prompt you to pick a server. You can grant additional permissions via Server Settings → Roles after the bot joins, or use the Installation page method below to bake permissions into the invite link.
+
+> **Important:** The `bot` scope is required. Using only `applications.commands` (slash commands) will not add the bot to your server — it registers commands but the bot cannot connect, read messages, or respond.
+
+### Recommended: use the Installation page
+
+For a reusable, permanent invite link with permissions pre-configured, use Discord's built-in **Installation** page:
+
+1. Go to **Installation** (left sidebar in the Developer Portal)
+2. Set **Install Link** to **Discord Provided Link**
+3. Under **Default Install Settings**, click **Add** next to Guild Install
+4. Add the scope **`bot`** (required). Optionally add `applications.commands` if you want slash commands.
+5. A **Permissions** selector appears — pick the permissions for the level you want (see profiles below)
+6. **Save Changes** at the bottom of the page
+7. Copy the **Install Link** shown at the top, open it in your browser, pick your server, and authorize
+
+> **Tip:** This install link is permanent. You can share it or bookmark it. To change permissions later, update the Installation page and re-invite — existing server members get the new permissions.
+
+> **Legacy alternative:** The **OAuth2 → URL Generator** page still works if you need a one-off URL with non-default scopes or permissions, but the Installation page is simpler for most setups.
 
 ### Permission profiles (choose intentionally)
 
-These are recommended sets of Discord permissions. You pick them by ticking the matching checkboxes in the Bot Permissions grid on the OAuth2 URL Generator page. You can always re-invite the bot later with a different set.
+These are recommended sets of Discord permissions. You pick them in the Permissions selector on the Installation page's Default Install Settings. You can always re-invite the bot later with a different set.
 
 - **Administrator** (recommended for private servers)
   - Tick: `Administrator` (under General Permissions, top-left of the grid)

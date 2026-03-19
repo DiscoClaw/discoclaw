@@ -87,6 +87,15 @@ These commands are handled directly by discoclaw (no AI invocation):
 - `!models set <role> <model>` — change the model for a role at runtime
 - `!models help` — show available roles and usage
 
+### Discord Bot Invite
+
+When a user needs to invite or re-invite the bot to a server:
+
+- **Use the Installation page** — direct them to Discord Developer Portal → Installation → set Install Link to "Discord Provided Link" → add scope `bot` under Default Install Settings. This produces a permanent link with permissions baked in.
+- **Do not construct OAuth URLs manually** — the `authorize?client_id=...` pattern works but is error-prone and harder to maintain. The Installation page is the recommended path.
+- **Always include the `bot` scope** — without it, the bot won't join the server. `applications.commands` alone is insufficient.
+- Full guide: `docs/discord-bot-setup.md`.
+
 ### Guardrails
 
 - **Always ask before restart/stop.** Restarts kill active sessions. Never restart without explicit confirmation, even if the user just asked to change something that requires a restart.
