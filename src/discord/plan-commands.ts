@@ -20,6 +20,7 @@ import {
   formatEvidenceSummary,
   formatVerificationBadge,
 } from './verification-evidence.js';
+import { verifyPushStatus, formatPushWarning } from './verify-push.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -958,8 +959,10 @@ export async function closePlanIfComplete(
   acquireLock: () => Promise<() => void>,
   log?: LoggerLike,
   onTaskClosed?: (taskId: string) => void,
-): Promise<{ closed: boolean; reason: string }> {
+  projectCwd?: string,
+): Promise<{ closed: boolean; reason: string; pushWarning?: string }> {
   let taskId: string | undefined;
+  let phasesForPushCheck: PlanPhase[] | undefined;
   const releaseLock = await acquireLock();
   try {
     let phases: PlanPhases;
@@ -975,6 +978,9 @@ export async function closePlanIfComplete(
     if (!allComplete) {
       return { closed: false, reason: 'not_all_complete' };
     }
+
+    // Capture phases for push verification (after lock release)
+    phasesForPushCheck = phases.phases;
 
     // Read plan file header
     let planContent: string;
@@ -1004,6 +1010,20 @@ export async function closePlanIfComplete(
     releaseLock();
   }
 
+  // Post-close push verification: detect local-only commits (best-effort, non-blocking).
+  let pushWarning: string | undefined;
+  if (projectCwd && phasesForPushCheck) {
+    try {
+      const pushResult = verifyPushStatus(projectCwd, phasesForPushCheck);
+      pushWarning = formatPushWarning(pushResult);
+      if (pushWarning) {
+        log?.warn({ pushResult }, 'closePlanIfComplete: unpushed commits detected');
+      }
+    } catch (err) {
+      log?.warn({ err }, 'closePlanIfComplete: push verification failed');
+    }
+  }
+
   // Best-effort task close (no lock needed).
   if (taskId) {
     try {
@@ -1018,5 +1038,5 @@ export async function closePlanIfComplete(
     }
   }
 
-  return { closed: true, reason: 'all_phases_complete' };
+  return { closed: true, reason: 'all_phases_complete', pushWarning };
 }

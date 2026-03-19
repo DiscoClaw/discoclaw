@@ -122,7 +122,7 @@ function hasVisibleForgePlanId(planId: string | undefined): planId is string {
 
 export function buildForgeCompletionWatchdogDetail(
   result: Pick<ForgeResult, 'planId' | 'filePath' | 'error'>,
-  opts?: { summaryPosted?: boolean },
+  opts?: { summaryPosted?: boolean; pushWarning?: string },
 ): string | undefined {
   if (result.error) {
     const detail = sanitizeErrorMessage(result.error);
@@ -138,6 +138,12 @@ export function buildForgeCompletionWatchdogDetail(
     return hasVisibleForgePlanId(result.planId)
       ? `Forge completed for ${result.planId}, but the summary could not be posted back to Discord.`
       : 'Forge completed, but the summary could not be posted back to Discord.';
+  }
+
+  if (opts?.pushWarning) {
+    return hasVisibleForgePlanId(result.planId)
+      ? `Forge completed for ${result.planId}. ${opts.pushWarning}`
+      : `Forge completed. ${opts.pushWarning}`;
   }
 
   return undefined;
