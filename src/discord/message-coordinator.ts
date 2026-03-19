@@ -2154,9 +2154,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                         acquireWriterLock,
                         params.log,
                         planOpts.onTaskClosed,
+                        projectCwd,
                       );
                       if (closeResult.closed) {
                         summaryMsg += '\n\nPlan and backing task auto-closed.';
+                      }
+                      if (closeResult.pushWarning) {
+                        summaryMsg += `\n\n${closeResult.pushWarning}`;
                       }
                     } catch (closeErr) {
                       params.log?.warn({ err: closeErr, planId }, 'plan-run: auto-close failed');

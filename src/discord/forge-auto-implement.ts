@@ -3,6 +3,8 @@ import type { LoggerLike } from '../logging/logger-like.js';
 
 export type ForgeAutoImplementRunSummary = {
   summary: string;
+  /** Push verification warning surfaced from the plan run, if any. */
+  pushWarning?: string;
 };
 
 export type ForgeAutoImplementDeps = {
@@ -91,8 +93,9 @@ export async function autoImplementForgePlan(
   }
 
   let runSummary: string;
+  let pushWarning: string | undefined;
   try {
-    ({ summary: runSummary } = await planRun(planId));
+    ({ summary: runSummary, pushWarning } = await planRun(planId));
     log?.info({ planId }, 'forge:auto-implement: implementation run completed');
   } catch (err) {
     const reason = `Auto-run failed: ${String(err)}`;
@@ -104,6 +107,7 @@ export async function autoImplementForgePlan(
   const summaryParts: string[] = [];
   if (warningMessage) summaryParts.push(warningMessage);
   if (runSummary) summaryParts.push(runSummary);
+  if (pushWarning) summaryParts.push(pushWarning);
   const summary = summaryParts.join('\n\n');
 
   return { status: 'auto', planId, summary };

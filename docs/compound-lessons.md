@@ -169,3 +169,10 @@ Lesson: Long-running test suite runners must implement four hardening layers: (1
 Source: plan-589 self-improve harness hardening — runner `safeSingle()` isolation, CLI `printFailureDiagnostics()`, `logProgress()` progress callback, and SIGINT/SIGTERM signal handling with `cleanupStagingFiles`/`cleanupOrphanedStagingFiles`
 Applied: `src/self-improve/runner.ts` (error isolation, progress, abort signal), `src/self-improve/cli.ts` (diagnostics, progress logging, signal handling, orphan cleanup), `src/self-improve/keeper.ts` (staging file cleanup)
 Status: active
+
+### 2026-03-19 - Verify commits are on a remote branch before marking forge tasks complete
+Tags: #forge #workflow #task
+Lesson: The forge runner must not mark a task as complete based solely on local commits landing. A post-implementation verification step must check that commits have been pushed to a remote branch and/or a PR has been opened before allowing task completion. Local-only commits are invisible to collaborators and CI, and treating them as "done" causes false "already merged" reports when unpushed work sits on a local branch. The verification should compare `HEAD` against the remote tracking ref (e.g. `git log @{u}..HEAD`) and check for an open PR (e.g. `gh pr view`), warning or blocking completion if either is missing.
+Source: forge run incident — unpushed commits on local main were reported as "already merged" because the forge runner checked only local commit state, not remote push or PR status
+Applied: docs/compound-lessons.md
+Status: active

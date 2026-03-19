@@ -604,6 +604,7 @@ export async function executePlanAction(
 
           // Auto-close plan if all phases are terminal
           let autoClosed = false;
+          let pushWarning: string | undefined;
           let runError: unknown;
           try {
             const closeResult = await closePlanIfComplete(
@@ -613,8 +614,10 @@ export async function executePlanAction(
               acquireWriterLock,
               planCtx.log,
               planCtx.onTaskClosed,
+              projectCwd,
             );
             autoClosed = closeResult.closed;
+            pushWarning = closeResult.pushWarning;
           } catch (err) {
             runError = err;
             planCtx.log?.error({ err, planId: runPlanId }, 'plan:action:run failed');
@@ -636,6 +639,9 @@ export async function executePlanAction(
           }
           if (autoClosed) {
             lines.push('Plan auto-closed — all phases terminal.');
+          }
+          if (pushWarning) {
+            lines.push(pushWarning);
           }
           let finalEvidence: RunVerificationEvidence[] = [];
           try {

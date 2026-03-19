@@ -20,6 +20,7 @@ import {
   formatEvidenceSummary,
   formatVerificationBadge,
 } from './verification-evidence.js';
+import { verifyPushStatus, formatPushWarning } from './verify-push.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -958,8 +959,11 @@ export async function closePlanIfComplete(
   acquireLock: () => Promise<() => void>,
   log?: LoggerLike,
   onTaskClosed?: (taskId: string) => void,
-): Promise<{ closed: boolean; reason: string }> {
+  projectCwd?: string,
+): Promise<{ closed: boolean; reason: string; pushWarning?: string }> {
   let taskId: string | undefined;
+  let phasesForPushCheck: PlanPhase[] | undefined;
+  let pushWarning: string | undefined;
   const releaseLock = await acquireLock();
   try {
     let phases: PlanPhases;
@@ -975,6 +979,9 @@ export async function closePlanIfComplete(
     if (!allComplete) {
       return { closed: false, reason: 'not_all_complete' };
     }
+
+    // Capture phases for push verification (before plan closure)
+    phasesForPushCheck = phases.phases;
 
     // Read plan file header
     let planContent: string;
@@ -998,6 +1005,23 @@ export async function closePlanIfComplete(
 
     taskId = resolvePlanHeaderTaskId(header) || undefined;
 
+    // Pre-close push verification: block closure if unpushed commits and no PR.
+    if (projectCwd && phasesForPushCheck) {
+      try {
+        const pushResult = await verifyPushStatus(projectCwd, phasesForPushCheck);
+        pushWarning = formatPushWarning(pushResult);
+        if (pushResult.unpushedPhaseCommits.length > 0 && !pushResult.prCheck.exists) {
+          log?.warn({ pushResult }, 'closePlanIfComplete: unpushed commits block closure');
+          return { closed: false, reason: 'unpushed_commits', pushWarning };
+        }
+        if (pushWarning) {
+          log?.warn({ pushResult }, 'closePlanIfComplete: push warning (PR exists, allowing closure)');
+        }
+      } catch (err) {
+        log?.warn({ err }, 'closePlanIfComplete: push verification failed (allowing closure)');
+      }
+    }
+
     // Close the plan (under lock, as updatePlanFileStatus requires)
     await updatePlanFileStatus(planFilePath, 'CLOSED');
   } finally {
@@ -1018,5 +1042,5 @@ export async function closePlanIfComplete(
     }
   }
 
-  return { closed: true, reason: 'all_phases_complete' };
+  return { closed: true, reason: 'all_phases_complete', pushWarning };
 }
