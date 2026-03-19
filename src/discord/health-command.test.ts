@@ -293,6 +293,105 @@ describe('renderHealthReport', () => {
     expect(basic).toContain('Loops: active=3 running=2');
   });
 
+  it('shows canvas=ready when canvas is enabled and locally ready', () => {
+    const metrics = new MetricsRegistry();
+    const verbose = renderHealthReport({
+      metrics,
+      queueDepth: 0,
+      config: {
+        runtimeModel: 'opus', runtimeTimeoutMs: 60000, runtimeTools: ['Read'],
+        useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
+        discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
+        messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
+        cronEnabled: true, tasksEnabled: false, tasksActive: false,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
+        requireChannelContext: true, autoIndexChannelContext: true,
+        canvasEnabled: true, canvasServerListening: true, canvasLocallyReady: true,
+      },
+      mode: 'verbose',
+    });
+    expect(verbose).toContain('canvas=ready');
+  });
+
+  it('shows canvas=off when canvas is disabled', () => {
+    const metrics = new MetricsRegistry();
+    const verbose = renderHealthReport({
+      metrics,
+      queueDepth: 0,
+      config: {
+        runtimeModel: 'opus', runtimeTimeoutMs: 60000, runtimeTools: ['Read'],
+        useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
+        discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
+        messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
+        cronEnabled: true, tasksEnabled: false, tasksActive: false,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
+        requireChannelContext: true, autoIndexChannelContext: true,
+        canvasEnabled: false,
+      },
+      mode: 'verbose',
+    });
+    expect(verbose).toContain('canvas=off');
+  });
+
+  it('shows canvas=server-only when server is listening but not locally ready', () => {
+    const metrics = new MetricsRegistry();
+    const verbose = renderHealthReport({
+      metrics,
+      queueDepth: 0,
+      config: {
+        runtimeModel: 'opus', runtimeTimeoutMs: 60000, runtimeTools: ['Read'],
+        useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
+        discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
+        messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
+        cronEnabled: true, tasksEnabled: false, tasksActive: false,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
+        requireChannelContext: true, autoIndexChannelContext: true,
+        canvasEnabled: true, canvasServerListening: true, canvasLocallyReady: false,
+      },
+      mode: 'verbose',
+    });
+    expect(verbose).toContain('canvas=server-only');
+  });
+
+  it('shows canvas=enabled-not-listening when enabled but server not listening', () => {
+    const metrics = new MetricsRegistry();
+    const verbose = renderHealthReport({
+      metrics,
+      queueDepth: 0,
+      config: {
+        runtimeModel: 'opus', runtimeTimeoutMs: 60000, runtimeTools: ['Read'],
+        useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
+        discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
+        messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
+        cronEnabled: true, tasksEnabled: false, tasksActive: false,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
+        requireChannelContext: true, autoIndexChannelContext: true,
+        canvasEnabled: true, canvasServerListening: false, canvasLocallyReady: false,
+      },
+      mode: 'verbose',
+    });
+    expect(verbose).toContain('canvas=enabled-not-listening');
+  });
+
+  it('shows canvas=n/a when canvas fields are omitted', () => {
+    const metrics = new MetricsRegistry();
+    const verbose = renderHealthReport({
+      metrics,
+      queueDepth: 0,
+      config: {
+        runtimeModel: 'opus', runtimeTimeoutMs: 60000, runtimeTools: ['Read'],
+        useRuntimeSessions: true, toolAwareStreaming: false, maxConcurrentInvocations: 0,
+        discordActionsEnabled: false, summaryEnabled: true, durableMemoryEnabled: true,
+        messageHistoryBudget: 3000, reactionHandlerEnabled: false, reactionRemoveHandlerEnabled: false,
+        cronEnabled: true, tasksEnabled: false, tasksActive: false,
+        tasksSyncFailureRetryEnabled: true, tasksSyncFailureRetryDelayMs: 30000, tasksSyncDeferredRetryDelayMs: 30000,
+        requireChannelContext: true, autoIndexChannelContext: true,
+      },
+      mode: 'verbose',
+    });
+    expect(verbose).toContain('canvas=n/a');
+  });
+
   it('shows loopActions flag in verbose config output', () => {
     const metrics = new MetricsRegistry();
 

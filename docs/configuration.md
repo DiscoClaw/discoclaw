@@ -296,6 +296,22 @@ See [docs/dashboard-tailscale.md](dashboard-tailscale.md) for access and trusted
 
 If you run multiple DiscoClaw instances on one machine and want dashboards on both, assign distinct `DISCOCLAW_DASHBOARD_PORT` values such as `9401` and `9402`.
 
+## Canvas
+
+Interactive HTML artifacts served as Discord Activities. See [docs/discord-bot-setup.md](discord-bot-setup.md) § Canvas Activities for the Discord Developer Portal setup steps.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DISCOCLAW_CANVAS_ENABLED` | `true` | Master switch for the canvas subsystem |
+| `DISCOCLAW_CANVAS_PORT` | `9402` | Canvas server port |
+| `DISCOCLAW_CANVAS_ARTIFACT_DIR` | — | Override artifact storage directory |
+| `DISCOCLAW_CANVAS_MAX_ARTIFACTS` | `1000` | Max stored artifacts (LRU eviction) |
+| `DISCOCLAW_CANVAS_PENDING_LAUNCH_TTL_SECONDS` | `120` | Pending launch expiry |
+| `DISCOCLAW_CANVAS_WRITE_BRIDGE_ENABLED` | `true` | Allow artifacts to export files to disk |
+| `DISCOCLAW_CANVAS_EXPORT_DIR` | — | Override export directory |
+| `DISCOCLAW_CANVAS_EXPORT_MAX_BYTES` | `5242880` (5 MB) | Max export file size |
+| `DISCORD_ACTIVITY_CLIENT_SECRET` | — | OAuth client secret (optional; pre-auth is used when absent) |
+
 ## Actions
 
 Master switch and per-category flags for Discord actions. See [docs/discord-actions.md](discord-actions.md).

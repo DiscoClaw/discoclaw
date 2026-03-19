@@ -1458,6 +1458,9 @@ const botParams = {
     tasksSyncDeferredRetryDelayMs,
     requireChannelContext,
     autoIndexChannelContext,
+    canvasEnabled: cfg.canvasEnabled,
+    canvasServerListening: false,
+    canvasLocallyReady: false,
   },
   metrics: globalMetrics,
   appendSystemPrompt,
@@ -1579,6 +1582,8 @@ if (cfg.canvasEnabled) {
       log,
     });
     canvasCtx.server = canvasServer;
+    botParams.healthConfigSnapshot.canvasServerListening = canvasServer.isListening();
+    botParams.healthConfigSnapshot.canvasLocallyReady = canvasCtx.isLocallyReady();
     log.info(
       {
         port: cfg.canvasPort,
