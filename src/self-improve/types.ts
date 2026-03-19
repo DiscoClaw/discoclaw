@@ -67,6 +67,8 @@ export interface RunnerOpts {
   injectActionSchema?: boolean;
   /** Called after each test case completes or fails. */
   onProgress?: ProgressCallback;
+  /** Called after each test case completes with its full result (for checkpointing). */
+  onCaseResult?: (tc: FrozenTestCase, result: RunResult) => void | Promise<void>;
   /** AbortSignal — when aborted, pending cases are skipped. */
   signal?: AbortSignal;
 }
@@ -113,6 +115,25 @@ export interface Ledger {
   caseSetHash?: string;
   /** Full history of every iteration (baseline + mutations). */
   history?: IterationRecord[];
+}
+
+// ── Checkpoint types ──────────────────────────────────────────────
+
+/** Minimal result data preserved in a checkpoint for resume. */
+export interface CheckpointedResult {
+  actions: ExpectedAction[];
+  durationMs: number;
+  error?: string;
+}
+
+/** Checkpoint state for resumable harness runs. */
+export interface HarnessCheckpoint {
+  /** Phase identifier: "baseline" or "iteration-N". */
+  phase: string;
+  /** Hash of the test case set (must match to resume). */
+  caseSetHash: string;
+  /** Completed case results keyed by test case ID. */
+  completed: Record<string, CheckpointedResult>;
 }
 
 // ── Scoring types ───────────────────────────────────────────────────

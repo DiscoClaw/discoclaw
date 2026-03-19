@@ -10,7 +10,7 @@
 import { readFile, writeFile, rename, unlink, readdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
-import type { Ledger, IterationRecord } from './types.js';
+import type { Ledger, IterationRecord, HarnessCheckpoint } from './types.js';
 
 const STAGING_PREFIX = '.self-improve-staging-';
 
@@ -107,6 +107,38 @@ export async function recordIteration(
   const updated = { ...ledger, history };
   await saveLedger(ledgerPath, updated);
   return updated;
+}
+
+// ── Checkpoint I/O ──────────────────────────────────────────────────
+
+/** Load an existing checkpoint from disk, or return null if missing/invalid. */
+export async function loadCheckpoint(path: string): Promise<HarnessCheckpoint | null> {
+  try {
+    const raw = await readFile(path, 'utf-8');
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      typeof (parsed as HarnessCheckpoint).phase === 'string' &&
+      typeof (parsed as HarnessCheckpoint).caseSetHash === 'string' &&
+      typeof (parsed as HarnessCheckpoint).completed === 'object'
+    ) {
+      return parsed as HarnessCheckpoint;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Write checkpoint state to disk (pretty-printed for debuggability). */
+export async function saveCheckpoint(path: string, checkpoint: HarnessCheckpoint): Promise<void> {
+  await writeFile(path, JSON.stringify(checkpoint, null, 2) + '\n', 'utf-8');
+}
+
+/** Remove the checkpoint file (called after a phase completes successfully). */
+export async function clearCheckpoint(path: string): Promise<void> {
+  await unlink(path).catch(() => {});
 }
 
 // ── Promotion logic ─────────────────────────────────────────────────

@@ -22,11 +22,11 @@ import { applyMutation, generateRandomMutation, generateMutation } from './mutat
 import { generateAiMutation } from './ai-mutator.js';
 import { runSuite } from './runner.js';
 import { scoreBatch } from './scorer.js';
-import { loadLedger, saveLedger, shouldPromote, promote, cleanupStagingFiles, cleanupOrphanedStagingFiles, computeCaseSetHash, caseSetChanged, recordIteration } from './keeper.js';
+import { loadLedger, saveLedger, shouldPromote, promote, cleanupStagingFiles, cleanupOrphanedStagingFiles, computeCaseSetHash, caseSetChanged, recordIteration, loadCheckpoint, saveCheckpoint, clearCheckpoint } from './keeper.js';
 import { formatConsoleTable, formatSummary } from './reporter.js';
 import { createClaudeCliRuntime } from '../runtime/claude-code-cli.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
-import type { RunResult, ScoreResult } from './types.js';
+import type { RunResult, RunnerOpts, ScoreResult, FrozenTestCase, CheckpointedResult, HarnessCheckpoint, ExpectedAction } from './types.js';
 
 // ── Arg parsing ─────────────────────────────────────────────────────
 
@@ -54,6 +54,30 @@ const { values } = parseArgs({
 if (!values.target) {
   console.error('Error: --target <path to instruction file> is required');
   process.exit(1);
+}
+
+// ── Double-fork intermediate ────────────────────────────────────────
+// When __SELF_IMPROVE_INTERMEDIATE=1, this is the intermediate fork in a
+// double-fork daemon pattern. Spawn the real worker, write its PID, and
+// exit immediately. This severs the pgrep -P parent chain so
+// killProcessTree can't reach the worker from the Claude session.
+
+if (process.env.__SELF_IMPROVE_INTERMEDIATE === '1') {
+  delete process.env.__SELF_IMPROVE_INTERMEDIATE;
+  const { writeFileSync } = await import('node:fs');
+
+  const worker = spawn(process.execPath, process.argv.slice(1), {
+    detached: true,
+    stdio: 'inherit',
+    cwd: process.cwd(),
+    env: process.env,
+  });
+  worker.unref();
+
+  if (worker.pid) {
+    writeFileSync(resolve(values.target) + '.harness.pid', String(worker.pid), 'utf-8');
+  }
+  process.exit(0);
 }
 
 // ── PID file helpers ────────────────────────────────────────────────
@@ -106,10 +130,12 @@ if (values.status) {
   }
 }
 
-// ── --detach: re-exec as a fully detached process ───────────────────
-// Spawns a child in a new session (detached: true) with stdout/stderr
-// piped to the log file, writes PID file, then exits immediately.
-// The child is immune to parent process death and idle timeouts.
+// ── --detach: re-exec via double-fork daemon pattern ────────────────
+// Uses a double-fork to fully sever the pgrep -P parent chain:
+// 1. This process spawns an intermediate with __SELF_IMPROVE_INTERMEDIATE=1
+// 2. The intermediate spawns the real worker (detached), writes its PID, exits
+// 3. The worker is reparented to PID 1, immune to killProcessTree
+// This protects the harness from idle timeout cleanup in the Claude session.
 
 if (values.detach) {
   // Check for an already-running instance.
@@ -135,25 +161,27 @@ if (values.detach) {
   // Truncate the log file for a fresh run.
   const logFd = await open(logPath, 'w');
 
-  const child = spawn(process.execPath, childArgs, {
+  // Spawn the intermediate fork. It will spawn the real worker (double-fork),
+  // write the worker's PID to the PID file, and exit immediately.
+  const intermediate = spawn(process.execPath, childArgs, {
     detached: true,
     stdio: ['ignore', logFd.fd, logFd.fd],
     cwd: process.cwd(),
-    env: process.env,
+    env: { ...process.env, __SELF_IMPROVE_INTERMEDIATE: '1' },
   });
 
-  child.unref();
-  const childPid = child.pid;
-  if (!childPid) {
-    console.error('Failed to spawn detached harness process.');
-    await logFd.close();
+  // Wait for intermediate to exit — it spawns the real worker and exits instantly.
+  await new Promise<void>((r) => intermediate.on('exit', () => r()));
+  await logFd.close();
+
+  // The intermediate wrote the real worker PID to the PID file.
+  const workerPid = await readPidFile();
+  if (!workerPid) {
+    console.error('Failed to start daemonized harness process.');
     process.exit(1);
   }
 
-  await writeFile(pidFilePath, String(childPid), 'utf-8');
-  await logFd.close();
-
-  console.log(`Harness detached (PID ${childPid}). Log: ${logPath}`);
+  console.log(`Harness daemonized (PID ${workerPid}). Log: ${logPath}`);
   console.log(`Check status: pnpm self-improve --target ${values.target} --status`);
   process.exit(0);
 }
@@ -266,6 +294,89 @@ function printFailureDiagnostics(results: RunResult[]): void {
   }
 }
 
+// ── Checkpoint-aware phase runner ────────────────────────────────────
+// Loads any existing checkpoint for the given phase, skips completed
+// cases, runs remaining cases with per-case checkpointing, and returns
+// merged results covering all test cases.
+
+async function runPhaseWithCheckpoint(
+  phase: string,
+  allCases: FrozenTestCase[],
+  instructions: string,
+  adapter: RuntimeAdapter,
+  baseOpts: RunnerOpts,
+  checkpointPath: string,
+  caseSetHash: string,
+  logFn: (msg: string) => Promise<void>,
+): Promise<{ runResults: RunResult[]; actionsMap: Map<string, ExpectedAction[]> }> {
+  // Try to resume from a matching checkpoint.
+  const existing = await loadCheckpoint(checkpointPath);
+  const resumed = new Map<string, CheckpointedResult>();
+
+  if (existing && existing.phase === phase && existing.caseSetHash === caseSetHash) {
+    for (const [id, result] of Object.entries(existing.completed)) {
+      resumed.set(id, result);
+    }
+    if (resumed.size > 0) {
+      await logFn(`Resuming ${phase}: ${resumed.size}/${allCases.length} cases already completed`);
+    }
+  }
+
+  // Filter to cases not yet completed.
+  const remaining = allCases.filter((tc) => !resumed.has(tc.id));
+
+  // Build active checkpoint state (seed with resumed data).
+  const activeCheckpoint: HarnessCheckpoint = {
+    phase,
+    caseSetHash,
+    completed: existing?.phase === phase && existing?.caseSetHash === caseSetHash
+      ? { ...existing.completed }
+      : {},
+  };
+
+  // Run remaining cases with per-case checkpointing.
+  const opts = {
+    ...baseOpts,
+    onCaseResult: async (_tc: FrozenTestCase, result: RunResult) => {
+      activeCheckpoint.completed[result.testCaseId] = {
+        actions: result.actions,
+        durationMs: result.durationMs,
+        error: result.error,
+      };
+      await saveCheckpoint(checkpointPath, activeCheckpoint);
+    },
+  };
+
+  const { results: freshResults, actionsMap: freshActionsMap } = await runSuite(
+    remaining, instructions, adapter, opts,
+  );
+
+  // Merge: build complete results covering all cases in original order.
+  const runResults: RunResult[] = [];
+  const actionsMap = new Map<string, ExpectedAction[]>();
+
+  for (const tc of allCases) {
+    if (freshActionsMap.has(tc.id)) {
+      actionsMap.set(tc.id, freshActionsMap.get(tc.id)!);
+      runResults.push(freshResults.find((r) => r.testCaseId === tc.id)!);
+    } else {
+      const cp = resumed.get(tc.id)!;
+      actionsMap.set(tc.id, cp.actions);
+      runResults.push({
+        testCaseId: tc.id,
+        text: '',
+        actions: cp.actions,
+        parseFailures: 0,
+        events: [],
+        durationMs: cp.durationMs,
+        error: cp.error,
+      });
+    }
+  }
+
+  return { runResults, actionsMap };
+}
+
 // ── Main loop ───────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -312,6 +423,7 @@ async function main(): Promise<void> {
     signal: abortController.signal,
   };
   const ledgerPath = targetPath + '.ledger.json';
+  const checkpointPath = targetPath + '.harness.checkpoint.json';
   let ledger = await loadLedger(ledgerPath);
 
   // Track last score results for AI mutator feedback loop.
@@ -333,7 +445,9 @@ async function main(): Promise<void> {
   if (needsBaseline) {
     await log(`\n── Baseline: ${targetLabel} ──`);
     const instructions = await readFile(targetPath, 'utf-8');
-    const { results: runResults, actionsMap } = await runSuite(testCases, instructions, adapter, runOpts);
+    const { runResults, actionsMap } = await runPhaseWithCheckpoint(
+      'baseline', testCases, instructions, adapter, runOpts, checkpointPath, currentCaseHash, log,
+    );
 
     printFailureDiagnostics(runResults);
 
@@ -346,6 +460,9 @@ async function main(): Promise<void> {
       (totalViolations > 0 ? ` (${totalViolations} violation(s))` : '') +
       (errorCount > 0 ? ` (${errorCount} error(s))` : ''),
     );
+
+    // Clear checkpoint now that baseline is complete.
+    await clearCheckpoint(checkpointPath);
 
     ledger = {
       bestScore: meanScore,
@@ -406,18 +523,18 @@ async function main(): Promise<void> {
     const { mutated } = applyMutation(instructions, mutation);
     await log(`Mutation: ${mutation.description}`);
 
-    // Run the suite with mutated instructions.
-    const { results: runResults, actionsMap } = await runSuite(
-      testCases,
-      mutated,
-      adapter,
-      runOpts,
+    // Run the suite with mutated instructions (with checkpoint/resume).
+    const { runResults, actionsMap } = await runPhaseWithCheckpoint(
+      `iteration-${i}`, testCases, mutated, adapter, runOpts, checkpointPath, currentCaseHash, log,
     );
 
     printFailureDiagnostics(runResults);
 
     // Score.
     const { results: scoreResults, meanScore } = scoreBatch(testCases, actionsMap);
+
+    // Clear checkpoint now that iteration is complete.
+    await clearCheckpoint(checkpointPath);
 
     // Update feedback for next iteration's AI mutator.
     lastScoreResults = scoreResults;

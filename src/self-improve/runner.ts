@@ -142,6 +142,9 @@ export async function runSuite(
       error: result.error,
     });
 
+    // Checkpoint callback — fires after each case for resume support.
+    await opts?.onCaseResult?.(tc, result);
+
     return result;
   }
 
