@@ -179,6 +179,52 @@ Run through this checklist in order. Each step should produce the expected outpu
 7. **Channel context auto-scaffold (optional):**
    - Create a new channel and post once. DiscoClaw should auto-create a stub context file under `content/discord/channels/` and add it to `content/discord/DISCORD.md`.
 
+## Canvas Activities (optional)
+
+Canvas lets DiscoClaw launch interactive HTML artifacts (calculators, charts, diffs, dashboards) as Discord Activities — panels that open inside the Discord client. Canvas is enabled by default, but requires two manual steps in the Discord Developer Portal before it will work.
+
+If you skip this section, the bot will still work normally — canvas launch buttons will show a setup walkthrough when clicked instead of opening an Activity.
+
+### Prerequisites
+
+1. **Enable Activities** — In the Developer Portal, open your application → **Activities** → toggle Activities on.
+
+2. **Add a URL Mapping** — Still in the Activities section, add a URL Mapping:
+   - **Prefix:** `/`
+   - **Target:** your public HTTPS endpoint that reaches the canvas server (default `127.0.0.1:9402`)
+
+   The canvas server listens on localhost. Discord needs a publicly reachable HTTPS URL to load the Activity iframe. Options for exposing it:
+   - **Tailscale Funnel** (recommended for private use): `tailscale funnel --bg 9402`
+   - **ngrok**: `ngrok http 9402`
+   - **Caddy reverse proxy**: see `docs/webhook-exposure.md` for a similar pattern
+
+   Use the resulting public URL as the URL Mapping target.
+
+That's it. No OAuth client secret or redirect URI is required — DiscoClaw uses pre-authenticated activity context by default.
+
+### Optional: OAuth authentication
+
+If you prefer full OAuth verification (instead of the default pre-auth flow), also:
+- Add `https://127.0.0.1` as an OAuth redirect URI in the Developer Portal.
+- Set `DISCORD_ACTIVITY_CLIENT_SECRET` in `.env` to the application's client secret.
+
+### Verification
+
+After completing setup, restart the bot and ask it to launch a canvas (e.g. "make me a calculator"). The bot should post a button; clicking it should open the Activity panel.
+
+If the button shows "Discord rejected the Activity launch request", Activities are not enabled on the application — revisit step 1 above.
+
+### Configuration
+
+Canvas-related environment variables (all optional, sensible defaults):
+
+- `DISCOCLAW_CANVAS_ENABLED` — Master switch (default: `true`)
+- `DISCOCLAW_CANVAS_PORT` — Canvas server port (default: `9402`)
+- `DISCOCLAW_CANVAS_WRITE_BRIDGE_ENABLED` — Allow artifacts to export files to disk (default: `true`)
+- `DISCOCLAW_CANVAS_MAX_ARTIFACTS` — LRU artifact cap (default: `1000`)
+
+See `docs/configuration.md` and `.env.example.full` for the full list.
+
 ## Secret Management
 
 The `!secret` command lets you securely manage `.env` entries (API keys, tokens, etc.) without leaving Discord. It is **DM-only** — the message coordinator rejects `!secret` in guild channels to prevent accidental exposure.
