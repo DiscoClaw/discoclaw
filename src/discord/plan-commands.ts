@@ -963,6 +963,7 @@ export async function closePlanIfComplete(
 ): Promise<{ closed: boolean; reason: string; pushWarning?: string }> {
   let taskId: string | undefined;
   let phasesForPushCheck: PlanPhase[] | undefined;
+  let pushWarning: string | undefined;
   const releaseLock = await acquireLock();
   try {
     let phases: PlanPhases;
@@ -979,7 +980,7 @@ export async function closePlanIfComplete(
       return { closed: false, reason: 'not_all_complete' };
     }
 
-    // Capture phases for push verification (after lock release)
+    // Capture phases for push verification (before plan closure)
     phasesForPushCheck = phases.phases;
 
     // Read plan file header
@@ -1004,24 +1005,27 @@ export async function closePlanIfComplete(
 
     taskId = resolvePlanHeaderTaskId(header) || undefined;
 
+    // Pre-close push verification: block closure if unpushed commits and no PR.
+    if (projectCwd && phasesForPushCheck) {
+      try {
+        const pushResult = await verifyPushStatus(projectCwd, phasesForPushCheck);
+        pushWarning = formatPushWarning(pushResult);
+        if (pushResult.unpushedPhaseCommits.length > 0 && !pushResult.prCheck.exists) {
+          log?.warn({ pushResult }, 'closePlanIfComplete: unpushed commits block closure');
+          return { closed: false, reason: 'unpushed_commits', pushWarning };
+        }
+        if (pushWarning) {
+          log?.warn({ pushResult }, 'closePlanIfComplete: push warning (PR exists, allowing closure)');
+        }
+      } catch (err) {
+        log?.warn({ err }, 'closePlanIfComplete: push verification failed (allowing closure)');
+      }
+    }
+
     // Close the plan (under lock, as updatePlanFileStatus requires)
     await updatePlanFileStatus(planFilePath, 'CLOSED');
   } finally {
     releaseLock();
-  }
-
-  // Post-close push verification: detect local-only commits (best-effort, non-blocking).
-  let pushWarning: string | undefined;
-  if (projectCwd && phasesForPushCheck) {
-    try {
-      const pushResult = verifyPushStatus(projectCwd, phasesForPushCheck);
-      pushWarning = formatPushWarning(pushResult);
-      if (pushWarning) {
-        log?.warn({ pushResult }, 'closePlanIfComplete: unpushed commits detected');
-      }
-    } catch (err) {
-      log?.warn({ err }, 'closePlanIfComplete: push verification failed');
-    }
   }
 
   // Best-effort task close (no lock needed).

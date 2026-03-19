@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execa } from 'execa';
 import type { PlanPhase } from './plan-manager.js';
 
 // ---------------------------------------------------------------------------
@@ -14,6 +14,8 @@ export type PushVerificationResult = {
   unpushedCommits: number;
   /** Commit hashes from phases that are not yet on the remote. */
   unpushedPhaseCommits: string[];
+  /** PR check result — whether gh CLI is available and if a PR exists for the branch. */
+  prCheck: { available: boolean; exists: boolean; url?: string };
   /** Human-readable warning, or undefined if all commits are pushed. */
   warning?: string;
 };
@@ -29,12 +31,11 @@ function localGitEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-function gitIsAvailable(cwd: string): boolean {
+async function gitIsAvailable(cwd: string): Promise<boolean> {
   try {
-    execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
+    await execa('git', ['rev-parse', '--is-inside-work-tree'], {
       cwd,
       env: localGitEnv(),
-      encoding: 'utf-8',
       stdio: 'pipe',
     });
     return true;
@@ -43,26 +44,37 @@ function gitIsAvailable(cwd: string): boolean {
   }
 }
 
-function getCurrentBranch(cwd: string): string | null {
+async function getCurrentBranch(cwd: string): Promise<string | null> {
   try {
-    const branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    const result = await execa('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd,
       env: localGitEnv(),
-      encoding: 'utf-8',
       stdio: 'pipe',
-    }).trim();
+    });
+    const branch = result.stdout.trim();
     return branch && branch !== 'HEAD' ? branch : null;
   } catch {
     return null;
   }
 }
 
-function hasUpstream(cwd: string, branch: string): boolean {
+async function fetchOrigin(cwd: string): Promise<void> {
   try {
-    execFileSync('git', ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`], {
+    await execa('git', ['fetch', 'origin'], {
       cwd,
       env: localGitEnv(),
-      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
+  } catch {
+    // Best-effort — remote may be unreachable
+  }
+}
+
+async function hasUpstream(cwd: string, branch: string): Promise<boolean> {
+  try {
+    await execa('git', ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`], {
+      cwd,
+      env: localGitEnv(),
       stdio: 'pipe',
     });
     return true;
@@ -71,14 +83,14 @@ function hasUpstream(cwd: string, branch: string): boolean {
   }
 }
 
-function countUnpushedCommits(cwd: string, branch: string): number {
+async function countUnpushedCommits(cwd: string, branch: string): Promise<number> {
   try {
-    const count = execFileSync(
+    const result = await execa(
       'git',
       ['rev-list', '--count', `${branch}@{upstream}..HEAD`],
-      { cwd, env: localGitEnv(), encoding: 'utf-8', stdio: 'pipe' },
-    ).trim();
-    return parseInt(count, 10) || 0;
+      { cwd, env: localGitEnv(), stdio: 'pipe' },
+    );
+    return parseInt(result.stdout.trim(), 10) || 0;
   } catch {
     return 0;
   }
@@ -88,17 +100,17 @@ function countUnpushedCommits(cwd: string, branch: string): number {
  * Check whether a specific short commit hash exists on the remote tracking branch.
  * Returns true if the commit is reachable from the upstream ref (i.e. already pushed).
  */
-function isCommitOnRemote(cwd: string, branch: string, shortHash: string): boolean {
+async function isCommitOnRemote(cwd: string, branch: string, shortHash: string): Promise<boolean> {
   try {
     // Resolve the short hash to a full hash first
-    const fullHash = execFileSync('git', ['rev-parse', shortHash], {
+    const result = await execa('git', ['rev-parse', shortHash], {
       cwd,
       env: localGitEnv(),
-      encoding: 'utf-8',
       stdio: 'pipe',
-    }).trim();
+    });
+    const fullHash = result.stdout.trim();
     // Check if the commit is an ancestor of (reachable from) the upstream
-    execFileSync('git', ['merge-base', '--is-ancestor', fullHash, `${branch}@{upstream}`], {
+    await execa('git', ['merge-base', '--is-ancestor', fullHash, `${branch}@{upstream}`], {
       cwd,
       env: localGitEnv(),
       stdio: 'pipe',
@@ -110,38 +122,78 @@ function isCommitOnRemote(cwd: string, branch: string, shortHash: string): boole
 }
 
 // ---------------------------------------------------------------------------
+// PR check via gh CLI
+// ---------------------------------------------------------------------------
+
+/**
+ * Check whether a PR exists for the given branch using the gh CLI.
+ * Gracefully degrades if gh is unavailable or not authenticated.
+ */
+async function checkPRExists(
+  branchName: string,
+  cwd: string,
+): Promise<{ available: boolean; exists: boolean; url?: string }> {
+  try {
+    const result = await execa(
+      'gh',
+      ['pr', 'list', '--head', branchName, '--json', 'number,state,url', '--limit', '1'],
+      { cwd, env: localGitEnv(), stdio: 'pipe' },
+    );
+    const prs = JSON.parse(result.stdout.trim() || '[]');
+    if (Array.isArray(prs) && prs.length > 0) {
+      return { available: true, exists: true, url: prs[0].url };
+    }
+    return { available: true, exists: false };
+  } catch {
+    // gh CLI not available or not authenticated
+    return { available: false, exists: false };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Main verification function
 // ---------------------------------------------------------------------------
+
+const NO_PR: PushVerificationResult['prCheck'] = { available: false, exists: false };
 
 /**
  * Verify that commits from completed plan phases have been pushed to a remote branch.
  *
- * Returns a structured result indicating push status. Callers can use the `warning`
- * field to surface issues to the user without blocking plan closure.
+ * Fetches from origin before comparing to ensure remote refs are current.
+ * Also checks for an open PR via the gh CLI (gracefully degrades if unavailable).
+ *
+ * Returns a structured result indicating push status. The `prCheck` field
+ * indicates whether a PR exists for the branch — callers can use this to
+ * allow closure even when commits are ahead of the remote tracking branch.
  */
-export function verifyPushStatus(cwd: string, phases: PlanPhase[]): PushVerificationResult {
-  if (!gitIsAvailable(cwd)) {
+export async function verifyPushStatus(cwd: string, phases: PlanPhase[]): Promise<PushVerificationResult> {
+  if (!(await gitIsAvailable(cwd))) {
     return {
       branch: null,
       hasRemote: false,
       unpushedCommits: 0,
       unpushedPhaseCommits: [],
+      prCheck: NO_PR,
       warning: 'Git is not available — cannot verify push status.',
     };
   }
 
-  const branch = getCurrentBranch(cwd);
+  const branch = await getCurrentBranch(cwd);
   if (!branch) {
     return {
       branch: null,
       hasRemote: false,
       unpushedCommits: 0,
       unpushedPhaseCommits: [],
+      prCheck: NO_PR,
       warning: 'Detached HEAD — cannot verify push status.',
     };
   }
 
-  const remote = hasUpstream(cwd, branch);
+  // Fetch latest remote state before comparing (concern 3: stale refs)
+  await fetchOrigin(cwd);
+
+  const remote = await hasUpstream(cwd, branch);
 
   // Collect git commit hashes from completed phases
   const phaseCommits = phases
@@ -155,8 +207,12 @@ export function verifyPushStatus(cwd: string, phases: PlanPhase[]): PushVerifica
       hasRemote: remote,
       unpushedCommits: 0,
       unpushedPhaseCommits: [],
+      prCheck: NO_PR,
     };
   }
+
+  // Check PR existence for the branch
+  const prCheck = await checkPRExists(branch, cwd);
 
   if (!remote) {
     return {
@@ -164,15 +220,20 @@ export function verifyPushStatus(cwd: string, phases: PlanPhase[]): PushVerifica
       hasRemote: false,
       unpushedCommits: phaseCommits.length,
       unpushedPhaseCommits: phaseCommits,
+      prCheck,
       warning: `Branch '${branch}' has no remote tracking branch — ${phaseCommits.length} phase commit(s) are local-only.`,
     };
   }
 
   // Branch has a remote — check which phase commits are not yet pushed
-  const unpushedPhaseCommits = phaseCommits.filter(
-    (hash) => !isCommitOnRemote(cwd, branch, hash),
+  const unpushedChecks = await Promise.all(
+    phaseCommits.map(async (hash) => ({
+      hash,
+      onRemote: await isCommitOnRemote(cwd, branch, hash),
+    })),
   );
-  const totalUnpushed = countUnpushedCommits(cwd, branch);
+  const unpushedPhaseCommits = unpushedChecks.filter((c) => !c.onRemote).map((c) => c.hash);
+  const totalUnpushed = await countUnpushedCommits(cwd, branch);
 
   if (unpushedPhaseCommits.length === 0) {
     return {
@@ -180,6 +241,7 @@ export function verifyPushStatus(cwd: string, phases: PlanPhase[]): PushVerifica
       hasRemote: true,
       unpushedCommits: totalUnpushed,
       unpushedPhaseCommits: [],
+      prCheck,
     };
   }
 
@@ -188,6 +250,7 @@ export function verifyPushStatus(cwd: string, phases: PlanPhase[]): PushVerifica
     hasRemote: true,
     unpushedCommits: totalUnpushed,
     unpushedPhaseCommits,
+    prCheck,
     warning: `Branch '${branch}' has ${unpushedPhaseCommits.length} unpushed phase commit(s): ${unpushedPhaseCommits.join(', ')}.`,
   };
 }
@@ -198,5 +261,9 @@ export function verifyPushStatus(cwd: string, phases: PlanPhase[]): PushVerifica
  */
 export function formatPushWarning(result: PushVerificationResult): string | undefined {
   if (!result.warning) return undefined;
+  if (result.prCheck.exists) {
+    const prPart = result.prCheck.url ? ` (PR: ${result.prCheck.url})` : '';
+    return `⚠️ **Push verification:** ${result.warning} A PR exists for this branch${prPart} — allowing closure.`;
+  }
   return `⚠️ **Push verification:** ${result.warning} Commits must be pushed to a remote branch (with a PR) before the task can be considered complete.`;
 }
