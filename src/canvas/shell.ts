@@ -189,6 +189,7 @@ export function renderCanvasShellHtml(opts: {
       let activityGuildId = '';
       let discordSdk = null;
       let artifactFrame = null;
+      let currentBlobUrl = '';
       let toastTimer = 0;
       let appRefreshTimer = 0;
       let sessionRefreshTimer = 0;
@@ -205,6 +206,10 @@ export function renderCanvasShellHtml(opts: {
         clearSessionRefreshTimer();
         activeTargetKey = '';
         artifactFrame = null;
+        if (currentBlobUrl) {
+          URL.revokeObjectURL(currentBlobUrl);
+          currentBlobUrl = '';
+        }
         landingMessageEl.textContent = message;
         if (!landingEl.parentElement) {
           viewportEl.innerHTML = '';
@@ -309,11 +314,17 @@ export function renderCanvasShellHtml(opts: {
 
       function renderDocument(html, title) {
         titleEl.textContent = title || 'Canvas';
+        if (currentBlobUrl) {
+          URL.revokeObjectURL(currentBlobUrl);
+          currentBlobUrl = '';
+        }
+        const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
+        currentBlobUrl = URL.createObjectURL(blob);
         const frame = document.createElement('iframe');
         frame.className = 'viewport-frame';
         frame.setAttribute('sandbox', 'allow-scripts allow-forms');
         frame.setAttribute('referrerpolicy', 'no-referrer');
-        frame.srcdoc = html;
+        frame.src = currentBlobUrl;
         viewportEl.innerHTML = '';
         viewportEl.appendChild(frame);
         artifactFrame = frame;
@@ -544,6 +555,36 @@ export function renderCanvasShellHtml(opts: {
       }
 
       boot();
+    </script>
+    <script nonce="${opts.nonce}">
+      // Non-module fallback: catches silent ES module import failures.
+      // If boot() never runs (module blocked by proxy, MIME type, or CSP),
+      // the status will still read "Starting..." after a timeout.
+      (function() {
+        var timeout = setTimeout(function() {
+          var el = document.getElementById('shellStatus');
+          if (el && el.textContent === 'Starting\u2026') {
+            el.textContent = 'Module load failed';
+            el.className = 'status error';
+            var landing = document.getElementById('landingMessage');
+            if (landing) {
+              landing.textContent = 'The shell script failed to load. This usually means the Discord Activity proxy blocked the ES module import. Try popping out the Activity window.';
+            }
+          }
+        }, 5000);
+        window.addEventListener('error', function(e) {
+          clearTimeout(timeout);
+          var el = document.getElementById('shellStatus');
+          if (el) {
+            el.textContent = 'Script error';
+            el.className = 'status error';
+          }
+          var landing = document.getElementById('landingMessage');
+          if (landing) {
+            landing.textContent = 'Script error: ' + (e.message || 'unknown');
+          }
+        });
+      })();
     </script>
   </body>
 </html>`;
