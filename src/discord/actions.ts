@@ -45,6 +45,13 @@ import { SPAWN_ACTION_TYPES, executeSpawnActions, spawnActionsPromptSection } fr
 import type { SpawnActionRequest, SpawnContext } from './actions-spawn.js';
 import { ARCHIVE_ACTION_TYPES, executeArchiveAction, archiveActionsPromptSection } from './actions-archive.js';
 import type { ArchiveActionRequest } from './actions-archive.js';
+import {
+  CANVAS_ACTION_TYPES,
+  canvasActionsPromptSection,
+  executeCanvasAction,
+  buildCanvasSetupRequiredStub,
+} from '../canvas/canvas-action.js';
+import type { LaunchCanvasActionRequest, CanvasContext } from '../canvas/canvas-action.js';
 import { describeDestructiveConfirmationRequirement } from './destructive-confirmation.js';
 import { checkConfigAuthorization } from './action-dispatcher.js';
 import { computeMarkdownCodeRanges } from './markdown-code-ranges.js';
@@ -92,6 +99,7 @@ export type ActionCategoryFlags = {
   defer: boolean;
   config: boolean;
   loop?: boolean;
+  canvas?: boolean;
   imagegen?: boolean;
   voice?: boolean;
   spawn?: boolean;
@@ -115,6 +123,7 @@ export type DiscordActionRequest =
   | LoopActionRequest
   | ConfigActionRequest
   | ReactionPromptRequest
+  | LaunchCanvasActionRequest
   | ImagegenActionRequest
   | VoiceActionRequest
   | SpawnActionRequest
@@ -139,6 +148,7 @@ export type SubsystemContexts = {
   planCtx?: PlanContext;
   memoryCtx?: MemoryContext;
   configCtx?: ConfigContext;
+  canvasCtx?: CanvasContext;
   imagegenCtx?: ImagegenContext;
   voiceCtx?: VoiceContext;
   spawnCtx?: SpawnContext;
@@ -157,7 +167,7 @@ function buildImagegenSetupRequiredStub(): string {
   ].join(' ');
 }
 
-function shouldReturnImagegenSetupStub(ctx: ActionContext): boolean {
+function shouldReturnInteractiveSetupStub(ctx: ActionContext): boolean {
   // Manual user turns and their follow-ups run through the interactive path.
   return ctx.confirmation?.mode === 'interactive';
 }
@@ -183,6 +193,7 @@ function buildValidTypes(flags: ActionCategoryFlags): Set<string> {
   if (flags.defer) for (const t of DEFER_ACTION_TYPES) types.add(t);
   if (flags.loop) for (const t of LOOP_ACTION_TYPES) types.add(t);
   if (flags.config) for (const t of CONFIG_ACTION_TYPES) types.add(t);
+  if (flags.canvas) for (const t of CANVAS_ACTION_TYPES) types.add(t);
   if (flags.imagegen) for (const t of IMAGEGEN_ACTION_TYPES) types.add(t);
   if (flags.voice) for (const t of VOICE_ACTION_TYPES) types.add(t);
   if (flags.spawn) for (const t of SPAWN_ACTION_TYPES) types.add(t);
@@ -569,9 +580,17 @@ export async function executeDiscordActions(
         } else {
           result = executeConfigAction(action as ConfigActionRequest, effectiveSubs.configCtx);
         }
+      } else if (CANVAS_ACTION_TYPES.has(action.type)) {
+        if (!effectiveSubs.canvasCtx) {
+          result = shouldReturnInteractiveSetupStub(ctx)
+            ? { ok: false, error: buildCanvasSetupRequiredStub() }
+            : { ok: false, error: 'Canvas subsystem not configured' };
+        } else {
+          result = await executeCanvasAction(action as LaunchCanvasActionRequest, ctx, effectiveSubs.canvasCtx);
+        }
       } else if (IMAGEGEN_ACTION_TYPES.has(action.type)) {
         if (!effectiveSubs.imagegenCtx) {
-          result = shouldReturnImagegenSetupStub(ctx)
+          result = shouldReturnInteractiveSetupStub(ctx)
             ? { ok: false, error: buildImagegenSetupRequiredStub() }
             : { ok: false, error: 'Imagegen subsystem not configured' };
         } else {
@@ -702,6 +721,7 @@ type ActionSchemaCategory =
   | 'defer'
   | 'loop'
   | 'config'
+  | 'canvas'
   | 'imagegen'
   | 'voice'
   | 'spawn'
@@ -722,6 +742,7 @@ const ACTION_SCHEMA_CATEGORY_ORDER: ActionSchemaCategory[] = [
   'defer',
   'loop',
   'config',
+  'canvas',
   'imagegen',
   'voice',
   'spawn',
@@ -743,6 +764,7 @@ const ACTION_SCHEMA_IMAGEGEN_RE = new RegExp(
   `${ACTION_SCHEMA_IMAGEGEN_STANDALONE_PATTERN}|${ACTION_SCHEMA_IMAGEGEN_GENERATIVE_PATTERN}`,
   'i',
 );
+const ACTION_SCHEMA_CANVAS_RE = /\b(canvas|artifact|activity|interactive|dashboard|chart|graph|diff|visuali[sz]ation|calculator|viewer)\b/i;
 
 type ActionSchemaKeywordRule = {
   hit: string;
@@ -758,6 +780,7 @@ const ACTION_SCHEMA_KEYWORD_RULES: ActionSchemaKeywordRule[] = [
   { hit: 'cron', pattern: /\b(cron|schedule|scheduled|reminder|remind|later)\b/i, categories: ['crons', 'defer'] },
   { hit: 'loop', pattern: /\b(loop|repeat|repeating|interval)\b/i, categories: ['loop'] },
   { hit: 'config', pattern: /\b(model|config|configure|setting|doctor|diagnostic|workspace|bootstrap)\b/i, categories: ['config'] },
+  { hit: 'canvas', pattern: ACTION_SCHEMA_CANVAS_RE, categories: ['canvas'] },
   { hit: 'imagegen', pattern: ACTION_SCHEMA_IMAGEGEN_RE, categories: ['imagegen'] },
   { hit: 'voice', pattern: /\b(voice|speak|mute|unmute)\b/i, categories: ['voice'] },
   { hit: 'moderation', pattern: /\b(moderat|ban|kick|timeout)\b/i, categories: ['moderation'] },
@@ -793,6 +816,7 @@ function isActionSchemaCategoryEnabled(flags: ActionCategoryFlags, category: Act
     case 'defer': return flags.defer;
     case 'loop': return Boolean(flags.loop);
     case 'config': return flags.config;
+    case 'canvas': return Boolean(flags.canvas);
     case 'imagegen': return Boolean(flags.imagegen);
     case 'voice': return Boolean(flags.voice);
     case 'spawn': return Boolean(flags.spawn);
@@ -801,6 +825,7 @@ function isActionSchemaCategoryEnabled(flags: ActionCategoryFlags, category: Act
 }
 
 type ActionSchemaRenderContext = {
+  canvasWriteBridgeEnabled?: boolean;
   imagegenDefaultModel?: string;
 };
 
@@ -830,6 +855,8 @@ function renderActionSchemaCategorySection(category: ActionSchemaCategory, rende
       return memoryActionsPromptSection();
     case 'config':
       return configActionsPromptSection();
+    case 'canvas':
+      return canvasActionsPromptSection({ writeBridgeEnabled: renderCtx?.canvasWriteBridgeEnabled });
     case 'loop':
       return loopActionsPromptSection();
     case 'imagegen':
@@ -952,6 +979,7 @@ export function buildTieredDiscordActionsPromptSection(
     channelContextPath?: string | null;
     isThread?: boolean;
     userText?: string;
+    canvasWriteBridgeEnabled?: boolean;
     imagegenDefaultModel?: string;
   },
 ): ActionSchemaSelection {
@@ -1001,7 +1029,11 @@ export function buildTieredDiscordActionsPromptSection(
   sectionLogs.push({ section: 'intro', content: intro });
 
   const renderCtx: ActionSchemaRenderContext | undefined = opts?.imagegenDefaultModel
-    ? { imagegenDefaultModel: opts.imagegenDefaultModel }
+    || typeof opts?.canvasWriteBridgeEnabled === 'boolean'
+    ? {
+      imagegenDefaultModel: opts?.imagegenDefaultModel,
+      canvasWriteBridgeEnabled: opts?.canvasWriteBridgeEnabled,
+    }
     : undefined;
 
   for (const category of includedCategories) {
@@ -1054,4 +1086,3 @@ export function buildTieredDiscordActionsPromptSection(
 export function discordActionsPromptSection(flags: ActionCategoryFlags, botDisplayName?: string): string {
   return buildTieredDiscordActionsPromptSection(flags, botDisplayName).prompt;
 }
-

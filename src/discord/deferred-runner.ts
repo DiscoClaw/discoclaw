@@ -19,6 +19,7 @@ import { resolveDefaultModel } from './actions-imagegen.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 import type { VoiceContext } from './actions-voice.js';
 import type { SpawnContext } from './actions-spawn.js';
+import type { CanvasContext } from '../canvas/canvas-action.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import { resolveGroundedToolCapabilities } from '../runtime/tool-capabilities.js';
@@ -72,6 +73,7 @@ type DeferredRunnerState = {
   planCtx?: PlanContext;
   memoryCtx?: MemoryContext;
   configCtx?: ConfigContext;
+  canvasCtx?: CanvasContext;
   imagegenCtx?: ImagegenContext;
   voiceCtx?: VoiceContext;
   spawnCtx?: SpawnContext;
@@ -155,6 +157,7 @@ function buildDeferredActionFlags(state: DeferredRunnerState, depth: number, max
     memory: false,
     config: Boolean(state.discordActionsConfig),
     defer: depth < maxDepth,
+    canvas: Boolean(state.canvasCtx?.isLocallyReady()),
     imagegen: Boolean(state.discordActionsImagegen),
     voice: Boolean(state.discordActionsVoice),
     spawn: Boolean(state.discordActionsSpawn),
@@ -253,6 +256,7 @@ export function configureDeferredScheduler(
           channelContextPath: channelCtx.contextPath,
           isThread: threadParentId !== null,
           userText: action.prompt,
+          canvasWriteBridgeEnabled: opts.state.canvasCtx?.writeBridgeEnabled,
           imagegenDefaultModel: opts.state.imagegenCtx ? resolveDefaultModel(opts.state.imagegenCtx) : undefined,
         },
       );
@@ -391,6 +395,7 @@ export function configureDeferredScheduler(
         planCtx: opts.state.planCtx,
         memoryCtx: opts.state.memoryCtx,
         configCtx: opts.state.configCtx,
+        canvasCtx: opts.state.canvasCtx,
         imagegenCtx: opts.state.imagegenCtx,
         voiceCtx: opts.state.voiceCtx,
         spawnCtx: opts.state.spawnCtx,

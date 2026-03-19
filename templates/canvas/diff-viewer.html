@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Diff Viewer Template</title>
+    <style>
+      :root { color-scheme: dark; --bg: #0d1117; --panel: #161b22; --border: rgba(255,255,255,0.08); --text: #e6edf3; --muted: #9fb0c0; --add: rgba(63,185,80,0.16); --remove: rgba(248,81,73,0.16); }
+      body { margin: 0; font-family: "IBM Plex Mono", ui-monospace, monospace; background: linear-gradient(180deg, #0b0f14, #0d1117); color: var(--text); padding: 16px; }
+      .shell { display: grid; gap: 14px; }
+      .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 18px; overflow: hidden; }
+      .header { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .col { min-width: 0; }
+      .col + .col { border-left: 1px solid var(--border); }
+      .line { padding: 10px 14px; white-space: pre-wrap; border-top: 1px solid rgba(255,255,255,0.04); }
+      .line.add { background: var(--add); }
+      .line.remove { background: var(--remove); }
+      .meta { color: var(--muted); font-family: system-ui, sans-serif; }
+      @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } .col + .col { border-left: 0; border-top: 1px solid var(--border); } }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="panel">
+        <div class="header">
+          <h1>Diff Viewer</h1>
+          <p class="meta">Starter side-by-side diff layout. Replace the example lines with generated content.</p>
+        </div>
+        <div class="grid">
+          <section class="col">
+            <div class="line">const greeting = "hello";</div>
+            <div class="line remove">console.log(greeting);</div>
+            <div class="line">return greeting.toUpperCase();</div>
+          </section>
+          <section class="col">
+            <div class="line">const greeting = "hello";</div>
+            <div class="line add">console.info(greeting);</div>
+            <div class="line">return greeting.toUpperCase();</div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

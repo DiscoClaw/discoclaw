@@ -21,7 +21,7 @@ const stubRuntime: RuntimeAdapter = {
 const openrouterRuntime: RuntimeAdapter = {
   id: 'openrouter',
   capabilities: new Set(),
-  defaultModel: 'anthropic/claude-sonnet-4-20250514',
+  defaultModel: 'anthropic/claude-opus-4-6',
   async *invoke() { /* no-op */ },
 };
 
@@ -518,13 +518,13 @@ describe('modelSet runtime swap', () => {
     expect(ctx.botParams.runtime).toBe(openrouterRuntime);
     expect(ctx.runtime).toBe(openrouterRuntime);
     expect(ctx.runtimeName).toBe('openrouter');
-    expect(ctx.botParams.runtimeModel).toBe('anthropic/claude-sonnet-4-20250514');
+    expect(ctx.botParams.runtimeModel).toBe('anthropic/claude-opus-4-6');
     expect(ctx.botParams.planCtx!.runtime).toBe(openrouterRuntime);
     expect(ctx.botParams.planCtx!.model).toBe('capable');
     expect(ctx.botParams.planRunModel).toBe('capable');
     expect(ctx.botParams.cronCtx!.runtime).toBe(openrouterRuntime);
     expect(ctx.botParams.cronCtx!.executorCtx!.runtime).toBe(openrouterRuntime);
-    expect(ctx.botParams.cronCtx!.executorCtx!.model).toBe('anthropic/claude-sonnet-4-20250514');
+    expect(ctx.botParams.cronCtx!.executorCtx!.model).toBe('anthropic/claude-opus-4-6');
     expect(ctx.botParams.deferOpts!.runtime).toBe(openrouterRuntime);
     expect(result.summary).toContain('runtime → openrouter');
     expect(result.summary).toContain('adapter default');

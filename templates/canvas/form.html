@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Form Template</title>
+    <style>
+      :root { color-scheme: dark; --bg: #10131a; --panel: #171d27; --text: #f7fafc; --muted: #9aa9b8; --accent: #fbbf24; --ok: #86efac; --danger: #fca5a5; }
+      body { margin: 0; background: radial-gradient(circle at top, rgba(251,191,36,0.14), transparent 30%), var(--bg); color: var(--text); font-family: system-ui, sans-serif; padding: 16px; }
+      .panel { max-width: 720px; margin: 0 auto; background: var(--panel); border: 1px solid rgba(255,255,255,0.08); border-radius: 18px; padding: 18px; }
+      .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+      label { display: grid; gap: 8px; }
+      input, textarea, select, button { font: inherit; }
+      input, textarea, select { border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); background: #0f141c; color: var(--text); padding: 12px; }
+      textarea { min-height: 140px; resize: vertical; }
+      .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+      button { border: 0; border-radius: 999px; padding: 10px 14px; cursor: pointer; }
+      .primary { background: linear-gradient(135deg, var(--accent), #f59e0b); color: #1b1405; font-weight: 700; }
+      .secondary { background: rgba(255,255,255,0.08); color: var(--text); }
+      .note { color: var(--muted); }
+      .status { min-height: 1.4em; margin-top: 12px; color: var(--muted); }
+      .status.ok { color: var(--ok); }
+      .status.error { color: var(--danger); }
+    </style>
+  </head>
+  <body>
+    <form class="panel" id="reportForm">
+      <h1>Incident Report</h1>
+      <p class="note">Starter form pattern for structured input. Replace fields as needed.</p>
+      <div class="grid">
+        <label><span>Owner</span><input name="owner" required /></label>
+        <label><span>Severity</span><select name="severity"><option>Low</option><option>Medium</option><option>High</option></select></label>
+      </div>
+      <label><span>Summary</span><input name="summary" required /></label>
+      <label><span>Details</span><textarea name="details" required></textarea></label>
+      <div class="actions">
+        <button class="primary" type="submit">Save Markdown</button>
+        <button class="secondary" type="button" id="previewBtn">Preview</button>
+      </div>
+      <div class="status" id="status"></div>
+    </form>
+    <script>
+      const form = document.getElementById('reportForm');
+      const statusEl = document.getElementById('status');
+      const fields = form.elements;
+      const buildMarkdown = () => {
+        const owner = fields.owner.value.trim();
+        const severity = fields.severity.value;
+        const summary = fields.summary.value.trim();
+        const details = fields.details.value.trim();
+        return '# Incident Report\\n\\n' +
+          '- Owner: ' + owner + '\\n' +
+          '- Severity: ' + severity + '\\n' +
+          '- Summary: ' + summary + '\\n\\n' +
+          '## Details\\n' + details + '\\n';
+      };
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (!form.reportValidity()) {
+          statusEl.className = 'status error';
+          statusEl.textContent = 'Fill in the required fields first.';
+          return;
+        }
+        window.parent.postMessage({
+          type: 'canvas.saveFile',
+          suggestedName: 'incident-report.md',
+          mimeType: 'text/markdown',
+          encoding: 'utf8',
+          content: buildMarkdown(),
+        }, '*');
+        statusEl.className = 'status';
+        statusEl.textContent = 'Save request sent to the shell.';
+      });
+      document.getElementById('previewBtn').addEventListener('click', () => {
+        statusEl.className = 'status ok';
+        statusEl.textContent = buildMarkdown();
+      });
+      window.addEventListener('message', (event) => {
+        const data = event.data;
+        if (!data || data.type !== 'canvas.saveFile.result') return;
+        statusEl.className = data.ok ? 'status ok' : 'status error';
+        statusEl.textContent = data.ok ? 'Saved ' + data.fileName : String(data.error || 'Save failed');
+      });
+    </script>
+  </body>
+</html>

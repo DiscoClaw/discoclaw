@@ -170,6 +170,38 @@ describe('LongRunWatchdog', () => {
     watchdog.dispose();
   });
 
+  it('posts final follow-up when notifyOnCompletion is true and check-in was posted', async () => {
+    const filePath = path.join(tmpDir, 'watchdog.json');
+    const postStillRunning = vi.fn(async () => {});
+    const postFinal = vi.fn(async () => {});
+    const watchdog = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning,
+      postFinal,
+      stillRunningDelayMs: 1_000,
+    });
+
+    await watchdog.start({
+      runId: 'run-chat-notify',
+      channelId: 'chan-1',
+      messageId: 'msg-1',
+      notifyOnCompletion: true,
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await watchdog._waitForIdleForTest();
+    expect(postStillRunning).toHaveBeenCalledTimes(1);
+
+    await watchdog.complete('run-chat-notify', { outcome: 'succeeded' });
+
+    expect(postFinal).toHaveBeenCalledTimes(1);
+    const state = await watchdog.getRun('run-chat-notify');
+    expect(state?.notifyOnCompletion).toBe(true);
+    expect(state?.status).toBe('completed');
+    expect(state?.checkInPosted).toBe(true);
+    expect(state?.finalPosted).toBe(true);
+    watchdog.dispose();
+  });
+
   it('posts a single deferred still-running check-in via timer', async () => {
     const filePath = path.join(tmpDir, 'watchdog.json');
     const postStillRunning = vi.fn(async () => {});

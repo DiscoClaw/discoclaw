@@ -6,6 +6,7 @@ import type { BotParams, StatusRef } from '../discord.js';
 import { ensureGroupDir } from '../discord.js';
 import type { KeyedQueue } from '../group-queue.js';
 import { isAllowlisted } from './allowlist.js';
+import { shouldCanvasPromptBeSurfaced } from '../canvas/canvas-action.js';
 import { discordSessionKey } from './session-key.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
 import { fetchMessageHistory } from './message-history.js';
@@ -533,6 +534,10 @@ function createReactionHandler(
             config: params.discordActionsConfig ?? false,
             defer: !isDm && (params.discordActionsDefer ?? false),
             loop: !isDm && (params.discordActionsLoop ?? false),
+            canvas: shouldCanvasPromptBeSurfaced(
+              params.canvasCtx,
+              actionRoutingParts.filter((part) => part.trim().length > 0).join('\n\n'),
+            ),
             imagegen: params.discordActionsImagegen ?? false,
             voice: params.discordActionsVoice ?? false,
             spawn: params.discordActionsSpawn ?? false,
@@ -548,6 +553,7 @@ function createReactionHandler(
                 channelContextPath: channelCtx.contextPath,
                 isThread,
                 userText: actionRoutingParts.filter((part) => part.trim().length > 0).join('\n\n'),
+                canvasWriteBridgeEnabled: params.canvasCtx?.writeBridgeEnabled,
                 imagegenDefaultModel: params.imagegenCtx ? resolveImagegenDefaultModel(params.imagegenCtx) : undefined,
               },
             );
@@ -1053,6 +1059,7 @@ function createReactionHandler(
                 planCtx: params.planCtx,
                 memoryCtx: perEventMemoryCtx,
                 configCtx: params.configCtx,
+                canvasCtx: params.canvasCtx,
                 imagegenCtx: params.imagegenCtx,
                 voiceCtx: params.voiceCtx,
                 spawnCtx: params.spawnCtx,

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Dashboard Template</title>
+    <style>
+      :root { color-scheme: dark; --bg: #071019; --panel: #101a26; --border: rgba(255,255,255,0.08); --text: #eff6ff; --muted: #9db2c6; --accent: #60a5fa; }
+      body { margin: 0; font-family: system-ui, sans-serif; background: radial-gradient(circle at top right, rgba(96,165,250,0.18), transparent 28%), var(--bg); color: var(--text); padding: 16px; }
+      .shell { display: grid; gap: 14px; }
+      .hero, .card { background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 16px; }
+      .hero p, .card p { color: var(--muted); }
+      .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+      .metric { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.04); border-radius: 14px; padding: 12px; }
+      .metric strong { display: block; font-size: 22px; margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <section class="hero">
+        <h1>Dashboard Pattern</h1>
+        <p>Starter layout for read-only operational dashboards in Activity canvases.</p>
+      </section>
+      <section class="card">
+        <div class="metrics">
+          <div class="metric">Uptime<strong>99.98%</strong></div>
+          <div class="metric">Deploys<strong>12</strong></div>
+          <div class="metric">Alerts<strong>1</strong></div>
+          <div class="metric">Latency<strong>184ms</strong></div>
+        </div>
+      </section>
+    </div>
+  </body>
+</html>

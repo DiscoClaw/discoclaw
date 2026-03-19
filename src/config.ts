@@ -58,6 +58,16 @@ export type DiscoclawConfig = {
   discordActionsVoice: boolean;
   discordActionsSpawn: boolean;
   discordActionsArchive: boolean;
+  canvasEnabled: boolean;
+  canvasPort: number;
+  canvasArtifactDir?: string;
+  canvasMaxArtifacts: number;
+  canvasPendingLaunchTtlSeconds: number;
+  canvasWriteBridgeEnabled: boolean;
+  canvasExportDir?: string;
+  canvasExportMaxBytes: number;
+  discordClientId?: string;
+  discordActivityClientSecret?: string;
 
   deferMaxDelaySeconds: number;
   deferMaxDepth: number;
@@ -496,6 +506,16 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsVoice = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_VOICE', false);
   const discordActionsSpawn = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_SPAWN', true);
   const discordActionsArchive = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_ARCHIVE', false);
+  const canvasEnabled = parseBoolean(env, 'DISCOCLAW_CANVAS_ENABLED', true);
+  const canvasPort = parsePositiveInt(env, 'DISCOCLAW_CANVAS_PORT', 9402);
+  const canvasArtifactDir = parseTrimmedString(env, 'DISCOCLAW_CANVAS_ARTIFACT_DIR');
+  const canvasMaxArtifacts = parsePositiveInt(env, 'DISCOCLAW_CANVAS_MAX_ARTIFACTS', 1000);
+  const canvasPendingLaunchTtlSeconds = parsePositiveInt(env, 'DISCOCLAW_CANVAS_PENDING_LAUNCH_TTL_SECONDS', 120);
+  const canvasWriteBridgeEnabled = parseBoolean(env, 'DISCOCLAW_CANVAS_WRITE_BRIDGE_ENABLED', true);
+  const canvasExportDir = parseTrimmedString(env, 'DISCOCLAW_CANVAS_EXPORT_DIR');
+  const canvasExportMaxBytes = parsePositiveInt(env, 'DISCOCLAW_CANVAS_EXPORT_MAX_BYTES', 5_242_880);
+  const discordClientId = parseTrimmedString(env, 'DISCORD_CLIENT_ID');
+  const discordActivityClientSecret = parseTrimmedString(env, 'DISCORD_ACTIVITY_CLIENT_SECRET');
   const spawnMaxConcurrent = parsePositiveInt(env, 'DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT', 4);
   const deferMaxDelaySeconds = parsePositiveNumber(
     env,
@@ -801,6 +821,16 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       discordActionsVoice,
       discordActionsSpawn,
       discordActionsArchive,
+      canvasEnabled,
+      canvasPort,
+      canvasArtifactDir,
+      canvasMaxArtifacts,
+      canvasPendingLaunchTtlSeconds,
+      canvasWriteBridgeEnabled,
+      canvasExportDir,
+      canvasExportMaxBytes,
+      discordClientId,
+      discordActivityClientSecret,
 
       deferMaxDelaySeconds,
       deferMaxDepth,

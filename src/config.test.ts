@@ -358,6 +358,41 @@ describe('parseConfig', () => {
     expect(config.discordActionsImagegen).toBe(false);
   });
 
+  it('defaults canvas to enabled with the write bridge enabled', () => {
+    const { config } = parseConfig(env());
+    expect(config.canvasEnabled).toBe(true);
+    expect(config.canvasWriteBridgeEnabled).toBe(true);
+    expect(config.canvasPort).toBe(9402);
+    expect(config.canvasMaxArtifacts).toBe(1000);
+    expect(config.canvasPendingLaunchTtlSeconds).toBe(120);
+    expect(config.canvasExportMaxBytes).toBe(5_242_880);
+  });
+
+  it('parses canvas configuration overrides', () => {
+    const { config } = parseConfig(env({
+      DISCOCLAW_CANVAS_ENABLED: '0',
+      DISCOCLAW_CANVAS_PORT: '9502',
+      DISCOCLAW_CANVAS_ARTIFACT_DIR: '/tmp/canvas-artifacts',
+      DISCOCLAW_CANVAS_MAX_ARTIFACTS: '25',
+      DISCOCLAW_CANVAS_PENDING_LAUNCH_TTL_SECONDS: '30',
+      DISCOCLAW_CANVAS_WRITE_BRIDGE_ENABLED: '0',
+      DISCOCLAW_CANVAS_EXPORT_DIR: '/tmp/canvas-exports',
+      DISCOCLAW_CANVAS_EXPORT_MAX_BYTES: '2048',
+      DISCORD_CLIENT_ID: 'discord-client-id',
+      DISCORD_ACTIVITY_CLIENT_SECRET: 'discord-secret',
+    }));
+    expect(config.canvasEnabled).toBe(false);
+    expect(config.canvasPort).toBe(9502);
+    expect(config.canvasArtifactDir).toBe('/tmp/canvas-artifacts');
+    expect(config.canvasMaxArtifacts).toBe(25);
+    expect(config.canvasPendingLaunchTtlSeconds).toBe(30);
+    expect(config.canvasWriteBridgeEnabled).toBe(false);
+    expect(config.canvasExportDir).toBe('/tmp/canvas-exports');
+    expect(config.canvasExportMaxBytes).toBe(2048);
+    expect(config.discordClientId).toBe('discord-client-id');
+    expect(config.discordActivityClientSecret).toBe('discord-secret');
+  });
+
   it('enables discordActionsImagegen when DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1', () => {
     const { config } = parseConfig(env({ DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN: '1' }));
     expect(config.discordActionsImagegen).toBe(true);

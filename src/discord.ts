@@ -10,6 +10,7 @@ import type { SystemScaffold } from './discord/system-bootstrap.js';
 import { createReactionAddHandler, createReactionRemoveHandler } from './discord/reaction-handler.js';
 import { createMessageCreateHandler } from './discord/message-coordinator.js';
 import type { BotParams, StatusRef } from './discord/message-coordinator.js';
+import { handleCanvasButtonInteraction } from './canvas/canvas-action.js';
 
 export type { BotParams, StatusRef };
 export type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
@@ -128,6 +129,19 @@ export async function startDiscordBot(params: BotParams): Promise<{ client: Clie
 
   const queue = new KeyedQueue();
   client.on('messageCreate', createMessageCreateHandler(params, queue, statusRef));
+  client.on('interactionCreate', async (interaction) => {
+    try {
+      if (!interaction.isButton() || !params.canvasCtx) return;
+      await handleCanvasButtonInteraction({
+        interaction,
+        canvasCtx: params.canvasCtx,
+        allowUserIds: params.allowUserIds,
+        log: params.log,
+      });
+    } catch (err) {
+      params.log?.warn({ err }, 'discord:interactionCreate failed');
+    }
+  });
 
   if (params.reactionHandlerEnabled) {
     client.on('messageReactionAdd', createReactionAddHandler(params, queue, statusRef));

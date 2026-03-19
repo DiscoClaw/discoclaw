@@ -89,6 +89,15 @@ import type { WebhookServer } from './webhook/server.js';
 import { startDashboardServer } from './dashboard/server.js';
 import type { DashboardServer as LocalDashboardServer } from './dashboard/server.js';
 import { formatDashboardOperatorUrl, resolveDashboardBindHost } from './dashboard/options.js';
+import { collectDashboardSnapshot } from './cli/dashboard.js';
+import { ArtifactStore } from './canvas/artifact-store.js';
+import { createCanvasBuiltinApps } from './canvas/apps.js';
+import { CanvasFileExport } from './canvas/file-export.js';
+import { LaunchStore } from './canvas/launch-store.js';
+import { createCanvasContext } from './canvas/canvas-action.js';
+import { buildCanvasLocalReadiness, startCanvasServer } from './canvas/server.js';
+import type { CanvasServer } from './canvas/server.js';
+import { createSignedTokenSigner, loadOrCreateSigningSecret } from './canvas/tokens.js';
 import { resolveModel, initTierOverrides } from './runtime/model-tiers.js';
 import { resolveDisplayName } from './identity.js';
 import { globalMetrics } from './observability/metrics.js';
@@ -131,6 +140,7 @@ import {
 import { createColdStorage, type ColdStorageSubsystem } from './cold-storage/index.js';
 import { parseGlobalSupervisorBail, type GlobalSupervisorAuditPayload } from './runtime/global-supervisor.js';
 import type { StreamingPreviewMode } from './discord/output-utils.js';
+import { buildCompletionNotice } from './discord/output-utils.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 const bootStartMs = Date.now();
@@ -249,6 +259,7 @@ let taskForumCountSync: ForumCountSync | undefined;
 let cronForumCountSync: ForumCountSync | undefined;
 let webhookServer: WebhookServer | null = null;
 let dashboardServer: LocalDashboardServer | null = null;
+let canvasServer: CanvasServer | null = null;
 let savedCronExecCtx: import('./cron/executor.js').CronExecutorContext | null = null;
 let voiceManager: VoiceConnectionManager | null = null;
 let audioPipeline: AudioPipelineManager | null = null;
@@ -344,6 +355,9 @@ const shutdown = async () => {
   }
   if (dashboardServer) {
     await dashboardServer.close().catch((err) => log.warn({ err }, 'dashboard:close error'));
+  }
+  if (canvasServer) {
+    await canvasServer.close().catch((err) => log.warn({ err }, 'canvas:close error'));
   }
   coldStorageSubsystem?.close();
   await botStatus?.offline();
@@ -516,6 +530,46 @@ async function postDiscordActionFollowUpLifecycleNotice(
   );
 }
 
+/**
+ * Reply-only delivery for chat message completion notices.
+ * Reuses the channel-fetch pattern from postLongRunWatchdogNotice but always
+ * replies to the source message (the bot's answer), falling back to
+ * channel.send() if the message is gone. This avoids the edit-first path
+ * in postLongRunWatchdogNoticeToChannel which would overwrite the answer.
+ */
+async function postChatCompletionReply(
+  run: Pick<LongRunWatchdogRun, 'channelId' | 'messageId'>,
+  content: string,
+): Promise<void> {
+  const clientRef = longRunWatchdogClientRef;
+  if (!clientRef) {
+    throw new Error('Discord client unavailable');
+  }
+
+  const channel = clientRef.channels.cache.get(run.channelId)
+    ?? await clientRef.channels.fetch(run.channelId).catch(() => null);
+  if (!channel || !channel.isTextBased()) {
+    throw new Error(`watchdog channel unavailable (${run.channelId})`);
+  }
+
+  const channelSend = (channel as { send?: unknown }).send;
+  if (typeof channelSend !== 'function') {
+    throw new Error(`watchdog channel is not sendable (${run.channelId})`);
+  }
+
+  const fetchMessage = (channel as { messages?: { fetch?: (id: string) => Promise<unknown> } }).messages?.fetch;
+  if (typeof fetchMessage === 'function') {
+    const source = await fetchMessage.call((channel as any).messages, run.messageId).catch(() => null);
+    if (source && typeof (source as any).reply === 'function') {
+      await (source as any).reply({ content, allowedMentions: NO_MENTIONS });
+      return;
+    }
+  }
+
+  await (channelSend as (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>)
+    .call(channel, { content, allowedMentions: NO_MENTIONS });
+}
+
 const messageCoordinatorWatchdog = completionNotifyEnabled
   ? (() => {
     const watchdog = new LongRunWatchdog({
@@ -535,11 +589,15 @@ const messageCoordinatorWatchdog = completionNotifyEnabled
           }
           return;
         }
-        await postLongRunWatchdogNotice(run, buildLongRunFinalNotice({
-          completion: run.completion,
-          completionDetail: run.completionDetail,
-          source: meta.source,
-        }));
+        // Chat message runs: reply to the bot's answer instead of editing it.
+        const content = run.completion === 'succeeded' && run.completedAt != null && run.startedAt != null
+          ? buildCompletionNotice(run.completedAt - run.startedAt)
+          : buildLongRunFinalNotice({
+            completion: run.completion,
+            completionDetail: run.completionDetail,
+            source: meta.source,
+          });
+        await postChatCompletionReply(run, content);
       },
       log,
     });
@@ -569,6 +627,45 @@ const defaultWorkspaceCwd = dataDir
 const workspaceCwd = cfg.workspaceCwdOverride || defaultWorkspaceCwd;
 const groupsDir = cfg.groupsDirOverride || path.join(__dirname, '..', 'groups');
 const useGroupDirCwd = cfg.useGroupDirCwd;
+const canvasDataRoot = dataDir ?? path.join(__dirname, '..', 'data');
+const canvasArtifactDir = cfg.canvasArtifactDir || path.join(canvasDataRoot, 'canvas', 'artifacts');
+const canvasExportDir = cfg.canvasExportDir || path.join(workspaceCwd, 'exports', 'canvas');
+const canvasTokenSigner = createSignedTokenSigner(
+  await loadOrCreateSigningSecret(path.join(canvasDataRoot, 'canvas', 'launch-signing-secret')),
+);
+const canvasArtifactStore = new ArtifactStore({
+  rootDir: canvasArtifactDir,
+  maxArtifacts: cfg.canvasMaxArtifacts,
+});
+const canvasLaunchStore = new LaunchStore({
+  pendingTtlMs: cfg.canvasPendingLaunchTtlSeconds * 1000,
+  boundSessionTtlMs: 24 * 60 * 60 * 1000,
+  signer: canvasTokenSigner,
+  launchRefSecret: await loadOrCreateSigningSecret(path.join(canvasDataRoot, 'canvas', 'launch-ref-secret')),
+});
+const canvasFileExport = new CanvasFileExport({
+  rootDir: canvasExportDir,
+  maxBytes: cfg.canvasExportMaxBytes,
+});
+const canvasBuiltinApps = createCanvasBuiltinApps({
+  getDashboardSnapshot: () => collectDashboardSnapshot({ cwd: projectRoot, env: process.env }),
+});
+const canvasCtx = createCanvasContext({
+  enabled: cfg.canvasEnabled,
+  discordClientId: cfg.discordClientId,
+  writeBridgeEnabled: cfg.canvasWriteBridgeEnabled,
+  artifactStore: canvasArtifactStore,
+  launchStore: canvasLaunchStore,
+  fileExport: canvasFileExport,
+  builtinApps: canvasBuiltinApps,
+  getLocalReadiness: () => buildCanvasLocalReadiness({
+    discordClientId: canvasCtx.discordClientId,
+    discordActivityClientSecret: cfg.discordActivityClientSecret,
+    serverListening: canvasServer?.isListening() ?? false,
+    artifactRoot: canvasArtifactStore.rootPath(),
+    exportRoot: canvasFileExport.rootPath(),
+  }),
+});
 
 // --- Scaffold workspace PA files (first run) ---
 await ensureWorkspaceBootstrapFiles(workspaceCwd, log);
@@ -1263,6 +1360,7 @@ const botParams = {
   planCtx: undefined as PlanContext | undefined,
   memoryCtx: undefined as MemoryContext | undefined,
   imagegenCtx: undefined as ImagegenContext | undefined,
+  canvasCtx,
   spawnCtx: undefined as SpawnContext | undefined,
   voiceCtx: undefined as import('./discord/actions-voice.js').VoiceContext | undefined,
   voiceStatusCtx: undefined as import('./discord/actions-voice.js').VoiceContext | undefined,
@@ -1463,6 +1561,36 @@ try {
 botStatus = status;
 longRunWatchdogClientRef = client;
 if (deferOpts) deferOpts.status = botStatus;
+
+canvasCtx.discordClientId = cfg.discordClientId || client.application?.id || undefined;
+if (cfg.canvasEnabled) {
+  try {
+    canvasServer = await startCanvasServer({
+      port: cfg.canvasPort,
+      host: '127.0.0.1',
+      discordClientId: canvasCtx.discordClientId,
+      discordActivityClientSecret: cfg.discordActivityClientSecret,
+      allowUserIds,
+      artifactStore: canvasArtifactStore,
+      launchStore: canvasLaunchStore,
+      fileExport: canvasFileExport,
+      builtinApps: canvasBuiltinApps,
+      writeBridgeEnabled: cfg.canvasWriteBridgeEnabled,
+      log,
+    });
+    canvasCtx.server = canvasServer;
+    log.info(
+      {
+        port: cfg.canvasPort,
+        artifactDir: canvasArtifactStore.rootPath(),
+        exportDir: canvasFileExport.rootPath(),
+      },
+      'canvas:server started',
+    );
+  } catch (err) {
+    log.error({ err, port: cfg.canvasPort }, 'canvas:server failed to start');
+  }
+}
 
 if (longRunWatchdog) {
   try {
@@ -2520,6 +2648,7 @@ const actionCategoriesEnabled = buildActionCategoriesEnabled({
   discordActionsImagegen: cfg.discordActionsImagegen,
   discordActionsVoice: cfg.discordActionsVoice,
   voiceEnabled: cfg.voiceEnabled,
+  canvasEnabled: cfg.canvasEnabled,
   discordActionsArchive: cfg.discordActionsArchive,
 });
 const npmLatestVersion = await npmLatestVersionPromise;
