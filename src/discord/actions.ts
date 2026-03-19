@@ -167,7 +167,7 @@ function buildImagegenSetupRequiredStub(): string {
   ].join(' ');
 }
 
-function shouldReturnImagegenSetupStub(ctx: ActionContext): boolean {
+function shouldReturnInteractiveSetupStub(ctx: ActionContext): boolean {
   // Manual user turns and their follow-ups run through the interactive path.
   return ctx.confirmation?.mode === 'interactive';
 }
@@ -582,7 +582,7 @@ export async function executeDiscordActions(
         }
       } else if (CANVAS_ACTION_TYPES.has(action.type)) {
         if (!effectiveSubs.canvasCtx) {
-          result = shouldReturnImagegenSetupStub(ctx)
+          result = shouldReturnInteractiveSetupStub(ctx)
             ? { ok: false, error: buildCanvasSetupRequiredStub() }
             : { ok: false, error: 'Canvas subsystem not configured' };
         } else {
@@ -590,7 +590,7 @@ export async function executeDiscordActions(
         }
       } else if (IMAGEGEN_ACTION_TYPES.has(action.type)) {
         if (!effectiveSubs.imagegenCtx) {
-          result = shouldReturnImagegenSetupStub(ctx)
+          result = shouldReturnInteractiveSetupStub(ctx)
             ? { ok: false, error: buildImagegenSetupRequiredStub() }
             : { ok: false, error: 'Imagegen subsystem not configured' };
         } else {

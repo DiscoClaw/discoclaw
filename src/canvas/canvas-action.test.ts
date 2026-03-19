@@ -147,6 +147,35 @@ describe('canvas-action', () => {
     expect(payload.content).toContain('live canvas app');
   });
 
+  it('escapes markdown metacharacters in the Discord launch message title', async () => {
+    const canvasCtx = await makeCanvasContext();
+    const send = vi.fn(async () => ({}));
+    const result = await executeCanvasAction(
+      {
+        type: 'launchCanvas',
+        title: '  **Chart** [v2]\nReport  ',
+        content: '<!doctype html><html><body><h1>Tax</h1></body></html>',
+      },
+      {
+        guild: {
+          channels: {
+            cache: {
+              get: () => ({ isTextBased: () => true, send }),
+            },
+          },
+        } as any,
+        client: {} as any,
+        channelId: 'channel-1',
+        messageId: 'message-1',
+      },
+      canvasCtx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Posted canvas launch button for "**Chart** [v2] Report"' });
+    const payload = (send as any).mock.calls[0]?.[0];
+    expect(payload.content).toContain('**\\*\\*Chart\\*\\* \\[v2\\] Report**');
+  });
+
   it('creates a pending launch and issues LAUNCH_ACTIVITY for authorized button clicks', async () => {
     const canvasCtx = await makeCanvasContext();
     const artifact = await canvasCtx.artifactStore.createArtifact({

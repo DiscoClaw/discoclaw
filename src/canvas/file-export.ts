@@ -104,8 +104,7 @@ export class CanvasFileExport {
       .slice(0, 80);
 
     const safeStem = stem || 'canvas-export';
-    const safeExt = extname === extension ? extension : extension;
-    return `${safeStem}.${safeExt}`;
+    return `${safeStem}.${extension}`;
   }
 
   private async writeUniqueFile(fileName: string, buffer: Buffer): Promise<string> {

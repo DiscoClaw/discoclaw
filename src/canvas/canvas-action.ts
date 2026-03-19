@@ -123,6 +123,14 @@ export function parseCanvasLaunchCustomId(customId: string): string | null {
   return customId.slice(CANVAS_LAUNCH_COMPONENT_PREFIX.length) || null;
 }
 
+function normalizeCanvasTitle(title: string): string {
+  return title.replace(/\s+/g, ' ').trim();
+}
+
+function escapeDiscordMessageText(input: string): string {
+  return input.replace(/([\\*_`~|>\[\]()])/g, '\\$1');
+}
+
 function currentTextChannel(ctx: ActionContext): GuildTextBasedChannel | null {
   const channel = ctx.guild.channels.cache.get(ctx.channelId);
   if (!channel?.isTextBased()) return null;
@@ -169,7 +177,7 @@ export async function executeCanvasAction(
   ctx: ActionContext,
   canvasCtx: CanvasContext,
 ): Promise<DiscordActionResult> {
-  const title = String(action.title ?? '').trim();
+  const title = normalizeCanvasTitle(String(action.title ?? ''));
   if (!title) return { ok: false, error: 'launchCanvas requires a non-empty title' };
   if (!canvasCtx.isLocallyReady()) {
     return { ok: false, error: buildCanvasSetupRequiredStub(canvasCtx) };
@@ -212,7 +220,7 @@ export async function executeCanvasAction(
   );
 
   await channel.send({
-    content: `**${title}**\n${messageBody}`,
+    content: `**${escapeDiscordMessageText(title)}**\n${messageBody}`,
     allowedMentions: NO_MENTIONS,
     components: [row],
   });

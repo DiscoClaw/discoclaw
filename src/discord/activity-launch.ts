@@ -1,5 +1,8 @@
 import type { ButtonInteraction } from 'discord.js';
 
+// Discord interaction callback type 12 launches the app's associated Activity.
+const INTERACTION_CALLBACK_TYPE_LAUNCH_ACTIVITY = 12;
+
 export async function respondWithLaunchActivity(
   interaction: Pick<ButtonInteraction, 'id' | 'token'>,
 ): Promise<void> {
@@ -10,7 +13,7 @@ export async function respondWithLaunchActivity(
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ type: 12 }),
+      body: JSON.stringify({ type: INTERACTION_CALLBACK_TYPE_LAUNCH_ACTIVITY }),
     },
   );
 

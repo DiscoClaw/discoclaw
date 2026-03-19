@@ -6,13 +6,17 @@ function escapeForHtml(input: string): string {
     .replaceAll('"', '&quot;');
 }
 
+function escapeInlineScriptJson(input: unknown): string {
+  return JSON.stringify(input).replaceAll('<', '\\u003c');
+}
+
 export function renderCanvasShellHtml(opts: {
   nonce: string;
   discordClientId: string;
   writeBridgeEnabled: boolean;
   defaultLandingMessage: string;
 }): string {
-  const config = JSON.stringify({
+  const config = escapeInlineScriptJson({
     clientId: opts.discordClientId,
     writeBridgeEnabled: opts.writeBridgeEnabled,
     defaultLandingMessage: opts.defaultLandingMessage,
