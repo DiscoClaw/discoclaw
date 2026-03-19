@@ -61,8 +61,8 @@ export type CanvasServer = {
 
 function buildCanvasExternalChecks(): string[] {
   return [
-    'Enable Activities on the Discord application in the Developer Portal (Application → Activities → Enable).',
     'Add a URL Mapping in the Developer Portal pointing / to the public HTTPS canvas endpoint (e.g. your Tailscale Funnel or ngrok URL).',
+    'Enable Activities on the Discord application in the Developer Portal (Application → Activities → Enable). Requires the URL Mapping first.',
   ];
 }
 

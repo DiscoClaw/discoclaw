@@ -93,8 +93,8 @@ export function buildCanvasSetupRequiredStub(canvasCtx?: CanvasContext): string 
     ready: false,
     missingChecks: ['Canvas subsystem is not initialized in this process.'],
     externalChecks: [
-      'Enable Activities on the Discord application in the Developer Portal (Application → Activities → Enable).',
       'Add a URL Mapping in the Developer Portal pointing / to the public HTTPS canvas endpoint (e.g. your Tailscale Funnel or ngrok URL).',
+      'Enable Activities on the Discord application in the Developer Portal (Application → Activities → Enable). Requires the URL Mapping first.',
     ],
   };
   return buildCanvasSetupWalkthrough(readiness);
@@ -302,8 +302,8 @@ export async function handleCanvasButtonInteraction(input: {
       'Discord rejected the Activity launch request. This usually means Activities are not enabled on the Discord application.',
       '',
       'To fix this, go to the Discord Developer Portal:',
-      '1. Open your application → Activities → Enable Activities.',
-      '2. Add a URL Mapping pointing / to your public HTTPS canvas endpoint (Tailscale Funnel, ngrok, etc.).',
+      '1. Add a URL Mapping pointing / to your public HTTPS canvas endpoint (Tailscale Funnel, ngrok, etc.).',
+      '2. Enable Activities (requires the URL Mapping first).',
       '',
       'See docs/discord-bot-setup.md § Canvas Activities for the full walkthrough.',
     ].join('\n');
