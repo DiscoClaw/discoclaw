@@ -256,6 +256,8 @@ const DISABLED_TYPE_HELP: Record<string, string> = {
   botSetStatus: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE=1` in .env.',
   botSetActivity: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE=1` in .env.',
   botSetNickname: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE=1` in .env.',
+  // Canvas Activities — requires DISCOCLAW_CANVAS_ENABLED plus Discord Activity setup.
+  launchCanvas: 'To enable: set `DISCOCLAW_CANVAS_ENABLED=1`, configure `DISCORD_ACTIVITY_CLIENT_SECRET`, then complete Discord Activity setup (redirect URI, URL Mapping, public HTTPS exposure).',
   // Polls — requires DISCOCLAW_DISCORD_ACTIONS_POLLS.
   poll: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_POLLS=1` in .env.',
   // Forge — requires DISCOCLAW_DISCORD_ACTIONS_FORGE + DISCOCLAW_FORGE_COMMANDS_ENABLED.

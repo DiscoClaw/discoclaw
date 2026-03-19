@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Data Table Template</title>
+    <style>
+      :root { color-scheme: dark; --bg: #10141b; --panel: #161c24; --border: rgba(255,255,255,0.08); --text: #f8fafc; --muted: #94a3b8; --accent: #c4b5fd; }
+      body { margin: 0; background: linear-gradient(180deg, #0f1319, #10141b); color: var(--text); font-family: system-ui, sans-serif; padding: 16px; }
+      .card { background: var(--panel); border: 1px solid var(--border); border-radius: 18px; padding: 16px; display: grid; gap: 14px; }
+      .toolbar { display: flex; gap: 10px; flex-wrap: wrap; }
+      input { border-radius: 12px; border: 1px solid var(--border); background: #0f141b; color: var(--text); padding: 10px 12px; flex: 1 1 220px; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { text-align: left; padding: 12px 10px; border-top: 1px solid rgba(255,255,255,0.06); }
+      th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; cursor: pointer; }
+      .empty { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <section class="card">
+      <div>
+        <h1>Deployments</h1>
+        <p class="empty">Starter filterable table pattern.</p>
+      </div>
+      <div class="toolbar">
+        <input id="query" placeholder="Filter rows..." />
+      </div>
+      <table>
+        <thead>
+          <tr><th data-key="service">Service</th><th data-key="status">Status</th><th data-key="owner">Owner</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p class="empty" id="empty" hidden>No rows match.</p>
+    </section>
+    <script>
+      const data = [
+        { service: 'api', status: 'healthy', owner: 'Weston' },
+        { service: 'worker', status: 'degraded', owner: 'Dave' },
+        { service: 'scheduler', status: 'healthy', owner: 'Weston' },
+      ];
+      let sortKey = 'service';
+      let sortDir = 1;
+      const rowsEl = document.getElementById('rows');
+      const emptyEl = document.getElementById('empty');
+      const queryEl = document.getElementById('query');
+      const render = () => {
+        const query = queryEl.value.trim().toLowerCase();
+        const rows = data
+          .filter((row) => Object.values(row).some((value) => String(value).toLowerCase().includes(query)))
+          .sort((a, b) => String(a[sortKey]).localeCompare(String(b[sortKey])) * sortDir);
+        rowsEl.innerHTML = rows.map((row) => '<tr><td>' + row.service + '</td><td>' + row.status + '</td><td>' + row.owner + '</td></tr>').join('');
+        emptyEl.hidden = rows.length > 0;
+      };
+      queryEl.addEventListener('input', render);
+      document.querySelectorAll('th[data-key]').forEach((th) => {
+        th.addEventListener('click', () => {
+          const key = th.getAttribute('data-key');
+          sortDir = key === sortKey ? sortDir * -1 : 1;
+          sortKey = key;
+          render();
+        });
+      });
+      render();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chart Template</title>
+    <style>
+      :root { color-scheme: dark; --bg: #081119; --panel: #0e1a29; --accent: #7dd3fc; --accent-2: #86efac; --text: #eff8ff; --muted: #9fb6c7; }
+      body { margin: 0; font-family: system-ui, sans-serif; background: linear-gradient(180deg, #081119, #050b12); color: var(--text); padding: 16px; }
+      .card { background: var(--panel); border: 1px solid rgba(125, 211, 252, 0.18); border-radius: 18px; padding: 16px; }
+      .header { display: flex; justify-content: space-between; gap: 12px; align-items: center; flex-wrap: wrap; }
+      button { border: 0; border-radius: 999px; padding: 10px 14px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #06202d; font-weight: 700; cursor: pointer; }
+      .bars { display: grid; gap: 12px; margin-top: 16px; }
+      .row { display: grid; grid-template-columns: 92px 1fr 52px; gap: 10px; align-items: center; }
+      .track { height: 16px; background: rgba(255,255,255,0.08); border-radius: 999px; overflow: hidden; }
+      .fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+      .muted { color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <section class="card">
+      <div class="header">
+        <div>
+          <h1>Quarterly Signups</h1>
+          <p class="muted">Starter canvas chart pattern with a safe export button.</p>
+        </div>
+        <button id="save">Save PNG</button>
+      </div>
+      <div class="bars" id="bars"></div>
+    </section>
+    <script>
+      const data = [
+        ['Q1', 42],
+        ['Q2', 57],
+        ['Q3', 33],
+        ['Q4', 71],
+      ];
+      const max = Math.max(...data.map(([, value]) => value));
+      const bars = document.getElementById('bars');
+      for (const [label, value] of data) {
+        const row = document.createElement('div');
+        row.className = 'row';
+        row.innerHTML = '<strong>' + label + '</strong><div class="track"><div class="fill" style="width:' + ((value / max) * 100).toFixed(2) + '%"></div></div><span>' + value + '</span>';
+        bars.appendChild(row);
+      }
+
+      document.getElementById('save').addEventListener('click', async () => {
+        const svg = `
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520">
+  <rect width="100%" height="100%" fill="#081119" />
+  <text x="48" y="64" fill="#eff8ff" font-size="34" font-family="Arial">Quarterly Signups</text>
+  ${data.map(([label, value], index) => {
+    const width = Math.round((value / max) * 620);
+    const y = 120 + index * 86;
+    return `<text x="48" y="${y + 22}" fill="#9fb6c7" font-size="20" font-family="Arial">${label}</text><rect x="150" y="${y}" width="640" height="32" rx="16" fill="rgba(255,255,255,0.08)" /><rect x="150" y="${y}" width="${width}" height="32" rx="16" fill="#7dd3fc" /><text x="${810}" y="${y + 23}" fill="#eff8ff" font-size="18" font-family="Arial">${value}</text>`;
+  }).join('')}
+</svg>`;
+        const blob = new Blob([svg], { type: 'image/svg+xml' });
+        const reader = new FileReader();
+        reader.onload = () => {
+          const content = String(reader.result || '').split(',')[1] || '';
+          window.parent.postMessage({
+            type: 'canvas.saveFile',
+            suggestedName: 'quarterly-signups.svg',
+            mimeType: 'image/svg+xml',
+            encoding: 'base64',
+            content,
+          }, '*');
+        };
+        reader.readAsDataURL(blob);
+      });
+    </script>
+  </body>
+</html>

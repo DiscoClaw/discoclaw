@@ -351,6 +351,30 @@ describe('parseDiscordActions', () => {
     expect(strippedUnrecognizedTypes).toEqual(['voiceLeave']);
   });
 
+  it('includes launchCanvas when canvas flag is true and strips it when disabled', () => {
+    const input = '<discord-action>{"type":"launchCanvas","title":"Chart","content":"<!doctype html><html><body>chart</body></html>"}</discord-action>';
+    const enabled = parseDiscordActions(input, { ...ALL_FLAGS, canvas: true });
+    expect(enabled.actions).toEqual([{
+      type: 'launchCanvas',
+      title: 'Chart',
+      content: '<!doctype html><html><body>chart</body></html>',
+    }]);
+
+    const disabled = parseDiscordActions(input, { ...ALL_FLAGS, canvas: false });
+    expect(disabled.actions).toEqual([]);
+    expect(disabled.strippedUnrecognizedTypes).toEqual(['launchCanvas']);
+  });
+
+  it('parses launchCanvas built-in app requests when canvas is enabled', () => {
+    const input = '<discord-action>{"type":"launchCanvas","title":"Dashboard","app":"dashboard"}</discord-action>';
+    const enabled = parseDiscordActions(input, { ...ALL_FLAGS, canvas: true });
+    expect(enabled.actions).toEqual([{
+      type: 'launchCanvas',
+      title: 'Dashboard',
+      app: 'dashboard',
+    }]);
+  });
+
   it('keeps allowlisted action types when allowedActionTypes is provided', () => {
     const input = '<discord-action>{"type":"channelList"}</discord-action>';
     const { actions, strippedUnrecognizedTypes } = parseDiscordActions(input, ALL_FLAGS, ['channelList']);
@@ -410,6 +434,7 @@ describe('withoutRequesterGatedActionFlags', () => {
       config: true,
       defer: true,
       loop: true,
+      canvas: true,
       imagegen: true,
       voice: true,
       spawn: true,
@@ -429,6 +454,7 @@ describe('withoutRequesterGatedActionFlags', () => {
       config: false,
       defer: true,
       loop: true,
+      canvas: false,
       imagegen: true,
       voice: true,
       spawn: true,
@@ -680,6 +706,26 @@ describe('executeDiscordActions', () => {
     expect(results[0].error).toContain('Setup walkthrough');
     expect(results[0].error).toContain('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1');
     expect(results[0].error).toContain('!models help');
+  });
+
+  it('returns canvas setup stub for interactive manual/follow-up calls when canvasCtx is absent', async () => {
+    const guild = makeMockGuild([]);
+    const results = await executeDiscordActions(
+      [{ type: 'launchCanvas', title: 'Chart', content: '<!doctype html><html><body>chart</body></html>' } as any],
+      {
+        ...makeCtx(guild),
+        confirmation: {
+          mode: 'interactive',
+          sessionKey: 'discord:channel:test-channel',
+          userId: 'user-1',
+        },
+      },
+    );
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(false);
+    if (results[0].ok) throw new Error('unexpected ok result');
+    expect(results[0].error).toContain('Canvas Activities are available in Discord actions');
+    expect(results[0].error).toContain('Developer Portal');
   });
 
   it('keeps the raw imagegen not-configured error for automated callers when imagegenCtx is absent', async () => {
@@ -1053,6 +1099,7 @@ describe('buildTieredDiscordActionsPromptSection', () => {
     memory: true,
     config: true,
     defer: true,
+    canvas: true,
     imagegen: true,
     voice: true,
     spawn: true,
@@ -1134,6 +1181,20 @@ describe('buildTieredDiscordActionsPromptSection', () => {
       expect(selection.includedCategories).toContain('imagegen');
       expect(selection.prompt).toContain('### Image Generation');
     }
+  });
+
+  it('routes interactive artifact requests into the canvas category', () => {
+    const selection = buildTieredDiscordActionsPromptSection(TIER_FLAGS, 'ClawBot', {
+      channelName: 'general',
+      channelContextPath: null,
+      isThread: false,
+      userText: 'Show me an interactive chart in a Discord activity canvas',
+    });
+
+    expect(selection.keywordHits).toContain('canvas');
+    expect(selection.tierBuckets.keywordTriggered).toContain('canvas');
+    expect(selection.includedCategories).toContain('canvas');
+    expect(selection.prompt).toContain('### Canvas Activities');
   });
 
   it('does not route ambiguous non-image creation requests into imagegen', () => {

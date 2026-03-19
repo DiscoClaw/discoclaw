@@ -32,6 +32,8 @@ import { resolveDefaultModel } from './actions-imagegen.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 import type { VoiceContext } from './actions-voice.js';
 import type { SpawnContext } from './actions-spawn.js';
+import type { CanvasContext } from '../canvas/canvas-action.js';
+import { shouldCanvasPromptBeSurfaced } from '../canvas/canvas-action.js';
 import { autoImplementForgePlan } from './forge-auto-implement.js';
 import type { ForgeAutoImplementDeps } from './forge-auto-implement.js';
 import type { LoggerLike } from '../logging/logger-like.js';
@@ -248,6 +250,7 @@ export type BotParams = {
   discordActionsConfig?: boolean;
   discordActionsDefer?: boolean;
   discordActionsLoop?: boolean;
+  canvasCtx?: CanvasContext;
   discordActionsImagegen?: boolean;
   discordActionsVoice?: boolean;
   discordActionsSpawn?: boolean;
@@ -757,6 +760,40 @@ function formatBatchedUserMessages(msgs: CoordinatorMessage[]): string {
   return `---\nUser messages (${msgs.length}, respond to all):\n${items}`;
 }
 
+function buildActionSelectionUserText(msgs: CoordinatorMessage[]): string {
+  const parts: string[] = [];
+
+  for (const msg of msgs) {
+    const content = String(msg.content ?? '').trim();
+    if (content) parts.push(content);
+
+    const attachmentNames = msg.attachments
+      ? [...msg.attachments.values()]
+        .map((attachment) => String(attachment.name ?? '').trim())
+        .filter((name) => name.length > 0)
+      : [];
+    if (attachmentNames.length > 0) {
+      parts.push(`Attachments: ${attachmentNames.join(', ')}`);
+    }
+
+    if (Array.isArray(msg.embeds) && msg.embeds.length > 0) {
+      const embedInfos = msg.embeds.map((embed) => {
+        if (!embed || typeof embed !== 'object') return '(embed)';
+        const candidate = embed as { title?: unknown; description?: unknown; url?: unknown };
+        const fields = [
+          typeof candidate.title === 'string' ? candidate.title : '',
+          typeof candidate.description === 'string' ? candidate.description : '',
+          typeof candidate.url === 'string' ? candidate.url : '',
+        ].filter((value) => value.trim().length > 0);
+        return fields.join(' ') || '(embed)';
+      });
+      parts.push(`Embeds: ${embedInfos.join(', ')}`);
+    }
+  }
+
+  return parts.join('\n\n');
+}
+
 function isQueueLevelCommand(m: CoordinatorMessage, params: Omit<BotParams, 'token'>): boolean {
   const content = String(m.content ?? '');
   if (params.memoryCommandsEnabled && parseMemoryCommand(content)) return true;
@@ -871,6 +908,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       if (params.statusCommandContext) params.statusCommandContext.lastMessageAt.current = Date.now();
 
       const isDm = msg.guildId == null;
+      let userTextForActionSelection = buildActionSelectionUserText([msg]);
       // Manual user turns should always advertise imagegen; execution still
       // gates on imagegenCtx and returns the interactive setup stub when absent.
       const actionFlags: ActionCategoryFlags = {
@@ -888,6 +926,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         config: params.discordActionsConfig ?? false,
         defer: !isDm && (params.discordActionsDefer ?? false),
         loop: !isDm && (params.discordActionsLoop ?? false),
+        canvas: !isDm && shouldCanvasPromptBeSurfaced(params.canvasCtx, userTextForActionSelection),
         imagegen: !isBotMessage || (params.discordActionsImagegen ?? false),
         voice: params.discordActionsVoice ?? false,
         spawn: params.discordActionsSpawn ?? false,
@@ -902,6 +941,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         actionFlags.config = false;
         actionFlags.defer = false;
         actionFlags.loop = false;
+        actionFlags.canvas = false;
         actionFlags.botProfile = false;
         actionFlags.crons = false;
         actionFlags.tasks = false;
@@ -1660,6 +1700,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         }
         const activeMsg = batch[batch.length - 1];
         const isBatch = batch.length > 1;
+        userTextForActionSelection = buildActionSelectionUserText(batch);
+        actionFlags.canvas = !isBotMessage && !isDm && shouldCanvasPromptBeSurfaced(params.canvasCtx, userTextForActionSelection);
         const disposePendingChannel = markChannelPending(msg.channelId);
 
         let reply: ReplyTarget | null = null;
@@ -2828,6 +2870,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               planCtx: params.planCtx,
               memoryCtx: perMessageMemoryCtx,
               configCtx: params.configCtx,
+              canvasCtx: params.canvasCtx,
               imagegenCtx: params.imagegenCtx,
               voiceCtx: params.voiceCtx,
               spawnCtx: params.spawnCtx,
@@ -2868,7 +2911,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             messageId: reply.id,
             sessionKey,
             stillRunningDelayMs: params.longRunStillRunningDelayMs,
-            notifyOnCompletion: false,
+            notifyOnCompletion: true,
             log: params.log,
             flow: 'message',
           });
@@ -3112,7 +3155,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 channelName: channelCtx.channelName ?? undefined,
                 channelContextPath: channelCtx.contextPath,
                 isThread,
-                userText: batch.map((m) => String(m.content ?? '')).join(' '),
+                userText: userTextForActionSelection,
+                canvasWriteBridgeEnabled: params.canvasCtx?.writeBridgeEnabled,
                 imagegenDefaultModel: params.imagegenCtx ? resolveDefaultModel(params.imagegenCtx) : undefined,
               },
             );
@@ -3986,6 +4030,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     planCtx: params.planCtx,
                     memoryCtx: perMessageMemoryCtx,
                     configCtx: params.configCtx,
+                    canvasCtx: params.canvasCtx,
                     imagegenCtx: params.imagegenCtx,
                     voiceCtx: params.voiceCtx,
                     spawnCtx: params.spawnCtx,
@@ -4134,6 +4179,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const followUpActionSection = buildTieredDiscordActionsPromptSection(
                   actionFlags,
                   params.botDisplayName,
+                  {
+                    canvasWriteBridgeEnabled: params.canvasCtx?.writeBridgeEnabled,
+                    imagegenDefaultModel: params.imagegenCtx ? resolveDefaultModel(params.imagegenCtx) : undefined,
+                  },
                 );
                 currentPrompt += '\n\n---\n' + followUpActionSection.prompt;
                 const pendingLine = buildFollowUpLifecycleLine(token, 'pending');
