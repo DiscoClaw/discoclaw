@@ -364,29 +364,6 @@ Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DEEPGRAM_STT_MODEL
 
 ---
 
-## 24. Self-Improvement Harness (`src/self-improve/`)
-
-Iterative instruction-tuning harness. Loads frozen test cases (prompt + expected-action pairs), runs them through a runtime adapter, scores actual vs expected actions, and optionally promotes mutations that improve scores. Supports both random structural mutations and AI-guided mutations (LLM-targeted edits informed by failure analysis). Invoked via CLI.
-
-**CLI usage:** `npx tsx src/self-improve/cli.ts --target workspace/AGENTS.md [--suite <dir>] [--iterations N] [--dry-run] [--baseline-only] [--ai-mutate] [--mutator-model <id>] [--model <id>] [--adapter claude_code]`
-
-| Component | File(s) | Status |
-|-----------|---------|--------|
-| Shared types (`FrozenTestCase`, `Mutation`, `RunResult`, `ScoreResult`, `Ledger`) | `src/self-improve/types.ts` | **done** |
-| Loader (reads JSON fixture files from a suite directory, validates shape, deduplicates IDs) | `src/self-improve/loader.ts`, `src/self-improve/loader.test.ts` | **done** |
-| Mutator (applies line-level insert/delete/replace/swap ops to instruction text) | `src/self-improve/mutator.ts`, `src/self-improve/mutator.test.ts` | **done** |
-| AI mutator (sends failure details + current instructions to an LLM, gets back targeted insert/delete/replace ops; falls back to structural mutations on API failure) | `src/self-improve/ai-mutator.ts`, `src/self-improve/ai-mutator.test.ts` | **done** |
-| Scorer (greedy best-match pairing of expected vs actual actions, type + param weighted scoring) | `src/self-improve/scorer.ts`, `src/self-improve/scorer.test.ts` | **done** |
-| Runner (invokes a `RuntimeAdapter` with instructions + test-case prompt, extracts actions) | `src/self-improve/runner.ts` | **done** |
-| Keeper (JSON ledger for best score, atomic promote-on-improvement) | `src/self-improve/keeper.ts` | **done** |
-| Reporter (console table + summary formatting for CLI output) | `src/self-improve/reporter.ts` | **done** |
-| CLI entry point (wires loader → runner → scorer → keeper → reporter into iterative loop) | `src/self-improve/cli.ts` | **done** |
-| Fixture validation tests | `src/self-improve/fixtures.test.ts` | **done** |
-
-**Test suites:** 51 frozen test cases across 19 fixture files in `test-suites/action-compliance/` covering channels, config, crons, deferred, events, guardrails, guild, memory, messaging, misc, moderation, multi-action, plans, reaction-prompts, tasks, voice, autonomy, response-quality, and edge-cases (injection attempts, negation, hypotheticals, urgency bypass).
-
----
-
 ## MVP Gaps (what's left)
 
 ### Must-have for MVP
