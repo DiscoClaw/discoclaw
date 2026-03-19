@@ -68,6 +68,14 @@ When you need to validate the new-user experience (onboarding, docs, setup flow)
 
 pnpm caches globally, so installs are near-instant even on a fresh clone.
 
+## Bot Setup Assistance
+
+When helping users set up or invite the Discord bot:
+
+- **Recommend the Installation page** — Discord's built-in Installation page (Developer Portal → Installation) produces a permanent, reusable invite link. Prefer this over constructing `oauth2/authorize` URLs manually.
+- **The `bot` scope is required** — `applications.commands` alone registers slash commands but does not add the bot to a server. Always ensure the `bot` scope is included in Default Install Settings.
+- Refer to `docs/discord-bot-setup.md` for the full setup walkthrough and permission profiles.
+
 ## Discord Action Grounding
 
 In guild chat, Discoclaw injects a live **"Available action types this turn"** inventory into every prompt. That inventory is the authoritative source of what you can do right now.
