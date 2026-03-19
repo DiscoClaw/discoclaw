@@ -187,9 +187,7 @@ If you skip this section, the bot will still work normally — canvas launch but
 
 ### Prerequisites
 
-1. **Enable Activities** — In the Developer Portal, open your application → **Activities** → toggle Activities on.
-
-2. **Add a URL Mapping** — Still in the Activities section, add a URL Mapping:
+1. **Add a URL Mapping** — In the Developer Portal, open your application → **Activities** → add a URL Mapping:
    - **Prefix:** `/`
    - **Target:** your public HTTPS endpoint that reaches the canvas server (default `127.0.0.1:9402`)
 
@@ -199,6 +197,10 @@ If you skip this section, the bot will still work normally — canvas launch but
    - **Caddy reverse proxy**: see `docs/webhook-exposure.md` for a similar pattern
 
    Use the resulting public URL as the URL Mapping target.
+
+2. **Enable Activities** — Still in the Activities section, toggle Activities on. (Discord requires the URL Mapping before it allows enabling Activities.)
+
+   Optionally, check **iOS** and **Android** under **Supported Platforms** on the same page if you want canvas to work on mobile Discord. Only **Web** is enabled by default.
 
 That's it. No OAuth client secret or redirect URI is required — DiscoClaw uses pre-authenticated activity context by default.
 
