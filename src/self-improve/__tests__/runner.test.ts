@@ -150,6 +150,23 @@ describe('runSuite', () => {
     expect(results).toEqual([]);
     expect(actionsMap.size).toBe(0);
   });
+
+  it('calls onCaseResult after each case', async () => {
+    const adapter = mockAdapter([
+      { type: 'text_final', text: '<discord-action>{"type":"channelList"}</discord-action>' },
+      { type: 'done' },
+    ]);
+    const caseResults: Array<{ id: string; actions: number }> = [];
+    const { results } = await runSuite(cases, 'instructions', adapter, {
+      onCaseResult: async (tc, result) => {
+        caseResults.push({ id: tc.id, actions: result.actions.length });
+      },
+    });
+    expect(results).toHaveLength(2);
+    expect(caseResults).toHaveLength(2);
+    expect(caseResults[0].id).toBe('suite-1');
+    expect(caseResults[1].id).toBe('suite-2');
+  });
 });
 
 // ── runSuite concurrency ────────────────────────────────────────

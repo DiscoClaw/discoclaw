@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { loadLedger, saveLedger, shouldPromote, promote } from '../keeper.js';
-import type { Ledger } from '../types.js';
+import { loadLedger, saveLedger, shouldPromote, promote, loadCheckpoint, saveCheckpoint, clearCheckpoint } from '../keeper.js';
+import type { Ledger, HarnessCheckpoint } from '../types.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -150,5 +150,69 @@ describe('promote', () => {
     const files = await readdir(testDir);
     const stagingFiles = files.filter((f) => f.startsWith('.self-improve-staging-'));
     expect(stagingFiles).toHaveLength(0);
+  });
+});
+
+// ── Checkpoint I/O ──────────────────────────────────────────────────
+
+describe('loadCheckpoint', () => {
+  it('returns null when file does not exist', async () => {
+    const result = await loadCheckpoint(join(testDir, 'missing.json'));
+    expect(result).toBeNull();
+  });
+
+  it('returns null for malformed JSON', async () => {
+    await writeFile(join(testDir, 'bad.json'), 'not json');
+    const result = await loadCheckpoint(join(testDir, 'bad.json'));
+    expect(result).toBeNull();
+  });
+
+  it('returns null for invalid schema', async () => {
+    await writeFile(join(testDir, 'bad.json'), JSON.stringify({ phase: 123 }));
+    const result = await loadCheckpoint(join(testDir, 'bad.json'));
+    expect(result).toBeNull();
+  });
+
+  it('loads a valid checkpoint', async () => {
+    const data: HarnessCheckpoint = {
+      phase: 'baseline',
+      caseSetHash: 'abc123',
+      completed: {
+        'case-1': { actions: [{ type: 'channelList' }], durationMs: 500 },
+      },
+    };
+    const path = join(testDir, 'checkpoint.json');
+    await writeFile(path, JSON.stringify(data));
+    const loaded = await loadCheckpoint(path);
+    expect(loaded).toEqual(data);
+  });
+});
+
+describe('saveCheckpoint / clearCheckpoint', () => {
+  it('round-trips checkpoint data', async () => {
+    const data: HarnessCheckpoint = {
+      phase: 'iteration-2',
+      caseSetHash: 'def456',
+      completed: {
+        'tc-1': { actions: [], durationMs: 100, error: 'timeout' },
+        'tc-2': { actions: [{ type: 'sendMessage' }], durationMs: 200 },
+      },
+    };
+    const path = join(testDir, 'cp.json');
+    await saveCheckpoint(path, data);
+    const loaded = await loadCheckpoint(path);
+    expect(loaded).toEqual(data);
+  });
+
+  it('clearCheckpoint removes the file', async () => {
+    const path = join(testDir, 'cp.json');
+    await writeFile(path, '{}');
+    await clearCheckpoint(path);
+    const result = await loadCheckpoint(path);
+    expect(result).toBeNull();
+  });
+
+  it('clearCheckpoint is safe on missing files', async () => {
+    await expect(clearCheckpoint(join(testDir, 'nope.json'))).resolves.not.toThrow();
   });
 });
