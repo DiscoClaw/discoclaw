@@ -15,11 +15,13 @@ export function renderCanvasShellHtml(opts: {
   discordClientId: string;
   writeBridgeEnabled: boolean;
   defaultLandingMessage: string;
+  authMode?: 'oauth' | 'preauth';
 }): string {
   const config = escapeInlineScriptJson({
     clientId: opts.discordClientId,
     writeBridgeEnabled: opts.writeBridgeEnabled,
     defaultLandingMessage: opts.defaultLandingMessage,
+    authMode: opts.authMode ?? 'oauth',
   });
 
   return `<!doctype html>
@@ -481,24 +483,33 @@ export function renderCanvasShellHtml(opts: {
           discordSdk = shouldUseMockSdk() ? createMockSdk() : new DiscordSDK(config.clientId);
           await discordSdk.ready();
 
-          setStatus('Authorizing…');
-          const { code } = await discordSdk.commands.authorize({
-            client_id: config.clientId,
-            response_type: 'code',
-            state: 'discoclaw-canvas',
-            prompt: 'none',
-            scope: ['identify', 'guilds', 'applications.commands'],
-          });
-
-          const tokenResponse = await postJson('/api/token', { code });
-          authToken = tokenResponse.authToken || '';
-
-          if (!shouldUseMockSdk()) {
-            await discordSdk.commands.authenticate({ access_token: tokenResponse.access_token });
-          }
-
           activityChannelId = discordSdk.channelId || '';
           activityGuildId = discordSdk.guildId || '';
+
+          if (config.authMode === 'preauth') {
+            setStatus('Authenticating…');
+            const tokenResponse = await postJson('/api/token', {
+              channelId: activityChannelId,
+              guildId: activityGuildId,
+            });
+            authToken = tokenResponse.authToken || '';
+          } else {
+            setStatus('Authorizing…');
+            const { code } = await discordSdk.commands.authorize({
+              client_id: config.clientId,
+              response_type: 'code',
+              state: 'discoclaw-canvas',
+              prompt: 'none',
+              scope: ['identify', 'guilds', 'applications.commands'],
+            });
+
+            const tokenResponse = await postJson('/api/token', { code });
+            authToken = tokenResponse.authToken || '';
+
+            if (!shouldUseMockSdk()) {
+              await discordSdk.commands.authenticate({ access_token: tokenResponse.access_token });
+            }
+          }
           const params = buildActivityContextParams();
 
           setStatus('Resolving launch…');

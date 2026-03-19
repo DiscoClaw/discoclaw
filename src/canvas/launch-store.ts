@@ -125,6 +125,44 @@ export class LaunchStore {
     };
   }
 
+  peekByActivity(channelId: string, guildId: string | null): { userId: string } | null {
+    this.purgeExpiredPending();
+    const normalizedGuildId = guildId ?? '';
+    for (const [key] of this.pending.entries()) {
+      const parts = key.split(':');
+      const keyChannelId = parts[1];
+      const keyGuildId = parts[2] ?? '';
+      if (keyChannelId === channelId && keyGuildId === normalizedGuildId) {
+        return { userId: parts[0] };
+      }
+    }
+    return null;
+  }
+
+  resolveByActivity(channelId: string, guildId: string | null): (LaunchResolution & { userId: string }) | null {
+    this.purgeExpiredPending();
+    const normalizedGuildId = guildId ?? '';
+    for (const [key, entry] of this.pending.entries()) {
+      // Key format: "userId:channelId:guildId"
+      const parts = key.split(':');
+      const keyChannelId = parts[1];
+      const keyGuildId = parts[2] ?? '';
+      if (keyChannelId === channelId && keyGuildId === normalizedGuildId) {
+        const keyUserId = parts[0];
+        this.pending.delete(key);
+        const context: CanvasLaunchContext = { userId: keyUserId, channelId, guildId };
+        const boundSessionToken = this.createBoundSessionToken(context, entry.target);
+        return {
+          target: entry.target,
+          boundSessionToken,
+          source: 'pending',
+          userId: keyUserId,
+        };
+      }
+    }
+    return null;
+  }
+
   refreshBoundSession(boundSessionToken: string, context?: CanvasLaunchContext): LaunchResolution | null {
     const bound = this.verifyBoundSession(boundSessionToken, context);
     if (!bound) return null;

@@ -77,7 +77,6 @@ export function buildCanvasLocalReadiness(opts: {
 }): CanvasLocalReadiness {
   const missingChecks: string[] = [];
   if (!opts.discordClientId) missingChecks.push('Discord application client ID is unavailable.');
-  if (!opts.discordActivityClientSecret) missingChecks.push('DISCORD_ACTIVITY_CLIENT_SECRET is not set.');
   if (!opts.serverListening) missingChecks.push('Canvas server is not listening.');
   if (!opts.artifactRoot) missingChecks.push('Canvas artifact root could not be resolved.');
   if (!opts.exportRoot) missingChecks.push('Canvas export root could not be resolved.');
@@ -303,6 +302,7 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
           discordClientId: opts.discordClientId ?? '',
           writeBridgeEnabled: opts.writeBridgeEnabled,
           defaultLandingMessage: DEFAULT_LANDING_MESSAGE,
+          authMode: opts.discordActivityClientSecret ? 'oauth' : 'preauth',
         });
         respondHtml(res, 200, body, {
           'Content-Security-Policy': buildShellCsp(nonce),
@@ -336,6 +336,27 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
       if ((req.method ?? 'POST') === 'POST' && pathname === '/api/token') {
         const body = await parseJsonBody(req, MAX_JSON_BODY_BYTES);
         const code = typeof body.code === 'string' ? body.code.trim() : '';
+
+        // Pre-auth branch: authenticate by activity context when no OAuth secret is configured.
+        // Peeks at the pending entry without consuming it so /api/launches/current can resolve it later.
+        const preauthChannelId = typeof body.channelId === 'string' ? body.channelId.trim() : '';
+        const preauthGuildId = typeof body.guildId === 'string' ? body.guildId.trim() : '';
+        if (!code && preauthChannelId) {
+          const pending = opts.launchStore.peekByActivity(
+            preauthChannelId,
+            preauthGuildId || null,
+          );
+          if (!pending || !requireAllowlistedUser(opts.allowUserIds, pending.userId)) {
+            respondJson(res, 403, { error: 'No authorized pending launch for this activity context' });
+            return;
+          }
+          respondJson(res, 200, {
+            authToken: buildAuthClaims(authSigner, pending.userId, authSessionTtlMs),
+            user: { id: pending.userId },
+          });
+          return;
+        }
+
         if (!code) {
           respondJson(res, 400, { error: 'Missing OAuth code' });
           return;
