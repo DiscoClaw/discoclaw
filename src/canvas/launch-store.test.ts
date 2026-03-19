@@ -92,6 +92,25 @@ describe('LaunchStore', () => {
     expect(second.parseLaunchRef(appRef)).toEqual({ type: 'app', appName: 'dashboard' });
   });
 
+  it('peeks at pending entries by activity context without consuming them', () => {
+    const store = new LaunchStore({
+      pendingTtlMs: 120_000,
+      boundSessionTtlMs: 600_000,
+    });
+    const ctx = { userId: 'user-1', channelId: 'channel-1', guildId: 'guild-1' };
+
+    expect(store.peekByActivity('channel-1', 'guild-1')).toBeNull();
+
+    store.registerPending(ctx, 'artifact-1');
+    const peeked = store.peekByActivity('channel-1', 'guild-1');
+    expect(peeked).toEqual({ userId: 'user-1' });
+
+    // Peek does not consume — hasPending and resolveCurrent still work
+    expect(store.hasPending(ctx)).toBe(true);
+    const resolved = store.resolveCurrent(ctx);
+    expect(resolved?.target).toEqual({ type: 'artifact', artifactId: 'artifact-1' });
+  });
+
   it('prefers a fresh pending launch over an older bound session in the same context', () => {
     const store = new LaunchStore({
       pendingTtlMs: 120_000,

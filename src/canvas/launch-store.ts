@@ -125,6 +125,20 @@ export class LaunchStore {
     };
   }
 
+  peekByActivity(channelId: string, guildId: string | null): { userId: string } | null {
+    this.purgeExpiredPending();
+    const normalizedGuildId = guildId ?? '';
+    for (const [key] of this.pending.entries()) {
+      const parts = key.split(':');
+      const keyChannelId = parts[1];
+      const keyGuildId = parts[2] ?? '';
+      if (keyChannelId === channelId && keyGuildId === normalizedGuildId) {
+        return { userId: parts[0] };
+      }
+    }
+    return null;
+  }
+
   resolveByActivity(channelId: string, guildId: string | null): (LaunchResolution & { userId: string }) | null {
     this.purgeExpiredPending();
     const normalizedGuildId = guildId ?? '';

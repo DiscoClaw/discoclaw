@@ -27,6 +27,7 @@ async function startHarness(input?: {
   writeBridgeEnabled?: boolean;
   allowMockAuth?: boolean;
   fetchImpl?: typeof fetch;
+  discordActivityClientSecret?: string;
 }) {
   const dir = await makeTempDir('discoclaw-canvas-server-');
   const artifactStore = new ArtifactStore({
@@ -70,7 +71,7 @@ async function startHarness(input?: {
     host: '127.0.0.1',
     port: 0,
     discordClientId: 'test-client',
-    discordActivityClientSecret: 'test-secret',
+    discordActivityClientSecret: input?.discordActivityClientSecret ?? 'test-secret',
     allowUserIds: new Set(['user-1']),
     artifactStore,
     launchStore,
@@ -356,5 +357,62 @@ describe('Canvas server', () => {
       },
     );
     expect(disabledSave.response.status).toBe(403);
+  });
+
+  it('authenticates via preauth (no OAuth secret) and resolves pending launch', async () => {
+    const harness = await startHarness({ discordActivityClientSecret: '' });
+    const artifact = await harness.artifactStore.createArtifact({
+      title: 'Preauth Demo',
+      content: '<!doctype html><html><body>Preauth</body></html>',
+    });
+    harness.launchStore.registerPending(
+      { userId: 'user-1', channelId: 'channel-1', guildId: 'guild-1' },
+      artifact.id,
+    );
+
+    // Preauth: POST /api/token with channelId/guildId instead of code
+    const tokenResult = await postJson(harness.baseUrl, '/api/token', {
+      channelId: 'channel-1',
+      guildId: 'guild-1',
+    });
+    expect(tokenResult.response.status).toBe(200);
+    expect(typeof tokenResult.json.authToken).toBe('string');
+    expect(tokenResult.json.user).toEqual({ id: 'user-1' });
+
+    const authToken = String(tokenResult.json.authToken);
+
+    // The pending entry must still be available for /api/launches/current
+    const launch = await getJson(
+      harness.baseUrl,
+      '/api/launches/current?channelId=channel-1&guildId=guild-1',
+      { Authorization: `Bearer ${authToken}` },
+    );
+    expect(launch.response.status).toBe(200);
+    expect(launch.json.target).toEqual({ type: 'artifact', id: artifact.id, title: 'Preauth Demo' });
+    expect(launch.json.source).toBe('pending');
+
+    // Verify the artifact itself is accessible
+    const boundSessionToken = String(launch.json.boundSessionToken);
+    const artifactResponse = await getJson(
+      harness.baseUrl,
+      `/api/artifacts/${artifact.id}`,
+      {
+        Authorization: `Bearer ${authToken}`,
+        'X-Canvas-Bound-Session': boundSessionToken,
+      },
+    );
+    expect(artifactResponse.response.status).toBe(200);
+    expect(artifactResponse.json.content).toContain('Preauth');
+  });
+
+  it('rejects preauth when no pending launch matches the activity context', async () => {
+    const harness = await startHarness({ discordActivityClientSecret: '' });
+
+    const tokenResult = await postJson(harness.baseUrl, '/api/token', {
+      channelId: 'no-such-channel',
+      guildId: 'no-such-guild',
+    });
+    expect(tokenResult.response.status).toBe(403);
+    expect(tokenResult.json.error).toContain('No authorized pending launch');
   });
 });

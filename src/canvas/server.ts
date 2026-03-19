@@ -337,21 +337,22 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
         const body = await parseJsonBody(req, MAX_JSON_BODY_BYTES);
         const code = typeof body.code === 'string' ? body.code.trim() : '';
 
-        // Pre-auth branch: resolve by activity context when no OAuth code is provided
+        // Pre-auth branch: authenticate by activity context when no OAuth secret is configured.
+        // Peeks at the pending entry without consuming it so /api/launches/current can resolve it later.
         const preauthChannelId = typeof body.channelId === 'string' ? body.channelId.trim() : '';
         const preauthGuildId = typeof body.guildId === 'string' ? body.guildId.trim() : '';
         if (!code && preauthChannelId) {
-          const resolved = opts.launchStore.resolveByActivity(
+          const pending = opts.launchStore.peekByActivity(
             preauthChannelId,
             preauthGuildId || null,
           );
-          if (!resolved || !requireAllowlistedUser(opts.allowUserIds, resolved.userId)) {
+          if (!pending || !requireAllowlistedUser(opts.allowUserIds, pending.userId)) {
             respondJson(res, 403, { error: 'No authorized pending launch for this activity context' });
             return;
           }
           respondJson(res, 200, {
-            authToken: buildAuthClaims(authSigner, resolved.userId, authSessionTtlMs),
-            user: { id: resolved.userId },
+            authToken: buildAuthClaims(authSigner, pending.userId, authSessionTtlMs),
+            user: { id: pending.userId },
           });
           return;
         }
