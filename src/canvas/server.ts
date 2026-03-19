@@ -224,7 +224,7 @@ function buildShellCsp(nonce: string): string {
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
     "connect-src 'self'",
-    "frame-src 'self'",
+    "frame-src 'self' blob:",
     "object-src 'none'",
     "base-uri 'none'",
     "frame-ancestors 'self' https://discord.com https://*.discord.com https://*.discordsays.com",
@@ -277,6 +277,11 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
   const server = http.createServer(async (req, res) => {
     const requestUrl = new URL(req.url ?? '/', 'http://127.0.0.1');
     const pathname = requestUrl.pathname;
+
+    opts.log?.info(
+      { method: req.method, pathname, userAgent: req.headers['user-agent'] },
+      'canvas:request',
+    );
 
     try {
       if ((req.method ?? 'GET') === 'GET' && pathname === '/healthz') {
