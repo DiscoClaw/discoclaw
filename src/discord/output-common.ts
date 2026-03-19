@@ -257,7 +257,7 @@ const DISABLED_TYPE_HELP: Record<string, string> = {
   botSetActivity: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE=1` in .env.',
   botSetNickname: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_BOT_PROFILE=1` in .env.',
   // Canvas Activities — requires DISCOCLAW_CANVAS_ENABLED plus Discord Activity setup.
-  launchCanvas: 'To enable: set `DISCOCLAW_CANVAS_ENABLED=1`, then complete Discord Activity setup (redirect URI, URL Mapping, public HTTPS exposure). `DISCORD_ACTIVITY_CLIENT_SECRET` is optional — without it, OAuth is skipped and the user is verified by the button-click allowlist instead.',
+  launchCanvas: 'To enable: set `DISCOCLAW_CANVAS_ENABLED=1`, then complete Discord Activity setup (URL Mapping + enable Activities in Developer Portal, public HTTPS exposure). No redirect URI or client secret needed — DiscoClaw uses pre-authenticated activity context by default.',
   // Polls — requires DISCOCLAW_DISCORD_ACTIONS_POLLS.
   poll: 'To enable: set `DISCOCLAW_DISCORD_ACTIONS_POLLS=1` in .env.',
   // Forge — requires DISCOCLAW_DISCORD_ACTIONS_FORGE + DISCOCLAW_FORGE_COMMANDS_ENABLED.
