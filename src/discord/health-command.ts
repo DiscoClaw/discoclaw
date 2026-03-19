@@ -30,6 +30,9 @@ export type HealthConfigSnapshot = {
   tasksSyncDeferredRetryDelayMs: number;
   requireChannelContext: boolean;
   autoIndexChannelContext: boolean;
+  canvasEnabled?: boolean;
+  canvasServerListening?: boolean;
+  canvasLocallyReady?: boolean;
 };
 
 export function parseDoctorCommand(content: string): DoctorCommandMode | null {
@@ -149,7 +152,12 @@ export function renderHealthReport(opts: {
     const tasksActive = opts.config.tasksActive;
     const tasksEnabled = opts.config.tasksEnabled;
     const tasksState = tasksActive ? 'active' : tasksEnabled ? 'degraded' : 'off';
-    lines.push(`reactionHandler=${opts.config.reactionHandlerEnabled} reactionRemoveHandler=${opts.config.reactionRemoveHandlerEnabled} loopActions=${opts.config.loopActionsEnabled ?? false} cron=${opts.config.cronEnabled} tasks=${tasksState}`);
+    const canvasState = opts.config.canvasEnabled == null ? 'n/a'
+      : !opts.config.canvasEnabled ? 'off'
+      : opts.config.canvasLocallyReady ? 'ready'
+      : opts.config.canvasServerListening ? 'server-only'
+      : 'enabled-not-listening';
+    lines.push(`reactionHandler=${opts.config.reactionHandlerEnabled} reactionRemoveHandler=${opts.config.reactionRemoveHandlerEnabled} loopActions=${opts.config.loopActionsEnabled ?? false} cron=${opts.config.cronEnabled} tasks=${tasksState} canvas=${canvasState}`);
     if (opts.config.cronEnabled && opts.config.cronCanonicalCount != null) {
       const canonical = opts.config.cronCanonicalCount;
       const registered = opts.config.cronRegisteredCount ?? 0;
