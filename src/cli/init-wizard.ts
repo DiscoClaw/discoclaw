@@ -209,11 +209,13 @@ export async function runInitWizard(): Promise<void> {
       `  3. Open the "Bot" tab and click "Add Bot".\n` +
       `  4. Enable "Message Content Intent" under Privileged Gateway Intents.\n` +
       `  5. Click "Reset Token", copy it — you'll enter it below.\n` +
-      `  6. Invite your bot: Bot tab → OAuth2 → URL Generator\n` +
-      `     Scopes: bot   Permissions: View Channels, Send Messages,\n` +
+      `  6. Invite your bot: Installation (left sidebar) →\n` +
+      `     Set Install Link to "Discord Provided Link" →\n` +
+      `     Default Install Settings → Guild Install → add scope: bot\n` +
+      `     Permissions: View Channels, Send Messages,\n` +
       `     Read Message History, Manage Channels, Manage Threads,\n` +
       `     Send Messages in Threads\n` +
-      `     Open the generated URL and select your server.\n\n` +
+      `     Save, then open the install link and select your server.\n\n` +
       `Already have a bot? Just press Enter.\n`,
   );
 

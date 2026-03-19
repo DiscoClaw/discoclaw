@@ -24,10 +24,13 @@ Safety disclaimer:
 
 ## Invite Bot To Server
 
-Preferred: use Discord Portal OAuth2 URL Generator.
+Preferred: use the **Installation** page in the Discord Developer Portal (left sidebar → Installation → set Install Link to "Discord Provided Link" → configure Default Install Settings for Guild Install).
 
-Scopes:
-- `bot`
+Scopes (under Default Install Settings → Guild Install):
+- `bot` (required — without this scope the bot cannot join a server)
+- `applications.commands` (optional, for slash commands)
+
+The generated install link is permanent and shareable. The legacy **OAuth2 → URL Generator** still works for one-off URLs but the Installation page is simpler.
 
 Before generating an invite URL, **ask which permission profile they want**. Do not assume `minimal` unless they explicitly choose it (or they say they don’t care and you default to least-privilege).
 

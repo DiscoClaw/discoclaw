@@ -32,16 +32,25 @@ If you don't have a private Discord server yet, click the **+** button at the bo
 
 ## 2) Invite The Bot To Your Server
 
+Discord provides a built-in **Installation** page that generates an install link for you — no manual URL construction needed.
+
 In the Developer Portal:
 
-1. Go to **OAuth2** -> **URL Generator**
-2. Under **Scopes**, tick `bot` (optional: `applications.commands` for slash commands)
-3. A **Bot Permissions** grid appears below — tick the checkboxes for the permission level you want (see profiles below)
-4. Copy the generated URL at the bottom, open it in your browser, pick your server, and authorize
+1. Go to **Installation** (left sidebar)
+2. Set **Install Link** to **Discord Provided Link**
+3. Under **Default Install Settings**, click **Add** next to Guild Install
+4. Add the scope **`bot`** (required — without it, the bot won't join your server). Optionally add `applications.commands` for slash commands.
+5. A **Permissions** selector appears — pick the permissions for the level you want (see profiles below)
+6. **Save Changes** at the bottom of the page
+7. Copy the **Install Link** shown at the top, open it in your browser, pick your server, and authorize
+
+> **Tip:** This install link is permanent. You can share it or bookmark it. To change permissions later, update the Installation page and re-invite — existing server members get the new permissions.
+
+> **Legacy alternative:** The **OAuth2 → URL Generator** page still works if you need a one-off URL with non-default scopes or permissions, but the Installation page is simpler for most setups.
 
 ### Permission profiles (choose intentionally)
 
-These are recommended sets of Discord permissions. You pick them by ticking the matching checkboxes in the Bot Permissions grid on the OAuth2 URL Generator page. You can always re-invite the bot later with a different set.
+These are recommended sets of Discord permissions. You pick them in the Permissions selector on the Installation page's Default Install Settings. You can always re-invite the bot later with a different set.
 
 - **Administrator** (recommended for private servers)
   - Tick: `Administrator` (under General Permissions, top-left of the grid)

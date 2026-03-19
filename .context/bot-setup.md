@@ -5,7 +5,7 @@
 ## Quick reference
 
 1. **Developer Portal** → create application → Bot → enable **Message Content Intent** → copy token to `.env` (`DISCORD_TOKEN`).
-2. **OAuth2 → URL Generator** → scope `bot` → pick permissions (see permission profiles in `docs/discord-bot-setup.md`) → invite to server.
+2. **Installation page** → set Install Link to "Discord Provided Link" → under Default Install Settings, add scope `bot` and pick permissions (see permission profiles in `docs/discord-bot-setup.md`) → use the install link or "Add to Server" button to invite.
 3. **Configure `.env`**:
    - *Global install:* `discoclaw init` — wizard creates `.env` with `DISCORD_TOKEN`, `DISCORD_ALLOW_USER_IDS`, and `DISCORD_CHANNEL_IDS`.
    - *From source:* `pnpm setup` for guided configuration, or copy `.env.example` → `.env` and set `DISCORD_TOKEN`, `DISCORD_ALLOW_USER_IDS` (fail-closed if empty), `DISCORD_CHANNEL_IDS` (recommended).
