@@ -182,7 +182,7 @@ export class SubprocessTracker {
       pool.killAll();
     }
     for (const p of this.subprocesses) {
-      // Kill the entire process tree first (catches grandchildren like harness runs),
+      // Kill the entire process tree first (catches grandchildren),
       // then also signal via execa's handle as a fallback.
       if (p.pid) killProcessTree(p.pid, 'SIGKILL');
       p.kill('SIGKILL');
