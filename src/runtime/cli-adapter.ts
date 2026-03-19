@@ -525,8 +525,8 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
 
       const onAbort = () => {
         // Kill the entire process tree — not just the top-level subprocess.
-        // Without this, grandchild processes (e.g. harness spawned via Bash tool)
-        // survive and become orphans that burn API credits with no parent collecting results.
+        // Without this, grandchild processes spawned via the Bash tool
+        // survive and become orphans.
         if (subprocess.pid) killProcessTree(subprocess.pid, 'SIGKILL');
         subprocess.kill('SIGKILL');
         if (attemptSettled || finished) return;

@@ -764,8 +764,8 @@ export class LongRunningProcess {
       this.pushDoneOnce();
     }
 
-    // Kill the entire process tree so grandchild processes (e.g. harness runs
-    // spawned via the AI's Bash tool) don't survive as orphans.
+    // Kill the entire process tree so grandchild processes
+    // spawned via the AI's Bash tool don't survive as orphans.
     // Belt-and-suspenders: tree kill first, then execa's handle as fallback.
     const pid = this.subprocess?.pid;
     if (pid) killProcessTree(pid, opts.signal);
