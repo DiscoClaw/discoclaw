@@ -32,14 +32,24 @@ If you don't have a private Discord server yet, click the **+** button at the bo
 
 ## 2) Invite The Bot To Your Server
 
-Discord provides a built-in **Installation** page that generates an install link for you — no manual URL construction needed.
+The simplest way to invite the bot is the **quick invite URL** — just replace `YOUR_CLIENT_ID` with your Application ID from the Developer Portal's General Information page:
 
-In the Developer Portal:
+```
+https://discord.com/oauth2/authorize?client_id=YOUR_CLIENT_ID&scope=bot&permissions=0
+```
 
-1. Go to **Installation** (left sidebar)
+This adds the bot with the `bot` scope and no special permissions. Discord will prompt you to pick a server. You can grant additional permissions via Server Settings → Roles after the bot joins, or use the Installation page method below to bake permissions into the invite link.
+
+> **Important:** The `bot` scope is required. Using only `applications.commands` (slash commands) will not add the bot to your server — it registers commands but the bot cannot connect, read messages, or respond.
+
+### Recommended: use the Installation page
+
+For a reusable, permanent invite link with permissions pre-configured, use Discord's built-in **Installation** page:
+
+1. Go to **Installation** (left sidebar in the Developer Portal)
 2. Set **Install Link** to **Discord Provided Link**
 3. Under **Default Install Settings**, click **Add** next to Guild Install
-4. Add the scope **`bot`** (required — without it, the bot won't join your server). Optionally add `applications.commands` for slash commands.
+4. Add the scope **`bot`** (required). Optionally add `applications.commands` if you want slash commands.
 5. A **Permissions** selector appears — pick the permissions for the level you want (see profiles below)
 6. **Save Changes** at the bottom of the page
 7. Copy the **Install Link** shown at the top, open it in your browser, pick your server, and authorize
