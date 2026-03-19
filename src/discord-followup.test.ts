@@ -305,7 +305,7 @@ describe('auto-follow-up for query actions', () => {
       channelId: 'chan',
       messageId: 'reply-1',
       stillRunningDelayMs: 43210,
-      notifyOnCompletion: false,
+      notifyOnCompletion: true,
     }));
   });
 

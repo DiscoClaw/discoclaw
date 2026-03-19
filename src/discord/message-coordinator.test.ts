@@ -270,6 +270,33 @@ describe('guild-chat prompt assembly — capability-refusal grounding', () => {
 
     expect(runtime.prompt).not.toContain('Capability-refusal rule');
   });
+
+  it('includes attachment names in action-routing text so schema selection sees attachment-heavy turns', async () => {
+    const runtime = makeCaptureRuntime();
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply, {
+      content: 'Make an interactive chart from this dataset',
+      attachments: new Map([
+        ['1', {
+          url: 'https://cdn.discordapp.com/report.csv',
+          name: 'report.csv',
+          contentType: 'text/csv',
+          size: 128,
+        }],
+      ]),
+    });
+    const params = makeParams(runtime);
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+    const actionsMod = await import('./actions.js');
+    const buildTiered = vi.mocked(actionsMod.buildTieredDiscordActionsPromptSection);
+
+    await handler(msg as any);
+
+    const selectionArgs = buildTiered.mock.calls.at(-1)?.[2];
+    expect(selectionArgs?.userText).toContain('Make an interactive chart from this dataset');
+    expect(selectionArgs?.userText).toContain('report.csv');
+  });
 });
 
 // ---------------------------------------------------------------------------
