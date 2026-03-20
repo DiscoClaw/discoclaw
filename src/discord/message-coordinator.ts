@@ -111,6 +111,7 @@ import { parseTraceCommand, renderTraceDetail, renderTraceList } from './trace-c
 import { parseMcpCommand, isMcpCommandPrefix, handleMcpCommand } from './mcp-command.js';
 import type { StatusCommandContext } from './status-command.js';
 import { parseRestartCommand, handleRestartCommand } from './restart-command.js';
+import { parseBrowserCommand, handleBrowserCommand, renderBrowserHelp } from './browser-command.js';
 import { parseModelsCommand, handleModelsCommand } from './models-command.js';
 import { parseUpdateCommand, handleUpdateCommand } from './update-command.js';
 import { consumeDestructiveConfirmation } from './destructive-confirmation.js';
@@ -1181,6 +1182,25 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           mcpWarnings: params.mcpWarnings ?? 0,
         });
         await msg.reply({ content: report, allowedMentions: NO_MENTIONS });
+        return;
+      }
+
+      const browserContent = String(msg.content ?? '');
+      if (!isBotMessage && /^\s*!browser(?:\s|$)/i.test(browserContent)) {
+        const browserCmd = parseBrowserCommand(browserContent);
+        if (!browserCmd) {
+          await msg.reply({
+            content: `Unknown \`!browser\` subcommand.\n\n${renderBrowserHelp()}`,
+            allowedMentions: NO_MENTIONS,
+          });
+          return;
+        }
+
+        const response = await handleBrowserCommand(browserCmd, {
+          cwd: params.projectCwd,
+          env: process.env,
+        });
+        await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
         return;
       }
 
