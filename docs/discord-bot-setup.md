@@ -200,13 +200,20 @@ Run through this checklist in order. Each step should produce the expected outpu
 
 ## Canvas Activities (optional)
 
-Canvas lets DiscoClaw launch interactive HTML artifacts (calculators, charts, diffs, dashboards) as Discord Activities — panels that open inside the Discord client. This feature is experimental and disabled by default. Fresh installs and upgraded installs both require an explicit opt-in: set `DISCOCLAW_CANVAS_ENABLED=1` in `.env`, restart the bot, then complete the two manual steps in the Discord Developer Portal below.
+Canvas lets DiscoClaw launch interactive HTML artifacts (calculators, charts, diffs, dashboards) as Discord Activities — panels that open inside the Discord client.
+
+Start by opting in explicitly:
+- Set `DISCOCLAW_CANVAS_ENABLED=1` in `.env`.
+- Restart the bot.
+- Then complete the manual Discord setup below.
+
+Canvas is experimental and disabled by default. Fresh installs and upgraded installs both require that explicit opt-in. If you were already using canvas before this default changed, add `DISCOCLAW_CANVAS_ENABLED=1` explicitly to keep it available after upgrading.
 
 If you skip this section, the bot will still work normally without canvas. Interactive canvas launches stay unavailable until you opt in, and explicit canvas requests surface setup guidance instead of opening an Activity.
 
 ### Prerequisites
 
-1. **Add a URL Mapping** — In the Developer Portal, open your application → **Activities** → add a URL Mapping:
+1. **Add a URL Mapping manually in the Developer Portal** — In the Developer Portal, open your application → **Activities** → add a URL Mapping:
    - **Prefix:** `/`
    - **Target:** your public HTTPS endpoint that reaches the canvas server (default `127.0.0.1:9402`)
 
@@ -217,7 +224,7 @@ If you skip this section, the bot will still work normally without canvas. Inter
 
    Use the resulting public URL as the URL Mapping target.
 
-2. **Enable Activities** — Still in the Activities section, toggle Activities on. (Discord requires the URL Mapping before it allows enabling Activities.)
+2. **Enable Activities manually in the Developer Portal** — Still in the Activities section, toggle Activities on. (Discord requires the URL Mapping before it allows enabling Activities.)
 
    Optionally, check **iOS** and **Android** under **Supported Platforms** on the same page if you want canvas to work on mobile Discord. Only **Web** is enabled by default.
 
@@ -235,11 +242,17 @@ After setting `DISCOCLAW_CANVAS_ENABLED=1`, completing setup, and restarting the
 
 If the button shows "Discord rejected the Activity launch request", Activities are not enabled on the application — revisit step 1 above.
 
+### Before This Should Become Default Again
+
+- Developer Portal work is still manual. DiscoClaw can tell you what to configure, but it does not create the URL Mapping or enable Activities for you.
+- Public HTTPS exposure is still required. The local readiness checks only verify local prerequisites; Discord still needs a reachable external HTTPS endpoint for the Activity iframe.
+- Current readiness/setup checks are intentionally limited. DiscoClaw verifies local prerequisites and returns static external setup instructions, but it does not validate your Developer Portal configuration or your public HTTPS exposure end-to-end.
+
 ### Configuration
 
 Canvas-related environment variables (all optional, sensible defaults):
 
-- `DISCOCLAW_CANVAS_ENABLED` — Master switch for the experimental canvas subsystem (default: `false`; set to `1` to opt in)
+- `DISCOCLAW_CANVAS_ENABLED` — Opt-in master switch for the experimental canvas subsystem (default: `false`; set to `1` to opt in, and set it explicitly on upgraded installs if you want to keep canvas enabled)
 - `DISCOCLAW_CANVAS_PORT` — Canvas server port (default: `9402`)
 - `DISCOCLAW_CANVAS_WRITE_BRIDGE_ENABLED` — Allow artifacts to export files to disk (default: `true`)
 - `DISCOCLAW_CANVAS_MAX_ARTIFACTS` — LRU artifact cap (default: `1000`)
