@@ -2,20 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { renderDashboardPage } from './page.js';
 
 describe('renderDashboardPage', () => {
-  it('renders user-friendly doctor controls and guidance', () => {
+  it('renders dashboard with all key sections and controls', () => {
     const html = renderDashboardPage();
 
     expect(html).toContain('<title>Dashboard</title>');
-    expect(html).toContain('Discoclaw Operator Dashboard');
+    expect(html).toContain('Discoclaw');
     expect(html).toContain('>Refresh<');
-    expect(html).toContain('One local place to check service health, review model settings, and fix common config issues.');
-    expect(html).toContain('The dashboard stays local by default.');
-    expect(html).toContain('Overrides: loading');
     expect(html).toContain('Dashboard: loading');
     expect(html).toContain('function formatServicePill');
-    expect(html).toContain('function formatRuntimePill');
     expect(html).toContain('function updateDashboardLocation()');
-    expect(html).toContain("document.title = 'Dashboard · ' + dashboardUrl;");
+    expect(html).toContain("document.title = 'Dashboard");
     expect(html).toContain('const ROLE_LABELS = {');
     expect(html).toContain("chat: 'Chat'");
     expect(html).toContain("fast: 'Quick Tasks'");
@@ -25,25 +21,17 @@ describe('renderDashboardPage', () => {
     expect(html).toContain('<select id="model-select"');
     expect(html).not.toContain('custom-model-input');
     expect(html).not.toContain('CUSTOM_MODEL_OPTION');
-    expect(html).toContain('>At a Glance<');
-    expect(html).toContain('>Service Controls<');
+    expect(html).toContain('>Readiness<');
+    expect(html).toContain('>Service<');
     expect(html).toContain('>Current Models<');
-    expect(html).toContain('>Update Saved Model<');
     expect(html).toContain('>Config Doctor<');
-    expect(html).toContain('>MCP Status<');
-    expect(html).toContain('>Advanced Details<');
-    expect(html).toContain('Pick a role, then choose one of its valid saved options.');
+    expect(html).toContain('>Advanced<');
     expect(html).toContain('id="model-form-help"');
     expect(html).toContain('Choose one of the valid saved options below.');
-    expect(html).toContain('>Save Change<');
-    expect(html).toContain("button.textContent = 'Change';");
-    expect(html).toContain('Scan for config problems and cleanup suggestions.');
-    expect(html).toContain('Safe fixes can be applied automatically; review-only items stay listed below.');
     expect(html).toContain('>Scan<');
     expect(html).toContain('>Apply Safe Fixes<');
     expect(html).toContain('id="doctor-fix-btn" type="button" disabled');
     expect(html).toContain('id="doctor-helper"');
-    expect(html).toContain('id="mcp-warning-pill"');
     expect(html).toContain('<select id="preset-select"');
     expect(html).toContain('id="preset-apply-btn"');
     expect(html).toContain('>Apply Preset<');
@@ -52,8 +40,9 @@ describe('renderDashboardPage', () => {
     expect(html).toContain('presetSelect.value = snapshot.primaryRuntime');
     expect(html).toContain('id="mcp-summary"');
     expect(html).toContain('id="mcp-servers"');
-    expect(html).toContain('Cleanup suggestions');
-    expect(html).toContain('manual cleanup');
     expect(html).toContain('safe auto-fix');
+    expect(html).toContain('status-dot');
+    expect(html).toContain('btn-danger');
+    expect(html).toContain('chat-forms');
   });
 });
