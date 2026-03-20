@@ -1,8 +1,10 @@
 import { build } from 'esbuild';
-import { mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const require = createRequire(import.meta.url);
 const sdkEntry = require.resolve('@discord/embedded-app-sdk');
@@ -10,21 +12,19 @@ const sdkEntry = require.resolve('@discord/embedded-app-sdk');
 const sdkDir = path.dirname(sdkEntry);
 const esmEntry = path.join(sdkDir, 'index.mjs');
 
-const outdir = path.resolve('dist', 'vendor');
-
-await mkdir(outdir, { recursive: true });
+const outfile = path.join(__dirname, 'bundle.js');
 
 try {
   await build({
     entryPoints: [esmEntry],
-    outfile: path.join(outdir, 'embedded-app-sdk.js'),
+    outfile,
     bundle: true,
     format: 'esm',
     platform: 'browser',
     minify: false,
     sourcemap: false,
   });
-  process.stdout.write(`Bundled embedded-app-sdk → ${outdir}/embedded-app-sdk.js\n`);
+  process.stdout.write(`Bundled embedded-app-sdk → ${outfile}\n`);
 } catch (err) {
   process.stderr.write(`esbuild failed: ${err.message}\n`);
   process.exit(1);

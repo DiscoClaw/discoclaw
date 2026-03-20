@@ -259,9 +259,9 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
   const fetchImpl = opts.fetchImpl ?? fetch;
   const authSigner = createAuthSigner();
   const authSessionTtlMs = opts.authSessionTtlMs ?? DEFAULT_AUTH_SESSION_TTL_MS;
-  // Bundled SDK: dist/vendor/embedded-app-sdk.js — resolve from project root
+  // Bundled SDK: vendor/embedded-app-sdk/bundle.js — resolve from project root
   // so the path works whether MODULE_DIR is src/canvas/ or dist/canvas/.
-  const bundledSdkPath = path.resolve(MODULE_DIR, '..', '..', 'dist', 'vendor', 'embedded-app-sdk.js');
+  const bundledSdkPath = path.resolve(MODULE_DIR, '..', '..', 'vendor', 'embedded-app-sdk', 'bundle.js');
   const bundledSdkCache = await fs.readFile(bundledSdkPath, 'utf8').catch(() => null);
   if (bundledSdkCache == null) {
     opts.log?.error({ path: bundledSdkPath }, 'canvas:sdk-bundle missing — run the bundle-embedded-sdk script');
