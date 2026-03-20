@@ -243,7 +243,7 @@ See [docs/tasks.md](tasks.md) for the operator guide.
 | `DISCOCLAW_TASKS_FORUM` | — | Forum channel ID for task threads (auto-created if missing) |
 | `DISCOCLAW_TASKS_CWD` | — | Override task working directory |
 | `DISCOCLAW_TASKS_TAG_MAP` | — | Override task tag map file path |
-| `DISCOCLAW_TASKS_MENTION_USER` | — | User ID to @mention on task creation |
+| `DISCOCLAW_TASKS_MENTION_USER` | — | User ID to @mention on task creation; fresh `discoclaw init` / `pnpm setup` configs default this to the first `DISCORD_ALLOW_USER_IDS` entry |
 | `DISCOCLAW_TASKS_SIDEBAR` | `true` | Show tasks in forum sidebar |
 | `DISCOCLAW_TASKS_AUTO_TAG` | `true` | Auto-tag task threads via AI |
 | `DISCOCLAW_TASKS_AUTO_TAG_MODEL` | `fast` | Model tier for auto-tagging |

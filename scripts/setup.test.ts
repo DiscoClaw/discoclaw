@@ -23,8 +23,26 @@ describe('setup: .env content generation', () => {
     });
     expect(content).toContain('DISCORD_TOKEN=abc.def.ghi');
     expect(content).toContain('DISCORD_ALLOW_USER_IDS=12345678901234567');
+    expect(content).toContain('DISCOCLAW_TASKS_MENTION_USER=12345678901234567');
     expect(content).toContain('DISCOCLAW_TASKS_FORUM=111111111111111111');
     expect(content).toContain('DISCOCLAW_CRON_FORUM=222222222222222222');
+  });
+
+  it('defaults DISCOCLAW_TASKS_MENTION_USER to the first allowlisted user', () => {
+    const content = buildEnvContent({
+      DISCORD_TOKEN: 'abc.def.ghi',
+      DISCORD_ALLOW_USER_IDS: '12345678901234567, 23456789012345678',
+    });
+    expect(content).toContain('DISCOCLAW_TASKS_MENTION_USER=12345678901234567');
+  });
+
+  it('preserves explicit DISCOCLAW_TASKS_MENTION_USER when provided', () => {
+    const content = buildEnvContent({
+      DISCORD_TOKEN: 'abc.def.ghi',
+      DISCORD_ALLOW_USER_IDS: '12345678901234567, 23456789012345678',
+      DISCOCLAW_TASKS_MENTION_USER: '23456789012345678',
+    });
+    expect(content).toContain('DISCOCLAW_TASKS_MENTION_USER=23456789012345678');
   });
 
   it('includes core values when provided (backward-compat: no PRIMARY_RUNTIME)', () => {

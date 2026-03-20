@@ -64,6 +64,7 @@ describe('init wizard helpers', () => {
     expect(content).toContain('CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1');
     expect(content).toContain('# CORE');
     expect(content).toContain('DISCORD_GUILD_ID=1000000000000000004');
+    expect(content).toContain('DISCOCLAW_TASKS_MENTION_USER=1000000000000000001');
     expect(content).toContain('# DEFAULTS');
     expect(content).toContain('DISCOCLAW_DISCORD_ACTIONS=1');
     expect(content).not.toContain('# OPTIONAL');
@@ -91,6 +92,31 @@ describe('init wizard helpers', () => {
 
     expect(content).toContain('# DEFAULTS');
     expect(content).toContain('DISCOCLAW_DISCORD_ACTIONS=1');
+  });
+
+  it('defaults DISCOCLAW_TASKS_MENTION_USER to the first allowlisted user', () => {
+    const content = buildEnvContent(
+      {
+        DISCORD_TOKEN: 'a.b.c',
+        DISCORD_ALLOW_USER_IDS: '1000000000000000001, 1000000000000000002',
+      },
+      new Date('2026-02-24T00:00:00.000Z'),
+    );
+
+    expect(content).toContain('DISCOCLAW_TASKS_MENTION_USER=1000000000000000001');
+  });
+
+  it('preserves explicit DISCOCLAW_TASKS_MENTION_USER when provided', () => {
+    const content = buildEnvContent(
+      {
+        DISCORD_TOKEN: 'a.b.c',
+        DISCORD_ALLOW_USER_IDS: '1000000000000000001, 1000000000000000002',
+        DISCOCLAW_TASKS_MENTION_USER: '1000000000000000002',
+      },
+      new Date('2026-02-24T00:00:00.000Z'),
+    );
+
+    expect(content).toContain('DISCOCLAW_TASKS_MENTION_USER=1000000000000000002');
   });
 
   it('selects provider defaults in expected precedence order', () => {
