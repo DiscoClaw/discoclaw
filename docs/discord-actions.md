@@ -43,6 +43,7 @@ Action categories (each module defines types, an executor, and prompt examples):
 - `src/discord/actions-loop.ts`
 - `src/discord/defer-scheduler.ts` (defer scheduler implementation)
 - `src/discord/actions-config.ts`
+- `src/canvas/canvas-action.ts`
 - `src/discord/actions-imagegen.ts`
 - `src/discord/actions-voice.ts`
 - `src/discord/actions-spawn.ts`
@@ -85,6 +86,9 @@ Loop action types (in `src/discord/actions-loop.ts`):
 
 Config action types (in `src/discord/actions-config.ts`):
 - `modelSet`, `modelShow`
+
+Canvas action types (in `src/canvas/canvas-action.ts`):
+- `launchCanvas`
 
 Imagegen action types (in `src/discord/actions-imagegen.ts`):
 - `generateImage`
@@ -135,6 +139,7 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_LOOP` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` default 60, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` default 86400, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT` default 5)
   - `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0; controls actual image generation readiness. Normal manual/help surfaces still advertise `imagegen` by default, but execution still requires this flag plus at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`)
   - `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` default 8)
+  - `canvas` (`launchCanvas`) — no separate `DISCOCLAW_DISCORD_ACTIONS_CANVAS` flag; availability follows the canvas subsystem (`DISCOCLAW_CANVAS_ENABLED`) and runtime readiness checks
   - `config` (`modelSet`/`modelShow`) — no separate env flag; always enabled when master switch is on
   - `reactionPrompt` — no separate env flag; gated under `DISCOCLAW_DISCORD_ACTIONS_MESSAGING`
 
@@ -144,7 +149,9 @@ Important behavioral notes:
 - Even if a category is implemented, it is not usable unless its flag is enabled.
 - Actions are not advertised to the model in DMs: `src/discord.ts` only appends the actions prompt section for non-DM messages, and execution requires `msg.guild`.
 - `imagegen` has an intentional discoverability/readiness split on the normal manual Discord path: ordinary user turns, their auto-follow-ups, and help/model surfaces such as `!models` / `!models help` can expose `imagegen` before setup is complete.
+- `launchCanvas` follows a similar discoverability/readiness split in guild flows: the schema is surfaced when canvas is already locally ready, or when the user's text explicitly asks for an interactive canvas/activity/artifact experience.
 - If an interactive/manual invocation emits `generateImage` without configured imagegen context, `executeDiscordActions(...)` returns a setup walkthrough instead of generating an image. That walkthrough points the operator at `.env`, `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN`, provider keys, restart, and `!models help`.
+- If an interactive/manual invocation emits `launchCanvas` before the canvas subsystem is locally ready, `executeDiscordActions(...)` returns the canvas setup walkthrough instead of posting a launch button.
 - The setup walkthrough is tied to the shared interactive action-confirmation mode used by manual user turns and their follow-ups. Automated callers keep the raw `Imagegen subsystem not configured` error.
 - Reaction and deferred surfaces remain separately flag-driven. This document does not treat them as already non-advertised; they continue to follow their current flow-specific contracts.
 
@@ -156,7 +163,7 @@ Prompt-time action schema guidance is assembled by `buildTieredDiscordActionsPro
 - When called with selection inputs (current message/reaction/defer/voice invocation flows), it injects a reduced subset across three tiers:
   - `core` (always): `messaging`, `channels`
   - `channelContextual`: inferred from `channelName`, `channelContextPath`, and `isThread` (currently adds task/cron categories when context indicates they are relevant)
-  - `keywordTriggered`: inferred from `userText` keyword matches (memory/task/plan/forge/cron/config/imagegen/voice/moderation/poll/guild/botProfile/spawn keywords)
+  - `keywordTriggered`: inferred from `userText` keyword matches (memory/task/plan/forge/cron/config/canvas/imagegen/voice/moderation/poll/guild/botProfile/spawn keywords)
 - Selection inputs are: `channelName`, `channelContextPath`, `isThread`, and `userText`.
 - Included categories are deduplicated and rendered in deterministic category order.
 - Optional schema estimate logging can be enabled with `DISCOCLAW_LOG_ACTION_SCHEMA_ESTIMATES=1`, which logs per-section `chars` and `estTokens` using `Math.ceil(chars / 4)`.
@@ -432,6 +439,41 @@ No subsystem context required beyond `ConfigContext` (holds `botParams` and the 
 No separate env flag — config actions are always enabled when the master switch is on.
 `modelShow` is a query action: it triggers the auto-follow-up loop so the model can read and reason about the current configuration.
 
+### Canvas Actions (`canvas-action.ts`)
+
+Allow the model to launch an interactive Discord Activity canvas, either from a built-in app or from a generated single-file HTML artifact.
+
+| Action | Description | Mutating? |
+|--------|-------------|-----------|
+| `launchCanvas` | Post a Discord Activity launch button for a built-in app or generated artifact | Yes |
+
+Fields:
+- `title` (required) — human-readable label used for the launch button
+- `content` (artifact mode) — full self-contained HTML document with inline CSS and JS
+- `app` (built-in mode) — named built-in canvas app such as `dashboard`
+
+Validation and behavior:
+- Exactly one of `content` or `app` must be supplied.
+- `content` must be a full HTML document (`<!doctype html>` or `<html ...>`), not an HTML fragment.
+- Artifact-mode HTML is stored unchanged; `window.canvasRuntime` is injected only when the render shell serves the artifact.
+- Artifacts should use the injected runtime (`html`, `render`, and the installed `preact/hooks` surface) instead of bundling React, Preact, Vue, or another UI framework.
+- In `html` template literals, void elements must be self-closed (`<input ... />`, `<img ... />`, `<br />`, etc.); bare void tags are rejected up front because they can corrupt the rendered DOM.
+- Built-in mode validates that the named app exists on the current install before posting a launch button.
+
+Execution flow:
+1. Validate `title`, current channel sendability, and local canvas readiness.
+2. If canvas is not locally ready, return the setup walkthrough from `buildCanvasSetupWalkthrough(...)` instead of posting a button.
+3. For artifact mode, lint and persist the HTML in the artifact store; for built-in mode, mint an app launch reference.
+4. Post a button in the current guild text channel.
+5. When the user clicks it, `handleCanvasButtonInteraction(...)` registers a pending launch and calls Discord's `LAUNCH_ACTIVITY` callback.
+
+Env and context:
+- No `DISCOCLAW_DISCORD_ACTIONS_CANVAS` flag exists; action availability is driven by the canvas subsystem itself.
+- Master switch: `DISCOCLAW_CANVAS_ENABLED` (default `true`).
+- Optional prompt/export toggle: `DISCOCLAW_CANVAS_WRITE_BRIDGE_ENABLED` controls whether the prompt teaches the trusted `canvas.saveFile` bridge for artifact exports.
+- Requires a configured `CanvasContext`, a live local canvas server, and a guild text channel. DMs are unsupported.
+- Full operator setup (Developer Portal URL Mapping, Activities enablement, HTTPS exposure) is documented in [docs/discord-bot-setup.md](/home/davidmarsh/code/discoclaw/docs/discord-bot-setup.md).
+
 ### Imagegen Actions (`actions-imagegen.ts`)
 
 Allow the model to generate images via OpenAI or Gemini and post them to a Discord channel.
@@ -613,6 +655,7 @@ When actions are executed within a cron job (via `src/cron/executor.ts`), the fo
 - `memory` — no user context in cron flows
 - `config` — no relevant runtime context in cron flows
 - `defer` — deferred runs target Discord message flows, not cron flows
+- `canvas` — canvas launches are guild interaction/UI work, not cron output
 - `voice` — voice actions require a live Discord guild context
 - `spawn` — spawning parallel agents from cron jobs could create unbounded agent trees
 
