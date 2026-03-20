@@ -85,6 +85,16 @@ async function makeCanvasContext() {
 }
 
 describe('canvas-action', () => {
+  it('surfaces the injected canvas runtime contract from the checked-in prompt template', async () => {
+    vi.resetModules();
+    const { canvasActionsPromptSection } = await import('./canvas-action.js');
+
+    const prompt = canvasActionsPromptSection({ writeBridgeEnabled: true });
+    expect(prompt).toContain('window.canvasRuntime');
+    expect(prompt).toContain('`html`, `render`, and `useState`');
+    expect(prompt).toContain('const { html, render, useState } = window.canvasRuntime');
+  });
+
   it('documents the injected canvas runtime in fallback prompt text and preserves save-bridge substitution', async () => {
     vi.resetModules();
     vi.spyOn(fsSync, 'readFileSync').mockImplementation(() => {
