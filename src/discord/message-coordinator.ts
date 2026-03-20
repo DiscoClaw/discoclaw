@@ -573,6 +573,12 @@ function buildCompletedWithoutVisibleOutputText(): string {
   return 'Completed successfully. Discord actions ran, but there was no additional reply text.';
 }
 
+function buildCompletedWithImageOutputText(hasActions: boolean): string {
+  return hasActions
+    ? 'Completed successfully. Discord actions ran and output included image attachments, but there was no additional reply text.'
+    : 'Completed successfully. Output included image attachments, but there was no additional reply text.';
+}
+
 function buildRecoveryText(prefix: string | null, bodyText: string): string | null {
   const normalizedPrefix = closeFenceIfOpen(String(prefix ?? '').trimEnd());
   const normalizedBody = closeFenceIfOpen(String(bodyText ?? '').trimEnd());
@@ -603,7 +609,11 @@ async function stageWatchdogRecovery(opts: {
     return false;
   }
   try {
-    await opts.watchdog.stageRecovery(opts.runId, { text: opts.text });
+    const stagedRun = await opts.watchdog.stageRecovery(opts.runId, { text: opts.text });
+    if (!stagedRun) {
+      opts.log?.warn({ runId: opts.runId }, `${opts.flow}: watchdog recovery stage missing run`);
+      return false;
+    }
     return true;
   } catch (err) {
     opts.log?.warn({ err, runId: opts.runId }, `${opts.flow}: watchdog recovery stage failed`);
@@ -1776,6 +1786,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         let abortSignal: AbortSignal | undefined;
         let primaryWatchdogRunId: string | null = null;
         let primaryWatchdogOutcome: LongRunOutcome = 'succeeded';
+        let primaryRecoveryReady = false;
+        let primaryDeliveryConfirmed = false;
         let deliveryConfirmed = false;
         try {
           // Handle !memory commands before session creation or the "..." placeholder.
@@ -4315,31 +4327,40 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
               pendingFollowUp = nextFollowUp;
               const finalReplyPrefix = currentFollowUpToken ? followUpPlaceholderLines.join('\n') : null;
-              const recoveryText = buildRecoveryText(finalReplyPrefix, processedText);
+              const recoveryBodyText = processedText.trim()
+                ? processedText
+                : (collectedImages.length > 0
+                  ? buildCompletedWithImageOutputText(actions.length > 0)
+                  : '');
+              const recoveryText = buildRecoveryText(finalReplyPrefix, recoveryBodyText);
+              const recoveryStaged = await stageWatchdogRecovery({
+                watchdog: longRunWatchdog,
+                runId: primaryWatchdogRunId,
+                text: recoveryText,
+                log: params.log,
+                flow: 'message',
+              });
+
+              if (!recoveryStaged) {
+                primaryWatchdogOutcome = 'failed';
+                metrics.increment('discord.message.finalization_loss');
+                try {
+                  await reply.edit({
+                    content: buildFinalizationLossVisibleText(finalReplyPrefix),
+                    allowedMentions: NO_MENTIONS,
+                  });
+                  replyFinalized = true;
+                  deliveryConfirmed = true;
+                  if (followUpDepth === 0) primaryDeliveryConfirmed = true;
+                } catch {
+                  preserveVisibleReply = true;
+                }
+                break;
+              }
+
+              primaryRecoveryReady = true;
 
               if (!isShuttingDown()) {
-                const recoveryStaged = await stageWatchdogRecovery({
-                  watchdog: longRunWatchdog,
-                  runId: primaryWatchdogRunId,
-                  text: recoveryText,
-                  log: params.log,
-                  flow: 'message',
-                });
-                if (!recoveryStaged) {
-                  primaryWatchdogOutcome = 'failed';
-                  metrics.increment('discord.message.finalization_loss');
-                  try {
-                    await reply.edit({
-                      content: buildFinalizationLossVisibleText(finalReplyPrefix),
-                      allowedMentions: NO_MENTIONS,
-                    });
-                    replyFinalized = true;
-                    deliveryConfirmed = true;
-                  } catch {
-                    preserveVisibleReply = true;
-                  }
-                  break;
-                }
                 try {
                   if (currentFollowUpToken) {
                     await editThenSendChunksWithPrefix(
@@ -4354,6 +4375,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   }
                   replyFinalized = true;
                   deliveryConfirmed = true;
+                  if (followUpDepth === 0) primaryDeliveryConfirmed = true;
                 } catch (editErr) {
                   // Thread archived by a taskClose action — the close summary was already
                   // posted inside closeTaskThread, so the only thing lost is Claude's
@@ -4362,6 +4384,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     params.log?.info({ sessionKey }, 'discord:reply preserved (thread archived by action)');
                     replyFinalized = true;
                     deliveryConfirmed = true;
+                    if (followUpDepth === 0) primaryDeliveryConfirmed = true;
                   } else {
                     metrics.increment('discord.message.finalization_loss');
                     throw editErr;
@@ -4404,6 +4427,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 });
                 replyFinalized = true;
                 deliveryConfirmed = true;
+                primaryDeliveryConfirmed = true;
               }
             } catch {
               // Ignore secondary errors; outer catch will handle logging.
@@ -4561,19 +4585,22 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 allowedMentions: NO_MENTIONS,
               });
               deliveryConfirmed = true;
+              primaryDeliveryConfirmed = true;
             }
           } catch {
             // Ignore secondary errors writing to Discord.
           }
         } finally {
-          const outcome: LongRunOutcome = (primaryWatchdogOutcome === 'failed' || abortSignal?.aborted || isShuttingDown())
+          const outcome: LongRunOutcome = (primaryWatchdogOutcome === 'failed'
+            || abortSignal?.aborted
+            || (isShuttingDown() && !primaryRecoveryReady))
             ? 'failed'
             : 'succeeded';
           await completeWatchdogRun({
             watchdog: longRunWatchdog,
             runId: primaryWatchdogRunId,
             outcome,
-            deliveryConfirmed,
+            deliveryConfirmed: primaryDeliveryConfirmed,
             log: params.log,
             flow: 'message',
           });

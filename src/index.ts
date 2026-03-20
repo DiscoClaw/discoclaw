@@ -140,7 +140,6 @@ import {
 import { createColdStorage, type ColdStorageSubsystem } from './cold-storage/index.js';
 import { parseGlobalSupervisorBail, type GlobalSupervisorAuditPayload } from './runtime/global-supervisor.js';
 import type { StreamingPreviewMode } from './discord/output-utils.js';
-import { buildCompletionNotice } from './discord/output-utils.js';
 
 const log = pino({ level: process.env.LOG_LEVEL ?? 'info' });
 const bootStartMs = Date.now();
@@ -609,14 +608,12 @@ const messageCoordinatorWatchdog = completionNotifyEnabled
           }
         }
         // Chat message runs: reply to the bot's answer instead of editing it.
-        const content = useGenericCompletionFallback && completionElapsedMs != null
-          ? buildCompletionNotice(completionElapsedMs)
-          : buildLongRunFinalNotice({
-            completion: run.completion,
-            completionDetail: run.completionDetail,
-            recoveryText: hasRecoveryText ? recoveryText : null,
-            source: meta.source,
-          });
+        const content = buildLongRunFinalNotice({
+          completion: run.completion,
+          completionDetail: run.completionDetail,
+          recoveryText: hasRecoveryText ? recoveryText : null,
+          source: meta.source,
+        });
         await postChatCompletionReply(run, content);
       },
       log,

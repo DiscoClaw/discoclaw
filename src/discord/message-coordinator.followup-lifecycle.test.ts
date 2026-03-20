@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineEvent } from '../runtime/types.js';
 import { _resetForTest as resetAbortRegistry } from './abort-registry.js';
-import { _resetForTest as resetInflightReplies } from './inflight-replies.js';
+import { _resetForTest as resetInflightReplies, drainInFlightReplies } from './inflight-replies.js';
 
 vi.mock('../workspace-bootstrap.js', () => ({
   isOnboardingComplete: vi.fn(async () => true),
@@ -157,7 +157,7 @@ describe('message auto-follow-up lifecycle', () => {
         order.push(`watchdog-start:${input.messageId}`);
         return { deduped: false, run: {} };
       }),
-      stageRecovery: vi.fn(async () => null),
+      stageRecovery: vi.fn(async () => ({})),
       complete: vi.fn(async () => ({
         runId: 'run-1',
         channelId: 'ch-1',
@@ -237,7 +237,7 @@ describe('message auto-follow-up lifecycle', () => {
         order.push(`watchdog-start:${input.messageId}`);
         return { deduped: false, run: {} };
       }),
-      stageRecovery: vi.fn(async () => null),
+      stageRecovery: vi.fn(async () => ({})),
       complete: vi.fn(async () => ({
         runId: 'run-1',
         channelId: 'ch-1',
@@ -343,7 +343,7 @@ describe('message auto-follow-up lifecycle', () => {
         order.push(`watchdog-start:${input.messageId}`);
         return { deduped: false, run: {} };
       }),
-      stageRecovery: vi.fn(async () => null),
+      stageRecovery: vi.fn(async () => ({})),
       complete: vi.fn(async () => ({
         runId: 'run-1',
         channelId: 'ch-1',
@@ -424,7 +424,7 @@ describe('message auto-follow-up lifecycle', () => {
         order.push(`watchdog-start:${input.messageId}`);
         return { deduped: false, run: {} };
       }),
-      stageRecovery: vi.fn(async () => null),
+      stageRecovery: vi.fn(async () => ({})),
       complete: vi.fn(async () => ({
         runId: 'run-1',
         channelId: 'ch-1',
@@ -492,6 +492,75 @@ describe('message auto-follow-up lifecycle', () => {
     expect(watchdog.stageRecovery).toHaveBeenLastCalledWith(
       expect.any(String),
       { text: `Auto-follow-up \`${token}\`: completed.` },
+    );
+  });
+
+  it('preserves primary delivery confirmation when shutdown interrupts a later follow-up turn', async () => {
+    let callCount = 0;
+    const runtime = {
+      id: 'test',
+      capabilities: new Set<string>(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        callCount += 1;
+        if (callCount === 1) {
+          yield {
+            type: 'text_final',
+            text: 'Looking up channels.\n<discord-action>{"type":"channelList"}</discord-action>',
+          };
+        } else {
+          yield { type: 'text_final', text: 'Follow-up summary.' };
+          await drainInFlightReplies();
+          yield { type: 'done' };
+          return;
+        }
+        yield { type: 'done' };
+      },
+    };
+    const initialReply = makeReply('initial-reply');
+    const followUpReply = makeReply('follow-up-reply');
+    const watchdog = {
+      start: vi.fn(async () => ({ deduped: false, run: {} })),
+      stageRecovery: vi.fn(async () => ({})),
+      complete: vi.fn(async () => null),
+      startupSweep: vi.fn(async () => ({ interruptedRuns: 0, finalRetried: 0, finalPosted: 0, finalFailed: 0 })),
+    };
+    const channelSend = vi.fn(async (_opts: { content: string }) => followUpReply);
+    const msg = {
+      id: 'm1',
+      type: 0,
+      content: 'hello',
+      author: { id: 'user-1', bot: false },
+      guildId: 'guild-1',
+      guild: { id: 'guild-1' },
+      channelId: 'ch-1',
+      channel: {
+        id: 'ch-1',
+        name: 'general',
+        send: channelSend,
+        isThread: () => false,
+      },
+      client: { channels: { cache: new Map() }, user: { id: 'bot-1' } },
+      attachments: new Map(),
+      stickers: new Map(),
+      embeds: [],
+      mentions: { has: () => false },
+      reply: vi.fn().mockResolvedValue(initialReply),
+    };
+
+    const { createMessageCreateHandler } = await import('./message-coordinator.js');
+    const handler = createMessageCreateHandler(makeParams(runtime, watchdog), {
+      run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()),
+    } as any);
+
+    await handler(msg as any);
+
+    expect(initialReply.edit).toHaveBeenCalledWith({
+      content: expect.stringContaining('Channel lookup complete.'),
+      allowedMentions: { parse: [] },
+    });
+    expect(watchdog.complete).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({ outcome: 'succeeded', deliveryConfirmed: true }),
     );
   });
 });

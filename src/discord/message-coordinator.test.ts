@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineEvent, ImageData } from '../runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from '../runtime/types.js';
 import { _resetForTest as resetAbortRegistry } from './abort-registry.js';
-import { _resetForTest as resetInflightReplies } from './inflight-replies.js';
+import { _resetForTest as resetInflightReplies, drainInFlightReplies } from './inflight-replies.js';
 import type { AttachmentLike } from './image-download.js';
 
 // ---------------------------------------------------------------------------
@@ -528,6 +528,8 @@ describe('image input precedence — direct > reply-ref > history', () => {
 describe('message finalization recovery staging', () => {
   const COMPLETED_WITHOUT_VISIBLE_OUTPUT =
     'Completed successfully. Discord actions ran, but there was no additional reply text.';
+  const COMPLETED_WITH_IMAGE_OUTPUT =
+    'Completed successfully. Output included image attachments, but there was no additional reply text.';
   const FINALIZATION_LOSS_VISIBLE_TEXT =
     'Final delivery safeguard failed before I could post the terminal reply. Leaving this message visible instead of deleting it.';
 
@@ -565,7 +567,7 @@ describe('message finalization recovery staging', () => {
       start: vi.fn(async () => ({})),
       stageRecovery: vi.fn(async (_runId: string, input: { text?: string | null }) => {
         order.push(`stage:${input.text ?? ''}`);
-        return null;
+        return {};
       }),
       complete: vi.fn(async () => null),
       startupSweep: vi.fn(async () => ({
@@ -601,6 +603,108 @@ describe('message finalization recovery staging', () => {
     expect(reply.delete).not.toHaveBeenCalled();
     expect(metrics.increment).toHaveBeenCalledWith('discord.message.completed_without_visible_output');
     expect(metrics.increment).not.toHaveBeenCalledWith('discord.message.finalization_loss');
+  });
+
+  it('stages recovery for image-only completions before final Discord delivery', async () => {
+    const order: string[] = [];
+    const runtime = {
+      id: 'test',
+      capabilities: new Set<string>(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'image_data', image: fakeImage('chart') };
+        yield { type: 'done' };
+      },
+    };
+    const reply = {
+      id: 'reply-1',
+      edit: vi.fn(async (opts: { content: string }) => {
+        order.push(`edit:${opts.content}`);
+      }),
+      delete: vi.fn(async () => {
+        order.push('delete');
+      }),
+      react: vi.fn(async () => ({ remove: vi.fn(async () => undefined) })),
+    };
+    const msg = makeGuildMessage(reply);
+    const watchdog = {
+      start: vi.fn(async () => ({})),
+      stageRecovery: vi.fn(async (_runId: string, input: { text?: string | null }) => {
+        order.push(`stage:${input.text ?? ''}`);
+        return {};
+      }),
+      complete: vi.fn(async () => null),
+      startupSweep: vi.fn(async () => ({
+        interruptedRuns: 0,
+        finalRetried: 0,
+        finalPosted: 0,
+        finalFailed: 0,
+      })),
+    };
+    const params = makeParams(runtime, { longRunWatchdog: watchdog });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(watchdog.stageRecovery).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ text: COMPLETED_WITH_IMAGE_OUTPUT }),
+    );
+    expect(order.indexOf(`stage:${COMPLETED_WITH_IMAGE_OUTPUT}`)).toBeGreaterThanOrEqual(0);
+    expect(reply.delete).not.toHaveBeenCalled();
+  });
+
+  it('treats a missing staged watchdog run as a staging failure', async () => {
+    const runtime = makeCaptureRuntime();
+    const reply = {
+      id: 'reply-1',
+      edit: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+      react: vi.fn(async () => ({ remove: vi.fn(async () => undefined) })),
+    };
+    const msg = makeGuildMessage(reply);
+    const actionsMod = await import('./actions.js');
+    vi.mocked(actionsMod.parseDiscordActions).mockReturnValueOnce({
+      actions: [{ type: 'sendMessage' } as any],
+      cleanText: '',
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    vi.mocked(actionsMod.executeDiscordActions).mockResolvedValueOnce([
+      { ok: true, summary: 'sent' } as any,
+    ]);
+    const watchdog = {
+      start: vi.fn(async () => ({})),
+      stageRecovery: vi.fn(async () => null),
+      complete: vi.fn(async () => null),
+      startupSweep: vi.fn(async () => ({
+        interruptedRuns: 0,
+        finalRetried: 0,
+        finalPosted: 0,
+        finalFailed: 0,
+      })),
+    };
+    const metrics = {
+      increment: vi.fn(),
+      recordInvokeStart: vi.fn(),
+      recordInvokeResult: vi.fn(),
+      recordActionResult: vi.fn(),
+    };
+    const params = makeParams(runtime, { longRunWatchdog: watchdog, metrics });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(reply.edit).toHaveBeenCalledWith({
+      content: FINALIZATION_LOSS_VISIBLE_TEXT,
+      allowedMentions: { parse: [] },
+    });
+    expect(metrics.increment).toHaveBeenCalledWith('discord.message.finalization_loss');
+    expect(watchdog.complete).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ outcome: 'failed', deliveryConfirmed: true }),
+    );
   });
 
   it('does not confirm delivery or silently delete when staging and fallback edit both fail', async () => {
@@ -658,5 +762,49 @@ describe('message finalization recovery staging', () => {
     expect(reply.delete).not.toHaveBeenCalled();
     expect(metrics.increment).toHaveBeenCalledWith('discord.message.completed_without_visible_output');
     expect(metrics.increment).toHaveBeenCalledWith('discord.message.finalization_loss');
+  });
+
+  it('keeps a staged successful completion recoverable when shutdown begins before final Discord delivery', async () => {
+    const runtime = {
+      id: 'test',
+      capabilities: new Set<string>(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'Recovered final summary.' };
+        await drainInFlightReplies();
+        yield { type: 'done' };
+      },
+    };
+    const reply = {
+      id: 'reply-1',
+      edit: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+      react: vi.fn(async () => ({ remove: vi.fn(async () => undefined) })),
+    };
+    const msg = makeGuildMessage(reply);
+    const watchdog = {
+      start: vi.fn(async () => ({})),
+      stageRecovery: vi.fn(async () => ({})),
+      complete: vi.fn(async () => null),
+      startupSweep: vi.fn(async () => ({
+        interruptedRuns: 0,
+        finalRetried: 0,
+        finalPosted: 0,
+        finalFailed: 0,
+      })),
+    };
+    const params = makeParams(runtime, { longRunWatchdog: watchdog });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(watchdog.stageRecovery).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ text: 'Recovered final summary.' }),
+    );
+    expect(watchdog.complete).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ outcome: 'succeeded', deliveryConfirmed: false }),
+    );
   });
 });
