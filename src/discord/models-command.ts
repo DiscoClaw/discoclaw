@@ -9,13 +9,24 @@ export type ModelsCommand =
   | { action: 'show' }
   | { action: 'set'; role: ModelRole; model: string }
   | { action: 'reset'; role?: ModelRole }
-  | { action: 'help' };
+  | { action: 'help' }
+  | { action: 'error'; message: string };
 
 // ---------------------------------------------------------------------------
 // Parser
 // ---------------------------------------------------------------------------
 
 const VALID_ROLES = new Set<string>(['chat', 'plan-run', 'fast', 'forge-drafter', 'forge-auditor', 'summary', 'cron', 'cron-exec', 'voice', 'imagegen']);
+
+/** Aliases that map user-friendly names to canonical roles. */
+const ROLE_ALIASES: Record<string, string> = {
+  runtime: 'chat',
+};
+
+function resolveRole(raw: string): string {
+  const lower = raw.toLowerCase();
+  return ROLE_ALIASES[lower] ?? lower;
+}
 
 export function parseModelsCommand(content: string): ModelsCommand | null {
   const tokens = String(content ?? '').trim().split(/\s+/).filter(Boolean);
@@ -31,8 +42,10 @@ export function parseModelsCommand(content: string): ModelsCommand | null {
   if (subcommand === 'reset') {
     if (tokens.length === 2) return { action: 'reset' };
     if (tokens.length === 3) {
-      const role = tokens[2]!.toLowerCase();
-      if (!VALID_ROLES.has(role)) return null;
+      const role = resolveRole(tokens[2]!);
+      if (!VALID_ROLES.has(role)) {
+        return { action: 'error', message: `Unknown role "${tokens[2]}". Valid roles: ${[...VALID_ROLES].join(', ')}` };
+      }
       return { action: 'reset', role: role as ModelRole };
     }
     return null;
@@ -40,8 +53,10 @@ export function parseModelsCommand(content: string): ModelsCommand | null {
 
   if (subcommand !== 'set' || tokens.length !== 4) return null;
 
-  const role = tokens[2]!.toLowerCase();
-  if (!VALID_ROLES.has(role)) return null;
+  const role = resolveRole(tokens[2]!);
+  if (!VALID_ROLES.has(role)) {
+    return { action: 'error', message: `Unknown role "${tokens[2]}". Valid roles: ${[...VALID_ROLES].join(', ')}` };
+  }
 
   // Preserve original case for model IDs.
   return { action: 'set', role: role as ModelRole, model: tokens[3]! };
@@ -64,6 +79,10 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       : 'Model configuration is disabled.';
   }
 
+  if (cmd.action === 'error') {
+    return cmd.message;
+  }
+
   if (cmd.action === 'help') {
     return [
       '**!models commands:**',
@@ -74,7 +93,7 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '- `!models reset <role>` — revert a specific role to its startup default',
       '- `!models help` — this message',
       '',
-      '**Roles:** `chat`, `plan-run`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`, `voice`, `imagegen`',
+      '**Roles:** `chat`, `plan-run`, `fast`, `forge-drafter`, `forge-auditor`, `summary`, `cron`, `cron-exec`, `voice`, `imagegen` (alias: `runtime` → `chat`)',
       '',
       '**Runtime switching (chat and voice roles):**',
       'Setting the `chat` or `voice` role to a runtime name (`openrouter`, `openai`, `gemini`, `codex`, `claude`) switches the active runtime adapter so invocations route through that provider.',

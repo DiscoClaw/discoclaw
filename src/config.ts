@@ -950,7 +950,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       shortTermMaxAgeHours: parsePositiveNumber(env, 'DISCOCLAW_SHORTTERM_MAX_AGE_HOURS', 6),
       shortTermInjectMaxChars: parsePositiveInt(env, 'DISCOCLAW_SHORTTERM_INJECT_MAX_CHARS', 1000),
       shortTermDataDirOverride: parseTrimmedString(env, 'DISCOCLAW_SHORTTERM_DATA_DIR'),
-      actionFollowupDepth: parseNonNegativeInt(env, 'DISCOCLAW_ACTION_FOLLOWUP_DEPTH', 3),
+      actionFollowupDepth: parseNonNegativeInt(env, 'DISCOCLAW_ACTION_FOLLOWUP_DEPTH', 2),
 
       reactionHandlerEnabled: parseBoolean(env, 'DISCOCLAW_REACTION_HANDLER', true),
       reactionRemoveHandlerEnabled: parseBoolean(env, 'DISCOCLAW_REACTION_REMOVE_HANDLER', false),
