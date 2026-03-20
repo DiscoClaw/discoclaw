@@ -15,6 +15,8 @@
     "dashboard/",
     "templates/",
     "docs/official-docs.md",
+    "docs/configuration.md",
+    "docs/discord-bot-setup.md",
     "systemd/",
     ".context/",
     ".env.example",
