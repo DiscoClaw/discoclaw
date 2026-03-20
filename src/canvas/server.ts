@@ -223,6 +223,20 @@ function buildShellCsp(nonce: string): string {
   ].join('; ');
 }
 
+function buildArtifactCsp(): string {
+  return [
+    "default-src 'none'",
+    "script-src 'unsafe-inline'",
+    "style-src 'unsafe-inline'",
+    "img-src data: blob:",
+    "font-src data:",
+    "connect-src 'none'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'self'",
+  ].join('; ');
+}
+
 function buildAuthClaims(signer: SignedTokenSigner, userId: string, ttlMs: number): string {
   const now = Date.now();
   return signer.sign<CanvasAuthClaims>({
@@ -503,16 +517,32 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
       }
 
       if ((req.method ?? 'GET') === 'GET' && pathname.startsWith('/api/artifacts/')) {
-        const authClaims = verifyAuthClaims(authSigner, extractBearerToken(req));
+        const remainder = pathname.slice('/api/artifacts/'.length);
+        const isRenderRequest = remainder.endsWith('/render');
+        const artifactId = decodeURIComponent(isRenderRequest ? remainder.slice(0, -'/render'.length) : remainder);
+
+        // Render endpoint: auth via query params (iframe src can't send headers).
+        // JSON endpoint: auth via Bearer header (shell JS fetch).
+        let authClaims: CanvasAuthClaims | null;
+        let boundSession: ReturnType<typeof opts.launchStore.verifyBoundSession>;
+
+        if (isRenderRequest) {
+          const authParam = requestUrl.searchParams.get('auth') ?? '';
+          const sessionParam = requestUrl.searchParams.get('session') ?? '';
+          authClaims = verifyAuthClaims(authSigner, authParam || null);
+          boundSession = opts.launchStore.verifyBoundSession(sessionParam);
+        } else {
+          authClaims = verifyAuthClaims(authSigner, extractBearerToken(req));
+          const boundSessionHeader = typeof req.headers['x-canvas-bound-session'] === 'string'
+            ? req.headers['x-canvas-bound-session']
+            : '';
+          boundSession = opts.launchStore.verifyBoundSession(boundSessionHeader);
+        }
+
         if (!authClaims || !requireAllowlistedUser(opts.allowUserIds, authClaims.userId)) {
           respondJson(res, 401, { error: 'Canvas auth session is missing or expired' });
           return;
         }
-
-        const boundSessionToken = typeof req.headers['x-canvas-bound-session'] === 'string'
-          ? req.headers['x-canvas-bound-session']
-          : '';
-        const boundSession = opts.launchStore.verifyBoundSession(boundSessionToken);
         if (!boundSession || boundSession.userId !== authClaims.userId) {
           respondJson(res, 401, { error: 'Canvas launch session is missing or expired' });
           return;
@@ -521,8 +551,6 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
           respondJson(res, 403, { error: 'Canvas launch session does not allow artifact access' });
           return;
         }
-
-        const artifactId = decodeURIComponent(pathname.slice('/api/artifacts/'.length));
         if (artifactId !== boundSession.target.artifactId) {
           respondJson(res, 403, { error: 'Canvas launch session does not match the requested artifact' });
           return;
@@ -531,6 +559,16 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
         const artifact = await opts.artifactStore.getArtifact(artifactId);
         if (!artifact) {
           respondJson(res, 404, { error: 'Canvas artifact not found' });
+          return;
+        }
+
+        if (isRenderRequest) {
+          // Serve raw HTML with a permissive CSP for artifact content.
+          // The iframe is sandboxed (no allow-same-origin) so inline scripts
+          // cannot access the parent's origin, cookies, or storage.
+          respondHtml(res, 200, artifact.content, {
+            'Content-Security-Policy': buildArtifactCsp(),
+          });
           return;
         }
 

@@ -319,6 +319,18 @@ export function renderCanvasShellHtml(opts: {
         artifactFrame = frame;
       }
 
+      function renderDocumentFromUrl(url, title) {
+        titleEl.textContent = title || 'Canvas';
+        const frame = document.createElement('iframe');
+        frame.className = 'viewport-frame';
+        frame.setAttribute('sandbox', 'allow-scripts allow-forms');
+        frame.setAttribute('referrerpolicy', 'no-referrer');
+        frame.src = url;
+        viewportEl.innerHTML = '';
+        viewportEl.appendChild(frame);
+        artifactFrame = frame;
+      }
+
       async function refreshSessionCredentials() {
         if (sessionRefreshPromise) return sessionRefreshPromise;
         sessionRefreshPromise = (async () => {
@@ -374,11 +386,12 @@ export function renderCanvasShellHtml(opts: {
         activeTargetKey = 'artifact:' + target.id;
         setStatus('Loading artifact…');
         scheduleSessionRefresh();
-        const artifact = await withSessionRefreshRetry(() => getJson('/api/artifacts/' + encodeURIComponent(target.id), {
-          Authorization: 'Bearer ' + authToken,
-          'X-Canvas-Bound-Session': boundSessionToken,
-        }));
-        renderDocument(String(artifact.content || ''), String(artifact.title || target.title || 'Canvas'));
+        const renderParams = new URLSearchParams({
+          auth: authToken,
+          session: boundSessionToken,
+        });
+        const renderUrl = '/api/artifacts/' + encodeURIComponent(target.id) + '/render?' + renderParams.toString();
+        renderDocumentFromUrl(renderUrl, String(target.title || 'Canvas'));
         setStatus('Ready');
       }
 
