@@ -485,6 +485,10 @@ const emptyLongRunSweepResult = {
   finalPosted: 0,
   finalFailed: 0,
 };
+const longRunStartupSweepReplyStats = {
+  recoveredReposts: 0,
+  genericFallbacks: 0,
+};
 let longRunWatchdogClientRef: Awaited<ReturnType<typeof startDiscordBot>>['client'] | null = null;
 
 async function postLongRunWatchdogNotice(run: Pick<LongRunWatchdogRun, 'runId' | 'channelId' | 'messageId'>, content: string): Promise<void> {
@@ -590,16 +594,29 @@ const messageCoordinatorWatchdog = completionNotifyEnabled
           return;
         }
         const recoveryText = typeof run.recoveryText === 'string' ? run.recoveryText.trim() : '';
+        const hasRecoveryText = recoveryText.length > 0;
+        const completionElapsedMs = run.completedAt != null && run.startedAt != null
+          ? run.completedAt - run.startedAt
+          : null;
+        const useGenericCompletionFallback = !hasRecoveryText
+          && run.completion === 'succeeded'
+          && completionElapsedMs != null;
+        if (meta.source === 'startup-sweep') {
+          if (hasRecoveryText) {
+            longRunStartupSweepReplyStats.recoveredReposts += 1;
+          } else if (useGenericCompletionFallback) {
+            longRunStartupSweepReplyStats.genericFallbacks += 1;
+          }
+        }
         // Chat message runs: reply to the bot's answer instead of editing it.
-        const content = recoveryText && !run.deliveryConfirmed
-          ? recoveryText
-          : run.completion === 'succeeded' && run.completedAt != null && run.startedAt != null
-            ? buildCompletionNotice(run.completedAt - run.startedAt)
-            : buildLongRunFinalNotice({
-              completion: run.completion,
-              completionDetail: run.completionDetail,
-              source: meta.source,
-            });
+        const content = useGenericCompletionFallback && completionElapsedMs != null
+          ? buildCompletionNotice(completionElapsedMs)
+          : buildLongRunFinalNotice({
+            completion: run.completion,
+            completionDetail: run.completionDetail,
+            recoveryText: hasRecoveryText ? recoveryText : null,
+            source: meta.source,
+          });
         await postChatCompletionReply(run, content);
       },
       log,
@@ -1603,9 +1620,30 @@ if (cfg.canvasEnabled) {
 
 if (longRunWatchdog) {
   try {
+    const recoveredRepostsBeforeSweep = longRunStartupSweepReplyStats.recoveredReposts;
+    const genericFallbacksBeforeSweep = longRunStartupSweepReplyStats.genericFallbacks;
     const sweepResult = await longRunWatchdog.startupSweep();
-    if (sweepResult.interruptedRuns > 0 || sweepResult.finalRetried > 0 || sweepResult.finalFailed > 0) {
-      log.info(sweepResult, 'long-run-watchdog: startup sweep complete');
+    const recoveredReposts = Math.max(
+      0,
+      longRunStartupSweepReplyStats.recoveredReposts - recoveredRepostsBeforeSweep,
+    );
+    const genericFallbacks = Math.max(
+      0,
+      longRunStartupSweepReplyStats.genericFallbacks - genericFallbacksBeforeSweep,
+    );
+    const sweepLog = {
+      ...sweepResult,
+      recoveredReposts,
+      genericFallbacks,
+    };
+    if (
+      sweepLog.interruptedRuns > 0
+      || sweepLog.finalRetried > 0
+      || sweepLog.finalFailed > 0
+      || sweepLog.recoveredReposts > 0
+      || sweepLog.genericFallbacks > 0
+    ) {
+      log.info(sweepLog, 'long-run-watchdog: startup sweep complete');
     }
   } catch (err) {
     log.warn({ err }, 'long-run-watchdog: startup sweep failed');
