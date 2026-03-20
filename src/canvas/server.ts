@@ -773,7 +773,7 @@ export function buildCanvasSetupWalkthrough(readiness: CanvasLocalReadiness): st
   const externalLines = readiness.externalChecks.map((line, index) => `${index + 1}. ${line}`);
 
   return [
-    'Canvas Activities are available in Discord actions, but this install is not fully configured yet.',
+    'Canvas Activities are available in Discord actions only as an experimental, default-off DiscoClaw feature. Enable them with `DISCOCLAW_CANVAS_ENABLED=1`, restart the bot, then work through the checks below.',
     'Local checks:',
     ...localLines,
     'Manual Discord setup:',
