@@ -11,7 +11,11 @@ var
 !.env.example.full
 data/*.json
 data/*.pid
-data/browser/
+data/browser/*
+!data/browser/.gitignore
+!data/browser/README.md
+!data/browser/profile/
+!data/browser/profile/.gitkeep
 data/memory/
 data/canvas/
 *.log
