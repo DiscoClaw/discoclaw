@@ -358,9 +358,9 @@ describe('parseConfig', () => {
     expect(config.discordActionsImagegen).toBe(false);
   });
 
-  it('defaults canvas to enabled with the write bridge enabled', () => {
+  it('defaults canvas to disabled with the write bridge enabled', () => {
     const { config } = parseConfig(env());
-    expect(config.canvasEnabled).toBe(true);
+    expect(config.canvasEnabled).toBe(false);
     expect(config.canvasWriteBridgeEnabled).toBe(true);
     expect(config.canvasPort).toBe(9402);
     expect(config.canvasMaxArtifacts).toBe(1000);
@@ -369,7 +369,7 @@ describe('parseConfig', () => {
   });
 
   it('parses canvas configuration overrides', () => {
-    const { config } = parseConfig(env({
+    const disabled = parseConfig(env({
       DISCOCLAW_CANVAS_ENABLED: '0',
       DISCOCLAW_CANVAS_PORT: '9502',
       DISCOCLAW_CANVAS_ARTIFACT_DIR: '/tmp/canvas-artifacts',
@@ -381,16 +381,19 @@ describe('parseConfig', () => {
       DISCORD_CLIENT_ID: 'discord-client-id',
       DISCORD_ACTIVITY_CLIENT_SECRET: 'discord-secret',
     }));
-    expect(config.canvasEnabled).toBe(false);
-    expect(config.canvasPort).toBe(9502);
-    expect(config.canvasArtifactDir).toBe('/tmp/canvas-artifacts');
-    expect(config.canvasMaxArtifacts).toBe(25);
-    expect(config.canvasPendingLaunchTtlSeconds).toBe(30);
-    expect(config.canvasWriteBridgeEnabled).toBe(false);
-    expect(config.canvasExportDir).toBe('/tmp/canvas-exports');
-    expect(config.canvasExportMaxBytes).toBe(2048);
-    expect(config.discordClientId).toBe('discord-client-id');
-    expect(config.discordActivityClientSecret).toBe('discord-secret');
+    const enabled = parseConfig(env({ DISCOCLAW_CANVAS_ENABLED: '1' }));
+
+    expect(disabled.config.canvasEnabled).toBe(false);
+    expect(disabled.config.canvasPort).toBe(9502);
+    expect(disabled.config.canvasArtifactDir).toBe('/tmp/canvas-artifacts');
+    expect(disabled.config.canvasMaxArtifacts).toBe(25);
+    expect(disabled.config.canvasPendingLaunchTtlSeconds).toBe(30);
+    expect(disabled.config.canvasWriteBridgeEnabled).toBe(false);
+    expect(disabled.config.canvasExportDir).toBe('/tmp/canvas-exports');
+    expect(disabled.config.canvasExportMaxBytes).toBe(2048);
+    expect(disabled.config.discordClientId).toBe('discord-client-id');
+    expect(disabled.config.discordActivityClientSecret).toBe('discord-secret');
+    expect(enabled.config.canvasEnabled).toBe(true);
   });
 
   it('enables discordActionsImagegen when DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1', () => {

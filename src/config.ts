@@ -506,7 +506,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const discordActionsVoice = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_VOICE', false);
   const discordActionsSpawn = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_SPAWN', true);
   const discordActionsArchive = parseBoolean(env, 'DISCOCLAW_DISCORD_ACTIONS_ARCHIVE', false);
-  const canvasEnabled = parseBoolean(env, 'DISCOCLAW_CANVAS_ENABLED', true);
+  const canvasEnabled = parseBoolean(env, 'DISCOCLAW_CANVAS_ENABLED', false);
   const canvasPort = parsePositiveInt(env, 'DISCOCLAW_CANVAS_PORT', 9402);
   const canvasArtifactDir = parseTrimmedString(env, 'DISCOCLAW_CANVAS_ARTIFACT_DIR');
   const canvasMaxArtifacts = parsePositiveInt(env, 'DISCOCLAW_CANVAS_MAX_ARTIFACTS', 1000);
