@@ -273,6 +273,8 @@ describe('buildVoicePrompt', () => {
   it('includes separator before user text', () => {
     const result = buildVoicePrompt(baseParts);
     expect(result).toContain('sections above are internal system context');
+    expect(result).toContain('Treat earlier conversation as context, not as pending requests to answer.');
+    expect(result).toContain('Respond only to the user message below unless it explicitly asks you to revisit something older.');
   });
 
   it('includes actions section when provided', () => {

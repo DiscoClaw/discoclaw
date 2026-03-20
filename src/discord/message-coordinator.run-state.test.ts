@@ -140,6 +140,8 @@ describe('message coordinator run-state prompt guidance', () => {
     expect(boundaryIdx).toBeGreaterThan(runStateIdx);
     expect(userMessageIdx).toBeGreaterThan(boundaryIdx);
     expect(seenPrompt).toContain('Do not claim that work is currently running, auditing, being handled, or still in progress.');
+    expect(seenPrompt).toContain('Treat earlier conversation as context, not as pending requests to answer.');
+    expect(seenPrompt).toContain('Respond only to the user message below unless it explicitly asks you to revisit something older.');
   });
 
   it('injects the active-run note instead when a forge or plan run is active in the channel', async () => {

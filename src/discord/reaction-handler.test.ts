@@ -2158,6 +2158,8 @@ describe('reaction prompt interception', () => {
     expect(prompt).toContain('Tracked forge/plan run state: there is no active forge or plan run in this channel right now.');
     expect(prompt).toContain('Do not claim that work is currently running, auditing, being handled, or still in progress.');
     expect(prompt).toContain('The sections above are internal system context.');
+    expect(prompt).toContain('Treat earlier conversation as context, not as pending requests to answer.');
+    expect(prompt).toContain('Respond only to the event below unless it explicitly asks you to revisit something older.');
   });
 
   it('injects the active-run note instead when a forge or plan run is active in the channel', async () => {
