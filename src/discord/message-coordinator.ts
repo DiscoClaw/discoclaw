@@ -14,7 +14,8 @@ import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPr
 import type { ActionCategoryFlags, ActionContext, DiscordActionResult } from './actions.js';
 import type { DeferScheduler } from './defer-scheduler.js';
 import type { DeferActionRequest } from './actions-defer.js';
-import { shouldTriggerFollowUp } from './action-categories.js';
+import { shouldTriggerFollowUp, actionDedupeKey, isDuplicateAction, buildActionHistorySummary } from './action-categories.js';
+import type { ActionHistoryEntry } from './action-categories.js';
 import { countPinnedMessages, normalizePinnedMessages } from './pinned-message-utils.js';
 import type { TaskContext } from '../tasks/task-context.js';
 import type { CronContext } from './actions-crons.js';
@@ -3382,6 +3383,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let currentPrompt = prompt;
           let followUpDepth = 0;
           let pendingFollowUp: PendingActionFollowUp | null = null;
+          const actionHistory: ActionHistoryEntry[] = [];
           effectiveContinuationCapsule = existingContinuationCapsule;
           const traceId = `message_${randomUUID()}`;
           let traceOutcome = 'success';
@@ -3985,6 +3987,26 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     ? parsed.actions.filter(a => a.type !== 'sendFile')
                     : parsed.actions;
                   strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
+
+                  // Dedup: skip non-query actions that already succeeded in a prior
+                  // follow-up round to prevent the AI from re-running the same work.
+                  if (followUpDepth > 0 && actionHistory.length > 0) {
+                    const before = actions.length;
+                    actions = actions.filter((a) => {
+                      const key = actionDedupeKey(a as Record<string, unknown>);
+                      if (isDuplicateAction(key, a.type, actionHistory)) {
+                        params.log?.info({ sessionKey, followUpDepth, actionType: a.type, key }, 'followup:dedup-skipped');
+                        return false;
+                      }
+                      return true;
+                    });
+                    if (actions.length < before) {
+                      params.log?.info(
+                        { sessionKey, followUpDepth, skipped: before - actions.length, remaining: actions.length },
+                        'followup:dedup-filtered',
+                      );
+                    }
+                  }
                   const actCtx = {
                     guild: msg.guild,
                     client: msg.client,
@@ -4056,6 +4078,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       'obs.action.result',
                     );
                   }
+                  // Record action history for follow-up dedup.
+                  for (let i = 0; i < actions.length; i++) {
+                    const a = actions[i]!;
+                    actionHistory.push({
+                      type: a.type,
+                      key: actionDedupeKey(a as Record<string, unknown>),
+                      ok: actionResults[i]?.ok ?? false,
+                    });
+                  }
+
                   const anyActionSucceeded = actionResults.some((r) => r.ok);
                   processedText = appendActionResults(cleanProcessedText.trimEnd(), actions, actionResults);
                   // When all display lines were suppressed (e.g. sendMessage-only) and there's
@@ -4171,6 +4203,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     `Your earlier output may have ended before final reasoning or action blocks completed. ` +
                     `Review the action results below and continue from where you left off.`,
                   );
+                }
+
+                // Include prior action history so the AI avoids re-emitting succeeded actions.
+                const historySummary = buildActionHistorySummary(actionHistory);
+                if (historySummary) {
+                  followUpParts.push(historySummary);
                 }
 
                 followUpParts.push(

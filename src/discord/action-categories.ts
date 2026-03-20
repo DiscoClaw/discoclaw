@@ -103,3 +103,55 @@ export function followUpPromptSuffix(isFailure: boolean): string {
   }
   return `Continue your analysis based on these results. If you need additional information, you may emit further query actions.`;
 }
+
+// ---------------------------------------------------------------------------
+// Action history tracking for follow-up deduplication
+// ---------------------------------------------------------------------------
+
+export type ActionHistoryEntry = {
+  type: string;
+  /** Stable key derived from type + distinguishing params (e.g. taskId, channel). */
+  key: string;
+  ok: boolean;
+};
+
+/**
+ * Build a stable dedup key for an action.  Uses `type` plus the most
+ * distinguishing parameter so that e.g. two `taskShow` calls with different
+ * taskIds are not considered duplicates.
+ */
+export function actionDedupeKey(action: Record<string, unknown>): string {
+  const type = String(action.type ?? '');
+  // Pick the first present distinguishing param.
+  for (const field of ['taskId', 'channelId', 'channel', 'threadId', 'cronId', 'eventId', 'userId', 'role', 'prompt', 'query']) {
+    if (action[field] != null) return `${type}:${String(action[field])}`;
+  }
+  return type;
+}
+
+/**
+ * Returns true if this action (by dedup key) already succeeded in a prior
+ * follow-up round.  Query actions are exempt — re-querying is often
+ * intentional (e.g. re-reading a channel after an update).
+ */
+export function isDuplicateAction(
+  key: string,
+  type: string,
+  history: ActionHistoryEntry[],
+): boolean {
+  if (QUERY_ACTION_TYPES.has(type)) return false;
+  return history.some((h) => h.key === key && h.ok);
+}
+
+/**
+ * Build a human-readable summary of prior action history for the follow-up
+ * prompt, so the AI knows what already ran and can avoid re-emitting.
+ */
+export function buildActionHistorySummary(history: ActionHistoryEntry[]): string {
+  if (history.length === 0) return '';
+  const lines = history.map((h) => `- ${h.type}: ${h.ok ? 'succeeded' : 'failed'}`);
+  return (
+    `[Prior actions in this follow-up chain — do NOT re-emit actions that already succeeded]\n` +
+    lines.join('\n')
+  );
+}

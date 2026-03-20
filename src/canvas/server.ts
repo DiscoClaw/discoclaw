@@ -1,8 +1,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
-import { createRequire } from 'node:module';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { ArtifactStore } from './artifact-store.js';
 import type { CanvasArtifactRecord } from './artifact-store.js';
@@ -18,7 +18,7 @@ const DEFAULT_REDIRECT_URI = 'https://127.0.0.1';
 const MAX_JSON_BODY_BYTES = 6 * 1024 * 1024;
 const DEFAULT_AUTH_SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_LANDING_MESSAGE = 'Launch an artifact from a chat message to view it here.';
-const require = createRequire(import.meta.url);
+const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 type CanvasAuthClaims = {
   kind: 'canvas-auth';
@@ -156,14 +156,6 @@ function createAuthSigner(): SignedTokenSigner {
   return createSignedTokenSigner();
 }
 
-function pathToMimeType(filePath: string): string {
-  if (filePath.endsWith('.mjs') || filePath.endsWith('.js')) return 'text/javascript; charset=utf-8';
-  if (filePath.endsWith('.map')) return 'application/json; charset=utf-8';
-  if (filePath.endsWith('.json')) return 'application/json; charset=utf-8';
-  if (filePath.endsWith('.svg')) return 'image/svg+xml';
-  return 'application/octet-stream';
-}
-
 function normalizeGuildId(value: string | null): string | null {
   if (value == null) return null;
   const trimmed = value.trim();
@@ -267,7 +259,13 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
   const fetchImpl = opts.fetchImpl ?? fetch;
   const authSigner = createAuthSigner();
   const authSessionTtlMs = opts.authSessionTtlMs ?? DEFAULT_AUTH_SESSION_TTL_MS;
-  const sdkOutputRoot = path.dirname(require.resolve('@discord/embedded-app-sdk'));
+  // Bundled SDK: dist/vendor/embedded-app-sdk.js — resolve from project root
+  // so the path works whether MODULE_DIR is src/canvas/ or dist/canvas/.
+  const bundledSdkPath = path.resolve(MODULE_DIR, '..', '..', 'dist', 'vendor', 'embedded-app-sdk.js');
+  const bundledSdkCache = await fs.readFile(bundledSdkPath, 'utf8').catch(() => null);
+  if (bundledSdkCache == null) {
+    opts.log?.error({ path: bundledSdkPath }, 'canvas:sdk-bundle missing — run the bundle-embedded-sdk script');
+  }
 
   await opts.artifactStore.ensureReady();
   await opts.fileExport.ensureReady();
@@ -314,25 +312,18 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
       }
 
       if ((req.method ?? 'GET') === 'GET' && pathname.startsWith('/vendor/embedded-app-sdk/')) {
-        const relativePath = pathname.slice('/vendor/embedded-app-sdk/'.length);
-        if (!relativePath || relativePath.includes('..')) {
-          respondJson(res, 404, { error: 'Not found' });
+        if (pathname === '/vendor/embedded-app-sdk/bundle.js') {
+          if (bundledSdkCache == null) {
+            respondJson(res, 404, { error: 'Bundled SDK not found — run the bundle-embedded-sdk script' });
+            return;
+          }
+          respondText(res, 200, bundledSdkCache, {
+            'Content-Type': 'text/javascript; charset=utf-8',
+            'Cache-Control': 'public, max-age=300',
+          });
           return;
         }
-        const filePath = path.resolve(sdkOutputRoot, relativePath);
-        if (!filePath.startsWith(`${sdkOutputRoot}${path.sep}`) && filePath !== path.join(sdkOutputRoot, relativePath)) {
-          respondJson(res, 404, { error: 'Not found' });
-          return;
-        }
-        const content = await fs.readFile(filePath, 'utf8').catch(() => null);
-        if (content == null) {
-          respondJson(res, 404, { error: 'Not found' });
-          return;
-        }
-        respondText(res, 200, content, {
-          'Content-Type': pathToMimeType(filePath),
-          'Cache-Control': 'public, max-age=300',
-        });
+        respondJson(res, 404, { error: 'Not found' });
         return;
       }
 

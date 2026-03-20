@@ -176,3 +176,10 @@ Lesson: The forge runner must not mark a task as complete based solely on local 
 Source: forge run incident — unpushed commits on local main were reported as "already merged" because the forge runner checked only local commit state, not remote push or PR status
 Applied: docs/compound-lessons.md
 Status: active
+
+### 2026-03-19 - Discord Activity proxy blocks chained ESM sub-module imports
+Tags: #discord #canvas #architecture
+Lesson: When serving JavaScript to a Discord Activity iframe, all vendor code must be pre-bundled into single self-contained files because Discord's Activity proxy does not follow chained ES module import chains. Multi-file SDK output (the default for `@discord/embedded-app-sdk`) causes silent "Module load failed" errors as secondary network requests for sub-modules are blocked by the proxy. Build vendor dependencies into single ESM bundles at build time (e.g. via esbuild) and serve those instead of the raw SDK output directory.
+Source: task ws-1266 — canvas server proxying individual module files from the SDK's `output/` directory triggered cascading load failures in the Activity iframe
+Applied: vendor bundling of `@discord/embedded-app-sdk` via esbuild
+Status: active

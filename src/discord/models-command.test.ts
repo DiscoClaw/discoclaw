@@ -33,8 +33,33 @@ describe('parseModelsCommand', () => {
     });
   });
 
-  it('rejects !models set with invalid role', () => {
-    expect(parseModelsCommand('!models set bogus sonnet')).toBeNull();
+  it('returns error for !models set with invalid role', () => {
+    const result = parseModelsCommand('!models set bogus sonnet');
+    expect(result).toEqual({
+      action: 'error',
+      message: expect.stringContaining('Unknown role "bogus"'),
+    });
+    expect((result as any).message).toContain('chat');
+  });
+
+  it('maps "runtime" alias to "chat" role', () => {
+    expect(parseModelsCommand('!models set runtime openai')).toEqual({
+      action: 'set',
+      role: 'chat',
+      model: 'openai',
+    });
+    expect(parseModelsCommand('!models set RUNTIME sonnet')).toEqual({
+      action: 'set',
+      role: 'chat',
+      model: 'sonnet',
+    });
+  });
+
+  it('maps "runtime" alias in reset too', () => {
+    expect(parseModelsCommand('!models reset runtime')).toEqual({
+      action: 'reset',
+      role: 'chat',
+    });
   });
 
   it('rejects !models set with missing model', () => {
