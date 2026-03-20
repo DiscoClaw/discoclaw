@@ -200,9 +200,9 @@ Run through this checklist in order. Each step should produce the expected outpu
 
 ## Canvas Activities (optional)
 
-Canvas lets DiscoClaw launch interactive HTML artifacts (calculators, charts, diffs, dashboards) as Discord Activities — panels that open inside the Discord client. Canvas is enabled by default, but requires two manual steps in the Discord Developer Portal before it will work.
+Canvas lets DiscoClaw launch interactive HTML artifacts (calculators, charts, diffs, dashboards) as Discord Activities — panels that open inside the Discord client. This feature is experimental and disabled by default. Fresh installs and upgraded installs both require an explicit opt-in: set `DISCOCLAW_CANVAS_ENABLED=1` in `.env`, restart the bot, then complete the two manual steps in the Discord Developer Portal below.
 
-If you skip this section, the bot will still work normally — canvas launch buttons will show a setup walkthrough when clicked instead of opening an Activity.
+If you skip this section, the bot will still work normally without canvas. Interactive canvas launches stay unavailable until you opt in, and explicit canvas requests surface setup guidance instead of opening an Activity.
 
 ### Prerequisites
 
@@ -231,7 +231,7 @@ If you prefer full OAuth verification (instead of the default pre-auth flow), al
 
 ### Verification
 
-After completing setup, restart the bot and ask it to launch a canvas (e.g. "make me a calculator"). The bot should post a button; clicking it should open the Activity panel.
+After setting `DISCOCLAW_CANVAS_ENABLED=1`, completing setup, and restarting the bot, ask it to launch a canvas (e.g. "make me a calculator"). The bot should post a button; clicking it should open the Activity panel.
 
 If the button shows "Discord rejected the Activity launch request", Activities are not enabled on the application — revisit step 1 above.
 
@@ -239,7 +239,7 @@ If the button shows "Discord rejected the Activity launch request", Activities a
 
 Canvas-related environment variables (all optional, sensible defaults):
 
-- `DISCOCLAW_CANVAS_ENABLED` — Master switch (default: `true`)
+- `DISCOCLAW_CANVAS_ENABLED` — Master switch for the experimental canvas subsystem (default: `false`; set to `1` to opt in)
 - `DISCOCLAW_CANVAS_PORT` — Canvas server port (default: `9402`)
 - `DISCOCLAW_CANVAS_WRITE_BRIDGE_ENABLED` — Allow artifacts to export files to disk (default: `true`)
 - `DISCOCLAW_CANVAS_MAX_ARTIFACTS` — LRU artifact cap (default: `1000`)

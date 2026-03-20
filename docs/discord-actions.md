@@ -441,7 +441,7 @@ No separate env flag — config actions are always enabled when the master switc
 
 ### Canvas Actions (`canvas-action.ts`)
 
-Allow the model to launch an interactive Discord Activity canvas, either from a built-in app or from a generated single-file HTML artifact.
+Allow the model to launch an interactive Discord Activity canvas, either from a built-in app or from a generated single-file HTML artifact. This path is experimental and default-off until the operator opts in with `DISCOCLAW_CANVAS_ENABLED=1`.
 
 | Action | Description | Mutating? |
 |--------|-------------|-----------|
@@ -469,7 +469,7 @@ Execution flow:
 
 Env and context:
 - No `DISCOCLAW_DISCORD_ACTIONS_CANVAS` flag exists; action availability is driven by the canvas subsystem itself.
-- Master switch: `DISCOCLAW_CANVAS_ENABLED` (default `true`).
+- Master switch: `DISCOCLAW_CANVAS_ENABLED` (default `false`; explicit opt-in required on fresh and upgraded installs).
 - Optional prompt/export toggle: `DISCOCLAW_CANVAS_WRITE_BRIDGE_ENABLED` controls whether the prompt teaches the trusted `canvas.saveFile` bridge for artifact exports.
 - Requires a configured `CanvasContext`, a live local canvas server, and a guild text channel. DMs are unsupported.
 - Full operator setup (Developer Portal URL Mapping, Activities enablement, HTTPS exposure) is documented in [docs/discord-bot-setup.md](/home/davidmarsh/code/discoclaw/docs/discord-bot-setup.md).
