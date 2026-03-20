@@ -98,6 +98,7 @@ describe('LaunchStore', () => {
 
     expect(second.parseLaunchRef(artifactRef)).toEqual({ type: 'artifact', artifactId: 'artifact-1' });
     expect(second.parseLaunchRef(appRef)).toEqual({ type: 'app', appName: 'dashboard' });
+    expect(second.instanceTag()).toBe(first.instanceTag());
   });
 
   it('peeks at pending entries by activity context without consuming them', () => {

@@ -150,6 +150,7 @@ describe('canvas-action', () => {
     expect(payload).toBeDefined();
     expect(payload.content).toContain('Tax Calculator');
     expect(payload.components[0].components[0].data.custom_id).toContain(CANVAS_LAUNCH_COMPONENT_PREFIX);
+    expect(payload.components[0].components[0].data.custom_id).toContain(`${canvasCtx.launchStore.instanceTag()}:`);
   });
 
   it('posts a built-in app launch button when app mode is requested', async () => {
@@ -218,7 +219,7 @@ describe('canvas-action', () => {
       title: 'Demo',
       content: '<!doctype html><html><body>Hello</body></html>',
     });
-    const customId = `${CANVAS_LAUNCH_COMPONENT_PREFIX}${canvasCtx.launchStore.createArtifactLaunchRef(artifact.id)}`;
+    const customId = `${CANVAS_LAUNCH_COMPONENT_PREFIX}${canvasCtx.launchStore.instanceTag()}:${canvasCtx.launchStore.createArtifactLaunchRef(artifact.id)}`;
     const reply = vi.fn(async () => ({}));
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -246,7 +247,7 @@ describe('canvas-action', () => {
 
   it('registers built-in app launches from dashboard buttons', async () => {
     const canvasCtx = await makeCanvasContext();
-    const customId = `${CANVAS_LAUNCH_COMPONENT_PREFIX}${canvasCtx.launchStore.createAppLaunchRef('dashboard')}`;
+    const customId = `${CANVAS_LAUNCH_COMPONENT_PREFIX}${canvasCtx.launchStore.instanceTag()}:${canvasCtx.launchStore.createAppLaunchRef('dashboard')}`;
     const reply = vi.fn(async () => ({}));
     const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -273,5 +274,84 @@ describe('canvas-action', () => {
     expect(resolution?.target).toEqual({ type: 'app', appName: 'dashboard' });
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(reply).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a stale-session message for launch buttons created by a different live instance', async () => {
+    const canvasCtx = await makeCanvasContext();
+    const foreignLaunchStore = new LaunchStore({
+      pendingTtlMs: 120_000,
+      boundSessionTtlMs: 600_000,
+      launchRefSecret: 'foreign-instance-secret',
+    });
+    const artifact = await canvasCtx.artifactStore.createArtifact({
+      title: 'Demo',
+      content: '<!doctype html><html><body>Hello</body></html>',
+    });
+    const customId = `${CANVAS_LAUNCH_COMPONENT_PREFIX}${foreignLaunchStore.instanceTag()}:${foreignLaunchStore.createArtifactLaunchRef(artifact.id)}`;
+    const reply = vi.fn(async () => ({}));
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const handled = await handleCanvasButtonInteraction({
+      interaction: {
+        isButton: () => true,
+        customId,
+        user: { id: 'user-1' },
+        guildId: 'guild-1',
+        channelId: 'channel-1',
+        id: 'interaction-1',
+        token: 'interaction-token',
+        reply,
+      } as any,
+      canvasCtx,
+      allowUserIds: new Set(['user-1']),
+      log: { debug: vi.fn() } as any,
+    });
+
+    expect(handled).toBe(true);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(reply).toHaveBeenCalledOnce();
+    const payload = (reply as any).mock.calls[0]?.[0];
+    expect(payload.content).toContain('earlier bot session');
+    expect(canvasCtx.launchStore.hasPending({ userId: 'user-1', channelId: 'channel-1', guildId: 'guild-1' })).toBe(false);
+  });
+
+  it('surfaces Discord channel-type launch failures instead of the generic setup hint', async () => {
+    const canvasCtx = await makeCanvasContext();
+    const artifact = await canvasCtx.artifactStore.createArtifact({
+      title: 'Demo',
+      content: '<!doctype html><html><body>Hello</body></html>',
+    });
+    const customId = `${CANVAS_LAUNCH_COMPONENT_PREFIX}${canvasCtx.launchStore.instanceTag()}:${canvasCtx.launchStore.createArtifactLaunchRef(artifact.id)}`;
+    const reply = vi.fn(async () => ({}));
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({ message: 'Cannot execute action on this channel type', code: 50024 }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const handled = await handleCanvasButtonInteraction({
+      interaction: {
+        isButton: () => true,
+        customId,
+        user: { id: 'user-1' },
+        guildId: 'guild-1',
+        channelId: 'channel-1',
+        id: 'interaction-1',
+        token: 'interaction-token',
+        reply,
+      } as any,
+      canvasCtx,
+      allowUserIds: new Set(['user-1']),
+      log: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } as any,
+    });
+
+    expect(handled).toBe(true);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(reply).toHaveBeenCalledOnce();
+    const payload = (reply as any).mock.calls[0]?.[0];
+    expect(payload.content).toContain('50024');
+    expect(payload.content).toContain('channel type');
+    expect(payload.content).toContain('button itself is valid');
   });
 });

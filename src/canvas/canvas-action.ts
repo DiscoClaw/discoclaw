@@ -10,12 +10,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ActionContext, DiscordActionResult } from '../discord/actions.js';
 import { NO_MENTIONS } from '../discord/allowed-mentions.js';
+import { LaunchActivityError, respondWithLaunchActivity } from '../discord/activity-launch.js';
 import { buildCanvasSetupWalkthrough, type CanvasLocalReadiness, type CanvasServer } from './server.js';
 import { ArtifactStore } from './artifact-store.js';
 import type { CanvasBuiltinApps } from './apps.js';
 import { CanvasFileExport } from './file-export.js';
 import { LaunchStore } from './launch-store.js';
-import { respondWithLaunchActivity } from '../discord/activity-launch.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 
 const CANVAS_HTML_DOC_RE = /<(?:!doctype\s+html|html)\b/i;
@@ -33,6 +33,7 @@ let cachedCanvasPromptTemplate: string | null = null;
 
 export const CANVAS_ACTION_TYPES: ReadonlySet<string> = new Set(['launchCanvas']);
 export const CANVAS_LAUNCH_COMPONENT_PREFIX = 'canvas:launch:';
+const CANVAS_LAUNCH_COMPONENT_SEPARATOR = ':';
 
 export type LaunchCanvasActionRequest = {
   type: 'launchCanvas';
@@ -118,7 +119,27 @@ export function isLaunchCanvasActionRequest(input: unknown): input is LaunchCanv
 
 export function parseCanvasLaunchCustomId(customId: string): string | null {
   if (!customId.startsWith(CANVAS_LAUNCH_COMPONENT_PREFIX)) return null;
-  return customId.slice(CANVAS_LAUNCH_COMPONENT_PREFIX.length) || null;
+  const payload = customId.slice(CANVAS_LAUNCH_COMPONENT_PREFIX.length);
+  return payload || null;
+}
+
+function buildCanvasLaunchCustomId(canvasCtx: CanvasContext, launchRef: string): string {
+  return `${CANVAS_LAUNCH_COMPONENT_PREFIX}${canvasCtx.launchStore.instanceTag()}${CANVAS_LAUNCH_COMPONENT_SEPARATOR}${launchRef}`;
+}
+
+function parseScopedCanvasLaunchCustomId(customId: string): { instanceTag: string | null; launchRef: string } | null {
+  const payload = parseCanvasLaunchCustomId(customId);
+  if (!payload) return null;
+
+  const separatorIndex = payload.indexOf(CANVAS_LAUNCH_COMPONENT_SEPARATOR);
+  if (separatorIndex <= 0) {
+    return { instanceTag: null, launchRef: payload };
+  }
+
+  return {
+    instanceTag: payload.slice(0, separatorIndex),
+    launchRef: payload.slice(separatorIndex + 1),
+  };
 }
 
 function normalizeCanvasTitle(title: string): string {
@@ -179,6 +200,38 @@ function loadCanvasPromptTemplate(): string {
   return cachedCanvasPromptTemplate;
 }
 
+function buildLaunchActivityFailureMessage(err: unknown): string {
+  if (err instanceof LaunchActivityError) {
+    if (err.discordCode === 50024) {
+      return [
+        'Discord rejected the Activity launch for this channel context.',
+        '',
+        'API error: `50024 Cannot execute action on this channel type`.',
+        '',
+        'The button itself is valid. Discord is refusing the `LAUNCH_ACTIVITY` callback here.',
+      ].join('\n');
+    }
+
+    if (err.discordMessage) {
+      return [
+        'Discord rejected the Activity launch request.',
+        '',
+        `API error: \`${err.discordCode ?? err.status} ${err.discordMessage}\`.`,
+      ].join('\n');
+    }
+  }
+
+  return [
+    'Discord rejected the Activity launch request. This usually means Activities are not enabled on the Discord application.',
+    '',
+    'To fix this, go to the Discord Developer Portal:',
+    '1. Add a URL Mapping pointing / to your public HTTPS canvas endpoint (Tailscale Funnel, ngrok, etc.).',
+    '2. Enable Activities (requires the URL Mapping first).',
+    '',
+    'See docs/discord-bot-setup.md § Canvas Activities for the full walkthrough.',
+  ].join('\n');
+}
+
 export async function executeCanvasAction(
   action: LaunchCanvasActionRequest,
   ctx: ActionContext,
@@ -208,7 +261,7 @@ export async function executeCanvasAction(
     if (!canvasCtx.builtinApps.hasApp(appName)) {
       return { ok: false, error: `launchCanvas app "${appName}" is not available on this install` };
     }
-    customId = `${CANVAS_LAUNCH_COMPONENT_PREFIX}${canvasCtx.launchStore.createAppLaunchRef(appName)}`;
+    customId = buildCanvasLaunchCustomId(canvasCtx, canvasCtx.launchStore.createAppLaunchRef(appName));
     messageBody = 'Open this live canvas app in Discord Activity.';
   } else {
     if (!content) return { ok: false, error: 'launchCanvas requires non-empty HTML content or a built-in app' };
@@ -216,7 +269,7 @@ export async function executeCanvasAction(
       return { ok: false, error: 'launchCanvas content must be a full self-contained HTML document' };
     }
     const meta = await canvasCtx.artifactStore.createArtifact({ title, content });
-    customId = `${CANVAS_LAUNCH_COMPONENT_PREFIX}${canvasCtx.launchStore.createArtifactLaunchRef(meta.id)}`;
+    customId = buildCanvasLaunchCustomId(canvasCtx, canvasCtx.launchStore.createArtifactLaunchRef(meta.id));
   }
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -264,9 +317,34 @@ export async function handleCanvasButtonInteraction(input: {
     return true;
   }
 
-  const launchRef = parseCanvasLaunchCustomId(customId);
-  const parsed = launchRef ? canvasCtx.launchStore.parseLaunchRef(launchRef) : null;
+  const scoped = parseScopedCanvasLaunchCustomId(customId);
+  if (!scoped) {
+    log?.warn?.({ interactionId: interaction.id, customId }, 'canvas:invalid launch button payload');
+    await interaction.reply({
+      content: 'That canvas launch button is invalid.',
+      ephemeral: true,
+      allowedMentions: NO_MENTIONS,
+    });
+    return true;
+  }
+
+  if (scoped.instanceTag && scoped.instanceTag !== canvasCtx.launchStore.instanceTag()) {
+    log?.info?.({
+      interactionId: interaction.id,
+      requestedInstanceTag: scoped.instanceTag,
+      currentInstanceTag: canvasCtx.launchStore.instanceTag(),
+    }, 'canvas:rejecting stale launch button for different live instance');
+    await interaction.reply({
+      content: 'That canvas launch button belongs to an earlier bot session. Ask me to post a fresh one.',
+      ephemeral: true,
+      allowedMentions: NO_MENTIONS,
+    });
+    return true;
+  }
+
+  const parsed = canvasCtx.launchStore.parseLaunchRef(scoped.launchRef);
   if (!parsed) {
+    log?.warn?.({ interactionId: interaction.id, customId, launchRef: scoped.launchRef }, 'canvas:launch ref rejected');
     await interaction.reply({
       content: 'That canvas launch button is invalid.',
       ephemeral: true,
@@ -307,17 +385,8 @@ export async function handleCanvasButtonInteraction(input: {
     await respondWithLaunchActivity(interaction);
   } catch (err) {
     log?.warn({ err, interactionId: interaction.id }, 'canvas:launch activity callback failed');
-    const setupHint = [
-      'Discord rejected the Activity launch request. This usually means Activities are not enabled on the Discord application.',
-      '',
-      'To fix this, go to the Discord Developer Portal:',
-      '1. Add a URL Mapping pointing / to your public HTTPS canvas endpoint (Tailscale Funnel, ngrok, etc.).',
-      '2. Enable Activities (requires the URL Mapping first).',
-      '',
-      'See docs/discord-bot-setup.md § Canvas Activities for the full walkthrough.',
-    ].join('\n');
     await interaction.reply({
-      content: setupHint,
+      content: buildLaunchActivityFailureMessage(err),
       ephemeral: true,
       allowedMentions: NO_MENTIONS,
     }).catch(() => {});
