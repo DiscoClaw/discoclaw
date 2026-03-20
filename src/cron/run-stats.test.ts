@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {
   CronRunStats,
+  computeDefinitionHash,
   loadRunStats,
   emptyStore,
   generateCronId,
@@ -53,7 +54,7 @@ describe('CronRunStats', () => {
   it('creates empty store on missing file', async () => {
     const stats = await loadRunStats(statsPath);
     const store = stats.getStore();
-    expect(store.version).toBe(11);
+    expect(store.version).toBe(12);
     expect(Object.keys(store.jobs)).toHaveLength(0);
   });
 
@@ -155,6 +156,76 @@ describe('CronRunStats', () => {
     await stats.upsertRecord('cron-st4', 'thread-st4');
     const rec = stats.getRecord('cron-st4')!;
     expect(rec.state).toBeUndefined();
+  });
+
+  it('defaults new records to explicit prompt input mode', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-im0', 'thread-im0');
+
+    const rec = stats.getRecord('cron-im0')!;
+    expect(rec.inputMode).toBe('prompt');
+    expect(rec.inputShell).toBeUndefined();
+  });
+
+  it('upserts with shell-input fields and retrieves them', async () => {
+    const stats = await loadRunStats(statsPath);
+    const rec = await stats.upsertRecord('cron-im1', 'thread-im1', {
+      inputMode: 'shell',
+      inputShell: 'printf "ready\\n"',
+    });
+
+    expect(rec.inputMode).toBe('shell');
+    expect(rec.inputShell).toBe('printf "ready\\n"');
+  });
+
+  it('persists shell-input fields through disk reload', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-im2', 'thread-im2', {
+      inputMode: 'shell',
+      inputShell: 'date -u +%FT%TZ',
+    });
+
+    const stats2 = await loadRunStats(statsPath);
+    const rec = stats2.getRecord('cron-im2');
+    expect(rec).toBeDefined();
+    expect(rec!.inputMode).toBe('shell');
+    expect(rec!.inputShell).toBe('date -u +%FT%TZ');
+  });
+
+  it('clears shell-input command when returning to prompt mode', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-im3', 'thread-im3', {
+      inputMode: 'shell',
+      inputShell: 'printf shell',
+    });
+
+    await stats.upsertRecord('cron-im3', 'thread-im3', {
+      inputMode: 'prompt',
+      inputShell: undefined,
+    });
+
+    const rec = stats.getRecord('cron-im3')!;
+    expect(rec.inputMode).toBe('prompt');
+    expect(rec.inputShell).toBeUndefined();
+    expect('inputShell' in rec).toBe(false);
+  });
+
+  it('keeps cleared shell-input command absent after disk reload', async () => {
+    const stats = await loadRunStats(statsPath);
+    await stats.upsertRecord('cron-im4', 'thread-im4', {
+      inputMode: 'shell',
+      inputShell: 'printf shell',
+    });
+    await stats.upsertRecord('cron-im4', 'thread-im4', {
+      inputMode: 'prompt',
+      inputShell: undefined,
+    });
+
+    const stats2 = await loadRunStats(statsPath);
+    const rec = stats2.getRecord('cron-im4')!;
+    expect(rec.inputMode).toBe('prompt');
+    expect(rec.inputShell).toBeUndefined();
+    expect('inputShell' in rec).toBe(false);
   });
 
   it('retrieves records by threadId', async () => {
@@ -339,9 +410,51 @@ describe('CronRunStats', () => {
 describe('emptyStore', () => {
   it('returns valid initial structure', () => {
     const store = emptyStore();
-    expect(store.version).toBe(11);
+    expect(store.version).toBe(12);
     expect(store.updatedAt).toBeGreaterThan(0);
     expect(Object.keys(store.jobs)).toHaveLength(0);
+  });
+});
+
+describe('computeDefinitionHash', () => {
+  it('changes when shell-input config changes', () => {
+    const promptOnlyHash = computeDefinitionHash({
+      cronId: 'cron-hash',
+      threadId: 'thread-hash',
+      runCount: 0,
+      lastRunAt: null,
+      lastRunStatus: null,
+      cadence: null,
+      purposeTags: [],
+      disabled: false,
+      model: null,
+      inputMode: 'prompt',
+      schedule: '0 * * * *',
+      timezone: 'UTC',
+      channel: 'ops',
+      prompt: 'Summarize status',
+      triggerType: 'schedule',
+    });
+    const shellInputHash = computeDefinitionHash({
+      cronId: 'cron-hash',
+      threadId: 'thread-hash',
+      runCount: 0,
+      lastRunAt: null,
+      lastRunStatus: null,
+      cadence: null,
+      purposeTags: [],
+      disabled: false,
+      model: null,
+      inputMode: 'shell',
+      inputShell: 'printf status',
+      schedule: '0 * * * *',
+      timezone: 'UTC',
+      channel: 'ops',
+      prompt: 'Summarize status',
+      triggerType: 'schedule',
+    });
+
+    expect(promptOnlyHash).not.toBe(shellInputHash);
   });
 });
 
@@ -369,7 +482,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(11);
+    expect(stats.getStore().version).toBe(12);
     const rec = stats.getRecord('cron-migrated');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-migrated');
@@ -402,7 +515,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(11);
+    expect(stats.getStore().version).toBe(12);
     const rec = stats.getRecord('cron-v4');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-v4');
@@ -435,7 +548,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(11);
+    expect(stats.getStore().version).toBe(12);
     const rec = stats.getRecord('cron-v5');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-v5');
@@ -475,7 +588,7 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(11);
+    expect(stats.getStore().version).toBe(12);
     const rec = stats.getRecord('cron-v8');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-v8');
@@ -508,12 +621,47 @@ describe('loadRunStats version migration', () => {
 
     const stats = await loadRunStats(statsPath);
 
-    expect(stats.getStore().version).toBe(11);
+    expect(stats.getStore().version).toBe(12);
     const rec = stats.getRecord('cron-v6');
     expect(rec).toBeDefined();
     expect(rec!.cronId).toBe('cron-v6');
     expect(rec!.runCount).toBe(2);
     expect(rec!.routingMode).toBeUndefined();
     expect(rec!.allowedActions).toBeUndefined();
+  });
+
+  it('migrates a v11 store to v12 with prompt input mode on existing records', async () => {
+    const v11Store = {
+      version: 11,
+      updatedAt: Date.now(),
+      jobs: {
+        'cron-v11': {
+          cronId: 'cron-v11',
+          threadId: 'thread-v11',
+          runCount: 9,
+          lastRunAt: '2026-03-01T00:00:00.000Z',
+          lastRunStatus: 'success',
+          cadence: 'weekly',
+          purposeTags: ['reporting'],
+          disabled: false,
+          model: 'sonnet',
+          triggerType: 'schedule',
+          schedule: '0 12 * * 1',
+          prompt: 'Weekly summary',
+          projectionStatus: 'synced',
+        },
+      },
+    };
+    await fs.writeFile(statsPath, JSON.stringify(v11Store), 'utf-8');
+
+    const stats = await loadRunStats(statsPath);
+
+    expect(stats.getStore().version).toBe(12);
+    const rec = stats.getRecord('cron-v11');
+    expect(rec).toBeDefined();
+    expect(rec!.cronId).toBe('cron-v11');
+    expect(rec!.runCount).toBe(9);
+    expect(rec!.inputMode).toBe('prompt');
+    expect(rec!.inputShell).toBeUndefined();
   });
 });
