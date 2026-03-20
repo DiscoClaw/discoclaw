@@ -2,7 +2,12 @@ import { Fragment, createContext, h, hydrate, render as preactRender } from 'pre
 import {
   useCallback,
   useContext,
+  useDebugValue,
   useEffect,
+  useErrorBoundary,
+  useId,
+  useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
@@ -27,7 +32,7 @@ function render(component, container, props = {}) {
 
 // Keep the injected browser API intentionally small. Generated artifacts can
 // author function components, compose HTML templates, mount/hydrate trees, and
-// use the common state/effect hooks without bundling framework code.
+// use the installed `preact/hooks` surface without bundling framework code.
 const canvasRuntime = Object.freeze({
   Fragment,
   createContext,
@@ -37,7 +42,12 @@ const canvasRuntime = Object.freeze({
   render,
   useCallback,
   useContext,
+  useDebugValue,
   useEffect,
+  useErrorBoundary,
+  useId,
+  useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,

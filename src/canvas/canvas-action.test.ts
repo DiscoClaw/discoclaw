@@ -91,7 +91,8 @@ describe('canvas-action', () => {
 
     const prompt = canvasActionsPromptSection({ writeBridgeEnabled: true });
     expect(prompt).toContain('window.canvasRuntime');
-    expect(prompt).toContain('`html`, `render`, and `useState`');
+    expect(prompt).toContain('installed `preact/hooks` surface');
+    expect(prompt).toContain('`useLayoutEffect`');
     expect(prompt).toContain('const { html, render, useState } = window.canvasRuntime');
   });
 
@@ -105,14 +106,16 @@ describe('canvas-action', () => {
 
     const withSaveBridge = canvasActionsPromptSection({ writeBridgeEnabled: true });
     expect(withSaveBridge).toContain('window.canvasRuntime');
-    expect(withSaveBridge).toContain('`html`, `render`, and `useState`');
+    expect(withSaveBridge).toContain('installed `preact/hooks` surface');
+    expect(withSaveBridge).toContain('`useErrorBoundary`');
     expect(withSaveBridge).toContain('const { html, render, useState } = window.canvasRuntime');
     expect(withSaveBridge).toContain('canvas.saveFile');
     expect(withSaveBridge).not.toContain('{{CANVAS_SAVE_BRIDGE_GUIDANCE}}');
 
     const withoutSaveBridge = canvasActionsPromptSection({ writeBridgeEnabled: false });
     expect(withoutSaveBridge).toContain('window.canvasRuntime');
-    expect(withoutSaveBridge).toContain('`html`, `render`, and `useState`');
+    expect(withoutSaveBridge).toContain('installed `preact/hooks` surface');
+    expect(withoutSaveBridge).toContain('`useId`');
     expect(withoutSaveBridge).not.toContain('canvas.saveFile');
     expect(withoutSaveBridge).not.toContain('{{CANVAS_SAVE_BRIDGE_GUIDANCE}}');
   });
