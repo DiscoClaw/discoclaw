@@ -303,6 +303,169 @@ describe('LongRunWatchdog', () => {
     watchdog.dispose();
   });
 
+  it('persists only the normalized bounded staged recovery payload', async () => {
+    const filePath = path.join(tmpDir, 'watchdog.json');
+    const watchdog = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning: vi.fn(async () => {}),
+      postFinal: vi.fn(async () => {}),
+      stillRunningDelayMs: 60_000,
+    });
+
+    await watchdog.start({
+      runId: 'run-recovery-stage',
+      channelId: 'chan-1',
+      messageId: 'msg-1',
+    });
+
+    const stagedText = ` \r\n${'x'.repeat(1_900)}\r\n `;
+    const expectedText = 'x'.repeat(1_800);
+    await watchdog.stageRecovery('run-recovery-stage', { text: stagedText });
+
+    const state = await watchdog.getRun('run-recovery-stage');
+    expect(state?.recoveryText).toBe(expectedText);
+
+    const persisted = await readRun(filePath, 'run-recovery-stage');
+    expect(persisted?.recoveryText).toBe(expectedText);
+    watchdog.dispose();
+  });
+
+  it('leaves finalPosted false when a recovered live final post fails', async () => {
+    const filePath = path.join(tmpDir, 'watchdog.json');
+    const recoveryText = 'Recovered successful summary.';
+    const postFinal = vi.fn(async (run: { recoveryText: string | null }) => {
+      expect(run.recoveryText).toBe(recoveryText);
+      throw new Error('transient discord error');
+    });
+    const watchdog = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning: vi.fn(async () => {}),
+      postFinal,
+      stillRunningDelayMs: 60_000,
+    });
+
+    await watchdog.start({
+      runId: 'run-recovery-live-fail',
+      channelId: 'chan-1',
+      messageId: 'msg-1',
+    });
+    await watchdog.stageRecovery('run-recovery-live-fail', { text: recoveryText });
+    await watchdog.complete('run-recovery-live-fail', { outcome: 'succeeded' });
+
+    expect(postFinal).toHaveBeenCalledTimes(1);
+    const state = await watchdog.getRun('run-recovery-live-fail');
+    expect(state?.completion).toBe('succeeded');
+    expect(state?.recoveryText).toBe(recoveryText);
+    expect(state?.finalPosted).toBe(false);
+    expect(state?.finalError).toBe('transient discord error');
+
+    const persisted = await readRun(filePath, 'run-recovery-live-fail');
+    expect(persisted?.finalPosted).toBe(false);
+    expect(persisted?.recoveryText).toBe(recoveryText);
+    watchdog.dispose();
+  });
+
+  it('startup sweep reposts staged recovered summary for completed successful runs', async () => {
+    const filePath = path.join(tmpDir, 'watchdog.json');
+    const recoveryText = 'Recovered successful summary.';
+    const beforeRestart = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning: vi.fn(async () => {}),
+      postFinal: vi.fn(async () => {
+        throw new Error('transient discord error');
+      }),
+      stillRunningDelayMs: 60_000,
+    });
+
+    await beforeRestart.start({
+      runId: 'run-recovery-restart',
+      channelId: 'chan-1',
+      messageId: 'msg-1',
+      notifyOnCompletion: false,
+    });
+    await beforeRestart.stageRecovery('run-recovery-restart', { text: recoveryText });
+    await beforeRestart.complete('run-recovery-restart', { outcome: 'succeeded' });
+
+    const afterFailedPost = await beforeRestart.getRun('run-recovery-restart');
+    expect(afterFailedPost?.finalPosted).toBe(false);
+    expect(afterFailedPost?.recoveryText).toBe(recoveryText);
+    beforeRestart.dispose();
+
+    const postFinalAfterRestart = vi.fn(async (run: { completion: string | null; recoveryText: string | null }) => {
+      expect(run.completion).toBe('succeeded');
+      expect(run.recoveryText).toBe(recoveryText);
+    });
+    const afterRestart = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning: vi.fn(async () => {}),
+      postFinal: postFinalAfterRestart,
+      stillRunningDelayMs: 60_000,
+    });
+
+    const sweep = await afterRestart.startupSweep();
+    expect(sweep.finalRetried).toBe(1);
+    expect(sweep.finalPosted).toBe(1);
+    expect(sweep.finalFailed).toBe(0);
+    expect(postFinalAfterRestart).toHaveBeenCalledTimes(1);
+
+    const recovered = await afterRestart.getRun('run-recovery-restart');
+    expect(recovered?.recoveryText).toBe(recoveryText);
+    expect(recovered?.finalPosted).toBe(true);
+    afterRestart.dispose();
+  });
+
+  it('marks coordinator-confirmed visible delivery as finalPosted so startup sweep skips it after restart', async () => {
+    const filePath = path.join(tmpDir, 'watchdog.json');
+    const recoveryText = 'Recovered successful summary.';
+    const beforeRestartPostFinal = vi.fn(async () => {});
+    const beforeRestart = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning: vi.fn(async () => {}),
+      postFinal: beforeRestartPostFinal,
+      stillRunningDelayMs: 60_000,
+    });
+
+    await beforeRestart.start({
+      runId: 'run-recovery-acked',
+      channelId: 'chan-1',
+      messageId: 'msg-1',
+    });
+    await beforeRestart.stageRecovery('run-recovery-acked', { text: recoveryText });
+    await beforeRestart.complete('run-recovery-acked', {
+      outcome: 'succeeded',
+      deliveryConfirmed: true,
+    });
+
+    expect(beforeRestartPostFinal).toHaveBeenCalledTimes(0);
+    const acknowledged = await beforeRestart.getRun('run-recovery-acked');
+    expect(acknowledged?.deliveryConfirmed).toBe(true);
+    expect(acknowledged?.finalPosted).toBe(true);
+
+    const persisted = await readRun(filePath, 'run-recovery-acked');
+    expect(persisted?.deliveryConfirmed).toBe(true);
+    expect(persisted?.finalPosted).toBe(true);
+    beforeRestart.dispose();
+
+    const afterRestartPostFinal = vi.fn(async () => {});
+    const afterRestart = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning: vi.fn(async () => {}),
+      postFinal: afterRestartPostFinal,
+      stillRunningDelayMs: 60_000,
+    });
+
+    const sweep = await afterRestart.startupSweep();
+    expect(sweep.finalRetried).toBe(0);
+    expect(sweep.finalPosted).toBe(0);
+    expect(sweep.finalFailed).toBe(0);
+    expect(afterRestartPostFinal).toHaveBeenCalledTimes(0);
+
+    const recovered = await afterRestart.getRun('run-recovery-acked');
+    expect(recovered?.deliveryConfirmed).toBe(true);
+    expect(recovered?.finalPosted).toBe(true);
+    afterRestart.dispose();
+  });
+
   it('persists failure detail across retries and restart recovery', async () => {
     const filePath = path.join(tmpDir, 'watchdog.json');
     const postStillRunningA = vi.fn(async () => {});

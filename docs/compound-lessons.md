@@ -13,7 +13,9 @@ Do not use this file for task status, one-off debugging notes, or personal works
 ## Ownership
 
 - The engineer landing the codified change owns adding or updating the lesson entry when a recurring pattern is discovered.
+- The engineer landing the codified change also owns doing the dedup search in this file and carrying the promotion outcome into PR or review text as part of the durable-artifact contract.
 - The reviewer approving that change owns checking whether the lesson was promoted here or explicitly judged unnecessary.
+- The reviewer approving that change also owns verifying that the dedup search happened and that exactly one explicit promotion decision was recorded before merge: update an existing lesson, add a materially distinct new lesson, or record that no promotion was needed.
 - If the lesson is discovered before the codification lands, record the lesson first and backfill the applied reference once the fix or guidance exists.
 
 ## Promotion Rules
@@ -39,7 +41,7 @@ Use the following source taxonomy when deciding whether raw material qualifies f
 
 Before adding an entry, search this file for the same pattern, affected subsystem, and likely tags. If an existing lesson already covers the issue, update that entry with the refined lesson text, source, or applied reference instead of creating a duplicate. Add a new entry only when the new lesson is materially distinct. If the search finds no matching entry and the current change still does not yield materially distinct reusable guidance, record an explicit "no promotion needed" decision in the PR or review discussion instead of forcing a lesson entry.
 
-The review gate is mandatory: every PR that introduces or codifies one of the triggers above must be reviewed for lesson promotion before merge. The review must record one explicit decision: update an existing lesson, add a materially distinct new lesson, or record that no promotion is needed. If no new or updated lesson is needed, the PR description or review discussion should make that judgment explicit.
+The review gate is mandatory: every PR that introduces or codifies one of the triggers above must be reviewed for lesson promotion before merge. That review is part of this file's durable-artifact contract: it must record the dedup search and one explicit decision only once per trigger set for the change, namely update an existing lesson, add a materially distinct new lesson, or record that no promotion is needed. If no new or updated lesson is needed, the PR description or review discussion should make that judgment explicit.
 
 ## Entry Format
 
@@ -67,10 +69,17 @@ Format notes:
 - Plan, forge, and audit reviewers should ask whether the change exposed a reusable lesson that belongs here.
 - A change that claims to close a recurring workflow, quality, or process gap must either update this file or explicitly record that no durable lesson was produced before merge.
 - PR review should record the promotion decision explicitly: existing lesson updated, materially distinct new lesson added, or no promotion needed.
-- PR review should include an explicit dedup check: confirm the author searched for an existing lesson first and updated it instead of adding a near-duplicate entry.
+- PR review should include an explicit dedup check: confirm the author searched for an existing lesson first, record that search in the review trail, and update the existing lesson instead of adding a near-duplicate entry when applicable.
 - Refer to this file during drafting and auditing to avoid rediscovering known failures.
 
 ## Lessons
+
+### 2026-03-20 - Stage terminal Discord summaries durably before risky delivery
+Tags: #discord #workflow #state
+Lesson: When a run is about to emit its terminal user-visible Discord artifact, stage the final recovery payload durably before any risky edit/send so retries and startup recovery can repost the real summary instead of inventing one later. Treat that staged payload as part of this file's durable-artifact contract: normalize and bound it before persistence, explicitly acknowledge successful visible delivery back into the durable state, and convert staging failure into an explicit visible failure notice rather than a silent recoverable-success path.
+Source: task/chat context - long-run Discord reply finalization could lose the only visible success reply on successful no-prose or tool-heavy paths because recovery persisted completion state without enough user-visible summary detail
+Applied: docs/configuration.md, docs/compound-lessons.md
+Status: active
 
 ### 2026-03-14 - Give Discord auto-follow-up turns explicit lifecycle ownership
 Tags: #discord #workflow #task

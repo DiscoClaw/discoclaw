@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineEvent } from '../runtime/types.js';
 import { _resetForTest as resetAbortRegistry } from './abort-registry.js';
-import { _resetForTest as resetInflightReplies } from './inflight-replies.js';
+import { _resetForTest as resetInflightReplies, drainInFlightReplies } from './inflight-replies.js';
 
 vi.mock('../workspace-bootstrap.js', () => ({
   isOnboardingComplete: vi.fn(async () => true),
@@ -39,7 +39,7 @@ vi.mock('./transport-client.js', () => ({
   DiscordTransportClient: vi.fn(() => ({})),
 }));
 
-function makeRuntime(order: string[]) {
+function makeRuntimeWithFollowUpText(order: string[], followUpText: string) {
   let callCount = 0;
   return {
     id: 'test',
@@ -53,33 +53,20 @@ function makeRuntime(order: string[]) {
           text: 'Looking up channels.\n<discord-action>{"type":"channelList"}</discord-action>',
         };
       } else {
-        yield { type: 'text_final', text: 'The channel list is ready.' };
+        yield { type: 'text_final', text: followUpText };
       }
       yield { type: 'done' };
     },
   };
 }
 
+function makeRuntime(order: string[]) {
+  return makeRuntimeWithFollowUpText(order, 'The channel list is ready.');
+}
+
 function makeLongFollowUpRuntime(order: string[]) {
-  let callCount = 0;
   const longBody = `Follow-up body ${'x'.repeat(2400)}`;
-  return {
-    id: 'test',
-    capabilities: new Set<string>(['streaming_text']),
-    async *invoke(): AsyncIterable<EngineEvent> {
-      callCount += 1;
-      order.push(`invoke:${callCount}`);
-      if (callCount === 1) {
-        yield {
-          type: 'text_final',
-          text: 'Looking up channels.\n<discord-action>{"type":"channelList"}</discord-action>',
-        };
-      } else {
-        yield { type: 'text_final', text: longBody };
-      }
-      yield { type: 'done' };
-    },
-  };
+  return makeRuntimeWithFollowUpText(order, longBody);
 }
 
 function makeReply(id: string) {
@@ -170,6 +157,7 @@ describe('message auto-follow-up lifecycle', () => {
         order.push(`watchdog-start:${input.messageId}`);
         return { deduped: false, run: {} };
       }),
+      stageRecovery: vi.fn(async () => ({})),
       complete: vi.fn(async () => ({
         runId: 'run-1',
         channelId: 'ch-1',
@@ -183,9 +171,11 @@ describe('message auto-follow-up lifecycle', () => {
         checkInDueAt: 0,
         checkInPosted: false,
         checkInPostedAt: null,
+        recoveryText: null,
         completion: 'succeeded',
         completionDetail: null,
         completedAt: 0,
+        deliveryConfirmed: false,
         finalPosted: false,
         finalPostAttempts: 0,
         lastFinalAttemptAt: null,
@@ -247,6 +237,7 @@ describe('message auto-follow-up lifecycle', () => {
         order.push(`watchdog-start:${input.messageId}`);
         return { deduped: false, run: {} };
       }),
+      stageRecovery: vi.fn(async () => ({})),
       complete: vi.fn(async () => ({
         runId: 'run-1',
         channelId: 'ch-1',
@@ -260,9 +251,11 @@ describe('message auto-follow-up lifecycle', () => {
         checkInDueAt: 0,
         checkInPosted: false,
         checkInPostedAt: null,
+        recoveryText: null,
         completion: 'succeeded',
         completionDetail: null,
         completedAt: 0,
+        deliveryConfirmed: false,
         finalPosted: false,
         finalPostAttempts: 0,
         lastFinalAttemptAt: null,
@@ -318,5 +311,256 @@ describe('message auto-follow-up lifecycle', () => {
     expect(channelSend.mock.calls.length).toBeGreaterThan(1);
     const bodyCall = channelSend.mock.calls[1]?.[0] as { content?: string } | undefined;
     expect(String(bodyCall?.content ?? '')).toContain('xxxxxxxx');
+  });
+
+  it('keeps a completed lifecycle line on the placeholder for lifecycle-only follow-up turns', async () => {
+    const order: string[] = [];
+    const initialReply = makeReply('initial-reply');
+    const followUpReply = makeReply('follow-up-reply');
+    const runtime = makeRuntimeWithFollowUpText(
+      order,
+      '<discord-action>{"type":"channelList"}</discord-action>',
+    );
+    const actionsMod = await import('./actions.js');
+    vi.mocked(actionsMod.parseDiscordActions)
+      .mockReturnValueOnce({
+        actions: [{ type: 'channelList' }],
+        cleanText: 'Looking up channels.',
+        strippedUnrecognizedTypes: [],
+        parseFailures: 0,
+      })
+      .mockReturnValueOnce({
+        actions: [{ type: 'channelList' }],
+        cleanText: '',
+        strippedUnrecognizedTypes: [],
+        parseFailures: 0,
+      });
+    vi.mocked(actionsMod.appendActionResults)
+      .mockImplementationOnce((body: string) => body)
+      .mockImplementationOnce((body: string) => body);
+    const watchdog = {
+      start: vi.fn(async (input: { messageId: string }) => {
+        order.push(`watchdog-start:${input.messageId}`);
+        return { deduped: false, run: {} };
+      }),
+      stageRecovery: vi.fn(async () => ({})),
+      complete: vi.fn(async () => ({
+        runId: 'run-1',
+        channelId: 'ch-1',
+        messageId: 'follow-up-reply',
+        sessionKey: 'session-1',
+        runKind: 'discord-action-followup',
+        correlationToken: 'ignored',
+        notifyOnCompletion: false,
+        status: 'completed',
+        startedAt: 0,
+        checkInDueAt: 0,
+        checkInPosted: false,
+        checkInPostedAt: null,
+        recoveryText: null,
+        completion: 'succeeded',
+        completionDetail: null,
+        completedAt: 0,
+        deliveryConfirmed: false,
+        finalPosted: false,
+        finalPostAttempts: 0,
+        lastFinalAttemptAt: null,
+        finalError: null,
+        updatedAt: 0,
+      })),
+      startupSweep: vi.fn(async () => ({ interruptedRuns: 0, finalRetried: 0, finalPosted: 0, finalFailed: 0 })),
+    };
+    const channelSend = vi.fn(async (_opts: { content: string }) => followUpReply);
+    const msg = {
+      id: 'm1',
+      type: 0,
+      content: 'hello',
+      author: { id: 'user-1', bot: false },
+      guildId: 'guild-1',
+      guild: { id: 'guild-1' },
+      channelId: 'ch-1',
+      channel: {
+        id: 'ch-1',
+        name: 'general',
+        send: channelSend,
+        isThread: () => false,
+      },
+      client: { channels: { cache: new Map() }, user: { id: 'bot-1' } },
+      attachments: new Map(),
+      stickers: new Map(),
+      embeds: [],
+      mentions: { has: () => false },
+      reply: vi.fn().mockResolvedValue(initialReply),
+    };
+
+    const { createMessageCreateHandler } = await import('./message-coordinator.js');
+    const handler = createMessageCreateHandler(makeParams(runtime, watchdog), {
+      run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()),
+    } as any);
+
+    await handler(msg as any);
+
+    const placeholderContent = channelSend.mock.calls[0]?.[0]?.content as string;
+    const token = placeholderContent.match(/`([^`]+)`/)?.[1];
+    expect(token).toBeTruthy();
+    expect(followUpReply.edit).toHaveBeenLastCalledWith({
+      content: `Auto-follow-up \`${token}\`: completed.`,
+      allowedMentions: { parse: [] },
+    });
+    expect(followUpReply.delete).not.toHaveBeenCalled();
+    expect(watchdog.stageRecovery).toHaveBeenLastCalledWith(
+      expect.any(String),
+      { text: `Auto-follow-up \`${token}\`: completed.` },
+    );
+  });
+
+  it('keeps a completed lifecycle line on the placeholder when a short follow-up is suppressed', async () => {
+    const order: string[] = [];
+    const initialReply = makeReply('initial-reply');
+    const followUpReply = makeReply('follow-up-reply');
+    const runtime = makeRuntimeWithFollowUpText(order, 'Done.');
+    const watchdog = {
+      start: vi.fn(async (input: { messageId: string }) => {
+        order.push(`watchdog-start:${input.messageId}`);
+        return { deduped: false, run: {} };
+      }),
+      stageRecovery: vi.fn(async () => ({})),
+      complete: vi.fn(async () => ({
+        runId: 'run-1',
+        channelId: 'ch-1',
+        messageId: 'follow-up-reply',
+        sessionKey: 'session-1',
+        runKind: 'discord-action-followup',
+        correlationToken: 'ignored',
+        notifyOnCompletion: false,
+        status: 'completed',
+        startedAt: 0,
+        checkInDueAt: 0,
+        checkInPosted: false,
+        checkInPostedAt: null,
+        recoveryText: null,
+        completion: 'succeeded',
+        completionDetail: null,
+        completedAt: 0,
+        deliveryConfirmed: false,
+        finalPosted: false,
+        finalPostAttempts: 0,
+        lastFinalAttemptAt: null,
+        finalError: null,
+        updatedAt: 0,
+      })),
+      startupSweep: vi.fn(async () => ({ interruptedRuns: 0, finalRetried: 0, finalPosted: 0, finalFailed: 0 })),
+    };
+    const channelSend = vi.fn(async (_opts: { content: string }) => followUpReply);
+    const msg = {
+      id: 'm1',
+      type: 0,
+      content: 'hello',
+      author: { id: 'user-1', bot: false },
+      guildId: 'guild-1',
+      guild: { id: 'guild-1' },
+      channelId: 'ch-1',
+      channel: {
+        id: 'ch-1',
+        name: 'general',
+        send: channelSend,
+        isThread: () => false,
+      },
+      client: { channels: { cache: new Map() }, user: { id: 'bot-1' } },
+      attachments: new Map(),
+      stickers: new Map(),
+      embeds: [],
+      mentions: { has: () => false },
+      reply: vi.fn().mockResolvedValue(initialReply),
+    };
+
+    const { createMessageCreateHandler } = await import('./message-coordinator.js');
+    const handler = createMessageCreateHandler(makeParams(runtime, watchdog), {
+      run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()),
+    } as any);
+
+    await handler(msg as any);
+
+    const placeholderContent = channelSend.mock.calls[0]?.[0]?.content as string;
+    const token = placeholderContent.match(/`([^`]+)`/)?.[1];
+    expect(token).toBeTruthy();
+    expect(followUpReply.edit).toHaveBeenLastCalledWith({
+      content: `Auto-follow-up \`${token}\`: completed.`,
+      allowedMentions: { parse: [] },
+    });
+    expect(followUpReply.delete).not.toHaveBeenCalled();
+    expect(watchdog.stageRecovery).toHaveBeenLastCalledWith(
+      expect.any(String),
+      { text: `Auto-follow-up \`${token}\`: completed.` },
+    );
+  });
+
+  it('preserves primary delivery confirmation when shutdown interrupts a later follow-up turn', async () => {
+    let callCount = 0;
+    const runtime = {
+      id: 'test',
+      capabilities: new Set<string>(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        callCount += 1;
+        if (callCount === 1) {
+          yield {
+            type: 'text_final',
+            text: 'Looking up channels.\n<discord-action>{"type":"channelList"}</discord-action>',
+          };
+        } else {
+          yield { type: 'text_final', text: 'Follow-up summary.' };
+          await drainInFlightReplies();
+          yield { type: 'done' };
+          return;
+        }
+        yield { type: 'done' };
+      },
+    };
+    const initialReply = makeReply('initial-reply');
+    const followUpReply = makeReply('follow-up-reply');
+    const watchdog = {
+      start: vi.fn(async () => ({ deduped: false, run: {} })),
+      stageRecovery: vi.fn(async () => ({})),
+      complete: vi.fn(async () => null),
+      startupSweep: vi.fn(async () => ({ interruptedRuns: 0, finalRetried: 0, finalPosted: 0, finalFailed: 0 })),
+    };
+    const channelSend = vi.fn(async (_opts: { content: string }) => followUpReply);
+    const msg = {
+      id: 'm1',
+      type: 0,
+      content: 'hello',
+      author: { id: 'user-1', bot: false },
+      guildId: 'guild-1',
+      guild: { id: 'guild-1' },
+      channelId: 'ch-1',
+      channel: {
+        id: 'ch-1',
+        name: 'general',
+        send: channelSend,
+        isThread: () => false,
+      },
+      client: { channels: { cache: new Map() }, user: { id: 'bot-1' } },
+      attachments: new Map(),
+      stickers: new Map(),
+      embeds: [],
+      mentions: { has: () => false },
+      reply: vi.fn().mockResolvedValue(initialReply),
+    };
+
+    const { createMessageCreateHandler } = await import('./message-coordinator.js');
+    const handler = createMessageCreateHandler(makeParams(runtime, watchdog), {
+      run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()),
+    } as any);
+
+    await handler(msg as any);
+
+    expect(initialReply.edit).toHaveBeenCalledWith({
+      content: expect.stringContaining('Channel lookup complete.'),
+      allowedMentions: { parse: [] },
+    });
+    expect(watchdog.complete).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({ outcome: 'succeeded', deliveryConfirmed: true }),
+    );
   });
 });

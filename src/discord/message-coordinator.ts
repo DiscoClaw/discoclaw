@@ -336,7 +336,7 @@ export type BotParams = {
   completionNotifyEnabled?: boolean;
   completionNotifyThresholdMs?: number;
   /** Optional lifecycle watchdog for long-running Discord operations. */
-  longRunWatchdog?: Pick<LongRunWatchdog, 'start' | 'complete' | 'startupSweep'>;
+  longRunWatchdog?: Pick<LongRunWatchdog, 'start' | 'complete' | 'stageRecovery' | 'startupSweep'>;
   /** Optional override for watchdog still-running check-in delay. */
   longRunStillRunningDelayMs?: number;
   serviceName?: string;
@@ -480,7 +480,7 @@ function errorMessage(err: unknown): string {
 }
 
 type LongRunOutcome = 'succeeded' | 'failed';
-type LongRunWatchdogLike = Pick<LongRunWatchdog, 'start' | 'complete' | 'startupSweep'>;
+type LongRunWatchdogLike = Pick<LongRunWatchdog, 'start' | 'complete' | 'stageRecovery' | 'startupSweep'>;
 type FollowUpTerminalState = 'completed' | 'failed' | 'completed after delay';
 type PendingActionFollowUp = {
   token: string;
@@ -535,12 +535,17 @@ async function completeWatchdogRun(opts: {
   runId: string | null;
   outcome: LongRunOutcome;
   detail?: string;
+  deliveryConfirmed?: boolean;
   log?: LoggerLike;
   flow: string;
 }): Promise<LongRunWatchdogRun | null> {
   if (!opts.watchdog || !opts.runId) return null;
   try {
-    return await opts.watchdog.complete(opts.runId, { outcome: opts.outcome, detail: opts.detail });
+    return await opts.watchdog.complete(opts.runId, {
+      outcome: opts.outcome,
+      detail: opts.detail,
+      deliveryConfirmed: opts.deliveryConfirmed,
+    });
   } catch (err) {
     opts.log?.warn({ err, runId: opts.runId, outcome: opts.outcome }, `${opts.flow}: watchdog complete failed`);
     return null;
@@ -562,6 +567,58 @@ function appendFollowUpLifecycleLine(text: string, token: string, state: 'pendin
   const line = buildFollowUpLifecycleLine(token, state);
   const base = closeFenceIfOpen(String(text ?? '').trimEnd());
   return base ? `${base}\n\n${line}` : line;
+}
+
+function buildCompletedWithoutVisibleOutputText(): string {
+  return 'Completed successfully. Discord actions ran, but there was no additional reply text.';
+}
+
+function buildCompletedWithImageOutputText(hasActions: boolean): string {
+  return hasActions
+    ? 'Completed successfully. Discord actions ran and output included image attachments, but there was no additional reply text.'
+    : 'Completed successfully. Output included image attachments, but there was no additional reply text.';
+}
+
+function buildRecoveryText(prefix: string | null, bodyText: string): string | null {
+  const normalizedPrefix = closeFenceIfOpen(String(prefix ?? '').trimEnd());
+  const normalizedBody = closeFenceIfOpen(String(bodyText ?? '').trimEnd());
+  const combined = normalizedPrefix && normalizedBody
+    ? `${normalizedPrefix}\n\n${normalizedBody}`
+    : normalizedPrefix || normalizedBody;
+  const trimmed = combined.trim();
+  return trimmed || null;
+}
+
+function buildFinalizationLossVisibleText(prefix: string | null): string {
+  return buildRecoveryText(
+    prefix,
+    'Final delivery safeguard failed before I could post the terminal reply. Leaving this message visible instead of deleting it.',
+  ) ?? 'Final delivery safeguard failed before I could post the terminal reply.';
+}
+
+async function stageWatchdogRecovery(opts: {
+  watchdog?: LongRunWatchdogLike;
+  runId: string | null;
+  text: string | null;
+  log?: LoggerLike;
+  flow: string;
+}): Promise<boolean> {
+  if (!opts.watchdog || !opts.runId || !opts.text) return true;
+  if (typeof opts.watchdog.stageRecovery !== 'function') {
+    opts.log?.warn({ runId: opts.runId }, `${opts.flow}: watchdog recovery staging unavailable`);
+    return false;
+  }
+  try {
+    const stagedRun = await opts.watchdog.stageRecovery(opts.runId, { text: opts.text });
+    if (!stagedRun) {
+      opts.log?.warn({ runId: opts.runId }, `${opts.flow}: watchdog recovery stage missing run`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    opts.log?.warn({ err, runId: opts.runId }, `${opts.flow}: watchdog recovery stage failed`);
+    return false;
+  }
 }
 
 function toSendTarget(candidate: unknown): SendTarget | null {
@@ -1729,6 +1786,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         let abortSignal: AbortSignal | undefined;
         let primaryWatchdogRunId: string | null = null;
         let primaryWatchdogOutcome: LongRunOutcome = 'succeeded';
+        let primaryRecoveryReady = false;
+        let primaryDeliveryConfirmed = false;
+        let deliveryConfirmed = false;
         try {
           // Handle !memory commands before session creation or the "..." placeholder.
           if (!isBotMessage && params.memoryCommandsEnabled) {
@@ -2943,6 +3003,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
           // Track this reply for graceful shutdown cleanup and cleanup on early error.
           let replyFinalized = false;
+          let preserveVisibleReply = false;
+          deliveryConfirmed = false;
           let hadTextFinal = false;
           let dispose = registerInFlightReply(reply, msg.channelId, reply.id, `message:${msg.channelId}`);
           let abortResult = registerAbort(reply.id);
@@ -3499,6 +3561,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 if (reactPromise) setStopReaction(msg.channelId, reply.id, reactPromise);
                 stopReactionRemoved = false;
                 replyFinalized = false;
+                preserveVisibleReply = false;
+                deliveryConfirmed = false;
                 currentFollowUpToken = plannedFollowUp.token;
                 currentFollowUpRunId = plannedFollowUp.runId;
                 const followUpWatchdogStarted = longRunWatchdog
@@ -3517,6 +3581,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   })
                   : true;
                 if (!followUpWatchdogStarted) {
+                  primaryWatchdogOutcome = 'failed';
                   try {
                     await reply.edit({
                       content:
@@ -3525,8 +3590,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       allowedMentions: NO_MENTIONS,
                     });
                     replyFinalized = true;
+                    deliveryConfirmed = true;
                   } catch {
-                    try { await reply.delete(); } catch { /* best-effort cleanup */ }
+                    preserveVisibleReply = true;
                   }
                   break;
                 }
@@ -4110,23 +4176,21 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
 
                   const anyActionSucceeded = actionResults.some((r) => r.ok);
                   processedText = appendActionResults(cleanProcessedText.trimEnd(), actions, actionResults);
-                  // When all display lines were suppressed (e.g. sendMessage-only) and there's
-                  // no prose, delete the placeholder instead of posting "(no output)".
-                  if (
+                  const completedWithoutVisibleOutput =
                     !processedText.trim()
                     && anyActionSucceeded
                     && collectedImages.length === 0
                     && strippedUnrecognizedTypes.length === 0
                     && parseFailuresCount === 0
-                  ) {
+                  ;
+                  if (completedWithoutVisibleOutput) {
+                    metrics.increment('discord.message.completed_without_visible_output');
                     if (followUpDepth > 0 && currentFollowUpToken) {
                       processedText = '';
                       params.log?.info({ sessionKey, followUpDepth }, 'followup:lifecycle-only terminal state');
                     } else {
-                      try { await reply.delete(); } catch { /* ignore */ }
-                      replyFinalized = true;
-                      params.log?.info({ sessionKey }, 'discord:reply suppressed (actions-only, no display text)');
-                      break;
+                      processedText = buildCompletedWithoutVisibleOutputText();
+                      params.log?.info({ sessionKey }, 'discord:reply visible terminal (actions-only, no display text)');
                     }
                   }
                   if (statusRef?.current) {
@@ -4262,6 +4326,39 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 }
               }
               pendingFollowUp = nextFollowUp;
+              const finalReplyPrefix = currentFollowUpToken ? followUpPlaceholderLines.join('\n') : null;
+              const recoveryBodyText = processedText.trim()
+                ? processedText
+                : (collectedImages.length > 0
+                  ? buildCompletedWithImageOutputText(actions.length > 0)
+                  : '');
+              const recoveryText = buildRecoveryText(finalReplyPrefix, recoveryBodyText);
+              const recoveryStaged = await stageWatchdogRecovery({
+                watchdog: longRunWatchdog,
+                runId: primaryWatchdogRunId,
+                text: recoveryText,
+                log: params.log,
+                flow: 'message',
+              });
+
+              if (!recoveryStaged) {
+                primaryWatchdogOutcome = 'failed';
+                metrics.increment('discord.message.finalization_loss');
+                try {
+                  await reply.edit({
+                    content: buildFinalizationLossVisibleText(finalReplyPrefix),
+                    allowedMentions: NO_MENTIONS,
+                  });
+                  replyFinalized = true;
+                  deliveryConfirmed = true;
+                  if (followUpDepth === 0) primaryDeliveryConfirmed = true;
+                } catch {
+                  preserveVisibleReply = true;
+                }
+                break;
+              }
+
+              primaryRecoveryReady = true;
 
               if (!isShuttingDown()) {
                 try {
@@ -4269,7 +4366,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     await editThenSendChunksWithPrefix(
                       reply,
                       msg.channel,
-                      followUpPlaceholderLines.join('\n'),
+                      finalReplyPrefix ?? '',
                       processedText,
                       collectedImages,
                     );
@@ -4277,15 +4374,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     await editThenSendChunks(reply, msg.channel, processedText, collectedImages);
                   }
                   replyFinalized = true;
+                  deliveryConfirmed = true;
+                  if (followUpDepth === 0) primaryDeliveryConfirmed = true;
                 } catch (editErr) {
                   // Thread archived by a taskClose action — the close summary was already
                   // posted inside closeTaskThread, so the only thing lost is Claude's
                   // conversational wrapper ("Done. Closing it out now.").  Swallow gracefully.
                   if (errorCode(editErr) === 50083) {
-                    params.log?.info({ sessionKey }, 'discord:reply skipped (thread archived by action)');
-                    try { await reply.delete(); } catch { /* best-effort cleanup */ }
+                    params.log?.info({ sessionKey }, 'discord:reply preserved (thread archived by action)');
                     replyFinalized = true;
+                    deliveryConfirmed = true;
+                    if (followUpDepth === 0) primaryDeliveryConfirmed = true;
                   } else {
+                    metrics.increment('discord.message.finalization_loss');
                     throw editErr;
                   }
                 }
@@ -4325,6 +4426,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   allowedMentions: NO_MENTIONS,
                 });
                 replyFinalized = true;
+                deliveryConfirmed = true;
+                primaryDeliveryConfirmed = true;
               }
             } catch {
               // Ignore secondary errors; outer catch will handle logging.
@@ -4333,7 +4436,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           } finally {
             // Safety net runs before dispose() so cold-start recovery can still see
             // the in-flight entry if the delete fails.
-            if (!replyFinalized && reply && !isShuttingDown()) {
+            if (!replyFinalized && !preserveVisibleReply && reply && !isShuttingDown()) {
               try { await reply.delete(); } catch { /* best-effort */ }
             }
             abortDispose();
@@ -4481,18 +4584,23 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 content: mapRuntimeErrorToUserMessage(String(err)),
                 allowedMentions: NO_MENTIONS,
               });
+              deliveryConfirmed = true;
+              primaryDeliveryConfirmed = true;
             }
           } catch {
             // Ignore secondary errors writing to Discord.
           }
         } finally {
-          const outcome: LongRunOutcome = (primaryWatchdogOutcome === 'failed' || abortSignal?.aborted || isShuttingDown())
+          const outcome: LongRunOutcome = (primaryWatchdogOutcome === 'failed'
+            || abortSignal?.aborted
+            || (isShuttingDown() && !primaryRecoveryReady))
             ? 'failed'
             : 'succeeded';
           await completeWatchdogRun({
             watchdog: longRunWatchdog,
             runId: primaryWatchdogRunId,
             outcome,
+            deliveryConfirmed: primaryDeliveryConfirmed,
             log: params.log,
             flow: 'message',
           });

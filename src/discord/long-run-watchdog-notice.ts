@@ -1,4 +1,5 @@
 import { NO_MENTIONS } from './allowed-mentions.js';
+import { appendOutsideFence } from './output-utils.js';
 import { sanitizeErrorMessage } from './status-channel.js';
 
 type WatchdogNoticeMessage = {
@@ -31,8 +32,14 @@ function canEditSourceMessage(message: WatchdogNoticeMessage | null, botUserId?:
 export function buildLongRunFinalNotice(args: {
   completion: 'succeeded' | 'failed' | 'interrupted' | null;
   completionDetail?: string | null;
+  recoveryText?: string | null;
   source: 'complete' | 'startup-sweep';
 }): string {
+  const recoveryText = normalizeWatchdogNoticeText(args.recoveryText);
+  if (recoveryText) {
+    return buildRecoveredWatchdogNotice(recoveryText, args.source);
+  }
+
   const base = args.completion === 'succeeded'
     ? 'Run complete.'
     : args.completion === 'failed'
@@ -42,7 +49,28 @@ export function buildLongRunFinalNotice(args: {
   const rawDetail = typeof args.completionDetail === 'string' ? args.completionDetail.trim() : '';
   if (!rawDetail || args.completion !== 'failed') return `${base}${recoveredSuffix}`;
   const detail = sanitizeErrorMessage(rawDetail);
-  return `${base}${recoveredSuffix}\nReason: ${detail}`.slice(0, 2000);
+  return `${base}${recoveredSuffix}\nReason: ${detail}`;
+}
+
+export function buildLongRunStagingFailureNotice(prefix?: string | null): string {
+  const base = 'Final delivery safeguard failed before I could post the terminal reply. Leaving this message visible instead of deleting it.';
+  const normalizedPrefix = normalizeWatchdogNoticeText(prefix);
+  if (!normalizedPrefix) return base;
+  return appendOutsideFence(normalizedPrefix, base);
+}
+
+function normalizeWatchdogNoticeText(value: string | null | undefined): string | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.replace(/\r\n?/g, '\n').trim();
+  return normalized || null;
+}
+
+function buildRecoveredWatchdogNotice(
+  recoveryText: string,
+  source: 'complete' | 'startup-sweep',
+): string {
+  if (source !== 'startup-sweep') return recoveryText;
+  return appendOutsideFence(recoveryText, 'Recovered after restart.');
 }
 
 export async function postLongRunWatchdogNoticeToChannel(
