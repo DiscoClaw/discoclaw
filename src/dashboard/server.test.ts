@@ -1043,26 +1043,94 @@ describe('startDashboardServer', () => {
     expect(handle.server.address()).toBeTruthy();
   });
 
-  it('maps listen EADDRINUSE errors to an actionable dashboard port message', async () => {
-    handle = await startDashboardServer({
-      port: 0,
-      host: '127.0.0.1',
-      cwd: '/repo',
-      env: {},
-      deps: makeDeps(),
-      log: mockLog(),
+  it('retries on EADDRINUSE and binds to the next available port', async () => {
+    // Occupy a port so the first attempt fails
+    const blocker = net.createServer();
+    const blockerPort = await new Promise<number>((resolve) => {
+      blocker.listen(0, '127.0.0.1', () => {
+        resolve((blocker.address() as net.AddressInfo).port);
+      });
     });
-    const port = (handle.server.address() as { port: number }).port;
+
+    const log = mockLog();
+    try {
+      handle = await startDashboardServer({
+        port: blockerPort,
+        host: '127.0.0.1',
+        cwd: '/repo',
+        env: {},
+        deps: makeDeps(),
+        log,
+      });
+
+      const boundPort = (handle.server.address() as { port: number }).port;
+      expect(boundPort).toBe(blockerPort + 1);
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: blockerPort, attempt: 1 }),
+        expect.stringContaining('in use'),
+      );
+    } finally {
+      blocker.close();
+    }
+  });
+
+  it('exhausts all retries on EADDRINUSE and throws the mapped error', async () => {
+    // Occupy 10 consecutive ports to exhaust retries
+    const blockers: net.Server[] = [];
+    const basePort = await new Promise<number>((resolve) => {
+      const s = net.createServer();
+      s.listen(0, '127.0.0.1', () => {
+        const p = (s.address() as net.AddressInfo).port;
+        blockers.push(s);
+        resolve(p);
+      });
+    });
+
+    try {
+      for (let i = 1; i < 10; i++) {
+        await new Promise<void>((resolve) => {
+          const s = net.createServer();
+          s.listen(basePort + i, '127.0.0.1', () => {
+            blockers.push(s);
+            resolve();
+          });
+        });
+      }
+
+      await expect(startDashboardServer({
+        port: basePort,
+        host: '127.0.0.1',
+        cwd: '/repo',
+        env: {},
+        deps: makeDeps(),
+        log: mockLog(),
+      })).rejects.toThrow(/port is already in use/);
+    } finally {
+      await Promise.all(blockers.map((s) => new Promise<void>((r) => s.close(() => r()))));
+    }
+  });
+
+  it('throws immediately on non-EADDRINUSE errors without retrying', async () => {
+    const log = mockLog();
+
+    // Port 1 requires elevated privileges (EACCES) on most systems.
+    // If running as root this test would not get EACCES, so skip.
+    const isRoot = process.getuid?.() === 0;
+    if (isRoot) return;
 
     await expect(startDashboardServer({
-      port,
+      port: 1,
       host: '127.0.0.1',
       cwd: '/repo',
       env: {},
       deps: makeDeps(),
-      log: mockLog(),
-    })).rejects.toThrow(
-      `Dashboard failed to bind 127.0.0.1:${port} (http://127.0.0.1:${port}/) because the port is already in use. Another DiscoClaw instance may already be running with the dashboard enabled. Set DISCOCLAW_DASHBOARD_PORT to a different port in .env for one instance (for example, 9402), or disable the dashboard on one of them.`,
+      log,
+    })).rejects.toThrow(/elevated privileges/);
+
+    // Should not have logged any retry warnings
+    expect(log.warn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ attempt: expect.any(Number) }),
+      expect.stringContaining('in use'),
     );
   });
 

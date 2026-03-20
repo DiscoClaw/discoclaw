@@ -18,7 +18,7 @@ import {
 import { DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT, formatDashboardUrl } from './options.js';
 import { renderDashboardPage } from './page.js';
 import { buildSnapshotResponse, type DashboardSnapshotApiResponse } from './api/snapshot.js';
-import { mapListenError } from './server-errors.js';
+import { hasErrorCode, mapListenError } from './server-errors.js';
 import type { DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext, updateEnvKey } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
@@ -693,24 +693,51 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
     }
   });
 
-  await new Promise<void>((resolve, reject) => {
-    const onError = (err: Error) => {
-      cleanup();
-      reject(mapListenError(err, host, port));
-    };
-    const onListening = () => {
-      cleanup();
-      resolve();
-    };
-    const cleanup = () => {
-      server.off('error', onError);
-      server.off('listening', onListening);
-    };
+  const MAX_PORT_ATTEMPTS = 10;
 
-    server.once('error', onError);
-    server.once('listening', onListening);
-    server.listen(port, host);
-  });
+  function listenOnPort(srv: http.Server, listenHost: string, listenPort: number): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      const onError = (err: Error) => {
+        cleanup();
+        reject(err);
+      };
+      const onListening = () => {
+        cleanup();
+        resolve();
+      };
+      const cleanup = () => {
+        srv.off('error', onError);
+        srv.off('listening', onListening);
+      };
+
+      srv.once('error', onError);
+      srv.once('listening', onListening);
+      srv.listen(listenPort, listenHost);
+    });
+  }
+
+  let lastError: unknown;
+  for (let attempt = 0; attempt < MAX_PORT_ATTEMPTS; attempt++) {
+    const currentPort = port + attempt;
+    try {
+      await listenOnPort(server, host, currentPort);
+      lastError = undefined;
+      break;
+    } catch (err) {
+      lastError = err;
+      if (!hasErrorCode(err, 'EADDRINUSE')) {
+        throw mapListenError(err, host, currentPort);
+      }
+      log?.warn(
+        { host, port: currentPort, attempt: attempt + 1, maxAttempts: MAX_PORT_ATTEMPTS },
+        `dashboard:port ${currentPort} in use, trying ${currentPort + 1}`,
+      );
+    }
+  }
+
+  if (lastError) {
+    throw mapListenError(lastError, host, port + MAX_PORT_ATTEMPTS - 1);
+  }
 
   const address = server.address() as { address: string; port: number } | null;
   const boundHost = address?.address ?? host;

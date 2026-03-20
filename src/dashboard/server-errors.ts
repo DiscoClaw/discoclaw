@@ -4,7 +4,7 @@ type ErrnoLike = {
   code?: unknown;
 };
 
-function hasErrorCode(err: unknown, code: string): boolean {
+export function hasErrorCode(err: unknown, code: string): boolean {
   return typeof err === 'object' && err !== null && (err as ErrnoLike).code === code;
 }
 
