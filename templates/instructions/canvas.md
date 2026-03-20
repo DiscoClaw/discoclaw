@@ -2,16 +2,21 @@
 
 **launchCanvas** — Generate and serve an interactive HTML artifact or built-in app in a Discord Activity panel:
 ```
-<discord-action>{"type":"launchCanvas","title":"Tax Calculator","content":"<!doctype html><html><head><meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" /><style>body{font-family:sans-serif;padding:16px}</style></head><body><h1>Tax Calculator</h1><label>Income <input id=\"income\" type=\"number\" value=\"50000\" /></label><p id=\"out\"></p><script>const input=document.getElementById('income');const out=document.getElementById('out');const render=()=>{const value=Number(input.value||0);out.textContent='Estimated tax: $'+Math.round(value*0.22).toLocaleString();};input.addEventListener('input',render);render();</script></body></html>"}</discord-action>
+<discord-action>{"type":"launchCanvas","title":"Tax Calculator","content":"<!doctype html><html><head><meta charset=\"utf-8\" /><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" /><style>body{font-family:sans-serif;padding:16px}label,input{display:block;margin-top:12px}</style></head><body><div id=\"app\"></div><script>const { html, render, useState } = window.canvasRuntime;function TaxCalculator(){const [income,setIncome]=useState(50000);const tax=Math.round(income*0.22);return html`<main><h1>Tax Calculator</h1><label>Income <input type=\"number\" value=${income} onInput=${(event)=>setIncome(Number(event.currentTarget.value||0))} /></label><p>Estimated tax: $${tax.toLocaleString()}</p></main>`;}render(TaxCalculator, document.getElementById(\"app\"));</script></body></html>"}</discord-action>
 <discord-action>{"type":"launchCanvas","title":"Dashboard","app":"dashboard"}</discord-action>
 ```
 - `title` (required): Human-readable label for the launch button.
-- `content` (artifact mode): Full self-contained HTML document with all CSS and JS inline.
+- `content` (artifact mode): Full self-contained HTML document with all CSS and JS inline; the server injects `window.canvasRuntime` only when serving artifact render responses.
 - `app` (built-in mode): Named built-in Activity app such as `dashboard`.
 - Use canvas only when interactivity materially improves the result over plain text.
 - Default is plain text. Do not use canvas for short answers, conversational replies, or single values.
 - Good fits: calculators, forms, charts, diffs, large comparison views, filterable tables, live dashboard launches.
 - Bad fits: simple status updates, brief explanations, or anything the user explicitly wants as plain text.
+- Artifact contract: stored artifact HTML stays unchanged, non-render API responses stay unchanged, and only artifact render responses receive `window.canvasRuntime`.
+- Artifacts should destructure from `window.canvasRuntime` instead of bundling React, Preact, Vue, or another UI framework.
+- Recommended starter surface: `const { html, render, useState } = window.canvasRuntime;`
+- The injected runtime exposes `html`, `render`, and the installed `preact/hooks` surface: `useState`, `useEffect`, `useLayoutEffect`, `useReducer`, `useRef`, `useMemo`, `useCallback`, `useContext`, `useImperativeHandle`, `useDebugValue`, `useErrorBoundary`, and `useId`.
+- Keep the starter small unless the artifact actually needs more hook surface; mount into a dedicated root node.
 - Generated artifacts must be a single HTML file, responsive at phone width, and keep total size under roughly 500KB.
 - No external scripts, stylesheets, fonts, images, or nested iframes in generated artifacts.
 - Generated artifacts run inside a sandboxed iframe and cannot call backend routes directly.
