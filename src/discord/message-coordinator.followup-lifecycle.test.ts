@@ -170,6 +170,7 @@ describe('message auto-follow-up lifecycle', () => {
         order.push(`watchdog-start:${input.messageId}`);
         return { deduped: false, run: {} };
       }),
+      stageRecovery: vi.fn(async () => null),
       complete: vi.fn(async () => ({
         runId: 'run-1',
         channelId: 'ch-1',
@@ -183,9 +184,11 @@ describe('message auto-follow-up lifecycle', () => {
         checkInDueAt: 0,
         checkInPosted: false,
         checkInPostedAt: null,
+        recoveryText: null,
         completion: 'succeeded',
         completionDetail: null,
         completedAt: 0,
+        deliveryConfirmed: false,
         finalPosted: false,
         finalPostAttempts: 0,
         lastFinalAttemptAt: null,
@@ -247,6 +250,7 @@ describe('message auto-follow-up lifecycle', () => {
         order.push(`watchdog-start:${input.messageId}`);
         return { deduped: false, run: {} };
       }),
+      stageRecovery: vi.fn(async () => null),
       complete: vi.fn(async () => ({
         runId: 'run-1',
         channelId: 'ch-1',
@@ -260,9 +264,11 @@ describe('message auto-follow-up lifecycle', () => {
         checkInDueAt: 0,
         checkInPosted: false,
         checkInPostedAt: null,
+        recoveryText: null,
         completion: 'succeeded',
         completionDetail: null,
         completedAt: 0,
+        deliveryConfirmed: false,
         finalPosted: false,
         finalPostAttempts: 0,
         lastFinalAttemptAt: null,

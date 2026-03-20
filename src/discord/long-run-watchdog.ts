@@ -19,6 +19,8 @@ type PersistedStore = {
 };
 
 const STORE_VERSION = 1;
+const MAX_COMPLETION_DETAIL_LENGTH = 1_500;
+const MAX_RECOVERY_TEXT_LENGTH = 1_800;
 
 export type LongRunWatchdogRun = {
   runId: string;
@@ -119,14 +121,14 @@ function normalizeCompletionDetail(value: unknown): string | null {
   const detail = asNullableString(value);
   if (detail === null) return null;
   const trimmed = detail.trim();
-  return trimmed ? trimmed.slice(0, 1500) : null;
+  return trimmed ? trimmed.slice(0, MAX_COMPLETION_DETAIL_LENGTH) : null;
 }
 
 function normalizeRecoveryText(value: unknown): string | null {
   const text = asNullableString(value);
   if (text === null) return null;
   const normalized = text.replace(/\r\n?/g, '\n').trim();
-  return normalized ? normalized.slice(0, 1800) : null;
+  return normalized ? normalized.slice(0, MAX_RECOVERY_TEXT_LENGTH) : null;
 }
 
 function asRunStatus(value: unknown, fallback: RunStatus): RunStatus {
@@ -316,6 +318,10 @@ export class LongRunWatchdog {
       }
       if (input.deliveryConfirmed !== undefined) {
         run.deliveryConfirmed = input.deliveryConfirmed;
+        if (input.deliveryConfirmed) {
+          run.finalPosted = true;
+          run.finalError = null;
+        }
       }
       run.updatedAt = this.now();
       await this.persistStore();
@@ -567,10 +573,11 @@ export class LongRunWatchdog {
   }
 
   private requiresFinalPost(run: LongRunWatchdogRun): boolean {
-    if (run.deliveryConfirmed) return false;
+    if (run.deliveryConfirmed || run.finalPosted) return false;
     if (run.runKind === DISCORD_ACTION_FOLLOW_UP_RUN_KIND) {
       return run.completion === 'interrupted';
     }
+    if (run.recoveryText) return true;
     if (run.completion === 'interrupted') return true;
     if (run.completion === 'failed' && run.completionDetail) return true;
     if (!run.notifyOnCompletion) return false;
