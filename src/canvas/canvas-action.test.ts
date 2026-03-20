@@ -94,6 +94,8 @@ describe('canvas-action', () => {
     expect(prompt).toContain('installed `preact/hooks` surface');
     expect(prompt).toContain('`useLayoutEffect`');
     expect(prompt).toContain('const { html, render, useState } = window.canvasRuntime');
+    expect(prompt).toContain('self-close void HTML elements');
+    expect(prompt).toContain('Bare `<input>` tags can corrupt the rendered DOM');
   });
 
   it('documents the injected canvas runtime in fallback prompt text and preserves save-bridge substitution', async () => {
@@ -109,6 +111,7 @@ describe('canvas-action', () => {
     expect(withSaveBridge).toContain('installed `preact/hooks` surface');
     expect(withSaveBridge).toContain('`useErrorBoundary`');
     expect(withSaveBridge).toContain('const { html, render, useState } = window.canvasRuntime');
+    expect(withSaveBridge).toContain('self-close void HTML elements');
     expect(withSaveBridge).toContain('canvas.saveFile');
     expect(withSaveBridge).not.toContain('{{CANVAS_SAVE_BRIDGE_GUIDANCE}}');
 
@@ -116,6 +119,7 @@ describe('canvas-action', () => {
     expect(withoutSaveBridge).toContain('window.canvasRuntime');
     expect(withoutSaveBridge).toContain('installed `preact/hooks` surface');
     expect(withoutSaveBridge).toContain('`useId`');
+    expect(withoutSaveBridge).toContain('Bare `<input>` tags can corrupt the rendered DOM');
     expect(withoutSaveBridge).not.toContain('canvas.saveFile');
     expect(withoutSaveBridge).not.toContain('{{CANVAS_SAVE_BRIDGE_GUIDANCE}}');
   });
@@ -151,6 +155,123 @@ describe('canvas-action', () => {
     expect(payload.content).toContain('Tax Calculator');
     expect(payload.components[0].components[0].data.custom_id).toContain(CANVAS_LAUNCH_COMPONENT_PREFIX);
     expect(payload.components[0].components[0].data.custom_id).toContain(`${canvasCtx.launchStore.instanceTag()}:`);
+  });
+
+  it('rejects runtime artifacts with bare void tags before storing them', async () => {
+    const canvasCtx = await makeCanvasContext();
+    const send = vi.fn(async () => ({}));
+    const result = await executeCanvasAction(
+      {
+        type: 'launchCanvas',
+        title: 'Broken Runtime Canvas',
+        content: "<!doctype html><html><body><div id='app'></div><script>const { html, render } = window.canvasRuntime; function App(){ return html`<main><input type='text'></main>`; } render(html`<${App} />`, document.getElementById('app'));</script></body></html>",
+      },
+      {
+        guild: {
+          channels: {
+            cache: {
+              get: () => ({ isTextBased: () => true, send }),
+            },
+          },
+        } as any,
+        client: {} as any,
+        channelId: 'channel-1',
+        messageId: 'message-1',
+      },
+      canvasCtx,
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      throw new Error('expected runtime artifact lint to reject bare void tags');
+    }
+    expect(result.error).toContain('bare void HTML elements');
+    expect(result.error).toContain('<input>');
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it('allows static HTML artifacts to use regular void-element syntax', async () => {
+    const canvasCtx = await makeCanvasContext();
+    const send = vi.fn(async () => ({}));
+    const result = await executeCanvasAction(
+      {
+        type: 'launchCanvas',
+        title: 'Static Form',
+        content: "<!doctype html><html><body><label>Name <input type='text'></label></body></html>",
+      },
+      {
+        guild: {
+          channels: {
+            cache: {
+              get: () => ({ isTextBased: () => true, send }),
+            },
+          },
+        } as any,
+        client: {} as any,
+        channelId: 'channel-1',
+        messageId: 'message-1',
+      },
+      canvasCtx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Posted canvas launch button for "Static Form"' });
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it('allows runtime artifacts with normal head tags and static markup outside html templates', async () => {
+    const canvasCtx = await makeCanvasContext();
+    const send = vi.fn(async () => ({}));
+    const result = await executeCanvasAction(
+      {
+        type: 'launchCanvas',
+        title: 'Runtime Form',
+        content: "<!doctype html><html><head><meta charset='utf-8'><link rel='icon' href='data:,'></head><body><label>Name <input type='text'></label><div id='app'></div><script>const { html, render } = window.canvasRuntime; function App(){ return html`<main><button>OK</button></main>`; } render(html`<${App} />`, document.getElementById('app'));</script></body></html>",
+      },
+      {
+        guild: {
+          channels: {
+            cache: {
+              get: () => ({ isTextBased: () => true, send }),
+            },
+          },
+        } as any,
+        client: {} as any,
+        channelId: 'channel-1',
+        messageId: 'message-1',
+      },
+      canvasCtx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Posted canvas launch button for "Runtime Form"' });
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it('ignores html-looking text inside script strings when linting runtime artifacts', async () => {
+    const canvasCtx = await makeCanvasContext();
+    const send = vi.fn(async () => ({}));
+    const result = await executeCanvasAction(
+      {
+        type: 'launchCanvas',
+        title: 'Runtime Code Sample',
+        content: "<!doctype html><html><body><div id='app'></div><script>const example = '<input type=\"text\">'; const { html, render } = window.canvasRuntime; function App(){ return html`<main><pre>${example}</pre></main>`; } render(html`<${App} />`, document.getElementById('app'));</script></body></html>",
+      },
+      {
+        guild: {
+          channels: {
+            cache: {
+              get: () => ({ isTextBased: () => true, send }),
+            },
+          },
+        } as any,
+        client: {} as any,
+        channelId: 'channel-1',
+        messageId: 'message-1',
+      },
+      canvasCtx,
+    );
+
+    expect(result).toEqual({ ok: true, summary: 'Posted canvas launch button for "Runtime Code Sample"' });
+    expect(send).toHaveBeenCalledOnce();
   });
 
   it('posts a built-in app launch button when app mode is requested', async () => {
