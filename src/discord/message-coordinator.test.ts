@@ -524,3 +524,139 @@ describe('image input precedence — direct > reply-ref > history', () => {
     expect(runtime.images![runtime.images!.length - 1]).toEqual(refImages[0]);
   });
 });
+
+describe('message finalization recovery staging', () => {
+  const COMPLETED_WITHOUT_VISIBLE_OUTPUT =
+    'Completed successfully. Discord actions ran, but there was no additional reply text.';
+  const FINALIZATION_LOSS_VISIBLE_TEXT =
+    'Final delivery safeguard failed before I could post the terminal reply. Leaving this message visible instead of deleting it.';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetAbortRegistry();
+    resetInflightReplies();
+  });
+
+  it('stages recovery before visible no-prose delivery and confirms delivery', async () => {
+    const order: string[] = [];
+    const runtime = makeCaptureRuntime();
+    const reply = {
+      id: 'reply-1',
+      edit: vi.fn(async (opts: { content: string }) => {
+        order.push(`edit:${opts.content}`);
+      }),
+      delete: vi.fn(async () => {
+        order.push('delete');
+      }),
+      react: vi.fn(async () => ({ remove: vi.fn(async () => undefined) })),
+    };
+    const msg = makeGuildMessage(reply);
+    const actionsMod = await import('./actions.js');
+    vi.mocked(actionsMod.parseDiscordActions).mockReturnValueOnce({
+      actions: [{ type: 'sendMessage' } as any],
+      cleanText: '',
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    vi.mocked(actionsMod.executeDiscordActions).mockResolvedValueOnce([
+      { ok: true, summary: 'sent' } as any,
+    ]);
+    const watchdog = {
+      start: vi.fn(async () => ({})),
+      stageRecovery: vi.fn(async (_runId: string, input: { text?: string | null }) => {
+        order.push(`stage:${input.text ?? ''}`);
+        return null;
+      }),
+      complete: vi.fn(async () => null),
+      startupSweep: vi.fn(async () => ({
+        interruptedRuns: 0,
+        finalRetried: 0,
+        finalPosted: 0,
+        finalFailed: 0,
+      })),
+    };
+    const metrics = {
+      increment: vi.fn(),
+      recordInvokeStart: vi.fn(),
+      recordInvokeResult: vi.fn(),
+      recordActionResult: vi.fn(),
+    };
+    const params = makeParams(runtime, { longRunWatchdog: watchdog, metrics });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(watchdog.stageRecovery).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ text: COMPLETED_WITHOUT_VISIBLE_OUTPUT }),
+    );
+    expect(order.indexOf(`stage:${COMPLETED_WITHOUT_VISIBLE_OUTPUT}`)).toBeLessThan(
+      order.indexOf(`edit:${COMPLETED_WITHOUT_VISIBLE_OUTPUT}`),
+    );
+    expect(reply.edit).toHaveBeenCalledWith({
+      content: COMPLETED_WITHOUT_VISIBLE_OUTPUT,
+      allowedMentions: { parse: [] },
+    });
+    expect(reply.delete).not.toHaveBeenCalled();
+    expect(metrics.increment).toHaveBeenCalledWith('discord.message.completed_without_visible_output');
+    expect(metrics.increment).not.toHaveBeenCalledWith('discord.message.finalization_loss');
+  });
+
+  it('does not confirm delivery or silently delete when staging and fallback edit both fail', async () => {
+    const runtime = makeCaptureRuntime();
+    const reply = {
+      id: 'reply-1',
+      edit: vi.fn(async (opts: { content: string }) => {
+        if (opts.content === FINALIZATION_LOSS_VISIBLE_TEXT) {
+          throw new Error('edit failed');
+        }
+      }),
+      delete: vi.fn(async () => undefined),
+      react: vi.fn(async () => ({ remove: vi.fn(async () => undefined) })),
+    };
+    const msg = makeGuildMessage(reply);
+    const actionsMod = await import('./actions.js');
+    vi.mocked(actionsMod.parseDiscordActions).mockReturnValueOnce({
+      actions: [{ type: 'sendMessage' } as any],
+      cleanText: '',
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    vi.mocked(actionsMod.executeDiscordActions).mockResolvedValueOnce([
+      { ok: true, summary: 'sent' } as any,
+    ]);
+    const watchdog = {
+      start: vi.fn(async () => ({})),
+      stageRecovery: vi.fn(async () => {
+        throw new Error('stage failed');
+      }),
+      complete: vi.fn(async () => null),
+      startupSweep: vi.fn(async () => ({
+        interruptedRuns: 0,
+        finalRetried: 0,
+        finalPosted: 0,
+        finalFailed: 0,
+      })),
+    };
+    const metrics = {
+      increment: vi.fn(),
+      recordInvokeStart: vi.fn(),
+      recordInvokeResult: vi.fn(),
+      recordActionResult: vi.fn(),
+    };
+    const params = makeParams(runtime, { longRunWatchdog: watchdog, metrics });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(reply.edit).toHaveBeenCalledWith({
+      content: FINALIZATION_LOSS_VISIBLE_TEXT,
+      allowedMentions: { parse: [] },
+    });
+    expect(reply.delete).not.toHaveBeenCalled();
+    expect(metrics.increment).toHaveBeenCalledWith('discord.message.completed_without_visible_output');
+    expect(metrics.increment).toHaveBeenCalledWith('discord.message.finalization_loss');
+  });
+});

@@ -589,14 +589,17 @@ const messageCoordinatorWatchdog = completionNotifyEnabled
           }
           return;
         }
+        const recoveryText = typeof run.recoveryText === 'string' ? run.recoveryText.trim() : '';
         // Chat message runs: reply to the bot's answer instead of editing it.
-        const content = run.completion === 'succeeded' && run.completedAt != null && run.startedAt != null
-          ? buildCompletionNotice(run.completedAt - run.startedAt)
-          : buildLongRunFinalNotice({
-            completion: run.completion,
-            completionDetail: run.completionDetail,
-            source: meta.source,
-          });
+        const content = recoveryText && !run.deliveryConfirmed
+          ? recoveryText
+          : run.completion === 'succeeded' && run.completedAt != null && run.startedAt != null
+            ? buildCompletionNotice(run.completedAt - run.startedAt)
+            : buildLongRunFinalNotice({
+              completion: run.completion,
+              completionDetail: run.completionDetail,
+              source: meta.source,
+            });
         await postChatCompletionReply(run, content);
       },
       log,
@@ -610,6 +613,7 @@ const messageCoordinatorWatchdog = completionNotifyEnabled
           : input.stillRunningDelayMs,
       }),
       complete: watchdog.complete.bind(watchdog),
+      stageRecovery: watchdog.stageRecovery.bind(watchdog),
       // Startup sweep is intentionally run after Discord connect from index.ts.
       startupSweep: async () => ({ ...emptyLongRunSweepResult }),
     };
