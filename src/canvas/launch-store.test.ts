@@ -15,9 +15,17 @@ describe('LaunchStore', () => {
     const initial = store.resolveCurrent(ctx);
     expect(initial?.target).toEqual({ type: 'artifact', artifactId: 'artifact-1' });
     expect(initial?.source).toBe('pending');
-    expect(store.hasPending(ctx)).toBe(false);
+    // Pending entry survives resolve so pop-out can re-resolve within the TTL
+    expect(store.hasPending(ctx)).toBe(true);
 
+    // Re-resolve before TTL expires still returns from pending
     now += 10_000;
+    const reResolve = store.resolveCurrent(ctx, initial?.boundSessionToken);
+    expect(reResolve?.target).toEqual({ type: 'artifact', artifactId: 'artifact-1' });
+    expect(reResolve?.source).toBe('pending');
+
+    // After pending expires, bound-session replay still works
+    now += 120_000;
     const replay = store.resolveCurrent(ctx, initial?.boundSessionToken);
     expect(replay?.target).toEqual({ type: 'artifact', artifactId: 'artifact-1' });
     expect(replay?.source).toBe('bound-session');

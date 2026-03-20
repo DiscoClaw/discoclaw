@@ -107,7 +107,9 @@ export class LaunchStore {
     const key = this.contextKey(context);
     const pending = this.pending.get(key);
     if (pending) {
-      this.pending.delete(key);
+      // Do NOT delete the pending entry here. Pop-out and embedded modes may
+      // each call resolveCurrent independently, so the entry must survive for
+      // its full TTL. Natural expiry via purgeExpiredPending() handles cleanup.
       const nextToken = this.createBoundSessionToken(context, pending.target);
       return {
         target: pending.target,
@@ -149,7 +151,7 @@ export class LaunchStore {
       const keyGuildId = parts[2] ?? '';
       if (keyChannelId === channelId && keyGuildId === normalizedGuildId) {
         const keyUserId = parts[0];
-        this.pending.delete(key);
+        // Keep the pending entry alive for its full TTL (see resolveCurrent).
         const context: CanvasLaunchContext = { userId: keyUserId, channelId, guildId };
         const boundSessionToken = this.createBoundSessionToken(context, entry.target);
         return {
