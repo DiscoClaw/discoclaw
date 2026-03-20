@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { buildLongRunFinalNotice, postLongRunWatchdogNoticeToChannel } from './long-run-watchdog-notice.js';
+import {
+  buildLongRunFinalNotice,
+  buildLongRunStagingFailureNotice,
+  postLongRunWatchdogNoticeToChannel,
+} from './long-run-watchdog-notice.js';
 
 describe('buildLongRunFinalNotice', () => {
   it('includes persisted failure detail in the final notice', () => {
@@ -18,6 +22,39 @@ describe('buildLongRunFinalNotice', () => {
       completionDetail: detail,
       source: 'startup-sweep',
     })).toBe('Run ended with errors. (Recovered after restart.)\nReason: Command failed with exit code 1');
+  });
+
+  it('renders recovered success summaries from persisted watchdog payloads', () => {
+    expect(buildLongRunFinalNotice({
+      completion: 'succeeded',
+      recoveryText: 'Summary restored from watchdog.\n- Updated task state',
+      source: 'startup-sweep',
+    })).toBe('Summary restored from watchdog.\n- Updated task state\n\nRecovered after restart.');
+  });
+
+  it('renders recovered no-prose notices from persisted watchdog payloads', () => {
+    expect(buildLongRunFinalNotice({
+      completion: 'succeeded',
+      recoveryText: 'Completed successfully. Discord actions ran, but there was no additional reply text.',
+      source: 'startup-sweep',
+    })).toBe('Completed successfully. Discord actions ran, but there was no additional reply text.\n\nRecovered after restart.');
+  });
+
+  it('falls back to the generic completion notice when no recovery payload exists', () => {
+    expect(buildLongRunFinalNotice({
+      completion: 'succeeded',
+      source: 'startup-sweep',
+    })).toBe('Run complete. (Recovered after restart.)');
+  });
+});
+
+describe('buildLongRunStagingFailureNotice', () => {
+  it('renders the coordinator staging-failure notice after existing visible text', () => {
+    expect(buildLongRunStagingFailureNotice(
+      'Completed successfully. Discord actions ran, but there was no additional reply text.',
+    )).toBe(
+      'Completed successfully. Discord actions ran, but there was no additional reply text.\n\nFinal delivery safeguard failed before I could post the terminal reply. Leaving this message visible instead of deleting it.',
+    );
   });
 });
 
