@@ -27,7 +27,19 @@ Optional tool for browsing, form filling, and scraping (`npm install -g @anthrop
 |------|------|-------------|
 | 1 | **WebFetch** | Read-only page content; no browser overhead |
 | 2 | **Playwright** (`agent-browser open <url>`, add `--headed` for visible window) | Interactive pages — click, fill, scroll. Fresh isolated browser |
-| 3 | **CDP** (`agent-browser connect 9222`) | Reuse a real Chrome profile with cookies/auth/extensions. **Ask-first** — gets access to logged-in accounts |
+| 3 | **CDP** (`discoclaw browser launch` -> `agent-browser connect <reported-port>`) | Reuse Discoclaw's managed Chrome/Chromium profile with cookies/auth/extensions. **Ask-first** — gets access to logged-in accounts |
+
+### Managed launcher flow
+
+Prefer Discoclaw's managed launcher path over manually starting Chrome with a fixed debug port.
+
+- `discoclaw browser setup` creates or validates the dedicated managed profile and checks storage/browser readiness. It does not open a browser.
+- `discoclaw browser launch` starts Chrome/Chromium on demand with remote debugging bound to `127.0.0.1`, then only records reusable state after `/json/version` and a WebSocket CDP probe both succeed.
+- Complete the one-time login in that headed browser window, then close it when finished.
+- Reuse the same profile later with `discoclaw browser launch` or `discoclaw browser launch --headless`.
+- After launch, connect `agent-browser` to the verified CDP port or URL that Discoclaw reports. Do not assume a fixed port like `9222`.
+- No companion service, long-lived helper daemon, or localhost control service is part of this path. Discord `!browser` commands print the local operator command; they do not launch the browser for you.
+- The initial headed login launch should be run locally from an interactive desktop session on the Discoclaw machine. Service-managed environments may not have the display/session access needed to open a visible browser window.
 
 ### Commands
 
@@ -44,8 +56,10 @@ Capture:       screenshot | screenshot --full
 
 ### Constraints
 
-- Do NOT browse internal/localhost/RFC1918 URLs (exception: `agent-browser connect <port>` to localhost is the intended CDP use).
-- Do NOT save auth state to tracked/committed locations.
+- Do NOT browse internal/localhost/RFC1918 URLs (exception: connecting `agent-browser` to the loopback CDP port or URL that Discoclaw just verified is the intended CDP use).
+- CDP is ask-first. Never connect to a real browser session without explicit user consent.
+- Do NOT save auth state to tracked/committed locations. Prefer Discoclaw's managed browser storage under `DISCOCLAW_DATA_DIR/browser/`.
+- In source checkouts, repo-local managed browser storage is only supported at the ignored default `./data/browser/` path. If custom browser storage is needed, move `DISCOCLAW_DATA_DIR` outside the repo.
 
 ## Service Operations (discoclaw)
 
