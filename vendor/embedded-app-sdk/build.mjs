@@ -12,7 +12,9 @@ const sdkEntry = require.resolve('@discord/embedded-app-sdk');
 const sdkDir = path.dirname(sdkEntry);
 const esmEntry = path.join(sdkDir, 'index.mjs');
 
-const outfile = path.join(__dirname, 'bundle.js');
+const projectRoot = path.resolve(__dirname, '..', '..');
+const outDir = path.join(projectRoot, 'dist', 'vendor');
+const outfile = path.join(outDir, 'embedded-app-sdk.js');
 
 try {
   await build({
