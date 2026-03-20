@@ -51,6 +51,7 @@ async function startHarness(input?: {
       gitHash: 'abc1234',
       serviceName: 'discoclaw',
       serviceSummary: 'active',
+      serviceEnabled: true,
       doctorSummary: '0 findings (errors=0, warnings=0, info=0)',
       roles: ['chat'],
       modelOptions: { chat: ['default', 'capable'] },

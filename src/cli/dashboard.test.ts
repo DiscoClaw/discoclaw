@@ -152,6 +152,7 @@ function makeSnapshot(overrides: Partial<DashboardSnapshot> = {}): DashboardSnap
     gitHash: 'abc1234',
     serviceName: 'discoclaw-beta',
     serviceSummary: 'active (running)',
+    serviceEnabled: true,
     doctorSummary: formatDoctorSummaryForTest([]),
     roles: [
       'chat',
@@ -1083,7 +1084,7 @@ describe('runDashboard', () => {
       },
     });
 
-    expect(runCommandMock).toHaveBeenCalledTimes(2);
+    expect(runCommandMock).toHaveBeenCalledTimes(4);
     expect(frames.some((frame) => frame.includes('Restart/start canceled.'))).toBe(true);
   });
 });

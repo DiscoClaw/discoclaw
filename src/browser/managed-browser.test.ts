@@ -429,7 +429,7 @@ describe('launchManagedBrowser', () => {
 
     expect(report.ok).toBe(false);
     expect(report.issues?.map((issue) => issue.code)).toContain('verification_failed');
-    expect(killPid).toHaveBeenCalledWith(7777);
+    expect(killPid).not.toHaveBeenCalled();
     await expect(fs.access(paths.stateFile)).rejects.toThrow();
   });
 

@@ -406,6 +406,19 @@ Completion notify behavior:
 - Persistence-first invariant: run completion is persisted before attempting the final post/edit, and `finalPosted` is set only after a successful post/edit.
 - Duplicate handling: startup recovery suppresses repeat finals when `finalPosted` is already true; crash boundaries may duplicate a follow-up/final update, but should not omit it.
 
+## Browser Launcher
+
+Discoclaw's browser path is a thin local launcher around a single managed Chrome/Chromium profile. It does not run a long-lived helper daemon or localhost control service. For the full operator workflow and failure modes, see [docs/browser-launcher.md](browser-launcher.md).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AGENT_BROWSER_EXECUTABLE_PATH` | — | Optional path to the Chrome/Chromium executable used for managed-profile launches. When unset, Discoclaw falls back to PATH/common-install discovery. |
+
+- Managed browser storage lives under `$DISCOCLAW_DATA_DIR/browser/` as `profile/` and `state.json`. If `DISCOCLAW_DATA_DIR` is unset in a source checkout, the default becomes `./data/browser/`.
+- Source-install restriction: repo-local source installs may only use the default `./data/browser/` path for managed browser storage. A custom in-repo `DISCOCLAW_DATA_DIR` is rejected; move it outside the repo or leave it unset.
+- Supported CLI commands: `discoclaw browser setup`, `discoclaw browser doctor`, `discoclaw browser launch`, and `discoclaw browser launch --headless`.
+- Supported Discord commands: `!browser setup`, `!browser doctor`, `!browser launch`, `!browser launch --headless`, and `!browser help`.
+
 ## Cold Storage
 
 Semantic search over conversation history using SQLite + sqlite-vec for vector storage, FTS5 for keyword search, and Reciprocal Rank Fusion for hybrid retrieval. Requires an embedding API (OpenAI or any OpenAI-compatible endpoint).
