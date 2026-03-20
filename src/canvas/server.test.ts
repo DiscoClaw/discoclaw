@@ -173,7 +173,8 @@ describe('Canvas server', () => {
       },
     );
     expect(replay.response.status).toBe(200);
-    expect(replay.json.source).toBe('bound-session');
+    // Pending entry survives resolve, so re-resolve returns 'pending' (not 'bound-session')
+    expect(replay.json.source).toBe('pending');
 
     const artifactResponse = await getJson(
       harness.baseUrl,
