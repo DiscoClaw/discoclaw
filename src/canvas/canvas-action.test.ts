@@ -96,6 +96,8 @@ describe('canvas-action', () => {
     expect(prompt).toContain('const { html, render, useState } = window.canvasRuntime');
     expect(prompt).toContain('self-close void HTML elements');
     expect(prompt).toContain('Bare `<input>` tags can corrupt the rendered DOM');
+    expect(prompt).toContain('feel at home in Discord without mimicking Discord');
+    expect(prompt).toContain('instead of cloning Discord\'s palette by default');
   });
 
   it('documents the injected canvas runtime in fallback prompt text and preserves save-bridge substitution', async () => {
@@ -112,6 +114,7 @@ describe('canvas-action', () => {
     expect(withSaveBridge).toContain('`useErrorBoundary`');
     expect(withSaveBridge).toContain('const { html, render, useState } = window.canvasRuntime');
     expect(withSaveBridge).toContain('self-close void HTML elements');
+    expect(withSaveBridge).toContain('feel at home in Discord without mimicking Discord');
     expect(withSaveBridge).toContain('canvas.saveFile');
     expect(withSaveBridge).not.toContain('{{CANVAS_SAVE_BRIDGE_GUIDANCE}}');
 
@@ -120,6 +123,7 @@ describe('canvas-action', () => {
     expect(withoutSaveBridge).toContain('installed `preact/hooks` surface');
     expect(withoutSaveBridge).toContain('`useId`');
     expect(withoutSaveBridge).toContain('Bare `<input>` tags can corrupt the rendered DOM');
+    expect(withoutSaveBridge).toContain('instead of cloning Discord\'s palette by default');
     expect(withoutSaveBridge).not.toContain('canvas.saveFile');
     expect(withoutSaveBridge).not.toContain('{{CANVAS_SAVE_BRIDGE_GUIDANCE}}');
   });

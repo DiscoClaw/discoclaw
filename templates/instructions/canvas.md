@@ -23,5 +23,8 @@
 - Generated artifacts run inside a sandboxed iframe and cannot call backend routes directly.
 - Artifacts are stored under a cap-based LRU policy; they are not time-expired in v1.
 - Include visible loading/error/fallback states when the UI depends on JavaScript.
+- Default visual direction: feel at home in Discord without mimicking Discord's UI chrome.
+- Favor Discord-adjacent contrast and restraint for dark surroundings, but choose colors and themes based on the content instead of cloning Discord's palette by default.
+- Use explicitly Discord-like styling only when the user asks for a native/control-panel/admin-tool feel.
 - Prefer semantic HTML, clear contrast, and obvious focus states.
 {{CANVAS_SAVE_BRIDGE_GUIDANCE}}
