@@ -21,6 +21,7 @@ import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModel
 import { saveOverrides, type RuntimeOverrides } from '../runtime-overrides.js';
 import type { CommandResult, ServiceControlDeps } from '../service-control.js';
 import {
+  getServiceEnabled,
   getServiceLogs,
   getServiceStatus,
   restartService,
@@ -66,6 +67,7 @@ export type DashboardSnapshot = {
   gitHash: string | null;
   serviceName: string;
   serviceSummary: string;
+  serviceEnabled: boolean | null;
   doctorSummary: string;
   roles: string[];
   modelOptions: Record<string, string[]>;
@@ -407,7 +409,10 @@ export async function collectDashboardSnapshot(
     detectMcpServers(workspaceCwd),
   ]);
   const serviceName = normalizeServiceName(ctx.env.DISCOCLAW_SERVICE_NAME);
-  const serviceStatus = await getServiceStatus(serviceName, deps as ServiceControlDeps);
+  const [serviceStatus, serviceEnabled] = await Promise.all([
+    getServiceStatus(serviceName, deps as ServiceControlDeps),
+    getServiceEnabled(serviceName, deps as ServiceControlDeps),
+  ]);
   const serviceSummary = summarizeServiceStatus(serviceStatus, deps.platform);
   const mcpWarnings = mcpDetectResult.status === 'found'
     ? [
@@ -424,6 +429,7 @@ export async function collectDashboardSnapshot(
     gitHash,
     serviceName,
     serviceSummary,
+    serviceEnabled,
     doctorSummary: formatDoctorSummary(report),
     roles: [...DASHBOARD_MODEL_ROLES],
     modelOptions: buildModelOptions(ctx),

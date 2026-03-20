@@ -218,6 +218,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Cron patterns cookbook | `docs/cron-patterns.md` | **done** |
 | Prompt ordering (primacy/recency zone optimization) | `docs/prompt-ordering.md` | **done** |
 | Configuration reference (all env vars) | `docs/configuration.md` | **done** |
+| Browser launcher operator guide (managed profile path, verified CDP launch/reuse flow, and service-environment limits) | `docs/browser-launcher.md` | **done** |
 | Official integration docs index | `docs/official-docs.md` | **done** |
 | Canonical runtime/model switching operator guide (startup defaults, live overrides, OpenRouter tier override workflow) | `docs/runtime-switching.md` | **done** |
 | Dashboard Tailscale access guide | `docs/dashboard-tailscale.md` | **done** |
@@ -290,10 +291,17 @@ Config: `DISCOCLAW_WEBHOOK_ENABLED`, `DISCOCLAW_WEBHOOK_PORT`, `DISCOCLAW_WEBHOO
 
 ## 20. CLI & Configuration
 
+### Browser Launcher
+
+| Component | File(s) | Status |
+|-----------|---------|--------|
+| Thin managed browser launcher (Discoclaw-owned profile, on-demand Chrome/Chromium spawn, verified CDP handoff, stale-state cleanup, and profile-lock enforcement without a helper daemon) | `src/browser/managed-browser.ts`, `src/browser/managed-browser.test.ts` | **done** |
+
 ### Operator Tools
 
 | Command | Description | File(s) | Status |
 |---------|-------------|---------|--------|
+| `discoclaw browser` | Browser operator commands: `setup`, `doctor`, and `launch [--headless]` for the managed-profile plus verified-CDP flow | `src/cli/index.ts`, `src/cli/index.test.ts`, `src/browser/managed-browser.ts` | **done** |
 | `discoclaw dashboard` | Launches the operator dashboard for common admin tasks: inspect service/runtime state, review config doctor findings, change model assignments, and trigger service actions through the loopback-by-default web UI/HTTP server, with optional trusted-host Tailscale access | `src/cli/index.ts`, `src/cli/dashboard.ts`, `src/cli/dashboard.test.ts`, `src/dashboard/server.ts`, `src/dashboard/page.ts`, `src/service-control.ts`, `src/health/config-doctor.ts` | **done** |
 
 ### Configuration
@@ -314,6 +322,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 | Command | Description | File(s) | Status |
 |---------|-------------|---------|--------|
 | `!help` | Lists available bang commands | `src/discord/help-command.ts` | **done** |
+| `!browser` | Managed browser setup, doctor, and launch guidance for the Discoclaw-owned profile; prints the exact local `discoclaw browser ...` commands to run | `src/discord/browser-command.ts`, `src/discord/browser-command.test.ts`, `src/discord/help-command.ts`, `src/discord/message-coordinator.ts` | **done** |
 | `!health [verbose\|tools\|doctor [fix]]` | Renders runtime metrics, config snapshot, tool reports, and shared config-doctor findings/fixes | `src/discord/health-command.ts`, `src/discord/health-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
 | `!doctor [fix]` | Runs the shared config doctor to report or apply config-health fixes | `src/discord/health-command.ts`, `src/discord/health-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
 | `!trace [traceId]` | Lists recent run traces or shows a detailed per-run timeline for a specific `traceId` | `src/discord/trace-command.ts`, `src/discord/trace-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |

@@ -1,0 +1,7 @@
+# Managed browser runtime artifacts stay local only.
+*
+!.gitignore
+!README.md
+!profile/
+profile/*
+!profile/.gitkeep

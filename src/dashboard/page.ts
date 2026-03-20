@@ -182,10 +182,18 @@ export function renderDashboardPage(): string {
     }
 
     .metrics {
-      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      grid-template-columns: 1fr;
+      gap: 2px;
     }
 
-    .metric,
+    .metric {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      padding: 3px 0;
+      min-width: 0;
+    }
+
     .path-item {
       padding: 8px 10px;
       border-radius: var(--radius-sm);
@@ -232,7 +240,18 @@ export function renderDashboardPage(): string {
       font-weight: 500;
     }
 
-    .metric-value,
+    .metric-label {
+      min-width: 100px;
+      flex-shrink: 0;
+    }
+
+    .metric-value {
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
     .path-value {
       margin-top: 2px;
       font-family: var(--mono);
@@ -1123,7 +1142,7 @@ export function renderDashboardPage(): string {
       clearNode(serviceMetrics);
       appendMetric(serviceMetrics, 'unit', snapshot.serviceName || 'discoclaw');
       appendMetric(serviceMetrics, 'status', snapshot.serviceSummary);
-      appendMetric(serviceMetrics, 'boot', snapshot.serviceEnabled === true ? 'enabled' : snapshot.serviceEnabled === false ? 'not enabled' : 'unknown');
+      appendMetric(serviceMetrics, 'start on boot', snapshot.serviceEnabled === true ? 'enabled' : snapshot.serviceEnabled === false ? 'disabled' : 'unknown');
       appendMetric(serviceMetrics, 'pending restart', snapshot.live.pendingRestart ? 'yes' : 'no');
     }
 

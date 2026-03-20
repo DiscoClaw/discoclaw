@@ -132,6 +132,26 @@ export async function getServiceStatus(
   return deps.runCommand(commands.statusCmd[0], commands.statusCmd[1]);
 }
 
+export async function getServiceEnabled(
+  serviceName: string,
+  deps: ServiceControlDeps,
+): Promise<boolean | null> {
+  if (deps.platform === 'linux') {
+    const result = await deps.runCommand('systemctl', ['--user', 'is-enabled', serviceName]);
+    const out = result.stdout.trim().toLowerCase();
+    if (out === 'enabled') return true;
+    if (out === 'disabled') return false;
+    return null;
+  }
+  if (deps.platform === 'darwin') {
+    const label = `com.discoclaw.${serviceName}`;
+    const plistPath = `${deps.homeDir}/Library/LaunchAgents/${label}.plist`;
+    const result = await deps.runCommand('test', ['-f', plistPath]);
+    return result.exitCode === 0;
+  }
+  return null;
+}
+
 export async function getServiceLogs(
   serviceName: string,
   deps: ServiceControlDeps,

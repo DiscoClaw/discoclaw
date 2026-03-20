@@ -39,6 +39,7 @@ describe('handleHelpCommand', () => {
     expect(result).toContain('!memory');
     expect(result).toContain('!models');
     expect(result).toContain('!mcp');
+    expect(result).toContain('!browser');
     expect(result).toContain('!health');
     expect(result).toContain('!doctor');
     expect(result).toContain('!health doctor');
@@ -54,7 +55,15 @@ describe('handleHelpCommand', () => {
     expect(result).toContain('!forge help');
     expect(result).toContain('!plan help');
     expect(result).toContain('!models help');
+    expect(result).toContain('!browser help');
     expect(result).toContain('!update help');
     expect(result).toContain('!restart help');
+  });
+
+  it('describes browser as managed-profile setup, doctor, and launch', () => {
+    const result = handleHelpCommand();
+    expect(result).toContain(
+      '- `!browser` — managed-profile browser setup, doctor, and launch; `!browser help` for details',
+    );
   });
 });
