@@ -1,4 +1,5 @@
 import type { Client, Guild } from 'discord.js';
+import { execa } from 'execa';
 import type { RuntimeAdapter, ImageData, EngineEvent } from '../runtime/types.js';
 import type { CronJob } from './types.js';
 import type { StatusPoster } from '../discord/status-channel.js';
@@ -27,8 +28,10 @@ import { ensureStatusMessage } from './discord-sync.js';
 import { globalMetrics } from '../observability/metrics.js';
 import { mapRuntimeErrorToUserMessage } from '../discord/user-errors.js';
 import { resolveModel } from '../runtime/model-tiers.js';
+import { cliExecaEnv, stripAnsi } from '../runtime/cli-shared.js';
 import { resolveGroundedToolCapabilities } from '../runtime/tool-capabilities.js';
 import { buildCronPromptBody } from './cron-prompt.js';
+import type { CronShellResult } from './cron-prompt.js';
 import { buildTieredDiscordActionsPromptSection } from '../discord/actions.js';
 import { handleJsonRouteOutput } from './json-router.js';
 
@@ -74,10 +77,34 @@ async function recordError(ctx: CronExecutorContext, job: CronJob, msg: string):
   }
 }
 
+async function recordSuccess(ctx: CronExecutorContext, job: CronJob): Promise<void> {
+  if (ctx.statsStore && job.cronId) {
+    try {
+      await ctx.statsStore.recordRun(job.cronId, 'success');
+    } catch {
+      // Best-effort.
+    }
+    void fireChainedJobs(job.cronId, ctx);
+  }
+}
+
 const MAX_CHAIN_DEPTH = 10;
 const CRON_REQUESTER_DENY_ALL_PREFIX = '__cron_requester_deny_all__';
 const activeCronRunKeys = new Set<string>();
 const queuedCronRerunKeys = new Set<string>();
+
+type CronShellFailureKind = 'spawn-failure' | 'timeout' | 'signal' | 'non-zero-exit';
+
+type CronShellOutcome =
+  | { kind: 'success'; shellResult: CronShellResult }
+  | { kind: CronShellFailureKind; message: string };
+
+type CronOutputDirective = 'post' | 'no-post';
+
+type ParsedCronOutput = {
+  directive?: CronOutputDirective;
+  text: string;
+};
 
 type CronActionRequester = {
   requesterId: string;
@@ -106,6 +133,95 @@ function resolveCronActionRequester(job: CronJob, authorId: string | undefined, 
     requesterId: normalizedAuthorId,
     trusted: true,
   };
+}
+
+async function runCronInputShell(command: string, cwd: string, timeoutMs: number): Promise<CronShellOutcome> {
+  try {
+    const result = await execa('bash', ['-lc', command], {
+      reject: false,
+      timeout: timeoutMs,
+      cwd,
+      env: cliExecaEnv(),
+    });
+
+    if (result.timedOut) {
+      return {
+        kind: 'timeout',
+        message: `cron pre-command timed out after ${timeoutMs}ms`,
+      };
+    }
+
+    if (result.failed && result.exitCode == null && !result.signal) {
+      return {
+        kind: 'spawn-failure',
+        message: 'cron pre-command failed to spawn',
+      };
+    }
+
+    if (result.signal) {
+      return {
+        kind: 'signal',
+        message: `cron pre-command exited from signal ${result.signal}`,
+      };
+    }
+
+    if (result.exitCode !== 0) {
+      return {
+        kind: 'non-zero-exit',
+        message: `cron pre-command exited with code ${result.exitCode}`,
+      };
+    }
+
+    return {
+      kind: 'success',
+      shellResult: {
+        exitCode: result.exitCode ?? 0,
+        stdout: stripAnsi(result.stdout),
+        stderr: stripAnsi(result.stderr),
+      },
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      kind: 'spawn-failure',
+      message: `cron pre-command failed to spawn: ${message}`,
+    };
+  }
+}
+
+function parseCronOutputDirective(output: string, job: CronJob, ctx: CronExecutorContext): ParsedCronOutput {
+  const cronOutputRegex = /<cron-output>([\s\S]*?)<\/cron-output>/g;
+  const matches = Array.from(output.matchAll(cronOutputRegex));
+  const text = output.replace(cronOutputRegex, '').trim();
+
+  if (matches.length === 0) {
+    return { text };
+  }
+
+  if (matches.length > 1) {
+    ctx.log?.warn({ jobId: job.id, cronId: job.cronId, blockCount: matches.length }, 'cron:exec <cron-output> ambiguous, ignoring');
+    return { text };
+  }
+
+  const block = matches[0]?.[1]?.trim() ?? '';
+  try {
+    const parsed = JSON.parse(block) as { mode?: unknown };
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      ctx.log?.warn({ jobId: job.id, cronId: job.cronId }, 'cron:exec <cron-output> was not a JSON object, ignoring');
+      return { text };
+    }
+    if (parsed.mode !== 'post' && parsed.mode !== 'no-post') {
+      ctx.log?.warn({ jobId: job.id, cronId: job.cronId, mode: parsed.mode ?? null }, 'cron:exec <cron-output> mode invalid, ignoring');
+      return { text };
+    }
+    return {
+      directive: parsed.mode,
+      text,
+    };
+  } catch (err) {
+    ctx.log?.warn({ err, jobId: job.id, cronId: job.cronId }, 'cron:exec <cron-output> parse failed, ignoring');
+    return { text };
+  }
 }
 
 export async function fireChainedJobs(cronId: string, ctx: CronExecutorContext): Promise<void> {
@@ -269,6 +385,24 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
 
     // Fetch run record early — needed for prompt flags (silent, routingMode) and model selection.
     const preRunRecord = ctx.statsStore && job.cronId ? ctx.statsStore.getRecord(job.cronId) : undefined;
+    const inputShell = preRunRecord?.inputShell?.trim() ? preRunRecord.inputShell.trim() : undefined;
+    const shellInputEnabled = preRunRecord?.inputMode === 'shell' || Boolean(inputShell);
+    let shellResult: CronShellResult | undefined;
+    if (shellInputEnabled && inputShell) {
+      const shellOutcome = await runCronInputShell(inputShell, ctx.cwd, ctx.timeoutMs);
+      if (shellOutcome.kind !== 'success') {
+        ctx.log?.error({ jobId: job.id, cronId: job.cronId, kind: shellOutcome.kind }, 'cron:exec pre-command failed');
+        throw new Error(shellOutcome.message);
+      }
+      shellResult = shellOutcome.shellResult;
+      if (shellResult.stdout === '' && shellResult.stderr === '') {
+        ctx.log?.info({ jobId: job.id, cronId: job.cronId }, 'cron:exec silent shell input produced no output; skipping AI');
+        metrics.increment('cron.run.success');
+        await recordSuccess(ctx, job);
+        return;
+      }
+    }
+
     const actionRequester = resolveCronActionRequester(job, preRunRecord?.authorId, ctx.client.user?.id);
     if (!actionRequester.trusted) {
       ctx.log?.warn(
@@ -301,6 +435,9 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         silent: preRunRecord?.silent,
         routingMode: preRunRecord?.routingMode === 'json' ? 'json' : undefined,
         state: preRunRecord?.state,
+        inputMode: preRunRecord?.inputMode,
+        inputShell,
+        shellResult,
       });
 
     // Inject tiered action schema documentation when discord actions are enabled.
@@ -441,17 +578,19 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       output = output.replace(/<cron-state>[\s\S]*?<\/cron-state>/g, '').trim();
     }
 
+    const cronOutput = parseCronOutputDirective(output, job, ctx);
+    output = cronOutput.text;
+    if (cronOutput.directive === 'no-post') {
+      ctx.log?.info({ jobId: job.id, cronId: job.cronId }, 'cron:exec structured no-post suppressed');
+      await recordSuccess(ctx, job);
+      metrics.increment('cron.run.success');
+      return;
+    }
+
     if (!output.trim() && collectedImages.length === 0) {
       metrics.increment('cron.run.skipped');
       ctx.log?.warn({ jobId: job.id }, 'cron:exec empty output');
-      if (ctx.statsStore && job.cronId) {
-        try {
-          await ctx.statsStore.recordRun(job.cronId, 'success');
-        } catch {
-          // Best-effort.
-        }
-        void fireChainedJobs(job.cronId, ctx);
-      }
+      await recordSuccess(ctx, job);
       return;
     }
 
@@ -542,14 +681,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     const isSuppressible = /^heartbeat(_ok)?$/i.test(strippedText) || strippedText === 'HEART' || strippedText === '(no output)' || /^[\u2764\uFE0F]+$/.test(strippedText);
     if (isSuppressible && collectedImages.length === 0) {
       ctx.log?.info({ jobId: job.id, name: job.name, sentinel: strippedText }, 'cron:exec sentinel output suppressed');
-      if (ctx.statsStore && job.cronId) {
-        try {
-          await ctx.statsStore.recordRun(job.cronId, 'success');
-        } catch {
-          // Best-effort.
-        }
-        void fireChainedJobs(job.cronId, ctx);
-      }
+      await recordSuccess(ctx, job);
       metrics.increment('cron.run.success');
       return;
     }
@@ -559,14 +691,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     // and short JSON payloads (e.g. a single-entry array) contain real content.
     if (preRunRecord?.silent && preRunRecord?.routingMode !== 'json' && collectedImages.length === 0 && strippedText.length <= 80) {
       ctx.log?.info({ jobId: job.id, name: job.name, len: strippedText.length }, 'cron:exec silent short-response suppressed');
-      if (ctx.statsStore && job.cronId) {
-        try {
-          await ctx.statsStore.recordRun(job.cronId, 'success');
-        } catch {
-          // Best-effort.
-        }
-        void fireChainedJobs(job.cronId, ctx);
-      }
+      await recordSuccess(ctx, job);
       metrics.increment('cron.run.success');
       return;
     }
@@ -600,13 +725,10 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     metrics.increment('cron.run.success');
 
     // Record successful run.
-    if (ctx.statsStore && job.cronId) {
-      try {
-        await ctx.statsStore.recordRun(job.cronId, 'success');
-      } catch (statsErr) {
-        ctx.log?.warn({ err: statsErr, jobId: job.id }, 'cron:exec stats record failed');
-      }
-      void fireChainedJobs(job.cronId, ctx);
+    try {
+      await recordSuccess(ctx, job);
+    } catch (statsErr) {
+      ctx.log?.warn({ err: statsErr, jobId: job.id }, 'cron:exec stats record failed');
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
