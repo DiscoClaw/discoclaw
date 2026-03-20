@@ -351,7 +351,22 @@ describe('parseDiscordActions', () => {
     expect(strippedUnrecognizedTypes).toEqual(['voiceLeave']);
   });
 
-  it('includes launchCanvas when canvas flag is true and strips it when disabled', () => {
+  it('strips launchCanvas by default and explains the experimental opt-in path', () => {
+    const input = 'Launching chart.\n<discord-action>{"type":"launchCanvas","title":"Chart","content":"<!doctype html><html><body>chart</body></html>"}</discord-action>';
+    const disabled = parseDiscordActions(input, ALL_FLAGS);
+    expect(disabled.actions).toEqual([]);
+    expect(disabled.cleanText).toBe('Launching chart.');
+    expect(disabled.strippedUnrecognizedTypes).toEqual(['launchCanvas']);
+
+    const notice = buildUnavailableActionTypesNotice(disabled.strippedUnrecognizedTypes);
+    expect(notice).toContain('experimental');
+    expect(notice).toContain('disabled by default');
+    expect(notice).toContain('DISCOCLAW_CANVAS_ENABLED=1');
+    expect(notice).toContain('Developer Portal');
+    expect(notice).toContain('HTTPS');
+  });
+
+  it('includes launchCanvas when canvas flag is true', () => {
     const input = '<discord-action>{"type":"launchCanvas","title":"Chart","content":"<!doctype html><html><body>chart</body></html>"}</discord-action>';
     const enabled = parseDiscordActions(input, { ...ALL_FLAGS, canvas: true });
     expect(enabled.actions).toEqual([{
@@ -359,10 +374,6 @@ describe('parseDiscordActions', () => {
       title: 'Chart',
       content: '<!doctype html><html><body>chart</body></html>',
     }]);
-
-    const disabled = parseDiscordActions(input, { ...ALL_FLAGS, canvas: false });
-    expect(disabled.actions).toEqual([]);
-    expect(disabled.strippedUnrecognizedTypes).toEqual(['launchCanvas']);
   });
 
   it('parses launchCanvas built-in app requests when canvas is enabled', () => {
@@ -726,6 +737,62 @@ describe('executeDiscordActions', () => {
     if (results[0].ok) throw new Error('unexpected ok result');
     expect(results[0].error).toContain('Canvas Activities are available in Discord actions');
     expect(results[0].error).toContain('Developer Portal');
+  });
+
+  it('routes launchCanvas actions through the canvas executor when canvas is opted in', async () => {
+    const input = '<discord-action>{"type":"launchCanvas","title":"Dashboard","app":"dashboard"}</discord-action>';
+    const { actions } = parseDiscordActions(input, { ...ALL_FLAGS, canvas: true });
+    expect(actions).toEqual([{ type: 'launchCanvas', title: 'Dashboard', app: 'dashboard' }]);
+
+    const send = vi.fn(async () => ({}));
+    const guild = {
+      channels: {
+        cache: {
+          get: (id: string) => (id === 'test-channel' ? { isTextBased: () => true, send } : undefined),
+        },
+      },
+    } as any;
+    const canvasCtx = {
+      enabled: true,
+      discordClientId: 'client-1',
+      writeBridgeEnabled: false,
+      artifactStore: { createArtifact: vi.fn() },
+      launchStore: {
+        instanceTag: () => 'instance-1',
+        createAppLaunchRef: vi.fn(),
+        createArtifactLaunchRef: vi.fn(),
+        parseLaunchRef: vi.fn(),
+      },
+      fileExport: {},
+      builtinApps: {
+        hasApp: vi.fn(() => false),
+        getAppTitle: vi.fn(() => null),
+        renderApp: vi.fn(async () => null),
+        getAppData: vi.fn(async () => null),
+      },
+      server: { isListening: () => true },
+      getLocalReadiness: () => ({ ready: true, missingChecks: [], externalChecks: [] }),
+      isLocallyReady: () => true,
+    } as any;
+
+    const results = await executeDiscordActions(
+      actions,
+      {
+        guild,
+        client: {} as any,
+        channelId: 'test-channel',
+        messageId: 'test-message',
+      },
+      undefined,
+      { canvasCtx },
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(false);
+    if (results[0].ok) throw new Error('unexpected ok result');
+    expect(results[0].error).toContain('launchCanvas app "dashboard" is not available on this install');
+    expect(results[0].error).not.toContain('not configured');
+    expect(send).not.toHaveBeenCalled();
   });
 
   it('keeps the raw imagegen not-configured error for automated callers when imagegenCtx is absent', async () => {
