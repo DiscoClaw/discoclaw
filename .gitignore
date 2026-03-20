@@ -11,6 +11,7 @@ var
 !.env.example.full
 data/*.json
 data/*.pid
+data/browser/
 data/memory/
 data/canvas/
 *.log
