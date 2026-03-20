@@ -12,6 +12,7 @@ var
 data/*.json
 data/*.pid
 data/memory/
+data/canvas/
 *.log
 *.ledger.json
 *.harness.log
