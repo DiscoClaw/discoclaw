@@ -108,7 +108,9 @@ Reuse requires all of the following to match:
 
 If that verification passes, `discoclaw browser launch` returns the verified instance details instead of spawning a second browser.
 
-If stored state exists but does not verify, Discoclaw treats it as stale, clears it, and continues with fresh-launch logic.
+If stored state exists but does not verify, Discoclaw treats it as stale and attempts to clear it before continuing with fresh-launch logic.
+
+If stale-state deletion fails, launch stops and returns an explicit cleanup error with the `state.json` path and manual recovery guidance.
 
 ## Lock Conflicts
 
@@ -128,11 +130,12 @@ Discoclaw writes tentative launcher state as soon as it has a spawned browser PI
 
 If post-spawn verification fails:
 
-- Discoclaw terminates the newly launched browser process
-- Discoclaw removes the tentative `state.json`
-- the command returns a failure instead of leaving behind unverified launcher state
+- Discoclaw requests termination of the newly launched browser process and only reports browser cleanup after it can confirm the PID is gone
+- Discoclaw removes the tentative `state.json` only after that exit is confirmed
+- if browser exit cannot be confirmed, Discoclaw leaves the tentative `state.json` in place and tells the operator to close the browser and remove the file manually
+- the command returns a failure instead of claiming a verified managed launch
 
-If browser termination succeeds but state-file cleanup fails, the command still reports that cleanup failure explicitly so the stale state can be removed manually.
+If browser exit is confirmed but state-file cleanup fails, the command still reports that cleanup failure explicitly so the stale state can be removed manually.
 
 ## Service-Managed Environment Limits
 

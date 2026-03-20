@@ -80,6 +80,8 @@ const HTTP_VERIFY_TIMEOUT_MS = 1_500;
 const WS_VERIFY_TIMEOUT_MS = 1_500;
 const POST_SPAWN_VERIFY_TIMEOUT_MS = 10_000;
 const POST_SPAWN_VERIFY_POLL_MS = 200;
+const POST_TERMINATION_VERIFY_TIMEOUT_MS = 2_000;
+const POST_TERMINATION_VERIFY_POLL_MS = 100;
 const PROFILE_LOCK_FILES = [
   'SingletonLock',
   'SingletonSocket',
@@ -457,7 +459,33 @@ export async function launchManagedBrowser(
   }
 
   if (staleStateFound) {
-    await clearManagedBrowserState(inspection.paths.stateFile, deps);
+    try {
+      await clearManagedBrowserState(inspection.paths.stateFile, deps);
+    } catch (err) {
+      return {
+        ok: false,
+        summary: 'Managed browser launch could not clear stale launcher state.',
+        installMode: inspection.installMode,
+        storageRule: inspection.storageRule,
+        executablePath: inspection.executablePath,
+        paths: inspection.paths,
+        issues: [
+          ...inspection.issues,
+          {
+            code: 'stale_launcher_state_cleanup_failed',
+            severity: 'error',
+            message: 'Stored managed browser state was stale, but Discoclaw could not remove it before relaunching.',
+            detail: `Failed to remove stale launcher state at ${inspection.paths.stateFile}: ${formatError(err)}`,
+            recommendation: 'Delete the stale state file after confirming no managed browser is still running, then rerun `discoclaw browser launch`.',
+          },
+        ],
+        launch: {
+          reusedExisting: false,
+          headless: options.headless === true,
+        },
+        nextSteps: [],
+      };
+    }
     storedState = null;
   }
 
@@ -543,7 +571,36 @@ export async function launchManagedBrowser(
   );
 
   if (!verified) {
-    deps.killPid(child.pid);
+    const exitConfirmed = await waitForManagedBrowserExit(child.pid, deps);
+
+    if (!exitConfirmed) {
+      return {
+        ok: false,
+        summary: 'Managed browser launch failed after CDP verification could not be confirmed.',
+        installMode: inspection.installMode,
+        storageRule: inspection.storageRule,
+        executablePath: inspection.executablePath,
+        paths: inspection.paths,
+        issues: [
+          ...inspection.issues,
+          {
+            code: 'verification_termination_unconfirmed',
+            severity: 'error',
+            message: 'CDP verification failed, and Discoclaw could not confirm that the newly launched browser exited after requesting termination.',
+            detail: `Tentative launcher state was left at ${inspection.paths.stateFile} because browser exit could not be verified.`,
+            recommendation: 'Close the browser manually if it is still open, then delete the tentative state file before retrying.',
+          },
+        ],
+        launch: {
+          reusedExisting: false,
+          headless,
+          pid: child.pid,
+          port,
+        },
+        nextSteps: [],
+      };
+    }
+
     try {
       await clearManagedBrowserState(inspection.paths.stateFile, deps);
       return {
@@ -558,7 +615,7 @@ export async function launchManagedBrowser(
           {
             code: 'verification_failed',
             severity: 'error',
-            message: 'Discoclaw terminated the newly launched browser because CDP verification failed.',
+            message: 'Discoclaw confirmed the newly launched browser is no longer running after CDP verification failed and removed the tentative launcher state.',
             recommendation: 'Relaunch headed, confirm the browser stays open, then retry after manual login if needed.',
           },
         ],
@@ -583,7 +640,7 @@ export async function launchManagedBrowser(
           {
             code: 'verification_cleanup_failed',
             severity: 'error',
-            message: 'Discoclaw terminated the newly launched browser, but launcher-state cleanup still failed.',
+            message: 'Discoclaw confirmed the newly launched browser is no longer running, but launcher-state cleanup still failed.',
             detail: `Failed to remove stale launcher state at ${inspection.paths.stateFile}: ${formatError(err)}`,
             recommendation: 'Delete the stale state file after confirming no managed browser is still running.',
           },
@@ -669,6 +726,23 @@ async function waitForManagedBrowserVerification(
   } while (deps.now().getTime() < deadline);
 
   return null;
+}
+
+async function waitForManagedBrowserExit(
+  pid: number,
+  deps: Pick<ManagedBrowserDeps, 'killPid' | 'isPidAlive' | 'sleep' | 'now'>,
+): Promise<boolean> {
+  if (!deps.isPidAlive(pid)) return true;
+
+  deps.killPid(pid);
+
+  const deadline = deps.now().getTime() + POST_TERMINATION_VERIFY_TIMEOUT_MS;
+  do {
+    if (!deps.isPidAlive(pid)) return true;
+    await deps.sleep(POST_TERMINATION_VERIFY_POLL_MS);
+  } while (deps.now().getTime() < deadline);
+
+  return !deps.isPidAlive(pid);
 }
 
 async function readManagedBrowserState(

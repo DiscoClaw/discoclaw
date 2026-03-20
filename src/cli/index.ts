@@ -77,6 +77,7 @@ export type BrowserCliDeps = {
   setup: (options: BrowserCliCommandOptions) => Promise<BrowserCliReport>;
   doctor: (options: BrowserCliCommandOptions) => Promise<BrowserCliReport>;
   launch: (options: BrowserCliCommandOptions) => Promise<BrowserCliReport>;
+  loadDotenv: (options: { path: string }) => void;
   log: Pick<typeof console, 'log' | 'error'>;
 };
 
@@ -146,11 +147,13 @@ async function loadDashboardCliDeps(): Promise<DashboardCliDeps> {
 
 async function loadBrowserCliDeps(): Promise<BrowserCliDeps> {
   const module = await importBrowserCliModule('../browser/managed-browser.js');
+  const { config } = await import('dotenv');
 
   return {
     setup: selectBrowserCliHandler(module, ['setupManagedBrowser', 'runBrowserSetup', 'browserSetup']),
     doctor: selectBrowserCliHandler(module, ['doctorManagedBrowser', 'runBrowserDoctor', 'browserDoctor']),
     launch: selectBrowserCliHandler(module, ['launchManagedBrowser', 'runBrowserLaunch', 'browserLaunch']),
+    loadDotenv: config,
     log: console,
   };
 }
@@ -219,6 +222,8 @@ export async function runBrowserCliCommand(options: {
   const env = options.env ?? process.env;
   const deps = options.deps ?? await loadBrowserCliDeps();
   const subcommand = argv[3];
+
+  deps.loadDotenv({ path: path.join(cwd, '.env') });
 
   try {
     switch (subcommand) {

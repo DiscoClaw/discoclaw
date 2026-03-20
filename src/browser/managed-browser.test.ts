@@ -323,6 +323,34 @@ describe('launchManagedBrowser', () => {
     expect(persisted.cdpUrl).toBe('ws://127.0.0.1:9555/devtools/browser/fresh');
   });
 
+  it('returns a structured failure when stale launcher state cannot be removed before relaunch', async () => {
+    const cwd = await makeTempDir();
+    tempDirs.push(cwd);
+    const paths = resolveManagedBrowserPaths(undefined, cwd);
+    await fs.mkdir(paths.profileDir, { recursive: true });
+    await fs.writeFile(paths.stateFile, '{not-json', 'utf-8');
+
+    const spawnBrowser = vi.fn(() => makeChildProcess(4444));
+    const deps = makeDeps({
+      spawnBrowser,
+      unlink: vi.fn(async () => {
+        throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+      }),
+    });
+
+    const report = await launchManagedBrowser({
+      cwd,
+      env: {},
+      headless: false,
+    }, deps);
+
+    expect(report.ok).toBe(false);
+    expect(report.summary).toBe('Managed browser launch could not clear stale launcher state.');
+    expect(report.issues?.map((issue) => issue.code)).toContain('stale_launcher_state_cleanup_failed');
+    expect(report.issues?.[0]?.detail).toContain(paths.stateFile);
+    expect(spawnBrowser).not.toHaveBeenCalled();
+  });
+
   it('chooses a fresh free port when stored state is stale', async () => {
     const cwd = await makeTempDir();
     tempDirs.push(cwd);
@@ -382,6 +410,7 @@ describe('launchManagedBrowser', () => {
     const killPid = vi.fn();
     const isPidAlive = vi.fn()
       .mockReturnValueOnce(true)
+      .mockReturnValueOnce(true)
       .mockReturnValueOnce(false);
     const deps = makeDeps({
       spawnBrowser: vi.fn(() => makeChildProcess(7777)),
@@ -402,5 +431,35 @@ describe('launchManagedBrowser', () => {
     expect(report.issues?.map((issue) => issue.code)).toContain('verification_failed');
     expect(killPid).toHaveBeenCalledWith(7777);
     await expect(fs.access(paths.stateFile)).rejects.toThrow();
+  });
+
+  it('keeps tentative launcher state when browser termination cannot be confirmed after verification failure', async () => {
+    const cwd = await makeTempDir();
+    tempDirs.push(cwd);
+    const paths = resolveManagedBrowserPaths(undefined, cwd);
+    await fs.mkdir(paths.profileDir, { recursive: true });
+
+    const killPid = vi.fn();
+    const deps = makeDeps({
+      spawnBrowser: vi.fn(() => makeChildProcess(8888)),
+      killPid,
+      isPidAlive: vi.fn(() => true),
+      httpGetJson: vi.fn(async () => {
+        throw new Error('connection refused');
+      }),
+    });
+
+    const report = await launchManagedBrowser({
+      cwd,
+      env: {},
+      headless: true,
+    }, deps);
+
+    expect(report.ok).toBe(false);
+    expect(report.issues?.map((issue) => issue.code)).toContain('verification_termination_unconfirmed');
+    expect(killPid).toHaveBeenCalledWith(8888);
+    const persisted = JSON.parse(await fs.readFile(paths.stateFile, 'utf-8')) as ManagedBrowserState;
+    expect(persisted.pid).toBe(8888);
+    expect(persisted.cdpUrl).toBeUndefined();
   });
 });

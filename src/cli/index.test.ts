@@ -93,6 +93,7 @@ function makeBrowserDeps(overrides: Partial<BrowserCliDeps> = {}): BrowserCliDep
       },
       nextSteps: ['Reuse this profile later with `discoclaw browser launch --headless`.'],
     })),
+    loadDotenv: vi.fn(),
     log: {
       log: vi.fn(),
       error: vi.fn(),
@@ -318,6 +319,24 @@ describe('runBrowserCliCommand', () => {
     expect(output).toContain('/repo/custom-data/browser');
   });
 
+  it('loads .env before dispatching browser subcommands', async () => {
+    const deps = makeBrowserDeps();
+
+    const exitCode = await runBrowserCliCommand({
+      argv: ['node', 'discoclaw', 'browser', 'doctor'],
+      cwd: '/repo',
+      env: {},
+      deps,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(deps.loadDotenv).toHaveBeenCalledWith({ path: '/repo/.env' });
+    expect(deps.doctor).toHaveBeenCalledWith({
+      cwd: '/repo',
+      env: {},
+    });
+  });
+
   it('returns a non-zero exit code when the managed profile is locked and cannot be reused', async () => {
     const deps = makeBrowserDeps({
       launch: vi.fn(async () => makeBrowserReport({
@@ -367,7 +386,7 @@ describe('runBrowserCliCommand', () => {
           {
             code: 'verification_cleanup_failed',
             severity: 'error',
-            message: 'Discoclaw terminated the newly launched browser, but launcher-state cleanup still failed.',
+            message: 'Discoclaw confirmed the newly launched browser is no longer running, but launcher-state cleanup still failed.',
             detail: 'Failed to remove stale launcher state at /repo/data/browser/state.json: EBUSY',
             recommendation: 'Delete the stale state file after confirming no managed browser is still running.',
           },
