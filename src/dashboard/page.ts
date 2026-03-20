@@ -1204,6 +1204,7 @@ export function renderDashboardPage(): string {
     }
 
     function renderSnapshot(snapshot) {
+      if (!snapshot.live) snapshot.live = {};
       const selectedRole = roleSelect.value;
       const selectedModel = getSelectedModelValue();
       lastSnapshot = snapshot;
