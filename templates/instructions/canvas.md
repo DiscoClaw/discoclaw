@@ -6,15 +6,16 @@
 <discord-action>{"type":"launchCanvas","title":"Dashboard","app":"dashboard"}</discord-action>
 ```
 - `title` (required): Human-readable label for the launch button.
-- `content` (artifact mode): Full self-contained HTML document with all CSS and JS inline.
+- `content` (artifact mode): Full self-contained HTML document with all CSS and JS inline; the server injects `window.canvasRuntime` only when serving artifact render responses.
 - `app` (built-in mode): Named built-in Activity app such as `dashboard`.
 - Use canvas only when interactivity materially improves the result over plain text.
 - Default is plain text. Do not use canvas for short answers, conversational replies, or single values.
 - Good fits: calculators, forms, charts, diffs, large comparison views, filterable tables, live dashboard launches.
 - Bad fits: simple status updates, brief explanations, or anything the user explicitly wants as plain text.
-- Artifact render responses inject `window.canvasRuntime`; use that built-in runtime instead of bundling React, Preact, Vue, or another UI framework.
-- Supported `window.canvasRuntime` entry points include `html`, `render`, and `useState` for small reactive components.
-- Start interactive artifacts with `const { html, render, useState } = window.canvasRuntime` and mount into a dedicated root node.
+- Artifact contract: stored artifact HTML stays unchanged, non-render API responses stay unchanged, and only artifact render responses receive `window.canvasRuntime`.
+- Artifacts should destructure from `window.canvasRuntime` instead of bundling React, Preact, Vue, or another UI framework.
+- Recommended starter surface: `const { html, render, useState } = window.canvasRuntime;`
+- Supported starter entry points include `html`, `render`, and `useState` for small reactive components; mount into a dedicated root node.
 - Generated artifacts must be a single HTML file, responsive at phone width, and keep total size under roughly 500KB.
 - No external scripts, stylesheets, fonts, images, or nested iframes in generated artifacts.
 - Generated artifacts run inside a sandboxed iframe and cannot call backend routes directly.
