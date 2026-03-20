@@ -20,6 +20,8 @@ import type { LoggerLike } from '../logging/logger-like.js';
 
 const CANVAS_HTML_DOC_RE = /<(?:!doctype\s+html|html)\b/i;
 const CANVAS_INTENT_RE = /\b(canvas|artifact|activity|interactive|dashboard|chart|graph|diff|visuali[sz]ation|calculator|viewer)\b/i;
+const CANVAS_SCRIPT_RE = /<script\b[^>]*>([\s\S]*?)<\/script>/gi;
+const CANVAS_VOID_ELEMENT_TAG_RE = /<(area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi;
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CANVAS_PROMPT_TEMPLATE_PATH = path.resolve(__dirname, '..', '..', 'templates', 'instructions', 'canvas.md');
@@ -165,6 +167,174 @@ function isFullHtmlDocument(content: string): boolean {
   return CANVAS_HTML_DOC_RE.test(content);
 }
 
+function skipWhitespace(source: string, start: number): number {
+  let index = start;
+  while (index < source.length && /\s/.test(source[index] ?? '')) index += 1;
+  return index;
+}
+
+function collectHtmlTemplateChunksFromScript(source: string): string[] {
+  const chunks: string[] = [];
+
+  function scan(index: number, stopAtClosingBrace = false): number {
+    let i = index;
+    let braceDepth = stopAtClosingBrace ? 1 : 0;
+
+    while (i < source.length) {
+      const char = source[i] ?? '';
+      const next = source[i + 1] ?? '';
+
+      if (char === "'" || char === '"') {
+        i = skipQuotedString(i, char);
+        continue;
+      }
+      if (char === '`') {
+        i = skipTemplateLiteral(i);
+        continue;
+      }
+      if (char === '/' && next === '/') {
+        i = skipLineComment(i);
+        continue;
+      }
+      if (char === '/' && next === '*') {
+        i = skipBlockComment(i);
+        continue;
+      }
+      if (stopAtClosingBrace) {
+        if (char === '{') {
+          braceDepth += 1;
+          i += 1;
+          continue;
+        }
+        if (char === '}') {
+          braceDepth -= 1;
+          i += 1;
+          if (braceDepth === 0) return i;
+          continue;
+        }
+      }
+      if (/[A-Za-z_$]/.test(char)) {
+        const start = i;
+        i += 1;
+        while (i < source.length && /[A-Za-z0-9_$]/.test(source[i] ?? '')) i += 1;
+        const ident = source.slice(start, i);
+        if (ident === 'html') {
+          const nextIndex = skipWhitespace(source, i);
+          if ((source[nextIndex] ?? '') === '`') {
+            i = collectTaggedTemplate(nextIndex);
+            continue;
+          }
+        }
+        continue;
+      }
+      i += 1;
+    }
+
+    return i;
+  }
+
+  function skipQuotedString(start: number, quote: string): number {
+    let i = start + 1;
+    while (i < source.length) {
+      const char = source[i] ?? '';
+      if (char === '\\') {
+        i += 2;
+        continue;
+      }
+      i += 1;
+      if (char === quote) break;
+    }
+    return i;
+  }
+
+  function skipLineComment(start: number): number {
+    let i = start + 2;
+    while (i < source.length && (source[i] ?? '') !== '\n') i += 1;
+    return i;
+  }
+
+  function skipBlockComment(start: number): number {
+    let i = start + 2;
+    while (i < source.length) {
+      if ((source[i] ?? '') === '*' && (source[i + 1] ?? '') === '/') return i + 2;
+      i += 1;
+    }
+    return i;
+  }
+
+  function skipTemplateLiteral(start: number): number {
+    let i = start + 1;
+    while (i < source.length) {
+      const char = source[i] ?? '';
+      const next = source[i + 1] ?? '';
+      if (char === '\\') {
+        i += 2;
+        continue;
+      }
+      if (char === '$' && next === '{') {
+        i = scan(i + 2, true);
+        continue;
+      }
+      i += 1;
+      if (char === '`') break;
+    }
+    return i;
+  }
+
+  function collectTaggedTemplate(backtickIndex: number): number {
+    let i = backtickIndex + 1;
+    let chunkStart = i;
+
+    while (i < source.length) {
+      const char = source[i] ?? '';
+      const next = source[i + 1] ?? '';
+      if (char === '\\') {
+        i += 2;
+        continue;
+      }
+      if (char === '$' && next === '{') {
+        chunks.push(source.slice(chunkStart, i));
+        i = scan(i + 2, true);
+        chunkStart = i;
+        continue;
+      }
+      if (char === '`') {
+        chunks.push(source.slice(chunkStart, i));
+        return i + 1;
+      }
+      i += 1;
+    }
+
+    chunks.push(source.slice(chunkStart));
+    return i;
+  }
+
+  scan(0);
+  return chunks;
+}
+
+function findCanvasArtifactLintError(content: string): string | null {
+  const bareVoidTags = new Set<string>();
+  for (const scriptMatch of content.matchAll(CANVAS_SCRIPT_RE)) {
+    const scriptContent = scriptMatch[1] ?? '';
+    for (const chunk of collectHtmlTemplateChunksFromScript(scriptContent)) {
+      for (const match of chunk.matchAll(CANVAS_VOID_ELEMENT_TAG_RE)) {
+        const fullTag = match[0];
+        const tagName = match[1]?.toLowerCase();
+        if (!tagName) continue;
+        if (/\s*\/>$/.test(fullTag)) continue;
+        bareVoidTags.add(`<${tagName}>`);
+      }
+    }
+  }
+
+  if (bareVoidTags.size === 0) return null;
+  return [
+    `launchCanvas content uses bare void HTML elements (${Array.from(bareVoidTags).join(', ')}).`,
+    'In canvas artifacts using `window.canvasRuntime`/`html`, self-close them: use `<input ... />`, `<img ... />`, `<br />`, etc.',
+  ].join(' ');
+}
+
 function loadCanvasPromptTemplate(): string {
   if (cachedCanvasPromptTemplate != null) return cachedCanvasPromptTemplate;
   try {
@@ -188,6 +358,7 @@ function loadCanvasPromptTemplate(): string {
       '- Artifact render responses inject `window.canvasRuntime`; use that built-in runtime instead of bundling React, Preact, Vue, or another UI framework.',
       '- The injected runtime exposes `html`, `render`, and the installed `preact/hooks` surface: `useState`, `useEffect`, `useLayoutEffect`, `useReducer`, `useRef`, `useMemo`, `useCallback`, `useContext`, `useImperativeHandle`, `useDebugValue`, `useErrorBoundary`, and `useId`.',
       '- Start interactive artifacts with `const { html, render, useState } = window.canvasRuntime`; keep the starter small unless the artifact actually needs more hook surface, and mount into a dedicated root node.',
+      '- In `html` template literals, self-close void HTML elements: use `<input ... />`, `<img ... />`, `<br />`, etc. Bare `<input>` tags can corrupt the rendered DOM in canvas artifacts.',
       '- Generated artifacts must be a single HTML file, responsive at phone width, and keep total size under roughly 500KB.',
       '- No external scripts, stylesheets, fonts, images, or nested iframes in generated artifacts.',
       '- Generated artifacts run inside a sandboxed iframe and cannot call backend routes directly.',
@@ -268,6 +439,8 @@ export async function executeCanvasAction(
     if (!isFullHtmlDocument(content)) {
       return { ok: false, error: 'launchCanvas content must be a full self-contained HTML document' };
     }
+    const lintError = findCanvasArtifactLintError(content);
+    if (lintError) return { ok: false, error: lintError };
     const meta = await canvasCtx.artifactStore.createArtifact({ title, content });
     customId = buildCanvasLaunchCustomId(canvasCtx, canvasCtx.launchStore.createArtifactLaunchRef(meta.id));
   }

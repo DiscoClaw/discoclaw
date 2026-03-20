@@ -15,6 +15,7 @@
 - Artifact contract: stored artifact HTML stays unchanged, non-render API responses stay unchanged, and only artifact render responses receive `window.canvasRuntime`.
 - Artifacts should destructure from `window.canvasRuntime` instead of bundling React, Preact, Vue, or another UI framework.
 - Recommended starter surface: `const { html, render, useState } = window.canvasRuntime;`
+- In `html` template literals, self-close void HTML elements: use `<input ... />`, `<img ... />`, `<br />`, etc. Bare `<input>` tags can corrupt the rendered DOM in canvas artifacts.
 - The injected runtime exposes `html`, `render`, and the installed `preact/hooks` surface: `useState`, `useEffect`, `useLayoutEffect`, `useReducer`, `useRef`, `useMemo`, `useCallback`, `useContext`, `useImperativeHandle`, `useDebugValue`, `useErrorBoundary`, and `useId`.
 - Keep the starter small unless the artifact actually needs more hook surface; mount into a dedicated root node.
 - Generated artifacts must be a single HTML file, responsive at phone width, and keep total size under roughly 500KB.
