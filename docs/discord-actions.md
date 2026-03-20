@@ -139,7 +139,7 @@ Actions are controlled by a master switch plus per-category switches:
   - `DISCOCLAW_DISCORD_ACTIONS_LOOP` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_LOOP_MIN_INTERVAL_SECONDS` default 60, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_INTERVAL_SECONDS` default 86400, `DISCOCLAW_DISCORD_ACTIONS_LOOP_MAX_CONCURRENT` default 5)
   - `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN` (default 0; controls actual image generation readiness. Normal manual/help surfaces still advertise `imagegen` by default, but execution still requires this flag plus at least one of `OPENAI_API_KEY` or `IMAGEGEN_GEMINI_API_KEY`)
   - `DISCOCLAW_DISCORD_ACTIONS_SPAWN` (default 1; sub-config: `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT` default 8)
-  - `canvas` (`launchCanvas`) — no separate `DISCOCLAW_DISCORD_ACTIONS_CANVAS` flag; availability follows the canvas subsystem (`DISCOCLAW_CANVAS_ENABLED`) and runtime readiness checks
+  - `canvas` (`launchCanvas`) — no separate `DISCOCLAW_DISCORD_ACTIONS_CANVAS` flag; this experimental category is default-off behind `DISCOCLAW_CANVAS_ENABLED`, and the parser only accepts it when the current guild flow sets `ActionCategoryFlags.canvas`
   - `config` (`modelSet`/`modelShow`) — no separate env flag; always enabled when master switch is on
   - `reactionPrompt` — no separate env flag; gated under `DISCOCLAW_DISCORD_ACTIONS_MESSAGING`
 
@@ -149,10 +149,11 @@ Important behavioral notes:
 - Even if a category is implemented, it is not usable unless its flag is enabled.
 - Actions are not advertised to the model in DMs: `src/discord.ts` only appends the actions prompt section for non-DM messages, and execution requires `msg.guild`.
 - `imagegen` has an intentional discoverability/readiness split on the normal manual Discord path: ordinary user turns, their auto-follow-ups, and help/model surfaces such as `!models` / `!models help` can expose `imagegen` before setup is complete.
-- `launchCanvas` follows a similar discoverability/readiness split in guild flows: the schema is surfaced when canvas is already locally ready, or when the user's text explicitly asks for an interactive canvas/activity/artifact experience.
+- `launchCanvas` has a narrower discoverability/readiness split than `imagegen`: in normal guild message/reaction flows, `shouldCanvasPromptBeSurfaced(...)` only turns the parser/prompt flag on when `DISCOCLAW_CANVAS_ENABLED` is already set and either local readiness has passed or the user's text explicitly asks for a canvas/activity/artifact-style experience.
+- If that canvas flag is off for the current turn, `parseDiscordActions(...)` strips `launchCanvas` blocks as disabled rather than treating them as executable.
 - If an interactive/manual invocation emits `generateImage` without configured imagegen context, `executeDiscordActions(...)` returns a setup walkthrough instead of generating an image. That walkthrough points the operator at `.env`, `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN`, provider keys, restart, and `!models help`.
-- If an interactive/manual invocation emits `launchCanvas` before the canvas subsystem is locally ready, `executeDiscordActions(...)` returns the canvas setup walkthrough instead of posting a launch button.
-- The setup walkthrough is tied to the shared interactive action-confirmation mode used by manual user turns and their follow-ups. Automated callers keep the raw `Imagegen subsystem not configured` error.
+- If an interactive/manual invocation emits `launchCanvas` after the action has made it through parsing, but the canvas subsystem is absent or not locally ready, `executeDiscordActions(...)` returns the canvas setup walkthrough instead of posting a launch button.
+- The setup walkthrough is tied to the shared interactive action-confirmation mode used by manual user turns and their follow-ups. Automated callers keep the raw subsystem errors (`Canvas subsystem not configured` / `Imagegen subsystem not configured`).
 - Reaction and deferred surfaces remain separately flag-driven. This document does not treat them as already non-advertised; they continue to follow their current flow-specific contracts.
 
 ## Tiered Schema Injection (Prompt Guidance)
@@ -441,7 +442,13 @@ No separate env flag — config actions are always enabled when the master switc
 
 ### Canvas Actions (`canvas-action.ts`)
 
-Allow the model to launch an interactive Discord Activity canvas, either from a built-in app or from a generated single-file HTML artifact.
+Allow the model to launch an interactive Discord Activity canvas, either from a built-in app or from a generated single-file HTML artifact. This path is experimental and default-off until the operator opts in with `DISCOCLAW_CANVAS_ENABLED=1`.
+
+Discoverability vs. readiness:
+- There is still no separate Discord-actions env flag for canvas. The subsystem opt-in is `DISCOCLAW_CANVAS_ENABLED=1`.
+- In current guild message/reaction flows, the prompt/parser gate comes from `shouldCanvasPromptBeSurfaced(...)`: canvas schema is surfaced only after opt-in, and then only when local readiness has passed or the user text clearly asks for an interactive canvas/activity/artifact flow.
+- If that gate is off for the current turn, `parseDiscordActions(...)` strips `launchCanvas` as disabled.
+- If the gate is on but the subsystem is still not locally ready, interactive/manual execution returns the canvas setup walkthrough; automated callers keep the raw subsystem error.
 
 | Action | Description | Mutating? |
 |--------|-------------|-----------|
@@ -469,7 +476,7 @@ Execution flow:
 
 Env and context:
 - No `DISCOCLAW_DISCORD_ACTIONS_CANVAS` flag exists; action availability is driven by the canvas subsystem itself.
-- Master switch: `DISCOCLAW_CANVAS_ENABLED` (default `true`).
+- Master switch: `DISCOCLAW_CANVAS_ENABLED` (default `false`; explicit opt-in required on fresh installs, and existing installs must now set it explicitly to keep canvas on after upgrading).
 - Optional prompt/export toggle: `DISCOCLAW_CANVAS_WRITE_BRIDGE_ENABLED` controls whether the prompt teaches the trusted `canvas.saveFile` bridge for artifact exports.
 - Requires a configured `CanvasContext`, a live local canvas server, and a guild text channel. DMs are unsupported.
 - Full operator setup (Developer Portal URL Mapping, Activities enablement, HTTPS exposure) is documented in [docs/discord-bot-setup.md](/home/davidmarsh/code/discoclaw/docs/discord-bot-setup.md).

@@ -91,6 +91,9 @@ describe('canvas-action', () => {
     const { canvasActionsPromptSection } = await import('./canvas-action.js');
 
     const prompt = canvasActionsPromptSection({ writeBridgeEnabled: true });
+    expect(prompt).toContain('experimental and default-off');
+    expect(prompt).toContain('DISCOCLAW_CANVAS_ENABLED=1');
+    expect(prompt).toContain('Fresh installs and upgraded installs both require an explicit opt-in');
     expect(prompt).toContain('window.canvasRuntime');
     expect(prompt).toContain('installed `preact/hooks` surface');
     expect(prompt).toContain('`useLayoutEffect`');
@@ -110,6 +113,9 @@ describe('canvas-action', () => {
     const { canvasActionsPromptSection } = await import('./canvas-action.js');
 
     const withSaveBridge = canvasActionsPromptSection({ writeBridgeEnabled: true });
+    expect(withSaveBridge).toContain('experimental and default-off');
+    expect(withSaveBridge).toContain('DISCOCLAW_CANVAS_ENABLED=1');
+    expect(withSaveBridge).toContain('Fresh installs and upgraded installs both require an explicit opt-in');
     expect(withSaveBridge).toContain('window.canvasRuntime');
     expect(withSaveBridge).toContain('installed `preact/hooks` surface');
     expect(withSaveBridge).toContain('`useErrorBoundary`');
@@ -120,6 +126,8 @@ describe('canvas-action', () => {
     expect(withSaveBridge).not.toContain('{{CANVAS_SAVE_BRIDGE_GUIDANCE}}');
 
     const withoutSaveBridge = canvasActionsPromptSection({ writeBridgeEnabled: false });
+    expect(withoutSaveBridge).toContain('experimental and default-off');
+    expect(withoutSaveBridge).toContain('DISCOCLAW_CANVAS_ENABLED=1');
     expect(withoutSaveBridge).toContain('window.canvasRuntime');
     expect(withoutSaveBridge).toContain('installed `preact/hooks` surface');
     expect(withoutSaveBridge).toContain('`useId`');
@@ -127,6 +135,17 @@ describe('canvas-action', () => {
     expect(withoutSaveBridge).toContain('instead of cloning Discord\'s palette by default');
     expect(withoutSaveBridge).not.toContain('canvas.saveFile');
     expect(withoutSaveBridge).not.toContain('{{CANVAS_SAVE_BRIDGE_GUIDANCE}}');
+  });
+
+  it('describes canvas setup as experimental and explicit opt-in', async () => {
+    vi.resetModules();
+    const { buildCanvasSetupRequiredStub } = await import('./canvas-action.js');
+
+    const setup = buildCanvasSetupRequiredStub();
+    expect(setup).toContain('experimental and default-off');
+    expect(setup).toContain('DISCOCLAW_CANVAS_ENABLED=1');
+    expect(setup).toContain('Fresh installs and upgraded installs both require an explicit opt-in');
+    expect(setup).toContain('Developer Portal');
   });
 
   it('stores the artifact and posts a launch button when canvas is ready', async () => {

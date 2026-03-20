@@ -8,8 +8,10 @@
 - `title` (required): Human-readable label for the launch button.
 - `content` (artifact mode): Full self-contained HTML document with all CSS and JS inline; the server injects `window.canvasRuntime` only when serving artifact render responses.
 - `app` (built-in mode): Named built-in Activity app such as `dashboard`.
-- Use canvas only when interactivity materially improves the result over plain text.
-- Default is plain text. Do not use canvas for short answers, conversational replies, or single values.
+- Canvas is experimental and default-off. Its presence means this install explicitly opted in.
+- Treat plain text as the default path even when canvas is available.
+- Use canvas only when interactivity clearly and materially improves the result over plain text.
+- Do not use canvas for short answers, conversational replies, single values, or simple explanations.
 - Good fits: calculators, forms, charts, diffs, large comparison views, filterable tables, live dashboard launches.
 - Bad fits: simple status updates, brief explanations, or anything the user explicitly wants as plain text.
 - Artifact contract: stored artifact HTML stays unchanged, non-render API responses stay unchanged, and only artifact render responses receive `window.canvasRuntime`.

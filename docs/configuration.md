@@ -300,9 +300,11 @@ If you run multiple DiscoClaw instances on one machine and want dashboards on bo
 
 Interactive HTML artifacts served as Discord Activities. See [docs/discord-bot-setup.md](discord-bot-setup.md) § Canvas Activities for the Discord Developer Portal setup steps.
 
+Canvas is experimental and default-off. Existing installs that want to keep canvas available after this change must set `DISCOCLAW_CANVAS_ENABLED=1` explicitly before restarting on the new version.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DISCOCLAW_CANVAS_ENABLED` | `true` | Master switch for the canvas subsystem |
+| `DISCOCLAW_CANVAS_ENABLED` | `false` | Opt-in master switch for the experimental canvas subsystem. Fresh installs and upgraded installs must set it to `1` explicitly to keep canvas available. |
 | `DISCOCLAW_CANVAS_PORT` | `9402` | Canvas server port |
 | `DISCOCLAW_CANVAS_ARTIFACT_DIR` | — | Override artifact storage directory |
 | `DISCOCLAW_CANVAS_MAX_ARTIFACTS` | `1000` | Max stored artifacts (LRU eviction) |

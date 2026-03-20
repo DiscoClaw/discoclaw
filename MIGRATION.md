@@ -4,6 +4,24 @@ This document tracks breaking changes and migration steps for discoclaw operator
 
 ---
 
+## canvas default-off opt-in (`DISCOCLAW_CANVAS_ENABLED=0/1`)
+
+**Affects:** Existing deployments that used canvas without setting `DISCOCLAW_CANVAS_ENABLED` explicitly.
+
+### What changed
+
+Canvas Activities are now treated as an experimental opt-in feature in operator-facing defaults and documentation. The real runtime switch remains `DISCOCLAW_CANVAS_ENABLED`, and its startup default is now documented and scaffolded as off.
+
+### What you need to do
+
+- If you want canvas enabled after upgrading, set `DISCOCLAW_CANVAS_ENABLED=1` in your instance `.env`.
+- Restart the bot after changing the variable.
+- Keep or complete the Discord Activity setup in the Developer Portal: add the URL Mapping, enable Activities, and expose the canvas endpoint over public HTTPS.
+
+If you do nothing, the rest of DiscoClaw continues to work normally; canvas stays unavailable until you opt in.
+
+---
+
 ## agents → automations rename (PR #349)
 
 **Affects:** Existing deployments with the cron/automations subsystem enabled.

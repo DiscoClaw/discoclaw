@@ -25,6 +25,10 @@ const CANVAS_VOID_ELEMENT_TAG_RE = /<(area|base|br|col|embed|hr|img|input|link|m
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CANVAS_PROMPT_TEMPLATE_PATH = path.resolve(__dirname, '..', '..', 'templates', 'instructions', 'canvas.md');
+const CANVAS_EXPERIMENTAL_POSTURE_NOTE = [
+  'Canvas Activities are experimental and default-off in DiscoClaw.',
+  'Fresh installs and upgraded installs both require an explicit opt-in via `DISCOCLAW_CANVAS_ENABLED=1`, followed by a bot restart.',
+].join(' ');
 const DEFAULT_SAVE_BRIDGE_GUIDANCE = [
   '- Save-file export is available through the trusted shell bridge when enabled.',
   '- To export a file from inside the artifact, post a message to the parent shell:',
@@ -100,7 +104,7 @@ export function buildCanvasSetupRequiredStub(canvasCtx?: CanvasContext): string 
       'Enable Activities on the Discord application in the Developer Portal (Application → Activities → Enable). Requires the URL Mapping first.',
     ],
   };
-  return buildCanvasSetupWalkthrough(readiness);
+  return [CANVAS_EXPERIMENTAL_POSTURE_NOTE, buildCanvasSetupWalkthrough(readiness)].join(' ');
 }
 
 export function shouldCanvasPromptBeSurfaced(canvasCtx: CanvasContext | undefined, userText?: string): boolean {
@@ -370,6 +374,16 @@ function loadCanvasPromptTemplate(): string {
       '- Prefer semantic HTML, clear contrast, and obvious focus states.',
       '{{CANVAS_SAVE_BRIDGE_GUIDANCE}}',
     ].join('\n');
+  }
+  if (!cachedCanvasPromptTemplate.includes(CANVAS_EXPERIMENTAL_POSTURE_NOTE)) {
+    if (cachedCanvasPromptTemplate.startsWith('### Canvas Activities')) {
+      cachedCanvasPromptTemplate = cachedCanvasPromptTemplate.replace(
+        '### Canvas Activities',
+        `### Canvas Activities\n\n${CANVAS_EXPERIMENTAL_POSTURE_NOTE}`,
+      );
+    } else {
+      cachedCanvasPromptTemplate = `${CANVAS_EXPERIMENTAL_POSTURE_NOTE}\n\n${cachedCanvasPromptTemplate}`;
+    }
   }
   return cachedCanvasPromptTemplate;
 }
