@@ -533,8 +533,16 @@ export function renderDashboardPage(): string {
 
     .chat-forms form {
       display: grid;
-      gap: 8px;
+      gap: 10px;
       align-content: start;
+    }
+
+    form .actions {
+      margin-top: 2px;
+    }
+
+    .field-note {
+      margin-top: -2px;
     }
 
     @media (max-width: 980px) {
@@ -1113,7 +1121,9 @@ export function renderDashboardPage(): string {
 
     function renderServiceMetrics(snapshot) {
       clearNode(serviceMetrics);
-      appendMetric(serviceMetrics, 'service', snapshot.serviceSummary);
+      appendMetric(serviceMetrics, 'unit', snapshot.serviceName || 'discoclaw');
+      appendMetric(serviceMetrics, 'status', snapshot.serviceSummary);
+      appendMetric(serviceMetrics, 'boot', snapshot.serviceEnabled === true ? 'enabled' : snapshot.serviceEnabled === false ? 'not enabled' : 'unknown');
       appendMetric(serviceMetrics, 'pending restart', snapshot.live.pendingRestart ? 'yes' : 'no');
     }
 
