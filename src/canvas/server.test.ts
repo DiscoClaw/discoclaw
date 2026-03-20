@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { ArtifactStore } from './artifact-store.js';
 import { createCanvasBuiltinApps } from './apps.js';
 import { CanvasFileExport } from './file-export.js';
@@ -113,6 +114,18 @@ async function getJson(baseUrl: string, pathname: string, headers?: HeadersInit)
   return { response, json };
 }
 
+function mockCanvasRuntimeBundle(runtimeSource = 'window.__canvasRuntime = true;') {
+  const originalReadFile = fs.readFile.bind(fs) as (...args: any[]) => Promise<any>;
+  vi.spyOn(fs, 'readFile').mockImplementation((async (filePath: any, options?: any) => {
+    const resolvedPath = filePath instanceof URL ? fileURLToPath(filePath) : String(filePath);
+    if (resolvedPath.endsWith(path.join('dist', 'vendor', 'canvas-runtime.js'))) {
+      return runtimeSource;
+    }
+    return originalReadFile(filePath, options);
+  }) as typeof fs.readFile);
+  return runtimeSource;
+}
+
 describe('Canvas server', () => {
   it('exchanges OAuth codes using mocked Discord responses', async () => {
     const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
@@ -186,6 +199,79 @@ describe('Canvas server', () => {
     );
     expect(artifactResponse.response.status).toBe(200);
     expect(artifactResponse.json.content).toContain('Hello');
+  });
+
+  it('injects the cached canvas runtime into /render responses without changing stored artifact HTML', async () => {
+    const runtimeSource = mockCanvasRuntimeBundle();
+    const harness = await startHarness();
+    const artifactContent = '<!doctype html><html><head><title>Demo</title></head><body><main>Hello</main></body></html>';
+    const artifact = await harness.artifactStore.createArtifact({
+      title: 'Demo',
+      content: artifactContent,
+    });
+    harness.launchStore.registerPending(
+      { userId: 'user-1', channelId: 'channel-1', guildId: 'guild-1' },
+      artifact.id,
+    );
+
+    const tokenResult = await postJson(harness.baseUrl, '/api/token', { code: 'mock:user-1' });
+    const authToken = String(tokenResult.json.authToken);
+    const launch = await getJson(
+      harness.baseUrl,
+      '/api/launches/current?channelId=channel-1&guildId=guild-1',
+      { Authorization: `Bearer ${authToken}` },
+    );
+    const boundSessionToken = String(launch.json.boundSessionToken);
+
+    const renderResponse = await fetch(
+      `${harness.baseUrl}/api/artifacts/${artifact.id}/render?auth=${encodeURIComponent(authToken)}&session=${encodeURIComponent(boundSessionToken)}`,
+    );
+    const renderHtml = await renderResponse.text();
+    expect(renderResponse.status).toBe(200);
+    expect(renderHtml).toContain(`<script>${runtimeSource}</script>`);
+    expect(renderHtml).toContain('<head><title>Demo</title><script>');
+    expect(renderHtml).toContain('<main>Hello</main>');
+
+    const artifactResponse = await getJson(
+      harness.baseUrl,
+      `/api/artifacts/${artifact.id}`,
+      {
+        Authorization: `Bearer ${authToken}`,
+        'X-Canvas-Bound-Session': boundSessionToken,
+      },
+    );
+    expect(artifactResponse.response.status).toBe(200);
+    expect(artifactResponse.json.content).toBe(artifactContent);
+  });
+
+  it('injects the runtime into minimal full documents that omit <head>', async () => {
+    const runtimeSource = mockCanvasRuntimeBundle();
+    const harness = await startHarness();
+    const artifact = await harness.artifactStore.createArtifact({
+      title: 'Minimal',
+      content: '<!doctype html><html><body><main>Minimal</main></body></html>',
+    });
+    harness.launchStore.registerPending(
+      { userId: 'user-1', channelId: 'channel-1', guildId: 'guild-1' },
+      artifact.id,
+    );
+
+    const tokenResult = await postJson(harness.baseUrl, '/api/token', { code: 'mock:user-1' });
+    const authToken = String(tokenResult.json.authToken);
+    const launch = await getJson(
+      harness.baseUrl,
+      '/api/launches/current?channelId=channel-1&guildId=guild-1',
+      { Authorization: `Bearer ${authToken}` },
+    );
+    const boundSessionToken = String(launch.json.boundSessionToken);
+
+    const renderResponse = await fetch(
+      `${harness.baseUrl}/api/artifacts/${artifact.id}/render?auth=${encodeURIComponent(authToken)}&session=${encodeURIComponent(boundSessionToken)}`,
+    );
+    const renderHtml = await renderResponse.text();
+    expect(renderResponse.status).toBe(200);
+    expect(renderHtml).toContain(`<html><head><script>${runtimeSource}</script></head><body>`);
+    expect(renderHtml).toContain('<main>Minimal</main>');
   });
 
   it('serves built-in dashboard apps through the same launch/session flow', async () => {

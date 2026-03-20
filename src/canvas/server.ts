@@ -237,6 +237,33 @@ function buildArtifactCsp(): string {
   ].join('; ');
 }
 
+function buildInlineScriptTag(scriptSource: string): string {
+  return `<script>${scriptSource.replace(/<\/script/gi, '<\\/script')}</script>`;
+}
+
+function injectArtifactRuntimeHtml(documentHtml: string, runtimeSource: string | null): string {
+  if (!runtimeSource) return documentHtml;
+  const runtimeTag = buildInlineScriptTag(runtimeSource);
+
+  const headCloseMatch = documentHtml.match(/<\/head\s*>/i);
+  if (headCloseMatch?.index != null) {
+    return `${documentHtml.slice(0, headCloseMatch.index)}${runtimeTag}${documentHtml.slice(headCloseMatch.index)}`;
+  }
+
+  const htmlOpenMatch = documentHtml.match(/<html\b[^>]*>/i);
+  if (htmlOpenMatch?.index != null) {
+    const insertionIndex = htmlOpenMatch.index + htmlOpenMatch[0].length;
+    return `${documentHtml.slice(0, insertionIndex)}<head>${runtimeTag}</head>${documentHtml.slice(insertionIndex)}`;
+  }
+
+  const bodyOpenMatch = documentHtml.match(/<body\b[^>]*>/i);
+  if (bodyOpenMatch?.index != null) {
+    return `${documentHtml.slice(0, bodyOpenMatch.index)}<head>${runtimeTag}</head>${documentHtml.slice(bodyOpenMatch.index)}`;
+  }
+
+  return `${runtimeTag}${documentHtml}`;
+}
+
 function buildAuthClaims(signer: SignedTokenSigner, userId: string, ttlMs: number): string {
   const now = Date.now();
   return signer.sign<CanvasAuthClaims>({
@@ -279,6 +306,11 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
   const bundledSdkCache = await fs.readFile(bundledSdkPath, 'utf8').catch(() => null);
   if (bundledSdkCache == null) {
     opts.log?.error({ path: bundledSdkPath }, 'canvas:sdk-bundle missing — run the bundle-embedded-sdk script');
+  }
+  const canvasRuntimePath = path.resolve(MODULE_DIR, '..', '..', 'dist', 'vendor', 'canvas-runtime.js');
+  const canvasRuntimeCache = await fs.readFile(canvasRuntimePath, 'utf8').catch(() => null);
+  if (canvasRuntimeCache == null) {
+    opts.log?.error({ path: canvasRuntimePath }, 'canvas:runtime-bundle missing — build dist/vendor/canvas-runtime.js');
   }
 
   await opts.artifactStore.ensureReady();
@@ -566,7 +598,7 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
           // Serve raw HTML with a permissive CSP for artifact content.
           // The iframe is sandboxed (no allow-same-origin) so inline scripts
           // cannot access the parent's origin, cookies, or storage.
-          respondHtml(res, 200, artifact.content, {
+          respondHtml(res, 200, injectArtifactRuntimeHtml(artifact.content, canvasRuntimeCache), {
             'Content-Security-Policy': buildArtifactCsp(),
           });
           return;
