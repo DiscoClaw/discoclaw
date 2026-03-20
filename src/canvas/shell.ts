@@ -189,7 +189,6 @@ export function renderCanvasShellHtml(opts: {
       let activityGuildId = '';
       let discordSdk = null;
       let artifactFrame = null;
-      let currentBlobUrl = '';
       let toastTimer = 0;
       let appRefreshTimer = 0;
       let sessionRefreshTimer = 0;
@@ -206,10 +205,6 @@ export function renderCanvasShellHtml(opts: {
         clearSessionRefreshTimer();
         activeTargetKey = '';
         artifactFrame = null;
-        if (currentBlobUrl) {
-          URL.revokeObjectURL(currentBlobUrl);
-          currentBlobUrl = '';
-        }
         landingMessageEl.textContent = message;
         if (!landingEl.parentElement) {
           viewportEl.innerHTML = '';
@@ -314,17 +309,11 @@ export function renderCanvasShellHtml(opts: {
 
       function renderDocument(html, title) {
         titleEl.textContent = title || 'Canvas';
-        if (currentBlobUrl) {
-          URL.revokeObjectURL(currentBlobUrl);
-          currentBlobUrl = '';
-        }
-        const blob = new Blob([html], { type: 'text/html; charset=utf-8' });
-        currentBlobUrl = URL.createObjectURL(blob);
         const frame = document.createElement('iframe');
         frame.className = 'viewport-frame';
         frame.setAttribute('sandbox', 'allow-scripts allow-forms');
         frame.setAttribute('referrerpolicy', 'no-referrer');
-        frame.src = currentBlobUrl;
+        frame.srcdoc = html;
         viewportEl.innerHTML = '';
         viewportEl.appendChild(frame);
         artifactFrame = frame;

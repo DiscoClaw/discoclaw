@@ -216,7 +216,7 @@ function buildShellCsp(nonce: string): string {
     "img-src 'self' data: blob:",
     "font-src 'self' data:",
     "connect-src 'self'",
-    "frame-src 'self' blob:",
+    "frame-src 'self'",
     "object-src 'none'",
     "base-uri 'none'",
     "frame-ancestors 'self' https://discord.com https://*.discord.com https://*.discordsays.com",
