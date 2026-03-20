@@ -52,6 +52,7 @@ export class LaunchStore {
   private readonly now: () => number;
   private readonly signer: SignedTokenSigner;
   private readonly launchRefSecret: Buffer;
+  private readonly instanceTagValue: string;
 
   constructor(opts: LaunchStoreOptions) {
     this.pendingTtlMs = opts.pendingTtlMs;
@@ -61,6 +62,14 @@ export class LaunchStore {
     this.launchRefSecret = Buffer.isBuffer(opts.launchRefSecret)
       ? opts.launchRefSecret
       : Buffer.from(opts.launchRefSecret ?? crypto.randomBytes(32).toString('hex'), 'utf8');
+    this.instanceTagValue = crypto.createHash('sha256')
+      .update(this.launchRefSecret)
+      .digest('base64url')
+      .slice(0, 10);
+  }
+
+  instanceTag(): string {
+    return this.instanceTagValue;
   }
 
   createArtifactLaunchRef(artifactId: string): string {
