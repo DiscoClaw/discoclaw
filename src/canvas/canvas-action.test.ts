@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -84,6 +85,28 @@ async function makeCanvasContext() {
 }
 
 describe('canvas-action', () => {
+  it('documents the injected canvas runtime in fallback prompt text and preserves save-bridge substitution', async () => {
+    vi.resetModules();
+    vi.spyOn(fsSync, 'readFileSync').mockImplementation(() => {
+      throw new Error('template unavailable');
+    });
+
+    const { canvasActionsPromptSection } = await import('./canvas-action.js');
+
+    const withSaveBridge = canvasActionsPromptSection({ writeBridgeEnabled: true });
+    expect(withSaveBridge).toContain('window.canvasRuntime');
+    expect(withSaveBridge).toContain('`html`, `render`, and `useState`');
+    expect(withSaveBridge).toContain('const { html, render, useState } = window.canvasRuntime');
+    expect(withSaveBridge).toContain('canvas.saveFile');
+    expect(withSaveBridge).not.toContain('{{CANVAS_SAVE_BRIDGE_GUIDANCE}}');
+
+    const withoutSaveBridge = canvasActionsPromptSection({ writeBridgeEnabled: false });
+    expect(withoutSaveBridge).toContain('window.canvasRuntime');
+    expect(withoutSaveBridge).toContain('`html`, `render`, and `useState`');
+    expect(withoutSaveBridge).not.toContain('canvas.saveFile');
+    expect(withoutSaveBridge).not.toContain('{{CANVAS_SAVE_BRIDGE_GUIDANCE}}');
+  });
+
   it('stores the artifact and posts a launch button when canvas is ready', async () => {
     const canvasCtx = await makeCanvasContext();
     const send = vi.fn(async () => ({}));
