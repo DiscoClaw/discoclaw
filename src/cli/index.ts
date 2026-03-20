@@ -37,6 +37,54 @@ export type DashboardCliDeps = {
   log: Pick<typeof console, 'log' | 'error'>;
 };
 
+export type BrowserCliIssue = {
+  code: string;
+  severity: 'error' | 'warn' | 'info';
+  message: string;
+  detail?: string;
+  recommendation?: string;
+};
+
+export type BrowserCliReport = {
+  ok: boolean;
+  summary: string;
+  installMode?: string;
+  storageRule?: string;
+  executablePath?: string | null;
+  paths?: Partial<{
+    dataDir: string;
+    profileDir: string;
+    stateFile: string;
+  }>;
+  launch?: Partial<{
+    reusedExisting: boolean;
+    headless: boolean;
+    pid: number;
+    port: number;
+    cdpUrl: string;
+  }>;
+  issues?: BrowserCliIssue[];
+  nextSteps?: string[];
+};
+
+export type BrowserCliCommandOptions = {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  headless?: boolean;
+};
+
+export type BrowserCliDeps = {
+  setup: (options: BrowserCliCommandOptions) => Promise<BrowserCliReport>;
+  doctor: (options: BrowserCliCommandOptions) => Promise<BrowserCliReport>;
+  launch: (options: BrowserCliCommandOptions) => Promise<BrowserCliReport>;
+  log: Pick<typeof console, 'log' | 'error'>;
+};
+
+export type CliDeps = {
+  dashboard?: DashboardCliDeps;
+  browser?: BrowserCliDeps;
+};
+
 export async function probeTcpPortOccupancy(
   host: string,
   port: number,
@@ -96,6 +144,17 @@ async function loadDashboardCliDeps(): Promise<DashboardCliDeps> {
   };
 }
 
+async function loadBrowserCliDeps(): Promise<BrowserCliDeps> {
+  const module = await importBrowserCliModule('../browser/managed-browser.js');
+
+  return {
+    setup: selectBrowserCliHandler(module, ['setupManagedBrowser', 'runBrowserSetup', 'browserSetup']),
+    doctor: selectBrowserCliHandler(module, ['doctorManagedBrowser', 'runBrowserDoctor', 'browserDoctor']),
+    launch: selectBrowserCliHandler(module, ['launchManagedBrowser', 'runBrowserLaunch', 'browserLaunch']),
+    log: console,
+  };
+}
+
 export async function runDashboardCliCommand(options: {
   argv?: string[];
   cwd?: string;
@@ -149,7 +208,52 @@ export async function runDashboardCliCommand(options: {
   }
 }
 
-export async function runCli(argv = process.argv): Promise<number> {
+export async function runBrowserCliCommand(options: {
+  argv?: string[];
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  deps?: BrowserCliDeps;
+} = {}): Promise<number> {
+  const argv = options.argv ?? process.argv;
+  const cwd = options.cwd ?? process.cwd();
+  const env = options.env ?? process.env;
+  const deps = options.deps ?? await loadBrowserCliDeps();
+  const subcommand = argv[3];
+
+  try {
+    switch (subcommand) {
+      case 'setup': {
+        const report = await deps.setup({ cwd, env });
+        printBrowserReport(report, report.ok ? deps.log.log : deps.log.error);
+        return report.ok ? 0 : 1;
+      }
+      case 'doctor': {
+        const report = await deps.doctor({ cwd, env });
+        printBrowserReport(report, report.ok ? deps.log.log : deps.log.error);
+        return report.ok ? 0 : 1;
+      }
+      case 'launch': {
+        const report = await deps.launch({ cwd, env, headless: argv.includes('--headless') });
+        printBrowserReport(report, report.ok ? deps.log.log : deps.log.error);
+        return report.ok ? 0 : 1;
+      }
+      case undefined:
+      case '--help':
+      case '-h':
+        printBrowserHelp(deps.log.log);
+        return 0;
+      default:
+        deps.log.error(`Unknown browser subcommand: ${subcommand}\n`);
+        printBrowserHelp(deps.log.error);
+        return 1;
+    }
+  } catch (err) {
+    printBrowserCommandError(err, deps.log.error);
+    return 1;
+  }
+}
+
+export async function runCli(argv = process.argv, deps: CliDeps = {}): Promise<number> {
   const [, , command] = argv;
 
   switch (command) {
@@ -160,7 +264,9 @@ export async function runCli(argv = process.argv): Promise<number> {
       await runDaemonInstaller();
       return 0;
     case 'dashboard':
-      return await runDashboardCliCommand({ argv, cwd: process.cwd(), env: process.env });
+      return await runDashboardCliCommand({ argv, cwd: process.cwd(), env: process.env, deps: deps.dashboard });
+    case 'browser':
+      return await runBrowserCliCommand({ argv, cwd: process.cwd(), env: process.env, deps: deps.browser });
     case 'doctor': {
       const cwd = process.cwd();
       const shouldFix = argv.includes('--fix');
@@ -244,6 +350,9 @@ function printHelp(ver: string): void {
     `discoclaw v${ver} — Personal AI orchestrator\n` +
       `\nUsage: discoclaw <command>\n` +
       `\nCommands:\n` +
+      `  browser setup                         Create the managed browser profile and print one-time login guidance\n` +
+      `  browser doctor                        Inspect browser readiness, storage enforcement, and managed-instance status\n` +
+      `  browser launch [--headless]           Launch or reuse the managed browser profile after verified CDP handoff\n` +
       `  init                                  Interactive setup wizard — creates .env and workspace/\n` +
       `  dashboard                             Local web dashboard for common admin tasks (HTTP on 127.0.0.1 by default)\n` +
       `  doctor [--fix]                        Inspect config drift, deprecated env vars, conflicting/stale overrides, and missing secrets; use --fix for auto-fixes\n` +
@@ -256,6 +365,151 @@ function printHelp(ver: string): void {
       `  -v, --version   Print version\n` +
       `  -h, --help      Print this help\n`,
   );
+}
+
+function printBrowserHelp(write: (message: string) => void): void {
+  write(
+    `Usage: discoclaw browser <subcommand>\n` +
+      `\nSubcommands:\n` +
+      `  setup                 Create the managed browser profile and print one-time login guidance\n` +
+      `  doctor                Inspect browser readiness, storage enforcement, and managed-instance status\n` +
+      `  launch [--headless]   Launch or reuse the managed browser profile after verified CDP handoff\n` +
+      `\nFailure cases surfaced directly:\n` +
+      `  - rejected in-repo custom data dirs\n` +
+      `  - profile lock conflicts without a verified managed instance to reuse\n` +
+      `  - cleanup failures after post-spawn verification errors\n`,
+  );
+}
+
+function printBrowserReport(report: BrowserCliReport, write: (message: string) => void): void {
+  write(report.summary);
+
+  if (report.installMode) {
+    write(`  Install mode: ${report.installMode}`);
+  }
+  if (report.storageRule) {
+    write(`  Storage rule: ${report.storageRule}`);
+  }
+  if (report.executablePath !== undefined) {
+    write(`  Browser executable: ${report.executablePath ?? 'not found'}`);
+  }
+
+  const pathEntries = Object.entries(report.paths ?? {}) as Array<[keyof NonNullable<BrowserCliReport['paths']>, string]>;
+  for (const [key, value] of pathEntries) {
+    write(`  ${formatBrowserPathLabel(key)}: ${value}`);
+  }
+
+  if (report.launch) {
+    const launch = report.launch;
+    if (launch.reusedExisting !== undefined) {
+      write(`  Reused existing browser: ${launch.reusedExisting ? 'yes' : 'no'}`);
+    }
+    if (launch.headless !== undefined) {
+      write(`  Headless: ${launch.headless ? 'yes' : 'no'}`);
+    }
+    if (launch.pid !== undefined) {
+      write(`  PID: ${launch.pid}`);
+    }
+    if (launch.port !== undefined) {
+      write(`  CDP port: ${launch.port}`);
+    }
+    if (launch.cdpUrl) {
+      write(`  CDP endpoint: ${launch.cdpUrl}`);
+    }
+  }
+
+  if ((report.issues?.length ?? 0) > 0) {
+    write('');
+    write('Issues:');
+    for (const issue of report.issues ?? []) {
+      write(`[${issue.severity.toUpperCase()}] ${issue.code}`);
+      write(`  ${issue.message}`);
+      if (issue.detail) {
+        write(`  Detail: ${issue.detail}`);
+      }
+      if (issue.recommendation) {
+        write(`  Recommended fix: ${issue.recommendation}`);
+      }
+    }
+  }
+
+  if ((report.nextSteps?.length ?? 0) > 0) {
+    write('');
+    write('Next steps:');
+    for (const step of report.nextSteps ?? []) {
+      write(`  - ${step}`);
+    }
+  }
+}
+
+function printBrowserCommandError(err: unknown, write: (message: string) => void): void {
+  if (isBrowserCliReport((err as { report?: unknown } | null)?.report)) {
+    printBrowserReport((err as { report: BrowserCliReport }).report, write);
+    return;
+  }
+
+  if (isBrowserCliReport(err)) {
+    printBrowserReport(err, write);
+    return;
+  }
+
+  const error = err as { message?: unknown; detail?: unknown; recommendation?: unknown } | null;
+  if (typeof error?.message === 'string' && error.message.length > 0) {
+    write(error.message);
+  } else {
+    write(err instanceof Error ? err.message : String(err));
+  }
+
+  if (typeof error?.detail === 'string' && error.detail.length > 0) {
+    write(`Detail: ${error.detail}`);
+  }
+  if (typeof error?.recommendation === 'string' && error.recommendation.length > 0) {
+    write(`Recommended fix: ${error.recommendation}`);
+  }
+}
+
+function formatBrowserPathLabel(key: keyof NonNullable<BrowserCliReport['paths']>): string {
+  switch (key) {
+    case 'dataDir':
+      return 'Data dir';
+    case 'profileDir':
+      return 'Profile dir';
+    case 'stateFile':
+      return 'State file';
+  }
+
+  return key;
+}
+
+function isBrowserCliReport(value: unknown): value is BrowserCliReport {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<BrowserCliReport>;
+  return typeof candidate.ok === 'boolean' && typeof candidate.summary === 'string';
+}
+
+function selectBrowserCliHandler(
+  module: Record<string, unknown>,
+  exportNames: string[],
+): BrowserCliDeps['setup'] {
+  for (const name of exportNames) {
+    const candidate = module[name];
+    if (typeof candidate === 'function') {
+      return candidate as BrowserCliDeps['setup'];
+    }
+  }
+
+  throw new Error(
+    `Managed browser CLI integration is missing one of the expected exports: ${exportNames.join(', ')}`,
+  );
+}
+
+async function importBrowserCliModule(specifier: string): Promise<Record<string, unknown>> {
+  const dynamicImport = new Function('target', 'return import(target);') as (target: string) => Promise<unknown>;
+  const module = await dynamicImport(specifier);
+  if (!module || typeof module !== 'object') {
+    throw new Error(`Managed browser CLI module '${specifier}' did not load correctly.`);
+  }
+  return module as Record<string, unknown>;
 }
 
 function printDoctorReport(report: DoctorReport): void {
