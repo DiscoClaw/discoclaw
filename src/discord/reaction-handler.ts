@@ -1091,6 +1091,15 @@ function createReactionHandler(
                 metrics.recordActionResult(result.ok);
                 params.log?.info({ flow: 'reaction', sessionKey, ok: result.ok }, 'obs.action.result');
               }
+              // Record action history for follow-up dedup.
+              for (let i = 0; i < parsed.actions.length; i++) {
+                const a = parsed.actions[i]!;
+                actionHistory.push({
+                  type: a.type,
+                  key: actionDedupeKey(a as unknown as Record<string, unknown>),
+                  ok: results[i]?.ok ?? false,
+                });
+              }
               const anyActionSucceeded = results.some((r) => r.ok);
               processedText = appendActionResults(parsed.cleanText.trimEnd(), parsed.actions, results);
               // When all display lines were suppressed (e.g. sendMessage-only) and there's
@@ -1172,7 +1181,11 @@ function createReactionHandler(
             const followUpSuffix = failureRetryPlaceholder
               ? `One or more actions failed. If you retry, explicitly tell the user what failed and whether the retry succeeded or failed. Do not announce success before the action confirms it.`
               : `Continue your analysis based on these results. If you need additional information, you may emit further query actions.`;
+            // Include prior action history so the AI avoids re-emitting succeeded actions.
+            const historySummary = buildActionHistorySummary(actionHistory);
+            const historyBlock = historySummary ? `${historySummary}\n\n` : '';
             currentPrompt =
+              historyBlock +
               `[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\n` +
               followUpLines.join('\n') +
               `\n\n${followUpSuffix}`;
