@@ -259,9 +259,13 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
   const fetchImpl = opts.fetchImpl ?? fetch;
   const authSigner = createAuthSigner();
   const authSessionTtlMs = opts.authSessionTtlMs ?? DEFAULT_AUTH_SESSION_TTL_MS;
-  // Bundled SDK: dist/vendor/embedded-app-sdk.js sits one level up from dist/canvas/
-  const bundledSdkPath = path.resolve(MODULE_DIR, '..', 'vendor', 'embedded-app-sdk.js');
-  let bundledSdkCache: string | null | undefined;
+  // Bundled SDK: dist/vendor/embedded-app-sdk.js — resolve from project root
+  // so the path works whether MODULE_DIR is src/canvas/ or dist/canvas/.
+  const bundledSdkPath = path.resolve(MODULE_DIR, '..', '..', 'dist', 'vendor', 'embedded-app-sdk.js');
+  const bundledSdkCache = await fs.readFile(bundledSdkPath, 'utf8').catch(() => null);
+  if (bundledSdkCache == null) {
+    opts.log?.error({ path: bundledSdkPath }, 'canvas:sdk-bundle missing — run the bundle-embedded-sdk script');
+  }
 
   await opts.artifactStore.ensureReady();
   await opts.fileExport.ensureReady();
@@ -307,18 +311,19 @@ export async function startCanvasServer(opts: CanvasServerOptions): Promise<Canv
         return;
       }
 
-      if ((req.method ?? 'GET') === 'GET' && pathname === '/vendor/embedded-app-sdk.js') {
-        if (bundledSdkCache === undefined) {
-          bundledSdkCache = await fs.readFile(bundledSdkPath, 'utf8').catch(() => null);
-        }
-        if (bundledSdkCache == null) {
-          respondJson(res, 404, { error: 'Bundled SDK not found — run the bundle-embedded-sdk script' });
+      if ((req.method ?? 'GET') === 'GET' && pathname.startsWith('/vendor/embedded-app-sdk/')) {
+        if (pathname === '/vendor/embedded-app-sdk/bundle.js') {
+          if (bundledSdkCache == null) {
+            respondJson(res, 404, { error: 'Bundled SDK not found — run the bundle-embedded-sdk script' });
+            return;
+          }
+          respondText(res, 200, bundledSdkCache, {
+            'Content-Type': 'text/javascript; charset=utf-8',
+            'Cache-Control': 'public, max-age=300',
+          });
           return;
         }
-        respondText(res, 200, bundledSdkCache, {
-          'Content-Type': 'text/javascript; charset=utf-8',
-          'Cache-Control': 'public, max-age=300',
-        });
+        respondJson(res, 404, { error: 'Not found' });
         return;
       }
 

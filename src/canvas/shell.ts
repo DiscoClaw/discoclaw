@@ -171,7 +171,7 @@ export function renderCanvasShellHtml(opts: {
     </div>
     <div class="toast" id="toast" aria-live="polite"></div>
     <script type="module" nonce="${opts.nonce}">
-      import { DiscordSDK } from '/vendor/embedded-app-sdk.js';
+      import { DiscordSDK } from '/vendor/embedded-app-sdk/bundle.js';
 
       const config = ${config};
       const statusEl = document.getElementById('shellStatus');
