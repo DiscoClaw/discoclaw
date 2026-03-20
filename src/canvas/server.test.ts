@@ -242,6 +242,12 @@ describe('Canvas server', () => {
     );
     expect(artifactResponse.response.status).toBe(200);
     expect(artifactResponse.json.content).toBe(artifactContent);
+
+    const storedArtifactContent = await fs.readFile(
+      path.join(harness.artifactStore.rootPath(), `${artifact.id}.html`),
+      'utf8',
+    );
+    expect(storedArtifactContent).toBe(artifactContent);
   });
 
   it('injects the runtime into minimal full documents that omit <head>', async () => {
