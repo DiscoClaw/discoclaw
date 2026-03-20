@@ -10,6 +10,7 @@ import {
   launchManagedBrowser,
   resolveManagedBrowserPaths,
   saveManagedBrowserState,
+  verifyManagedBrowserCdp,
   type ManagedBrowserDeps,
   type ManagedBrowserState,
 } from './managed-browser.js';
@@ -177,6 +178,51 @@ describe('buildManagedBrowserLaunchArgs', () => {
   });
 });
 
+describe('verifyManagedBrowserCdp', () => {
+  it('accepts a loopback browser websocket from /json/version on the same port', async () => {
+    const deps = makeDeps({
+      httpGetJson: vi.fn(async () => ({
+        Browser: 'Chrome/136.0.0.0',
+        'Protocol-Version': '1.3',
+        webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/browser/reuse',
+      })),
+    });
+
+    const result = await verifyManagedBrowserCdp({
+      pid: 2222,
+      port: 9222,
+    }, deps);
+
+    expect(result).toMatchObject({
+      pid: 2222,
+      port: 9222,
+      cdpUrl: 'ws://127.0.0.1:9222/devtools/browser/reuse',
+    });
+    expect(deps.websocketProbe).toHaveBeenCalledWith(
+      'ws://127.0.0.1:9222/devtools/browser/reuse',
+      1_500,
+    );
+  });
+
+  it('rejects /json/version payloads that hand off to a different websocket endpoint', async () => {
+    const deps = makeDeps({
+      httpGetJson: vi.fn(async () => ({
+        Browser: 'Chrome/136.0.0.0',
+        'Protocol-Version': '1.3',
+        webSocketDebuggerUrl: 'ws://127.0.0.1:9333/devtools/browser/other-port',
+      })),
+    });
+
+    const result = await verifyManagedBrowserCdp({
+      pid: 2222,
+      port: 9222,
+    }, deps);
+
+    expect(result).toBeNull();
+    expect(deps.websocketProbe).not.toHaveBeenCalled();
+  });
+});
+
 describe('launchManagedBrowser', () => {
   it('reuses a previously verified managed instance', async () => {
     const cwd = await makeTempDir();
@@ -237,7 +283,7 @@ describe('launchManagedBrowser', () => {
       httpGetJson: vi.fn(async () => ({
         Browser: 'Chrome/136.0.0.0',
         'Protocol-Version': '1.3',
-        webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/browser/different',
+        webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/page/1',
       })),
     });
 

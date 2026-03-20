@@ -296,7 +296,7 @@ export async function verifyManagedBrowserCdp(
     return null;
   }
 
-  const version = parseJsonVersionPayload(versionPayload);
+  const version = parseJsonVersionPayload(versionPayload, state.port);
   if (!version) return null;
   if (state.cdpUrl && version.cdpUrl !== state.cdpUrl) return null;
 
@@ -742,7 +742,10 @@ async function isManagedBrowserProfileLocked(
   return false;
 }
 
-function parseJsonVersionPayload(value: unknown): {
+function parseJsonVersionPayload(
+  value: unknown,
+  expectedPort: number,
+): {
   browser?: string;
   protocolVersion?: string;
   cdpUrl: string;
@@ -753,13 +756,35 @@ function parseJsonVersionPayload(value: unknown): {
     return null;
   }
 
+  const cdpUrl = parseBrowserDebuggerUrl(candidate['webSocketDebuggerUrl']);
+  if (!cdpUrl) return null;
+  if (Number(cdpUrl.port) !== expectedPort) return null;
+
   return {
-    cdpUrl: candidate['webSocketDebuggerUrl'],
+    cdpUrl: cdpUrl.href,
     ...(typeof candidate['Browser'] === 'string' ? { browser: candidate['Browser'] } : {}),
     ...(typeof candidate['Protocol-Version'] === 'string'
       ? { protocolVersion: candidate['Protocol-Version'] }
       : {}),
   };
+}
+
+function parseBrowserDebuggerUrl(value: string): URL | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+
+  if (parsed.protocol !== 'ws:') return null;
+  if (parsed.username || parsed.password) return null;
+  if (parsed.hostname !== CDP_HOST) return null;
+  if (!parsed.port) return null;
+  if (!parsed.pathname.startsWith('/devtools/browser/')) return null;
+  if (parsed.pathname.length <= '/devtools/browser/'.length) return null;
+  if (parsed.search || parsed.hash) return null;
+  return parsed;
 }
 
 function hasBlockingIssues(issues: BrowserCliIssue[]): boolean {
