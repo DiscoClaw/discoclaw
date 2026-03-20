@@ -402,9 +402,13 @@ Runtime preview text adapter (DRAFT):
 Completion notify behavior:
 
 - Normal path: schedules an in-process deferred "still running" follow-up when runtime duration passes `DISCOCLAW_COMPLETION_NOTIFY_THRESHOLD_MS`.
-- Recovery path: lifecycle state is persisted and swept on startup so interrupted long-running operations still receive a follow-up/final status after restart.
-- Persistence-first invariant: run completion is persisted before attempting the final post/edit, and `finalPosted` is set only after a successful post/edit.
-- Duplicate handling: startup recovery suppresses repeat finals when `finalPosted` is already true; crash boundaries may duplicate a follow-up/final update, but should not omit it.
+- Persistence-first invariant: before any final Discord edit/send that could strand the run, the coordinator stages a bounded, normalized recovery payload through the watchdog and persists completion state to disk.
+- Staging failure behavior: if that recovery staging fails, the coordinator treats the run as a visible failure path and posts an explicit failure notice instead of continuing as a recoverable success path.
+- Recovery path: startup sweep replays interrupted long-running runs from persisted watchdog state and reposts meaningful summary text from the recovery payload when one was saved.
+- Generic fallback: startup recovery falls back to a generic completion notice only when no persisted recovery payload exists.
+- Duplicate handling: after a successful coordinator-side final Discord delivery, the coordinator explicitly acknowledges visibility back into the watchdog so startup sweep skips that run instead of reposting it.
+
+This guarantee adds no new environment variables; `.env.example` remains unchanged.
 
 ## Browser Launcher
 
