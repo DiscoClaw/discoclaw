@@ -1,16 +1,14 @@
 import { build } from 'esbuild';
-import { createRequire } from 'node:module';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const require = createRequire(import.meta.url);
-const sdkEntry = require.resolve('@discord/embedded-app-sdk');
-// resolve to the ESM entry (output/index.mjs) beside the CJS one
-const sdkDir = path.dirname(sdkEntry);
-const esmEntry = path.join(sdkDir, 'index.mjs');
+// Use the local ESM entry which re-exports @discord/embedded-app-sdk.
+// esbuild resolves the bare specifier via node_modules and bundles
+// everything into a single self-contained file — no chained sub-imports.
+const esmEntry = path.join(__dirname, 'index.mjs');
 
 const projectRoot = path.resolve(__dirname, '..', '..');
 const outDir = path.join(projectRoot, 'dist', 'vendor');

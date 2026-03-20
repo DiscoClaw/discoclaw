@@ -12,7 +12,8 @@ import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from
 import { fetchMessageHistory } from './message-history.js';
 import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildAllResultLines, appendActionResults } from './actions.js';
 import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } from './actions.js';
-import { shouldTriggerFollowUp } from './action-categories.js';
+import { shouldTriggerFollowUp, actionDedupeKey, isDuplicateAction, buildActionHistorySummary } from './action-categories.js';
+import type { ActionHistoryEntry } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
 import { tryAbort, isActivelyStreaming, snapshotAbort } from './abort-registry.js';
 import { buildStopSummary } from './stop-summary.js';
@@ -644,6 +645,7 @@ function createReactionHandler(
           let followUpDepth = 0;
           let currentPrompt = prompt;
           let pendingFollowUp: PendingActionFollowUp | null = null;
+          const actionHistory: ActionHistoryEntry[] = [];
           try {
 
           // -- auto-follow-up loop --
@@ -1029,6 +1031,26 @@ function createReactionHandler(
             strippedUnrecognizedTypes = parsed.strippedUnrecognizedTypes;
             parseFailuresCount = parsed.parseFailures;
             if (parsed.actions.length > 0) {
+              // Dedup: skip non-query actions that already succeeded in a prior follow-up round.
+              if (followUpDepth > 0 && actionHistory.length > 0) {
+                const before = parsed.actions.length;
+                parsed.actions = parsed.actions.filter((a) => {
+                  const key = actionDedupeKey(a as unknown as Record<string, unknown>);
+                  if (isDuplicateAction(key, a.type, actionHistory)) {
+                    params.log?.info({ sessionKey, followUpDepth, actionType: a.type, key }, `${logPrefix}:followup dedup-skipped`);
+                    return false;
+                  }
+                  return true;
+                });
+                parsedActions = parsed.actions;
+                parsedActionCount = parsed.actions.length;
+                if (parsed.actions.length < before) {
+                  params.log?.info(
+                    { sessionKey, followUpDepth, skipped: before - parsed.actions.length, remaining: parsed.actions.length },
+                    `${logPrefix}:followup dedup-filtered`,
+                  );
+                }
+              }
               const actCtx = {
                 guild: msg.guild,
                 client: msg.client,
