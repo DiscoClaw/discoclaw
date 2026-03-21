@@ -1,5 +1,8 @@
+import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { buildEnvContent, backupFileName } from './setup-lib.js';
+
+const setupSource = fs.readFileSync(new URL('./setup.ts', import.meta.url), 'utf8');
 
 describe('setup: backup file naming', () => {
   it('produces .env.backup.YYYYMMDDTHHMMSS format', () => {
@@ -26,6 +29,15 @@ describe('setup: .env content generation', () => {
     expect(content).toContain('DISCOCLAW_TASKS_MENTION_USER=12345678901234567');
     expect(content).toContain('DISCOCLAW_TASKS_FORUM=111111111111111111');
     expect(content).toContain('DISCOCLAW_CRON_FORUM=222222222222222222');
+  });
+
+  it('keeps forum placeholders blank when the wizard does not collect forum IDs', () => {
+    const content = buildEnvContent({
+      DISCORD_TOKEN: 'abc.def.ghi',
+      DISCORD_ALLOW_USER_IDS: '12345678901234567',
+    });
+    expect(content).toContain('DISCOCLAW_TASKS_FORUM=');
+    expect(content).toContain('DISCOCLAW_CRON_FORUM=');
   });
 
   it('defaults DISCOCLAW_TASKS_MENTION_USER to the first allowlisted user', () => {
@@ -187,5 +199,22 @@ describe('setup: atomic write design', () => {
     for (const line of dataLines) {
       expect(line).toMatch(/^[A-Z_]+=.*/);
     }
+  });
+});
+
+describe('setup: wizard copy contract', () => {
+  it('describes guild bootstrap instead of requiring forum IDs up front', () => {
+    expect(setupSource).toContain('and at least one allowed Discord user ID.');
+    expect(setupSource).toContain('If you set DISCORD_GUILD_ID, Discoclaw can auto-create the Tasks/Automations forums on first connect.');
+    expect(setupSource).not.toContain('and your Tasks/Cron forum channel IDs from Discord.');
+    expect(setupSource).not.toContain('Tasks forum channel ID (required): ');
+    expect(setupSource).not.toContain('Automations forum channel ID (required): ');
+  });
+
+  it('tells Claude operators to validate the unauthenticated smoke failure before logging in', () => {
+    expect(setupSource).toContain('Preflight only checks local prerequisites; Claude auth still needs a manual smoke test.');
+    expect(setupSource).toContain('Before logging in, run `claude -p -- "Reply with OK"` and confirm it fails with an auth/login error.');
+    expect(setupSource).toContain('Log in with `claude`.');
+    expect(setupSource).toContain('Repeat `claude -p -- "Reply with OK"` and confirm it returns normal text.');
   });
 });

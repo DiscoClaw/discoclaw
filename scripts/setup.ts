@@ -52,7 +52,8 @@ Discoclaw Setup
 ===============
 This wizard creates a .env file with your Discord bot configuration.
 You'll need your bot token from https://discord.com/developers/applications
-and your Tasks/Cron forum channel IDs from Discord.
+and at least one allowed Discord user ID.
+If you set DISCORD_GUILD_ID, Discoclaw can auto-create the Tasks/Automations forums on first connect.
 `);
 
 // --- Check existing .env ---
@@ -112,16 +113,6 @@ values.DISCORD_ALLOW_USER_IDS = await askValidated(
     if (!r.valid) return 'At least one valid snowflake ID is required';
     return null;
   },
-);
-
-values.DISCOCLAW_TASKS_FORUM = await askValidated(
-  'Tasks forum channel ID (required): ',
-  (val) => validateSnowflake(val) ? null : 'Must be a 17-20 digit number',
-);
-
-values.DISCOCLAW_CRON_FORUM = await askValidated(
-  'Automations forum channel ID (required): ',
-  (val) => validateSnowflake(val) ? null : 'Must be a 17-20 digit number',
 );
 
 // --- Provider selection ---
@@ -187,7 +178,7 @@ if (providerChoice === '1') {
 const configRecommended = await ask('\nConfigure recommended settings? [Y/n] ');
 if (configRecommended.toLowerCase() !== 'n') {
   const guildId = await askOptional(
-    'Discord guild (server) ID [leave empty to skip]: ',
+    'Discord guild (server) ID [recommended: enables first-connect Tasks/Automations forum bootstrap; leave empty to skip]: ',
     (val) => {
       if (!val) return null;
       return validateSnowflake(val) ? null : 'Must be a 17-20 digit number';
@@ -245,8 +236,13 @@ if (values.PRIMARY_RUNTIME === 'claude') {
   } catch {
     console.log('\nPreflight reported issues above. Fix them and run pnpm preflight again.\n');
   }
+  console.log('Preflight only checks local prerequisites; Claude auth still needs a manual smoke test.\n');
   console.log('\nNext steps:');
-  console.log('  pnpm build && pnpm dev\n');
+  console.log('  1. Before logging in, run `claude -p -- "Reply with OK"` and confirm it fails with an auth/login error.');
+  console.log('  2. Log in with `claude`.');
+  console.log('  3. Repeat `claude -p -- "Reply with OK"` and confirm it returns normal text.');
+  console.log('  4. Review docs/audit/claude-blank-machine-readiness.md if you need the full manual validation path.');
+  console.log('  5. pnpm build && pnpm dev\n');
 } else {
   console.log('\nNext steps:');
   if (values.PRIMARY_RUNTIME === 'gemini') {
