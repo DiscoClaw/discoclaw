@@ -248,7 +248,7 @@ describe('init wizard copy contract', () => {
   it('uses the revised Claude manual validation guidance', () => {
     expect(initWizardSource).toContain('Note: The bot will auto-create its forum channels on first connect.');
     expect(initWizardSource).toContain(
-      'Claude login is handled by the `claude` CLI itself; `discoclaw init` does not auto-check login state.',
+      'Claude login is handled by the `claude` CLI itself; `discoclaw init` does not auto-check login state or ship the repo source-checkout helpers.',
     );
     expect(initWizardSource).toContain(
       'Before logging in, run `claude -p -- "Reply with OK"` and confirm it fails with an auth/login error.',
@@ -258,7 +258,10 @@ describe('init wizard copy contract', () => {
       'Repeat `claude -p -- "Reply with OK"` and confirm it returns normal text.',
     );
     expect(initWizardSource).toContain(
-      'Review docs/audit/claude-blank-machine-readiness.md if you need the full manual validation path.',
+      'For global installs, that raw Claude prompt is the current equivalent of the repo `pnpm claude:auth-smoke` check.',
+    );
+    expect(initWizardSource).toContain(
+      'Review docs/audit/claude-blank-machine-readiness.md if you need the source-checkout audit details.',
     );
   });
 });

@@ -454,12 +454,13 @@ export async function runInitWizard(): Promise<void> {
   console.log('  Note: The bot will auto-create its forum channels on first connect.');
   console.log('  Tip: To add API keys or secrets later, DM the bot: !secret set KEY=value');
   if (values.PRIMARY_RUNTIME === 'claude') {
-    console.log('  Claude login is handled by the `claude` CLI itself; `discoclaw init` does not auto-check login state.');
+    console.log('  Claude login is handled by the `claude` CLI itself; `discoclaw init` does not auto-check login state or ship the repo source-checkout helpers.');
     console.log('  1. Before logging in, run `claude -p -- "Reply with OK"` and confirm it fails with an auth/login error.');
     console.log('  2. Log in with `claude`.');
     console.log('  3. Repeat `claude -p -- "Reply with OK"` and confirm it returns normal text.');
-    console.log('  4. Review docs/audit/claude-blank-machine-readiness.md if you need the full manual validation path.');
-    console.log(`  5. ${daemonHint}`);
+    console.log('  4. For global installs, that raw Claude prompt is the current equivalent of the repo `pnpm claude:auth-smoke` check.');
+    console.log('  5. Review docs/audit/claude-blank-machine-readiness.md if you need the source-checkout audit details.');
+    console.log(`  6. ${daemonHint}`);
   } else if (values.PRIMARY_RUNTIME === 'gemini') {
     console.log('  1. Authenticate: run `gemini` and follow the prompts.');
     console.log(`  2. ${daemonHint}`);
