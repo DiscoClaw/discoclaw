@@ -17,7 +17,7 @@ describe('setup: backup file naming', () => {
 });
 
 describe('setup: .env content generation', () => {
-  it('includes required values', () => {
+  it('includes required values and explicit forum overrides', () => {
     const content = buildEnvContent({
       DISCORD_TOKEN: 'abc.def.ghi',
       DISCORD_ALLOW_USER_IDS: '12345678901234567',
@@ -27,17 +27,19 @@ describe('setup: .env content generation', () => {
     expect(content).toContain('DISCORD_TOKEN=abc.def.ghi');
     expect(content).toContain('DISCORD_ALLOW_USER_IDS=12345678901234567');
     expect(content).toContain('DISCOCLAW_TASKS_MENTION_USER=12345678901234567');
+    expect(content).toContain('# AUTO-DETECTED');
     expect(content).toContain('DISCOCLAW_TASKS_FORUM=111111111111111111');
     expect(content).toContain('DISCOCLAW_CRON_FORUM=222222222222222222');
   });
 
-  it('keeps forum placeholders blank when the wizard does not collect forum IDs', () => {
+  it('omits forum placeholders when the wizard relies on bootstrap detection', () => {
     const content = buildEnvContent({
       DISCORD_TOKEN: 'abc.def.ghi',
       DISCORD_ALLOW_USER_IDS: '12345678901234567',
     });
-    expect(content).toContain('DISCOCLAW_TASKS_FORUM=');
-    expect(content).toContain('DISCOCLAW_CRON_FORUM=');
+    expect(content).not.toContain('DISCOCLAW_TASKS_FORUM=');
+    expect(content).not.toContain('DISCOCLAW_CRON_FORUM=');
+    expect(content).not.toContain('# AUTO-DETECTED');
   });
 
   it('defaults DISCOCLAW_TASKS_MENTION_USER to the first allowlisted user', () => {
