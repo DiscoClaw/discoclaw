@@ -39,8 +39,8 @@ import { VOICE_ACTION_TYPES } from './actions-voice.js';
 // ---------------------------------------------------------------------------
 
 export type CronActionRequest =
-  | { type: 'cronCreate'; name: string; schedule: string; timezone?: string; channel: string; prompt: string; tags?: string; model?: string; routingMode?: 'json'; allowedActions?: string; chain?: string }
-  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: string; tags?: string; silent?: boolean; routingMode?: 'json'; allowedActions?: string; state?: string; chain?: string }
+  | { type: 'cronCreate'; name: string; schedule: string; timezone?: string; channel: string; prompt: string; tags?: string; model?: string; inputMode?: 'prompt' | 'shell'; inputShell?: string; routingMode?: 'json'; allowedActions?: string; chain?: string }
+  | { type: 'cronUpdate'; cronId: string; schedule?: string; timezone?: string; channel?: string; prompt?: string; model?: string; tags?: string; silent?: boolean; inputMode?: 'prompt' | 'shell'; inputShell?: string; routingMode?: 'json'; allowedActions?: string; state?: string; chain?: string }
   | { type: 'cronList'; status?: string }
   | { type: 'cronShow'; cronId: string }
   | { type: 'cronPause'; cronId: string }
@@ -114,11 +114,66 @@ export type CronContext = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function buildStarterContent(schedule: string, timezone: string, channel: string, prompt: string): string {
+function normalizeCronInputMode(inputMode?: 'prompt' | 'shell', inputShell?: string): 'prompt' | 'shell' {
+  return inputMode === 'shell' || Boolean(inputShell?.trim()) ? 'shell' : 'prompt';
+}
+
+function describeCronInputMode(inputMode?: 'prompt' | 'shell', inputShell?: string): string {
+  return normalizeCronInputMode(inputMode, inputShell) === 'shell' ? 'shell-input' : 'prompt-only';
+}
+
+function validateCronInputConfig(
+  inputMode: 'prompt' | 'shell' | undefined,
+  inputShellRaw: string | undefined,
+): { inputShell?: string } | { error: string } {
+  const inputShell = inputShellRaw?.trim() ? inputShellRaw.trim() : undefined;
+  const inputShellSupplied = inputShellRaw !== undefined;
+
+  if (inputMode !== undefined && inputMode !== 'prompt' && inputMode !== 'shell') {
+    return { error: `Invalid inputMode "${inputMode}": must be "prompt" or "shell"` };
+  }
+  if (inputMode === 'shell' && !inputShell) {
+    return { error: 'inputShell is required when inputMode is "shell"' };
+  }
+  if (inputShellSupplied && inputMode !== 'shell') {
+    return { error: 'inputShell can only be provided when inputMode is "shell"' };
+  }
+
+  return { inputShell };
+}
+
+function truncateProjectionText(text: string, limit: number, continuation: string): string {
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}${continuation}`;
+}
+
+function buildStarterContent(
+  schedule: string,
+  timezone: string,
+  channel: string,
+  prompt: string,
+  inputMode?: 'prompt' | 'shell',
+  inputShell?: string,
+): string {
   const truncatedPrompt = prompt.length > 200
     ? `${prompt.slice(0, 200)}… *(full prompt pinned below)*`
     : prompt;
-  return `**Schedule:** \`${schedule}\` (${timezone})\n**Channel:** #${channel}\n\n${truncatedPrompt}`;
+  const lines = [
+    `**Schedule:** \`${schedule}\` (${timezone})`,
+    `**Channel:** #${channel}`,
+    `**Input:** ${describeCronInputMode(inputMode, inputShell)}`,
+  ];
+
+  if (normalizeCronInputMode(inputMode, inputShell) === 'shell' && inputShell?.trim()) {
+    lines.push(
+      '```bash',
+      truncateProjectionText(inputShell.trim(), 300, '\n# ... shell truncated'),
+      '```',
+    );
+  }
+
+  lines.push('', truncatedPrompt);
+  return lines.join('\n');
 }
 
 function validateCronDefinition(def: { schedule: string; timezone: string }): string | null {
@@ -225,6 +280,15 @@ export async function executeCronAction(
       }
       const cadence = detectCadence(def.schedule);
 
+      const inputConfig = validateCronInputConfig(action.inputMode, action.inputShell);
+      if ('error' in inputConfig) {
+        return { ok: false, error: inputConfig.error };
+      }
+      const createInputUpdates = {
+        ...(action.inputMode !== undefined ? { inputMode: action.inputMode } : {}),
+        ...(action.inputMode === 'shell' ? { inputShell: inputConfig.inputShell } : {}),
+      };
+
       // Validate allowedActions if provided.
       let parsedAllowedActions: string[] | undefined;
       if (action.allowedActions !== undefined) {
@@ -308,6 +372,7 @@ export async function executeCronAction(
         prompt: action.prompt,
         authorId: ctx.requesterId,
         projectionStatus: 'pending-resync' as const,
+        ...createInputUpdates,
         ...(action.routingMode ? { routingMode: action.routingMode } : {}),
         ...(parsedAllowedActions !== undefined && { allowedActions: parsedAllowedActions }),
         ...(parsedChain !== undefined && { chain: parsedChain }),
@@ -328,7 +393,14 @@ export async function executeCronAction(
         const uniqueTagIds = [...new Set(appliedTagIds)].slice(0, 5);
 
         const threadName = buildCronThreadName(action.name, cadence);
-        const starterContent = buildStarterContent(action.schedule, timezone, action.channel, action.prompt);
+        const starterContent = buildStarterContent(
+          action.schedule,
+          timezone,
+          action.channel,
+          action.prompt,
+          action.inputMode,
+          inputConfig.inputShell,
+        );
 
         const thread = await forum.threads.create({
           name: threadName,
@@ -394,6 +466,13 @@ export async function executeCronAction(
         return { ok: false, error: `Cron "${action.cronId}" not found` };
       }
 
+      const inputConfig = validateCronInputConfig(action.inputMode, action.inputShell);
+      if ('error' in inputConfig) {
+        return { ok: false, error: inputConfig.error };
+      }
+      const currentInputMode = normalizeCronInputMode(record.inputMode, record.inputShell);
+      const currentInputShell = record.inputShell?.trim() ? record.inputShell.trim() : undefined;
+
       // Scheduler job may be absent if projection is missing; updates proceed against canonical local record.
       const job = cronCtx.scheduler.getJob(record.threadId);
 
@@ -405,6 +484,12 @@ export async function executeCronAction(
       if (action.silent !== undefined) {
         updates.silent = action.silent;
         changes.push(`silent → ${action.silent}`);
+      }
+
+      if (action.inputMode !== undefined) {
+        updates.inputMode = action.inputMode;
+        updates.inputShell = action.inputMode === 'shell' ? inputConfig.inputShell : undefined;
+        changes.push(`input → ${describeCronInputMode(action.inputMode, inputConfig.inputShell)}`);
       }
 
       // Model override.
@@ -486,9 +571,16 @@ export async function executeCronAction(
       const newTimezone = action.timezone ?? record.timezone ?? job?.def.timezone ?? getDefaultTimezone();
       const newChannel = action.channel ?? record.channel ?? job?.def.channel ?? '';
       const newPrompt = action.prompt ?? record.prompt ?? job?.def.prompt ?? '';
+      const newInputMode = action.inputMode ?? currentInputMode;
+      const newInputShell = action.inputMode === 'shell'
+        ? inputConfig.inputShell
+        : action.inputMode === 'prompt'
+          ? undefined
+          : currentInputShell;
       const newDef = { triggerType: record.triggerType ?? job?.def.triggerType ?? ('schedule' as const), schedule: newSchedule, timezone: newTimezone, channel: newChannel, prompt: newPrompt };
 
       const defChanged = action.schedule !== undefined || action.timezone !== undefined || action.channel !== undefined || action.prompt !== undefined;
+      const projectionContentChanged = defChanged || action.inputMode !== undefined;
 
       if (defChanged) {
         const validationError = validateCronDefinition(newDef);
@@ -537,18 +629,24 @@ export async function executeCronAction(
       let discordSyncOk = true;
 
       // Try to edit the thread's starter message (works for bot-created threads).
-      if (defChanged) {
+      if (projectionContentChanged) {
         const thread = cronCtx.client.channels.cache.get(record.threadId);
         if (thread && thread.isThread()) {
           try {
             const starter = await thread.fetchStarterMessage();
+            const starterContent = buildStarterContent(
+              newSchedule,
+              newTimezone,
+              newChannel,
+              newPrompt,
+              newInputMode,
+              newInputShell,
+            );
             if (starter && starter.author.id === cronCtx.client.user?.id) {
-              const newContent = buildStarterContent(newSchedule, newTimezone, newChannel, newPrompt);
-              await starter.edit({ content: newContent.slice(0, 2000), allowedMentions: { parse: [] } });
+              await starter.edit({ content: starterContent.slice(0, 2000), allowedMentions: { parse: [] } });
             } else {
               // Can't edit user's message — post update note.
-              const promptPreview = newPrompt.length > 200 ? `${newPrompt.slice(0, 200)}... (truncated)` : newPrompt;
-              const note = `**Cron Updated**\n**Schedule:** \`${newSchedule}\` (${newTimezone})\n**Channel:** #${newChannel}\n**Prompt:** ${promptPreview}\n\nPlease update the starter message to reflect these changes.`;
+              const note = `**Cron Updated**\n${starterContent}\n\nPlease update the starter message to reflect these changes.`;
               await thread.send({ content: note, allowedMentions: { parse: [] } });
             }
           } catch (err) {
@@ -705,6 +803,10 @@ export async function executeCronAction(
       }
       lines.push(`Model: ${record.modelOverride ?? record.model ?? 'N/A'}${record.modelOverride ? ' (override)' : ''}`);
       if (record.silent) lines.push(`Silent: yes`);
+      lines.push(`Input: ${describeCronInputMode(record.inputMode, record.inputShell)}`);
+      if (normalizeCronInputMode(record.inputMode, record.inputShell) === 'shell' && record.inputShell?.trim()) {
+        lines.push(`Input shell: \`${record.inputShell.trim()}\``);
+      }
       if (record.routingMode) lines.push(`Routing: ${record.routingMode}`);
       lines.push(`Cadence: ${record.cadence ?? 'N/A'}`);
       lines.push(`Runs: ${record.runCount} | Last: ${record.lastRunStatus ?? 'never'}`);
@@ -957,6 +1059,8 @@ export async function executeCronAction(
         prompt: rec.prompt ?? null,
         disabled: rec.disabled,
         model: rec.modelOverride ?? rec.model ?? null,
+        inputMode: normalizeCronInputMode(rec.inputMode, rec.inputShell),
+        inputShell: rec.inputShell ?? null,
         cadence: rec.cadence ?? null,
         purposeTags: rec.purposeTags,
         triggerType: rec.triggerType ?? 'schedule',
@@ -1019,6 +1123,8 @@ the user to set them up manually or that you cannot do this.
 - \`timezone\` (optional, default: system timezone, or DEFAULT_TIMEZONE env if set): IANA timezone.
 - \`tags\` (optional): Comma-separated purpose tags.
 - \`model\` (optional): "fast", "capable", or "deep" (auto-classified if omitted).
+- \`inputMode\` (optional): \`"prompt"\` or \`"shell"\`. Omit for the normal prompt-only flow. Set to \`"shell"\` to run a deterministic pre-command before the AI step.
+- \`inputShell\` (optional): Shell command string for \`inputMode: "shell"\`. Required when \`inputMode\` is \`"shell"\`; rejected otherwise.
 - \`routingMode\` (optional): Set to \`"json"\` to enable JSON routing mode. In this mode the executor uses the JSON router to dispatch structured responses. The prompt may contain \`{{channel}}\` and \`{{channelId}}\` placeholders which are expanded to the target channel name and ID at runtime.
 - \`allowedActions\` (optional): Comma-separated list of Discord action types this job may emit (e.g., "cronList,cronShow"). Restricts the AI to only these action types during execution. Rejects unrecognized type names. Requires at least one entry if provided.
 - \`chain\` (optional): Comma-separated cronIds of downstream jobs to trigger on successful completion (e.g., "cron-a1b2c3d4,cron-e5f6g7h8"). Creates a multi-step pipeline — the completed job's persisted state is forwarded to downstream jobs. Referenced cronIds must exist. Cycles are rejected.
@@ -1030,6 +1136,8 @@ the user to set them up manually or that you cannot do this.
 - \`cronId\` (required): The stable cron ID.
 - \`schedule\`, \`timezone\`, \`channel\`, \`prompt\`, \`model\`, \`tags\` (optional).
 - \`silent\` (optional): Boolean. When true, suppresses short "nothing to report" responses.
+- \`inputMode\` (optional): Set to \`"shell"\` with \`inputShell\` to enable deterministic shell-input runs, or set to \`"prompt"\` to clear shell-input and return to prompt-only mode.
+- \`inputShell\` (optional): Required together with \`inputMode: "shell"\`. Rejected in prompt-only mode.
 - \`routingMode\` (optional): Set to \`"json"\` to enable JSON routing mode, or omit/pass empty string to clear.
 - \`allowedActions\` (optional): Update the allowed action types list. Empty string clears the restriction.
 - \`chain\` (optional): Update downstream pipeline jobs (comma-separated cronIds). Empty string clears the chain. Cycles are detected and rejected.

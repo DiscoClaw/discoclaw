@@ -28,6 +28,8 @@ export type CronRunRecord = {
   webhookSourceId?: string;   // URL path segment for /webhook/:source routing
   webhookSecret?: string;     // HMAC-SHA256 secret for signature verification
   silent?: boolean;           // suppress output when AI has nothing actionable to report
+  inputMode?: 'prompt' | 'shell';  // runtime input source; defaults to 'prompt' for legacy records
+  inputShell?: string;        // deterministic pre-runtime shell command used to construct input
   routingMode?: 'default' | 'json';  // how AI output is routed to Discord channels
   allowedActions?: string[];  // restrict which Discord action types the AI may emit during this job
   state?: Record<string, unknown>;  // persistent key-value state that survives across executions
@@ -45,12 +47,12 @@ export type CronRunRecord = {
 };
 
 export type CronRunStatsStore = {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
   updatedAt: number;
   jobs: Record<string, CronRunRecord>;
 };
 
-export const CURRENT_VERSION = 11 as const;
+export const CURRENT_VERSION = 12 as const;
 
 // ---------------------------------------------------------------------------
 // Stable Cron ID generation
@@ -77,6 +79,8 @@ export function computeDefinitionHash(record: CronRunRecord): string {
     prompt: record.prompt ?? null,
     triggerType: record.triggerType ?? 'schedule',
     disabled: record.disabled,
+    inputMode: record.inputMode ?? 'prompt',
+    inputShell: record.inputShell ?? null,
   });
   return crypto.createHash('sha256').update(payload).digest('hex').slice(0, 16);
 }
@@ -132,6 +136,7 @@ function emptyRecord(cronId: string, threadId: string): CronRunRecord {
     purposeTags: [],
     disabled: false,
     model: null,
+    inputMode: 'prompt',
   };
 }
 
@@ -221,6 +226,9 @@ export class CronRunStats {
           }
           if ('chain' in updates && updates.chain === undefined) {
             delete existing.chain;
+          }
+          if ('inputShell' in updates && updates.inputShell === undefined) {
+            delete existing.inputShell;
           }
         }
         existing.threadId = threadId;
@@ -461,6 +469,13 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
   // Migrate v10 → v11: no-op — new projection metadata fields (projectionStatus, projectionSyncedAt, projectionHash) are optional.
   if (store.version === 10) {
     store.version = 11;
+  }
+  // Migrate v11 → v12: backfill explicit prompt-mode input settings on existing records.
+  if (store.version === 11) {
+    for (const rec of Object.values(store.jobs)) {
+      if (!rec.inputMode) rec.inputMode = 'prompt';
+    }
+    store.version = 12;
   }
   return new CronRunStats(store, filePath);
 }

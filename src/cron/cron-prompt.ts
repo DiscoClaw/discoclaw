@@ -8,6 +8,12 @@
 
 export type CronRoutingMode = 'json';
 
+export type CronShellResult = {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+};
+
 export type CronPromptInput = {
   jobName: string;
   /** Raw prompt text — may contain {{channel}} and {{channelId}} placeholders. */
@@ -27,7 +33,16 @@ export type CronPromptInput = {
   availableChannels?: Array<{ name: string; id: string }>;
   /** Persistent key-value state from the previous run. */
   state?: Record<string, unknown>;
+  /** Runtime input source; defaults to legacy prompt-only mode. */
+  inputMode?: 'prompt' | 'shell';
+  /** Deterministic pre-runtime shell command used to construct input. */
+  inputShell?: string;
+  /** Captured output from the deterministic pre-runtime shell stage. */
+  shellResult?: CronShellResult;
 };
+
+const STATE_CHAR_LIMIT = 4000;
+const SHELL_STREAM_CHAR_LIMIT = 2000;
 
 // ---------------------------------------------------------------------------
 // Placeholder expansion
@@ -74,14 +89,23 @@ export function buildCronPromptBody(input: CronPromptInput): string {
     routingMode,
     availableChannels,
     state,
+    inputMode,
+    inputShell,
+    shellResult,
   } = input;
 
   const expandedPrompt = expandCronPlaceholders(promptTemplate, channel, channelId, state);
+  const isShellInputRun = inputMode === 'shell' || Boolean(inputShell) || Boolean(shellResult);
 
   const segments: string[] = [
     `You are executing a scheduled cron job named "${jobName}".`,
     `Instruction: ${expandedPrompt}`,
   ];
+
+  if (isShellInputRun) {
+    segments.push(buildShellResultSection(inputShell, shellResult));
+    segments.push(buildShellOutputContract(routingMode, silent));
+  }
 
   if (routingMode === 'json') {
     segments.push(buildJsonRoutingSection(channel, channelId || undefined, availableChannels));
@@ -105,7 +129,6 @@ export function buildCronPromptBody(input: CronPromptInput): string {
 
   // Inject persistent state section when state is present and non-empty.
   if (state && Object.keys(state).length > 0) {
-    const STATE_CHAR_LIMIT = 4000;
     let serialized = JSON.stringify(state, null, 2);
     if (serialized.length > STATE_CHAR_LIMIT) {
       serialized = serialized.slice(0, STATE_CHAR_LIMIT) + '\n... (state truncated)';
@@ -153,4 +176,69 @@ function buildJsonRoutingSection(
     '',
     'Return [] if there is nothing to post. Do NOT wrap the JSON in code fences.',
   ].join('\n');
+}
+
+function buildShellResultSection(inputShell: string | undefined, shellResult: CronShellResult | undefined): string {
+  const command = inputShell?.trim() ? inputShell : '(not provided)';
+  const exitCode = shellResult?.exitCode ?? 0;
+
+  return [
+    '## Pre-Run Shell Result',
+    '',
+    'A deterministic shell command already ran before this AI step. Base your decision only on the captured result below.',
+    '```bash',
+    command,
+    '```',
+    `Exit status: ${exitCode}`,
+    '',
+    'stdout:',
+    '```text',
+    formatShellStream(shellResult?.stdout ?? '', 'stdout'),
+    '```',
+    '',
+    'stderr:',
+    '```text',
+    formatShellStream(shellResult?.stderr ?? '', 'stderr'),
+    '```',
+  ].join('\n');
+}
+
+function buildShellOutputContract(routingMode: CronRoutingMode | undefined, silent: boolean | undefined): string {
+  const postInstruction =
+    routingMode === 'json'
+      ? 'Return a non-empty JSON array in the routing format described below. You may optionally prefix it with `<cron-output>{"mode":"post"}</cron-output>`.'
+      : 'Return only the final Discord message content to post to the target channel. You may optionally prefix it with `<cron-output>{"mode":"post"}</cron-output>`.';
+  const noPostInstruction = 'Prefer exactly `<cron-output>{"mode":"no-post"}</cron-output>` and nothing else.';
+  const structuredPayloadInstruction =
+    routingMode === 'json'
+      ? 'If you emit the `post` block, place the non-empty JSON routing array after it. If you emit the `no-post` block, do not return a routing payload.'
+      : 'If you emit the `post` block, place the final Discord message content after it.';
+  const fallbackInstruction =
+    routingMode === 'json'
+      ? 'Legacy fallback: if you cannot follow the contract cleanly, `[]` remains the accepted no-post sentinel.'
+      : silent
+        ? 'Legacy fallback: if you cannot emit an empty no-post response, respond with exactly `HEARTBEAT_OK` and nothing else.'
+        : null;
+
+  return [
+    '## Cron Output Contract',
+    '',
+    'Choose exactly one outcome after reviewing the shell result:',
+    `- \`post\`: ${postInstruction}`,
+    `- \`no-post\`: ${noPostInstruction}`,
+    '',
+    'Structured control blocks accepted by the executor:',
+    '`<cron-output>{"mode":"post"}</cron-output>`',
+    '`<cron-output>{"mode":"no-post"}</cron-output>`',
+    structuredPayloadInstruction,
+    fallbackInstruction,
+  ]
+    .filter((line): line is string => Boolean(line))
+    .join('\n');
+}
+
+function formatShellStream(text: string, label: 'stdout' | 'stderr'): string {
+  if (!text) return '(empty)';
+  if (text.length <= SHELL_STREAM_CHAR_LIMIT) return text;
+  return `${text.slice(0, SHELL_STREAM_CHAR_LIMIT)}\n... (${label} truncated)`;
 }

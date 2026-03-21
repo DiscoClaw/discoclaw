@@ -96,7 +96,7 @@ All actions are gated by category env flags (off by default except channels).
 | Moderation | kick, ban, timeout, warn | `actions-moderation.ts` | **done** |
 | Polls | create, manage | `actions-poll.ts` | **done** |
 | Tasks (task tracking) | create, update, close, show, list, sync | `task-action-contract.ts`, `task-action-executor.ts`, `task-action-mutations.ts`, `task-action-thread-sync.ts`, `task-action-mutation-helpers.ts`, `task-action-read-ops.ts`, `task-action-runner-types.ts`, `task-action-prompt.ts` | **done** |
-| Crons (scheduled tasks) | create, update, list, show, pause, resume, delete, trigger, sync, tagMapReload | `actions-crons.ts` | **done** |
+| Crons (scheduled tasks; prompt-only vs shell-input config, routing, structured no-post signaling) | create, update, list, show, pause, resume, delete, trigger, sync, tagMapReload | `actions-crons.ts` | **done** |
 | Bot profile | setStatus, setActivity, setNickname | `actions-bot-profile.ts` | **done** |
 | Forge (autonomous plan drafting) | create, resume, status, cancel | `actions-forge.ts` | **done** |
 | Plan management (autonomous) | list, show, approve, close, create, run (full-loop execution; shares phase runner with targeted resume + convergence guard paths) | `actions-plan.ts` | **done** |
@@ -146,7 +146,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Component | File(s) | Status |
 |-----------|---------|--------|
 | Scheduler (croner) | `src/cron/scheduler.ts` | **done** |
-| Executor (invoke runtime, post results) | `src/cron/executor.ts` | **done** |
+| Executor (optional shell-input pre-command, runtime invoke, structured no-post/sentinel suppression, post results) | `src/cron/executor.ts` | **done** |
 | Forum sync (thread → cron def) | `src/cron/forum-sync.ts` | **done** |
 | Parser (schedule + timezone + channel) | `src/cron/parser.ts` | **done** |
 

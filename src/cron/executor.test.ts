@@ -1263,6 +1263,218 @@ describe('executeCronJob silent mode', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Shell input execution
+// ---------------------------------------------------------------------------
+
+describe('executeCronJob shell input mode', () => {
+  let statsDir: string;
+
+  beforeEach(async () => {
+    statsDir = await fs.mkdtemp(path.join(os.tmpdir(), 'executor-shell-input-'));
+  });
+
+  afterEach(async () => {
+    await fs.rm(statsDir, { recursive: true, force: true });
+  });
+
+  function makeCapturingRuntime(response: string) {
+    const invokeSpy = vi.fn();
+    return {
+      runtime: {
+        id: 'claude_code',
+        capabilities: new Set(['streaming_text']),
+        async *invoke(params: any): AsyncIterable<EngineEvent> {
+          invokeSpy(params);
+          yield { type: 'text_final', text: response };
+          yield { type: 'done' };
+        },
+      } as RuntimeAdapter,
+      invokeSpy,
+    };
+  }
+
+  it('skips runtime.invoke when a silent shell-input pre-command succeeds with empty stdout and stderr', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', {
+      silent: true,
+      inputMode: 'shell',
+      inputShell: 'true',
+    });
+
+    const { runtime, invokeSpy } = makeCapturingRuntime('should not run');
+    const ctx = makeCtx({ statsStore, runtime });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).not.toHaveBeenCalled();
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).not.toHaveBeenCalled();
+    expect(statsStore.getRecord('cron-test0001')?.lastRunStatus).toBe('success');
+  });
+
+  it('still invokes the AI when a non-silent shell-input pre-command succeeds with empty stdout and stderr', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', {
+      silent: false,
+      inputMode: 'shell',
+      inputShell: 'true',
+    });
+
+    const { runtime, invokeSpy } = makeCapturingRuntime('All clear.');
+    const ctx = makeCtx({ statsStore, runtime });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalledOnce();
+    expect(channel.send.mock.calls[0][0].content).toContain('All clear.');
+  });
+
+  it('still invokes the AI when a successful shell-input pre-command writes only to stderr', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', {
+      inputMode: 'shell',
+      inputShell: 'printf "warn\\n" >&2',
+    });
+
+    const { runtime, invokeSpy } = makeCapturingRuntime('Handled warning.');
+    const ctx = makeCtx({ statsStore, runtime });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const prompt = invokeSpy.mock.calls[0][0].prompt;
+    expect(prompt).toContain('## Pre-Run Shell Result');
+    expect(prompt).toContain('warn');
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalledOnce();
+    expect(channel.send.mock.calls[0][0].content).toContain('Handled warning.');
+  });
+
+  it('records shell pre-command failures as errors and bypasses AI-side no-post suppression', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', {
+      silent: true,
+      inputMode: 'shell',
+      inputShell: 'printf "boom\\n" >&2; exit 23',
+    });
+
+    const status = {
+      online: vi.fn(),
+      offline: vi.fn(),
+      runtimeError: vi.fn(),
+      handlerError: vi.fn(),
+      actionFailed: vi.fn(),
+      taskSyncComplete: vi.fn(),
+    };
+    const { runtime, invokeSpy } = makeCapturingRuntime('HEARTBEAT_OK');
+    const ctx = makeCtx({ statsStore, runtime, status });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).not.toHaveBeenCalled();
+    expect(status.runtimeError).toHaveBeenCalledOnce();
+    expect(statsStore.getRecord('cron-test0001')?.lastRunStatus).toBe('error');
+    expect(statsStore.getRecord('cron-test0001')?.lastErrorMessage).toContain('code 23');
+
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalled();
+  });
+
+  it('suppresses posting when the AI returns a single valid structured no-post block', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', {
+      silent: true,
+      inputMode: 'shell',
+      inputShell: 'printf "ready\\n"',
+    });
+
+    const { runtime, invokeSpy } = makeCapturingRuntime(
+      'There is nothing actionable.\n<cron-output>{"mode":"no-post"}</cron-output>',
+    );
+    const ctx = makeCtx({ statsStore, runtime });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    expect(statsStore.getRecord('cron-test0001')?.lastRunStatus).toBe('success');
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).not.toHaveBeenCalled();
+  });
+
+  it('ignores malformed structured cron-output blocks and falls back to sentinel suppression', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', {
+      silent: true,
+      inputMode: 'shell',
+      inputShell: 'printf "ready\\n"',
+    });
+
+    const { runtime, invokeSpy } = makeCapturingRuntime(
+      'HEARTBEAT_OK\n<cron-output>not json</cron-output>',
+    );
+    const ctx = makeCtx({ statsStore, runtime });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).not.toHaveBeenCalled();
+    expect(ctx.log?.info).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: job.id, sentinel: 'HEARTBEAT_OK' }),
+      'cron:exec sentinel output suppressed',
+    );
+  });
+
+  it('ignores duplicate structured cron-output blocks and falls back to silent short-response suppression', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', {
+      silent: true,
+      inputMode: 'shell',
+      inputShell: 'printf "ready\\n"',
+    });
+
+    const { runtime, invokeSpy } = makeCapturingRuntime(
+      'Nothing to report.\n<cron-output>{"mode":"no-post"}</cron-output>\n<cron-output>{"mode":"post"}</cron-output>',
+    );
+    const ctx = makeCtx({ statsStore, runtime });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).not.toHaveBeenCalled();
+    expect(ctx.log?.info).toHaveBeenCalledWith(
+      expect.objectContaining({ jobId: job.id, name: job.name }),
+      'cron:exec silent short-response suppressed',
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // allowedActions filtering
 // ---------------------------------------------------------------------------
 

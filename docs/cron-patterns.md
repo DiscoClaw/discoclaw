@@ -152,7 +152,9 @@ Create the job:
   "timezone": "America/New_York",
   "channel": "general",
   "routingMode": "json",
-  "prompt": "Run ~/scripts/check-inbox.sh to get recent items as JSON.\n\nCheck the Persistent State section for `seen_ids`. Filter out any items whose `id` is already in that list. Only process new items.\n\nFor each new item, write a brief summary and route it to the appropriate channel:\n- Finance, billing, invoices → #finance\n- Infrastructure, ops, alerts → #ops\n- Project updates, PRs, CI → #dev\n- Everything else → #general\n\nReturn a JSON array: [{\"channel\": \"#finance\", \"content\": \"summary here\"}, ...]\n\nAfter routing, emit a <cron-state> block with the updated seen_ids (all existing IDs plus newly processed ones, capped at 200 most recent):\n<cron-state>{\"seen_ids\": [\"id1\", \"id2\", ...]}</cron-state>\n\nIf there are no new items, return [] and do not update state."
+  "inputMode": "shell",
+  "inputShell": "~/scripts/check-inbox.sh",
+  "prompt": "Review the captured shell result. stdout contains a JSON array of recent items with stable `id` values.\n\nCheck the Persistent State section for `seen_ids`. Filter out any items whose `id` is already in that list. Only process new items.\n\nFor each new item, write a brief summary and route it to the appropriate channel:\n- Finance, billing, invoices → #finance\n- Infrastructure, ops, alerts → #ops\n- Project updates, PRs, CI → #dev\n- Everything else → #general\n\nReturn a JSON array: [{\"channel\": \"#finance\", \"content\": \"summary here\"}, ...]\n\nAfter routing, emit a <cron-state> block with the updated seen_ids (all existing IDs plus newly processed ones, capped at 200 most recent):\n<cron-state>{\"seen_ids\": [\"id1\", \"id2\", ...]}</cron-state>\n\nIf there are no new items after filtering, return [] and do not update state."
 }
 ```
 
@@ -166,13 +168,14 @@ Enable silent mode so empty runs don't post:
 }
 ```
 
-On each run the AI:
+On each run the executor and AI:
 
-1. Executes the script and gets raw items
-2. Reads `{{state}}` to find previously seen IDs
-3. Filters to only new items
-4. Returns a JSON array with per-channel routing
-5. Emits `<cron-state>` with updated `seen_ids`
+1. Runs `~/scripts/check-inbox.sh` as the deterministic shell-input stage
+2. Captures its stdout/stderr and injects that result into the prompt
+3. Reads `{{state}}` to find previously seen IDs
+4. Filters to only new items
+5. Returns a JSON array with per-channel routing
+6. Emits `<cron-state>` with updated `seen_ids`
 
 When there's nothing new, the AI returns `[]` — the JSON router's empty-array sentinel — and silent mode suppresses the post.
 
@@ -418,7 +421,9 @@ An hourly job accumulates error counts. When 24 runs have passed (or a day bound
   "timezone": "America/Los_Angeles",
   "channel": "ops-alerts",
   "model": "fast",
-  "prompt": "Run ~/scripts/count-errors.sh to get the current error count as a number.\n\nPrevious state: {{state}}\n\nAccumulate the count into state.totals (an array of {hour, count} entries). Increment state.runCount.\n\nIf state.runCount reaches 24:\n- Post a daily summary: total errors, peak hour, trend vs yesterday (if state.yesterdayTotal exists).\n- Move the current total to state.yesterdayTotal.\n- Reset state.totals to [] and state.runCount to 0.\n\nIf state.runCount < 24, respond with HEARTBEAT_OK.\n\nAlways emit a <cron-state> block with the full updated state."
+  "inputMode": "shell",
+  "inputShell": "~/scripts/count-errors.sh",
+  "prompt": "Review the captured shell result. stdout contains the current error count as a number.\n\nPrevious state: {{state}}\n\nAccumulate the count into state.totals (an array of {hour, count} entries). Increment state.runCount.\n\nIf state.runCount reaches 24:\n- Post a daily summary: total errors, peak hour, trend vs yesterday (if state.yesterdayTotal exists).\n- Move the current total to state.yesterdayTotal.\n- Reset state.totals to [] and state.runCount to 0.\n\nIf state.runCount < 24, respond with HEARTBEAT_OK.\n\nAlways emit a <cron-state> block with the full updated state."
 }
 ```
 
@@ -512,11 +517,11 @@ For non-feed pages, track content hashes:
 
 ---
 
-## Pattern: Script Execution + Structured Output
+## Pattern: Shell-Input Monitoring
 
-**Use case:** Run a local script or command, parse its output, and act on the results. Covers system monitoring (disk space, process health, log scanning), data collection, and any workflow driven by shell commands.
+**Use case:** Run a local script or command in the executor's deterministic shell-input stage, then let the AI analyze the captured stdout/stderr. Covers system monitoring (disk space, process health, log scanning), data collection, and any workflow driven by shell commands.
 
-### Example: Disk Space Monitor
+### Example: Empty Shell Output Skips The AI
 
 ```json
 {
@@ -526,7 +531,9 @@ For non-feed pages, track content hashes:
   "timezone": "UTC",
   "channel": "ops-alerts",
   "model": "fast",
-  "prompt": "Run `df -h --output=target,pcent,avail /home /tmp /var` and parse the output.\n\nIf any filesystem is above 85% usage, post an alert with the mount point, usage percentage, and available space.\n\nIf all filesystems are healthy, respond with HEARTBEAT_OK."
+  "inputMode": "shell",
+  "inputShell": "~/scripts/disk-thresholds.sh",
+  "prompt": "Review the captured shell result. stdout contains one line per unhealthy filesystem in the format `<mount> <percent> <avail>`.\n\nIf stdout has any lines, post an alert listing each affected mount point with its usage percentage and available space.\n\nIf the shell result contains nothing actionable, choose `no-post`."
 }
 ```
 
@@ -538,9 +545,31 @@ For non-feed pages, track content hashes:
 }
 ```
 
-### Example: Log Scanner with Structured JSON
+Design `~/scripts/disk-thresholds.sh` to exit `0` and print nothing when all filesystems are healthy. In that exact case, because `silent` is enabled and both streams are empty, the executor marks the run successful and skips the AI call entirely.
 
-For scripts that produce JSON output:
+### Example: stderr Still Keeps The Run On The AI Path
+
+For scripts that sometimes emit warnings on `stderr` but still exit `0`:
+
+```json
+{
+  "action": "cronCreate",
+  "name": "backup-audit",
+  "schedule": "*/30 * * * *",
+  "timezone": "UTC",
+  "channel": "ops-alerts",
+  "model": "fast",
+  "inputMode": "shell",
+  "inputShell": "~/scripts/check-backups.sh",
+  "prompt": "Review the captured shell result.\n\n- stdout contains JSON describing the latest backup jobs\n- stderr contains collector warnings that should be surfaced if present\n\nIf any backup failed, is missing, or stderr contains a warning worth operator attention, post an alert summarizing the issue.\n\nIf everything is healthy and the warning is ignorable noise, choose `no-post`."
+}
+```
+
+Even if `stdout` is empty, any non-empty `stderr` keeps the run on the AI path. The narrow executor-side skip applies only to `silent` shell-input runs where exit status is `0` and both streams are empty.
+
+### Example: AI-Side `no-post` After Analyzing Non-Empty Shell Output
+
+For scripts that always produce data, but only sometimes justify a Discord post:
 
 ```json
 {
@@ -550,15 +579,27 @@ For scripts that produce JSON output:
   "timezone": "UTC",
   "channel": "ops-alerts",
   "model": "fast",
-  "prompt": "Run ~/scripts/scan-errors.sh which outputs a JSON array of {timestamp, level, message} objects representing recent log errors.\n\nPrevious state: {{state}}\n\nFilter out any entries with timestamps earlier than state.lastTimestamp.\n\nIf there are new errors:\n- Group by level (ERROR, WARN, FATAL)\n- Post a summary: count per level, plus the full text of any FATAL entries\n- Update state.lastTimestamp to the newest entry's timestamp\n\nIf no new errors, respond with HEARTBEAT_OK.\n\nAlways emit a <cron-state> block."
+  "inputMode": "shell",
+  "inputShell": "~/scripts/scan-errors.sh",
+  "prompt": "Review the captured shell result. stdout contains a JSON array of {timestamp, level, message} objects representing recent log errors.\n\nPrevious state: {{state}}\n\nFilter out any entries with timestamps earlier than state.lastTimestamp.\n\nIf there are new errors:\n- Group by level (ERROR, WARN, FATAL)\n- Post a summary: count per level, plus the full text of any FATAL entries\n- Update state.lastTimestamp to the newest entry's timestamp\n\nIf there are no new actionable errors after filtering, emit `<cron-output>{\"mode\":\"no-post\"}</cron-output>` and do not post prose.\n\nAlways emit a <cron-state> block when state changes."
 }
+```
+
+Example AI response when the script produced data but nothing new crossed the threshold:
+
+```text
+<cron-output>{"mode":"no-post"}</cron-output>
 ```
 
 ### Gotchas
 
-- **The script must be executable.** The AI runs commands via a shell — ensure scripts have `chmod +x` and the correct shebang line.
+- **Use shell-input fields, not prompt prose, to run scripts.** Put command execution in `inputMode: "shell"` plus `inputShell`, then write the prompt as analysis instructions over the captured shell result.
+- **The empty-output fast skip is narrow.** It only happens when `silent: true`, the shell command exits `0`, and both `stdout` and `stderr` are empty.
+- **Any stderr output keeps the AI path alive.** `stderr` is captured input, not automatic failure, as long as the shell command exits `0`.
+- **Shell failures are executor failures.** Spawn errors, timeouts, signals, and non-zero exits stop before the AI step and are reported as cron errors.
+- **AI-side `no-post` still matters.** Non-empty shell output can still result in no Discord post when the AI returns a valid structured `no-post` control block or the legacy sentinels.
+- **The script must be executable.** The executor runs commands via `bash -lc` — ensure scripts have `chmod +x` and the correct shebang line.
 - **Use absolute paths.** The working directory during cron execution may not be what you expect. Always use full paths to scripts and files.
-- **Capture exit codes in your prompt.** If the script might fail, instruct the AI to check for errors and report them instead of silently ignoring bad output.
 - **Keep script output concise.** The AI's context window is finite. Scripts that dump thousands of lines will get truncated. Design scripts to output summaries or filtered results.
 - **Shell commands run with the bot's user permissions.** No sudo, no access to other users' files. Plan accordingly.
 
@@ -581,7 +622,9 @@ A daily job that checks for stale PRs and creates tasks:
   "channel": "dev",
   "model": "capable",
   "allowedActions": ["taskCreate", "sendMessage"],
-  "prompt": "Run `gh pr list --repo owner/repo --json number,title,updatedAt,author --search 'is:open sort:updated-asc'` to get open PRs.\n\nFor each PR not updated in the last 3 days, emit:\n1. One `taskCreate` action with title 'Review stale PR #N: <title>' and tag 'pr-review'\n2. One `sendMessage` action to the #dev channel mentioning the PR number, author, and days since last update\n\nIf all PRs are recently active, respond with HEARTBEAT_OK."
+  "inputMode": "shell",
+  "inputShell": "gh pr list --repo owner/repo --json number,title,updatedAt,author --search 'is:open sort:updated-asc'",
+  "prompt": "Review the captured shell result. stdout contains a JSON array of open PRs.\n\nFor each PR not updated in the last 3 days, emit:\n1. One `taskCreate` action with title 'Review stale PR #N: <title>' and tag 'pr-review'\n2. One `sendMessage` action to the #dev channel mentioning the PR number, author, and days since last update\n\nIf all PRs are recently active, respond with HEARTBEAT_OK."
 }
 ```
 
@@ -664,7 +707,9 @@ Seed with initial themes so the first run has context:
   "channel": "metrics",
   "model": "capable",
   "allowedActions": ["generateImage"],
-  "prompt": "Run ~/scripts/weekly-metrics.sh to get this week's key metrics as JSON.\n\nGenerate an image that visualizes the metrics as a clean, readable chart or infographic. Use the generateImage action with a prompt that describes the chart layout and data points.\n\nPost it with a caption summarizing the week's highlights."
+  "inputMode": "shell",
+  "inputShell": "~/scripts/weekly-metrics.sh",
+  "prompt": "Review the captured shell result. stdout contains this week's key metrics as JSON.\n\nGenerate an image that visualizes the metrics as a clean, readable chart or infographic. Use the generateImage action with a prompt that describes the chart layout and data points.\n\nPost it with a caption summarizing the week's highlights."
 }
 ```
 
