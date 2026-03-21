@@ -16,11 +16,16 @@
  *   CODEX_SMOKE_TEST_TIERS=fast pnpm test
  *     Run Codex smoke tests (requires codex binary on PATH).
  *
+ *   OPENROUTER_SMOKE_TEST_TIERS=capable pnpm test
+ *     Run the separate OpenRouter smoke suite in openrouter-smoke.test.ts.
+ *
  *   SMOKE_TEST_TIERS=fast SMOKE_TEST_TIMEOUT_MS=120000 pnpm test
  *     Override per-prompt timeout.
  *
  * Catches: bad API keys, wrong tier mappings, malformed system prompts,
- * missing binaries — all surfaces as error events or empty text.
+ * missing binaries — all surfaces as error events or empty text. OpenRouter
+ * workload proof lives in its own suite because that path is the shipped
+ * source-checkout evidence surface.
  */
 
 import { describe, expect, it, beforeAll } from 'vitest';
@@ -34,7 +39,7 @@ import {
   buildOpenAISmokeRuntime,
   buildCodexSmokeRuntime,
 } from './model-smoke-helpers.js';
-import { resolveModel } from './model-tiers.js';
+import { initTierOverrides, resolveModel } from './model-tiers.js';
 
 /** Working directory passed to every invocation. */
 const CWD = '/tmp';
@@ -50,55 +55,57 @@ const TIMEOUT: number = (() => {
   return n;
 })();
 
+initTierOverrides(process.env);
+
+function parseSmokeTierEnv(envVarName: string): string[] {
+  const raw = process.env[envVarName]?.trim();
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
 /**
  * Comma-separated tier names or literal model IDs from SMOKE_TEST_TIERS.
  * Empty = all smoke tests skipped.
  */
-const SMOKE_TIERS: string[] = process.env.SMOKE_TEST_TIERS?.trim()
-  ? process.env.SMOKE_TEST_TIERS.trim()
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-  : [];
+const SMOKE_TIERS: string[] = parseSmokeTierEnv('SMOKE_TEST_TIERS');
 
 /**
  * Comma-separated tier names or literal model IDs from GEMINI_SMOKE_TEST_TIERS.
  * Empty = all Gemini smoke tests skipped.
  */
-const GEMINI_SMOKE_TIERS: string[] = process.env.GEMINI_SMOKE_TEST_TIERS?.trim()
-  ? process.env.GEMINI_SMOKE_TEST_TIERS.trim()
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-  : [];
+const GEMINI_SMOKE_TIERS: string[] = parseSmokeTierEnv('GEMINI_SMOKE_TEST_TIERS');
 
 /**
  * Comma-separated tier names or literal model IDs from OPENAI_SMOKE_TEST_TIERS.
  * Empty = all OpenAI smoke tests skipped.
  */
-const OPENAI_SMOKE_TIERS: string[] = process.env.OPENAI_SMOKE_TEST_TIERS?.trim()
-  ? process.env.OPENAI_SMOKE_TEST_TIERS.trim()
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-  : [];
+const OPENAI_SMOKE_TIERS: string[] = parseSmokeTierEnv('OPENAI_SMOKE_TEST_TIERS');
 
 /**
  * Comma-separated tier names or literal model IDs from CODEX_SMOKE_TEST_TIERS.
  * Empty = all Codex smoke tests skipped.
  */
-const CODEX_SMOKE_TIERS: string[] = process.env.CODEX_SMOKE_TEST_TIERS?.trim()
-  ? process.env.CODEX_SMOKE_TEST_TIERS.trim()
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
-  : [];
+const CODEX_SMOKE_TIERS: string[] = parseSmokeTierEnv('CODEX_SMOKE_TEST_TIERS');
 
 // Only build when opt-in is requested; avoids config-error noise in normal CI runs.
 const smokeState = SMOKE_TIERS.length > 0 ? buildSmokeRuntime() : null;
 const geminiSmokeState = GEMINI_SMOKE_TIERS.length > 0 ? buildGeminiSmokeRuntime() : null;
 const openaiSmokeState = OPENAI_SMOKE_TIERS.length > 0 ? buildOpenAISmokeRuntime() : null;
 const codexSmokeState = CODEX_SMOKE_TIERS.length > 0 ? buildCodexSmokeRuntime() : null;
+
+if (
+  SMOKE_TIERS.length === 0
+  && GEMINI_SMOKE_TIERS.length === 0
+  && OPENAI_SMOKE_TIERS.length === 0
+  && CODEX_SMOKE_TIERS.length === 0
+) {
+  describe('model smoke opt-in', () => {
+    it.skip('set a provider-specific *_SMOKE_TEST_TIERS env var to enable live smoke cases', () => {});
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Claude Code — one describe block per requested tier
