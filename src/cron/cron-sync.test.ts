@@ -142,7 +142,11 @@ function makeForum(
 }
 
 function makeClient(forum: ReturnType<typeof makeForum>, extraChannels: Array<{ id: string }> = []) {
-  const channelMap = new Map<string, any>([[forum.id, forum], ...extraChannels.map((channel) => [channel.id, channel])]);
+  const channelEntries: Array<[string, any]> = [
+    [forum.id, forum],
+    ...extraChannels.map((channel): [string, any] => [channel.id, channel]),
+  ];
+  const channelMap = new Map<string, any>(channelEntries);
   return {
     channels: {
       cache: { get: (id: string) => channelMap.get(id) },
