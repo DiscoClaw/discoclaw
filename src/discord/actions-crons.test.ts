@@ -463,6 +463,98 @@ describe('executeCronAction', () => {
     );
   });
 
+  it('cronCreate with shell-input persists it and projects shell-input starter text', async () => {
+    const cronCtx = makeCronCtx();
+    const forum = (cronCtx.client.channels.cache.get as ReturnType<typeof vi.fn>)('forum-1');
+    const result = await executeCronAction(
+      {
+        type: 'cronCreate',
+        name: 'Shell Cron',
+        schedule: '0 7 * * *',
+        channel: 'general',
+        prompt: 'Check status',
+        inputMode: 'shell',
+        inputShell: 'printf "ready\\n"',
+      },
+      makeActionCtx(),
+      cronCtx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ inputMode: 'shell', inputShell: 'printf "ready\\n"' }),
+    );
+    expect(forum.threads.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          content: expect.stringContaining('**Input:** shell-input'),
+        }),
+      }),
+    );
+    expect(forum.threads.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          content: expect.stringContaining('printf "ready\\n"'),
+        }),
+      }),
+    );
+  });
+
+  it('cronCreate without shell-input keeps prompt-only projection text and does not explicitly persist input fields', async () => {
+    const cronCtx = makeCronCtx();
+    const forum = (cronCtx.client.channels.cache.get as ReturnType<typeof vi.fn>)('forum-1');
+
+    await executeCronAction(
+      { type: 'cronCreate', name: 'Prompt Cron', schedule: '0 7 * * *', channel: 'general', prompt: 'Do something' },
+      makeActionCtx(),
+      cronCtx,
+    );
+
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.not.objectContaining({ inputMode: expect.anything() }),
+    );
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.not.objectContaining({ inputShell: expect.anything() }),
+    );
+    expect(forum.threads.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: expect.objectContaining({
+          content: expect.stringContaining('**Input:** prompt-only'),
+        }),
+      }),
+    );
+  });
+
+  it('cronCreate rejects shell-input mode without a shell command', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronCreate', name: 'Bad Shell Cron', schedule: '0 7 * * *', channel: 'general', prompt: 'Do something', inputMode: 'shell' },
+      makeActionCtx(),
+      cronCtx,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('inputShell is required');
+  });
+
+  it('cronCreate rejects inputShell without shell-input mode', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronCreate', name: 'Bad Shell Cron', schedule: '0 7 * * *', channel: 'general', prompt: 'Do something', inputShell: 'printf ready' },
+      makeActionCtx(),
+      cronCtx,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('inputShell can only be provided');
+  });
+
   it('cronTrigger returns ok for known job', async () => {
     // Mock the dynamic import of executeCronJob.
     vi.mock('../cron/executor.js', () => ({
@@ -707,6 +799,28 @@ describe('executeCronAction', () => {
     if (result.ok) expect(result.summary).toContain('No cron jobs to export');
   });
 
+  it('cronExport includes input mode and shell command fields', async () => {
+    const cronCtx = makeCronCtx({
+      statsStore: makeStatsStore([makeRecord({ inputMode: 'shell', inputShell: 'printf "ready\\n"' })]),
+    });
+    const result = await executeCronAction({ type: 'cronExport' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('"inputMode": "shell"');
+      expect(result.summary).toContain('"inputShell": "printf \\"ready\\\\n\\""');
+    }
+  });
+
+  it('cronExport reports prompt-only mode for legacy prompt-only records', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronExport' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('"inputMode": "prompt"');
+      expect(result.summary).toContain('"inputShell": null');
+    }
+  });
+
   it('cronCreate with routingMode "json" persists it', async () => {
     const cronCtx = makeCronCtx();
     const result = await executeCronAction(
@@ -827,6 +941,121 @@ describe('executeCronAction', () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       expect(result.summary).not.toContain('Routing:');
+    }
+  });
+
+  it('cronUpdate with shell-input persists it and updates starter projection text', async () => {
+    const cronCtx = makeCronCtx();
+    const starterEdit = vi.fn(async () => {});
+    const mockThread = {
+      id: 'thread-1',
+      isThread: () => true,
+      send: vi.fn(async () => ({ id: 'prompt-msg-2', pin: vi.fn(async () => {}), edit: vi.fn(async () => {}) })),
+      fetchStarterMessage: vi.fn(async () => ({ author: { id: 'bot-user' }, edit: starterEdit })),
+      setArchived: vi.fn(),
+      messages: { fetch: vi.fn(async () => ({ edit: vi.fn(async () => {}) })) },
+    };
+    (cronCtx.client.channels.cache.get as ReturnType<typeof vi.fn>).mockImplementation((id: string) =>
+      id === 'thread-1' ? mockThread : undefined,
+    );
+
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', inputMode: 'shell', inputShell: 'printf "status\\n"' },
+      makeActionCtx(),
+      cronCtx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      'cron-test0001',
+      'thread-1',
+      expect.objectContaining({ inputMode: 'shell', inputShell: 'printf "status\\n"' }),
+    );
+    expect(starterEdit).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('**Input:** shell-input') }),
+    );
+    expect(starterEdit).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('printf "status\\n"') }),
+    );
+  });
+
+  it('cronUpdate with prompt mode clears shell-input settings and restores prompt-only projection text', async () => {
+    const cronCtx = makeCronCtx({
+      statsStore: makeStatsStore([makeRecord({ inputMode: 'shell', inputShell: 'printf status' })]),
+    });
+    const starterEdit = vi.fn(async () => {});
+    const mockThread = {
+      id: 'thread-1',
+      isThread: () => true,
+      send: vi.fn(async () => ({ id: 'prompt-msg-2', pin: vi.fn(async () => {}), edit: vi.fn(async () => {}) })),
+      fetchStarterMessage: vi.fn(async () => ({ author: { id: 'bot-user' }, edit: starterEdit })),
+      setArchived: vi.fn(),
+      messages: { fetch: vi.fn(async () => ({ edit: vi.fn(async () => {}) })) },
+    };
+    (cronCtx.client.channels.cache.get as ReturnType<typeof vi.fn>).mockImplementation((id: string) =>
+      id === 'thread-1' ? mockThread : undefined,
+    );
+
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', inputMode: 'prompt' },
+      makeActionCtx(),
+      cronCtx,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(cronCtx.statsStore.upsertRecord).toHaveBeenCalledWith(
+      'cron-test0001',
+      'thread-1',
+      expect.objectContaining({ inputMode: 'prompt', inputShell: undefined }),
+    );
+    expect(starterEdit).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.stringContaining('**Input:** prompt-only') }),
+    );
+  });
+
+  it('cronUpdate rejects shell-input mode without a shell command', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', inputMode: 'shell' },
+      makeActionCtx(),
+      cronCtx,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('inputShell is required');
+  });
+
+  it('cronUpdate rejects inputShell without shell-input mode', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction(
+      { type: 'cronUpdate', cronId: 'cron-test0001', inputShell: 'printf ready' },
+      makeActionCtx(),
+      cronCtx,
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('inputShell can only be provided');
+  });
+
+  it('cronShow includes input mode and shell command when configured', async () => {
+    const cronCtx = makeCronCtx({
+      statsStore: makeStatsStore([makeRecord({ inputMode: 'shell', inputShell: 'printf "ready\\n"' })]),
+    });
+    const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('Input: shell-input');
+      expect(result.summary).toContain('Input shell: `printf "ready\\n"`');
+    }
+  });
+
+  it('cronShow reports prompt-only mode when shell-input is not configured', async () => {
+    const cronCtx = makeCronCtx();
+    const result = await executeCronAction({ type: 'cronShow', cronId: 'cron-test0001' }, makeActionCtx(), cronCtx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.summary).toContain('Input: prompt-only');
+      expect(result.summary).not.toContain('Input shell:');
     }
   });
 
