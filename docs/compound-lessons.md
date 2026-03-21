@@ -74,6 +74,13 @@ Format notes:
 
 ## Lessons
 
+### 2026-03-21 - Finalizers must reject claimed Discord work with zero executed actions
+Tags: #discord #workflow #runtime
+Lesson: Treat the manual Discord message finalization boundary as an enforcement layer, not just a formatting pass. If prose claims DiscoClaw is starting or performing Discord-managed work but parsing/execution yields zero actionable or executed `<discord-action>` blocks, convert that into a visible warning or failure instead of posting an ambiguous no-op. Keep this runtime guard separate from prompt-time capability guidance and from follow-up lifecycle ownership so malformed, stripped, or empty action outputs cannot silently masquerade as work in progress.
+Source: task/chat context - manual Discord reply finalization could leave prose that claimed Discord-managed action execution even when no actionable blocks survived parse/execute; dedup search on 2026-03-21 against the existing capability-refusal lesson and the auto-follow-up lifecycle lesson judged this runtime-boundary enforcement pattern materially distinct, so it was promoted as a new lesson
+Applied: `docs/discord-actions.md`, `docs/compound-lessons.md`
+Status: active
+
 ### 2026-03-20 - Automated readiness surfaces must not claim manual auth success
 Tags: #audit #workflow #setup
 Lesson: Setup, preflight, doctor, and install-mode-specific smoke surfaces must only claim prerequisites they can directly verify. When end-to-end readiness still depends on a separate auth step or on daemon/runtime-path parity, keep that boundary explicit in operator docs and point to the audit or smoke path that owns that gate instead of implying full readiness from binary presence or interactive-shell success alone. For npm-managed daemon installs, a shell-level Claude auth smoke does not prove that a service unit using different executable or `PATH` resolution can reach the same Claude binary.
