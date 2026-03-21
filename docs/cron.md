@@ -2,14 +2,14 @@
 
 > **Quick-reference context module:** [`.context/automations.md`](../.context/automations.md) — a compact cheat sheet for AI sessions (lifecycle, primitives, safety rails, config). Load it instead of this full doc when you only need the essentials.
 
-The cron system lets you define recurring tasks as forum threads in plain language. DiscoClaw parses the schedule, registers a timer, and executes the prompt on each tick — posting results to a target Discord channel.
+The cron system lets you define recurring tasks as forum threads in plain language. DiscoClaw parses the schedule, registers a timer, and executes the job on each tick — either by sending the prompt directly to the AI or by first running a deterministic shell command and giving the captured result to the AI — then posting results to a target Discord channel.
 
 ## How It Works
 
 1. **You ask the bot** (in chat or via a `cronCreate` action) to create a cron job. Example: "every weekday at 7am, check the weather and post to #general".
 2. **The bot parses the definition** — an AI call extracts the cron schedule, timezone, target channel, and prompt from your natural-language description.
 3. **A forum thread is created** in the cron forum channel. The thread title is the job name, and the starter message contains the parsed definition (schedule, timezone, channel, prompt) plus a stable `cronId`.
-4. **A croner timer is registered** in-process. On each tick, the executor assembles a prompt, invokes the AI runtime, and posts the output to the target channel.
+4. **A croner timer is registered** in-process. On each tick, the executor runs the job in either prompt-only mode or shell-input mode, invokes the AI only when needed, and posts the output to the target channel.
 5. **The thread stays synced** — archiving the thread pauses the job; unarchiving resumes it. Editing the starter message updates the definition on the next sync.
 
 ### Forum Thread ↔ Job Lifecycle
@@ -26,6 +26,68 @@ Manually creating a forum thread in the cron channel is rejected — the bot pos
 ## Patterns & Recipes
 
 For composition patterns, worked examples, and copy-pasteable action blocks — including stateful polling, silent monitoring, multi-channel routing, chained pipelines, and more — see [docs/cron-patterns.md](cron-patterns.md).
+
+## Execution Modes
+
+Cron jobs support two explicit input modes:
+
+### Prompt-Only Mode
+
+This is the default and legacy behavior. The executor builds the cron prompt from the saved prompt text, placeholders, state, and routing/silent flags, then invokes the AI directly.
+
+Use this when the job's input is primarily natural-language instructions, web fetches, or AI-side tool use.
+
+### Shell-Input Mode
+
+Set `inputMode: "shell"` and provide `inputShell` to opt into a deterministic pre-runtime shell stage owned by the executor.
+
+On each run, the executor:
+
+1. runs `inputShell` with `bash -lc`
+2. captures the exit status plus stripped `stdout` and `stderr`
+3. injects that captured result into the cron prompt under a `## Pre-Run Shell Result` section
+4. adds a structured `post` / `no-post` output contract for the AI
+
+Use this when a local script or shell command is the authoritative input source and you want the AI to analyze a bounded captured result instead of deciding how to collect it.
+
+## Silent Suppression Contract
+
+`silent: true` now has a two-stage contract:
+
+1. **Pre-runtime shell skip**: only in shell-input mode, the executor skips the AI call entirely when the pre-command succeeds with exit status `0` and both `stdout` and `stderr` are empty.
+2. **AI-side no-op suppression**: if the AI still runs, the existing suppression path remains in force for the final output.
+
+The pre-runtime skip rule is intentionally narrow. A successful shell-input pre-command that writes anything to either stream, including only `stderr`, stays on the AI path. Prompt-only jobs never use stage 1; they only use the existing AI-side suppression path.
+
+## Shell-Input Failure And Output Contracts
+
+### Pre-Command Failure Contract
+
+The shell stage is executor-owned, not AI-owned. If the pre-command fails to spawn, times out, exits from a signal, or exits non-zero, the executor records the run as an error, reports the failure through the normal cron error path, and does **not** invoke the AI. AI-side no-op suppression does not apply to these failures.
+
+### Structured `post` / `no-post` Contract
+
+When shell-input mode reaches the AI step, the prompt tells the model to choose exactly one outcome:
+
+- `post` — return the final content to send
+- `no-post` — suppress delivery for this run
+
+The AI may signal that choice with a single `<cron-output>` block:
+
+```text
+<cron-output>{"mode":"post"}</cron-output>
+<cron-output>{"mode":"no-post"}</cron-output>
+```
+
+Behavior:
+
+- A single valid `{"mode":"no-post"}` block suppresses posting and marks the run successful.
+- `{"mode":"post"}` leaves the remaining text or JSON-routing payload on the normal delivery path.
+- In `routingMode: "json"`, the `post` payload must still be a non-empty routing array and `no-post` maps to `[]`.
+
+### Fail-Safe Fallback Rule
+
+`<cron-output>` is a control hint, not a new hard guarantee. If the block is missing, malformed, duplicated, or otherwise invalid, the executor ignores it and falls back to the legacy suppression rules that already exist for the run: empty output, the normal sentinels (`HEARTBEAT_OK` or `[]`), and silent-mode short-response suppression where applicable.
 
 ## Writing Effective Cron Prompts
 
@@ -103,7 +165,10 @@ Restricts which Discord action types the AI may emit during this job. When set t
 
 ### `silent`
 
-When `true`, the AI is instructed to respond with a sentinel value (`HEARTBEAT_OK` in default mode, `[]` in JSON routing mode) if there's nothing actionable to report. The executor detects these sentinels and skips posting to Discord, keeping channels clean.
+When `true`, cron uses the two-stage suppression contract described above:
+
+- In shell-input mode, the executor first checks the narrow pre-command skip rule: exit `0` plus empty `stdout` and empty `stderr` skips the AI entirely.
+- If the AI runs, it is still instructed to use the legacy no-op signals (`HEARTBEAT_OK` in default mode, `[]` in JSON routing mode), and shell-input prompts also include the structured `post` / `no-post` contract.
 
 ### Trigger Types
 

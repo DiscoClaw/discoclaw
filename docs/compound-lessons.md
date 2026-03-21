@@ -109,11 +109,11 @@ Source: task-thread lifecycle fix `ws-925` plus task thread `ws-1220` - both exp
 Applied: docs/compound-lessons.md
 Status: active
 
-### 2026-03-10 - Prompt changes can orphan cron state
+### 2026-03-10 - Prompt and input-stage changes can orphan cron state
 Tags: #workflow #cron #state
-Lesson: When a cron prompt is updated, existing persisted state may become obsolete (for example, dedup IDs for a strategy the prompt no longer uses). The system warns but does not auto-clear, because some prompt changes are compatible with existing state. Operators must explicitly clear stale state via `cronUpdate` with `state: "{}"` in the same action that changes the prompt.
-Source: task thread ws-1211 - email cron carried stale seen_ids state after prompt moved dedup to shell script
-Applied: docs/compound-lessons.md
+Lesson: When a cron job's reasoning boundary changes, existing persisted state may become obsolete even if the schedule stays the same. Treat prompt rewrites, `inputMode` flips, `inputShell` changes, and moves between prompt-only and shell-input collection as state-schema changes; the system warns but does not auto-clear, so operators must clear or reseed stale state via `cronUpdate` in the same change that moves the logic.
+Source: task thread ws-1211 - email cron carried stale seen_ids state after prompt moved dedup to shell script; dedup search on 2026-03-20 found this as the closest existing cron-state lesson and updated it instead of adding a near-duplicate shell-input lesson
+Applied: docs/cron.md, docs/cron-patterns.md, docs/compound-lessons.md
 Status: active
 
 ### 2026-03-15 - Local cron persistence is canonical; Discord threads are a projection
