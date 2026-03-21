@@ -1,5 +1,8 @@
 import { configDefaults, defineConfig } from 'vitest/config';
 
+const isCi = process.env['CI'] === 'true' || process.env['GITHUB_ACTIONS'] === 'true';
+const maxForks = isCi ? 2 : 4;
+
 export default defineConfig({
   test: {
     setupFiles: ['./src/test-setup.ts'],
@@ -15,15 +18,14 @@ export default defineConfig({
     ],
     clearMocks: true,
     unstubEnvs: true,
-    // Cap parallelism to prevent OOM when tests run under discoclaw.service.
-    // 11 uncapped workers hit ~44GB RAM. 4 workers keeps peak usage reasonable.
+    // Cap parallelism to prevent OOM. Local/dev runs tolerate 4 forks, but
+    // GitHub runners are tighter and have shown exit-137 kills unless we drop lower.
     pool: 'forks',
     poolOptions: {
       forks: {
         minForks: 1,
-        maxForks: 4,
+        maxForks,
       },
     },
   },
 });
-
