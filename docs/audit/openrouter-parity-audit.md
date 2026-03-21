@@ -10,7 +10,7 @@ Verdict: `PARTIAL`.
 Reason:
 
 - DiscoClaw ships a real OpenRouter runtime registration path through the shared OpenAI-compatible adapter and a live credential probe that reports `openrouter-key: ok` only after a successful `GET /models` request.
-- Source checkouts can prove more than npm-managed installs because the repo contains the workload smoke harness in `src/runtime/model-smoke.test.ts`, while the published npm package does not ship that harness in `package.json.files`.
+- Source checkouts can prove more than npm-managed installs because the repo contains the dedicated OpenRouter workload smoke harness in `src/runtime/openrouter-smoke.test.ts`, while the published npm package does not ship that harness in `package.json.files`.
 - The doctor/init surfaces now align with that narrower boundary: they stop at config/bootstrap or post-start env-key visibility and do not claim broader OpenRouter workload, tool, or install-mode parity.
 - Built-in OpenRouter tier defaults and model recommendations are still intentionally deferred. The runtime can route to explicit OpenRouter models today, but this slice does not audit or recommend a default `fast` / `capable` / `deep` map.
 
@@ -18,7 +18,7 @@ Reason:
 
 | Install mode | Config/bootstrap proof | Live credential proof | Workload proof | Current support-safe claim |
 | --- | --- | --- | --- | --- |
-| Source checkout | `pnpm preflight` / `pnpm preflight:blank-machine` can prove local setup prerequisites only. They do not start DiscoClaw or hit OpenRouter. | `!status` or the startup credential report showing `openrouter-key: ok` proves the running process can see the configured env-key path and complete the shipped `GET /models` probe. | Repo-owned smoke path only. The current workload-proof surface lives in `src/runtime/model-smoke.test.ts` and `src/runtime/model-smoke-helpers.ts`, not in preflight. | `PASS`, but only for the exact source-checkout route or model that was separately smoke-validated plus the running instance that showed `openrouter-key: ok`. |
+| Source checkout | `pnpm preflight` / `pnpm preflight:blank-machine` can prove local setup prerequisites only. They do not start DiscoClaw or hit OpenRouter. | `!status` or the startup credential report showing `openrouter-key: ok` proves the running process can see the configured env-key path and complete the shipped `GET /models` probe. | Repo-owned smoke path only. The current workload-proof surface lives in `src/runtime/openrouter-smoke.test.ts` and `src/runtime/model-smoke-helpers.ts`, not in preflight. | `PASS`, but only for the exact source-checkout route or model that was separately smoke-validated plus the running instance that showed `openrouter-key: ok`. |
 | npm / global install | `discoclaw init`, `discoclaw doctor`, `!doctor`, and `.env` inspection are config/bootstrap evidence only. | `!status` or the startup credential report showing `openrouter-key: ok` is still valid post-start proof for the running instance. | No shipped npm-managed workload smoke path yet. The published package omits repo tests/helpers, so workload parity is not support-claimable from the installed CLI alone. | `PARTIAL`: support-safe claim stops at "this running instance can see and probe its configured env-key path." |
 
 ## What Enforces The Boundary
@@ -52,13 +52,13 @@ It is **not** support-safe to say "OpenRouter is read-only" as a blanket runtime
 
 The current shipped workload-proof path for source checkouts is the repo smoke harness:
 
-- `src/runtime/model-smoke.test.ts`
+- `src/runtime/openrouter-smoke.test.ts`
 - `src/runtime/model-smoke-helpers.ts`
 
 Important boundary details:
 
 - This harness is repo-only. It is available from a source checkout via `pnpm test`, not from the published npm package.
-- The current entry point is still the shared OpenAI-compatible smoke harness (`OPENAI_SMOKE_TEST_TIERS=... pnpm test`). There is no dedicated `OPENROUTER_SMOKE_TEST_TIERS` wrapper in this slice.
+- The current entry point is the dedicated OpenRouter smoke harness (`OPENROUTER_SMOKE_TEST_TIERS=... pnpm test`). `src/runtime/model-smoke.test.ts` advertises that suite, but the OpenRouter workload cases live in `src/runtime/openrouter-smoke.test.ts`.
 - Because the OpenRouter runtime is implemented through the shared OpenAI-compatible adapter in `src/runtime/openai-compat.ts`, the source-checkout smoke path is the only shipped place today where workload evidence can be captured for an exact OpenRouter-backed route or model.
 
 That means the evidence split for this slice is:
@@ -84,7 +84,7 @@ This first `ws-1285` slice does **not** claim the following:
 - built-in OpenRouter tier defaults for `DISCOCLAW_TIER_OPENROUTER_FAST`, `DISCOCLAW_TIER_OPENROUTER_CAPABLE`, or `DISCOCLAW_TIER_OPENROUTER_DEEP`
 - curated OpenRouter model recommendations for chat, fast-tier, forge, or action workloads
 - npm-managed OpenRouter workload parity
-- a dedicated `OPENROUTER_SMOKE_TEST_TIERS` or other one-command OpenRouter workload helper
+- npm-managed OpenRouter workload proof or any broader one-command install-mode workload helper
 - blanket tool, daemon, or install-mode equivalence from the current env-key proof
 
 The code backs that deferral today:

@@ -7,7 +7,7 @@ This memo intentionally stays narrow. Use it for the credential-only question:
 
 - can the running DiscoClaw instance see the configured `OPENROUTER_API_KEY` path and complete the shipped `GET /models` probe?
 
-For the broader first-slice parity boundary, including install-mode differences, the repo smoke evidence path for source checkouts, the enforcement behind read-only-tool claims, and the deferred tier-default / model-recommendation work, use [OpenRouter Parity Audit](openrouter-parity-audit.md).
+For the broader first-slice parity boundary, including install-mode differences, the repo smoke evidence path for source checkouts, the enforcement behind read-only-tool claims, and the deferred tier-default / model-recommendation work, use the companion [OpenRouter Parity Audit](openrouter-parity-audit.md).
 
 ## 1.0 Verdict
 
@@ -69,7 +69,7 @@ The following remain out of scope for this first auditable slice:
 - tier/default parity work for `DISCOCLAW_TIER_OPENROUTER_FAST`, `DISCOCLAW_TIER_OPENROUTER_CAPABLE`, and `DISCOCLAW_TIER_OPENROUTER_DEEP`
 - curated model recommendations for OpenRouter-backed roles
 - any stronger install-mode story than the current runtime-visible env-key proof
-- a dedicated OpenRouter smoke helper beyond the existing `!status` and startup credential report surfaces
+- workload proof beyond the repo-owned `OPENROUTER_SMOKE_TEST_TIERS` source-checkout smoke suite
 
 Until follow-up work lands, do not collapse the current env-key proof into broader claims about model quality, tool parity, or universal daemon/runtime readiness.
 

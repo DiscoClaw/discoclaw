@@ -139,7 +139,7 @@ Requirement: choose models that reliably support structured JSON output and func
 |----------|---------|-------------|
 | `OPENROUTER_API_KEY` | — | OpenRouter API key |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter base URL |
-| `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4` | Default model via OpenRouter |
+| `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4-20250514` | Default model via OpenRouter |
 
 Treat `OPENROUTER_API_KEY` as config presence only until the running instance proves it can see that key. The shipped live proof surface today is `!status` or the startup credential report showing `openrouter-key: ok` for the active OpenRouter path. For source checkouts, the audited support boundary is broader but still narrow: `pnpm preflight*` can prove setup/bootstrap prerequisites, and repo smoke-path validation is the only shipped workload-proof surface for OpenRouter-backed routes. For npm-managed installs, `discoclaw doctor` remains config-only and must not be described as workload proof. Same requirement applies when routing through OpenRouter: model reliability for JSON/tool-call output is required. OpenRouter has no built-in `fast`/`capable`/`deep` tier map in DiscoClaw; define only the specific `DISCOCLAW_TIER_OPENROUTER_<TIER>` vars you need if you want tier names and fast/voice auto-switching to resolve through OpenRouter.
 
