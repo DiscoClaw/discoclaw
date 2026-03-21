@@ -19,6 +19,8 @@
     "docs/discord-bot-setup.md",
     "docs/audit/claude-blank-machine-readiness.md",
     "docs/audit/claude-npm-managed-path.md",
+    "docs/audit/codex-blank-machine-readiness.md",
+    "docs/audit/codex-npm-managed-path.md",
     "systemd/",
     ".context/",
     ".env.example",
