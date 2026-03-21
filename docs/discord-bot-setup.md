@@ -105,7 +105,7 @@ discoclaw install-daemon # register as a user-level systemd service
 
 The `discoclaw init` wizard prompts for your bot token, user/channel IDs, and other essentials, then writes `.env` for you. No manual file editing required.
 
-For npm-managed installs, that `.env` creation step is config setup, not full Claude-readiness proof. Before treating the global-install path as ready, follow the npm-managed validation flow in [docs/audit/claude-npm-managed-path.md](audit/claude-npm-managed-path.md) and the checklist below.
+For npm-managed installs, that `.env` creation step is config setup, not full provider-readiness proof. Before treating the global-install path as ready, follow the audit and proof gate that matches the runtime path you actually plan to use: [docs/audit/claude-npm-managed-path.md](audit/claude-npm-managed-path.md) for Claude, or [docs/audit/codex-npm-managed-path.md](audit/codex-npm-managed-path.md) for Codex and the optional OpenAI fast/alternate runtime path.
 
 ### From source (contributors / developers)
 
@@ -162,11 +162,19 @@ If `--service-name` is omitted, the default name `discoclaw` is used and no `DIS
 
 Run through this checklist in order. Each step should produce the expected output before moving on.
 
-1. **Claude CLI installed:**
+1. **Provider baseline installed or selected intentionally:**
+   Run the command for the provider path you plan to use:
    ```bash
    claude --version
    ```
-   Expected: a version string `>= 2.1.0`. If not found, install it first — see [Claude CLI docs](https://docs.anthropic.com/en/docs/claude-code).
+   or
+   ```bash
+   codex --version
+   ```
+   Expected:
+   - If you plan to use Claude, `claude --version` should print a version string `>= 2.1.0`.
+   - If you plan to use Codex, `codex --version` should print a version string.
+   - If you plan to use the OpenAI adapter, there is no local CLI baseline, but `OPENAI_API_KEY` presence alone is still not proof of runtime readiness.
 
 2. **Node (and pnpm for contributors):**
    ```bash
@@ -178,25 +186,50 @@ Run through this checklist in order. Each step should produce the expected outpu
    - **Global install:** the `discoclaw init` wizard creates `.env` automatically — nothing to do here.
    - **From source:** `test -f .env && echo "ok" || echo "missing — run: cp .env.example .env"`
 
-4. **Npm-managed Claude validation (global install):**
-   - Read [docs/audit/claude-npm-managed-path.md](audit/claude-npm-managed-path.md) before treating the npm path as support-claimable.
-   - Run:
-     ```bash
-     discoclaw claude auth-smoke
-     ```
-   - Treat a successful result here as shell-level Claude auth evidence only.
+4. **Install-mode-specific provider proof gate:**
+   - **Global install (`npm install -g discoclaw`) + Claude path:**
+     - Read [docs/audit/claude-npm-managed-path.md](audit/claude-npm-managed-path.md).
+     - Run:
+       ```bash
+       discoclaw claude auth-smoke
+       ```
+     - Treat a successful result here as shell-level Claude auth evidence only.
+   - **Global install (`npm install -g discoclaw`) + Codex path:**
+     - Read [docs/audit/codex-npm-managed-path.md](audit/codex-npm-managed-path.md).
+     - Follow its manual Codex session-auth gate with:
+       ```bash
+       codex exec -m gpt-5.4 --skip-git-repo-check --ephemeral -s read-only -- "Reply with OK"
+       ```
+     - If the install also routes fast/alternate work through OpenAI, do not stop at key presence alone; confirm the live runtime-visible `openai-key: ok` evidence described in that audit after startup.
+   - **From source + Claude path:**
+     - Run:
+       ```bash
+       pnpm preflight:blank-machine
+       pnpm claude:auth-smoke
+       ```
+     - Use the source-checkout readiness contract in [docs/audit/claude-blank-machine-readiness.md](audit/claude-blank-machine-readiness.md).
+   - **From source + Codex path:**
+     - Run:
+       ```bash
+       pnpm preflight:blank-machine
+       ```
+     - Then follow the Codex session-auth and optional OpenAI proof gates in [docs/audit/codex-blank-machine-readiness.md](audit/codex-blank-machine-readiness.md).
+     - When source-checkout routing uses OpenAI, use the repo smoke harness rather than key presence alone:
+       ```bash
+       OPENAI_SMOKE_TEST_TIERS=fast pnpm test
+       ```
    - Repo-owned source helpers such as `pnpm claude:auth-smoke` and `pnpm discord:smoke-test` are unavailable in the published npm package by design; `package.json.files` ships the compiled CLI and selected docs/assets, not the repo `scripts/` tree.
-   - If you plan to use `discoclaw install-daemon`, note the current service caveat: the installer writes a service that uses `/usr/bin/node` and a fixed service `PATH`, so the daemon can still diverge from the interactive npm / Claude shell that passed `discoclaw claude auth-smoke`. Set `CLAUDE_BIN` manually when needed and verify the service logs before assuming daemon parity.
+   - If you plan to use `discoclaw install-daemon`, note the current service caveat: the installer writes a service that uses `/usr/bin/node` and a fixed service `PATH`, so the daemon can still diverge from the interactive shell you just validated. Verify service logs before assuming daemon parity.
 
-   > **From source only — steps 5 and 6 below use repo convenience scripts not available to global-install users. If you installed via `npm install -g discoclaw`, do step 4 and then continue to step 7.**
+   > **From source only — steps 5 and 6 below use repo smoke harnesses not available to global-install users. If you installed via `npm install -g discoclaw`, finish step 4 and continue to step 7.**
 
-5. **From source: smoke test (bot token + connection):**
+5. **From source: Discord smoke test (bot token + connection):**
    ```bash
    pnpm discord:smoke-test
    ```
    Expected: `Discord bot ready`. If it hangs or errors, double-check `DISCORD_TOKEN` in `.env`.
 
-6. **From source: smoke test with guild verification:**
+6. **From source: Discord smoke test with guild verification:**
    ```bash
    pnpm discord:smoke-test -- --guild-id <YOUR_SERVER_ID>
    ```

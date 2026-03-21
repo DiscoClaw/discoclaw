@@ -81,6 +81,8 @@ Only one forge can run at a time per DM handler instance. The `forgeOrchestrator
 
 The drafter/reviser uses `FORGE_DRAFTER_MODEL` if set, otherwise the main `RUNTIME_MODEL`. The auditor uses `FORGE_AUDITOR_MODEL` if set, otherwise the main model. The drafter/reviser gets read-only tools (Read, Glob, Grep); the auditor also gets read-only tools when its runtime declares the `tools_fs` capability (Claude and Codex both do). Runtimes without `tools_fs` (e.g., the OpenAI HTTP adapter when `OPENAI_COMPAT_TOOLS_ENABLED` is off) get a text-only prompt instead.
 
+`FORGE_DRAFTER_RUNTIME=codex|openai` and `FORGE_AUDITOR_RUNTIME=codex|openai` are routing selectors only. They choose which adapter DiscoClaw should try for that forge role; by themselves they do not prove Codex session auth, `OPENAI_API_KEY` runtime readiness, or install-mode supportability. Use the install-mode-specific proof gates from the Codex/OpenAI audit docs before treating those forge routes as ready.
+
 **Multi-provider auditor:** The auditor can optionally use a non-Claude runtime via `FORGE_AUDITOR_RUNTIME`. Two adapters are available:
 
 - `FORGE_AUDITOR_RUNTIME=codex` — routes through the Codex CLI adapter (`src/runtime/codex-cli.ts`), which shells out to `codex exec`. Auth is handled natively by the Codex CLI (`~/.codex/auth.json`). This is the recommended path for OpenAI models like `gpt-5.4` that aren't available on the public chat completions API.
