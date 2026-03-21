@@ -160,6 +160,21 @@ describe('setup: .env content generation', () => {
     expect(content).toContain('OPENAI_API_KEY=sk-test-key');
   });
 
+  it('includes PRIMARY_RUNTIME and OpenRouter values when provided', () => {
+    const content = buildEnvContent({
+      DISCORD_TOKEN: 'abc.def.ghi',
+      DISCORD_ALLOW_USER_IDS: '12345678901234567',
+      PRIMARY_RUNTIME: 'openrouter',
+      OPENROUTER_API_KEY: 'sk-or-test',
+      OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
+      OPENROUTER_MODEL: 'anthropic/claude-sonnet-4-20250514',
+    });
+    expect(content).toContain('PRIMARY_RUNTIME=openrouter');
+    expect(content).toContain('OPENROUTER_API_KEY=sk-or-test');
+    expect(content).toContain('OPENROUTER_BASE_URL=https://openrouter.ai/api/v1');
+    expect(content).toContain('OPENROUTER_MODEL=anthropic/claude-sonnet-4-20250514');
+  });
+
   it('includes PRIMARY_RUNTIME and Codex values when provided', () => {
     const content = buildEnvContent({
       DISCORD_TOKEN: 'abc.def.ghi',
@@ -240,5 +255,16 @@ describe('setup: wizard copy contract', () => {
     expect(setupSource).toContain('The optional OpenAI fast-tier path needs separate `OPENAI_API_KEY` evidence.');
     expect(setupSource).not.toContain('Verify your OPENAI_API_KEY is correct.');
     expect(setupSource).not.toContain('Ensure the Codex binary is installed and accessible.');
+  });
+
+  it('adds OpenRouter as a first-class provider and points source checkouts at preflight plus live proof', () => {
+    expect(setupSource).toContain("console.log('  5) OpenRouter');");
+    expect(setupSource).toContain("'Provider [1-5]: '");
+    expect(setupSource).toContain("values.PRIMARY_RUNTIME = 'openrouter';");
+    expect(setupSource).toContain("values.OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';");
+    expect(setupSource).toContain("values.OPENROUTER_MODEL = 'anthropic/claude-sonnet-4-20250514';");
+    expect(setupSource).toContain('Run `pnpm preflight:blank-machine` and fix any config issues it reports.');
+    expect(setupSource).toContain('Start discoclaw with `pnpm dev` and confirm `!status` (or the startup credential report) shows `openrouter-key: ok` for the active OpenRouter path.');
+    expect(setupSource).toContain('Treat that `openrouter-key: ok` signal as proof only for the shipped `OPENROUTER_API_KEY` path, not broader OpenRouter parity.');
   });
 });

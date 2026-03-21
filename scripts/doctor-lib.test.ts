@@ -266,4 +266,53 @@ describe('doctor-lib: checkRuntimeBinaries', () => {
     expect(c?.ok).toBe(false);
     expect(c?.info).toBeFalsy();
   });
+
+  it('reports OPENROUTER_API_KEY as info when openrouter is not a needed runtime', () => {
+    const checks = checkRuntimeBinaries({}, notFound);
+    const c = checks.find((r) => r.label.includes('OPENROUTER_API_KEY'));
+    expect(c?.ok).toBe(true);
+    expect(c?.info).toBe(true);
+  });
+
+  it('fails when PRIMARY_RUNTIME=openrouter and OPENROUTER_API_KEY is absent', () => {
+    const checks = checkRuntimeBinaries({ PRIMARY_RUNTIME: 'openrouter' }, notFound);
+    const c = checks.find((r) => r.label.includes('OPENROUTER_API_KEY'));
+    expect(c?.ok).toBe(false);
+    expect(c?.info).toBeFalsy();
+  });
+
+  it('passes when PRIMARY_RUNTIME=openrouter and OPENROUTER_API_KEY is set', () => {
+    const checks = checkRuntimeBinaries({ PRIMARY_RUNTIME: 'openrouter', OPENROUTER_API_KEY: 'sk-or-test' }, notFound);
+    const c = checks.find((r) => r.label.includes('OPENROUTER_API_KEY'));
+    expect(c?.ok).toBe(true);
+    expect(c?.info).toBeFalsy();
+  });
+
+  it('treats whitespace-only OPENROUTER_API_KEY as absent', () => {
+    const checks = checkRuntimeBinaries({ PRIMARY_RUNTIME: 'openrouter', OPENROUTER_API_KEY: '   ' }, notFound);
+    const c = checks.find((r) => r.label.includes('OPENROUTER_API_KEY'));
+    expect(c?.ok).toBe(false);
+    expect(c?.info).toBeFalsy();
+  });
+
+  it('requires OPENROUTER_API_KEY when DISCOCLAW_FAST_RUNTIME=openrouter', () => {
+    const checks = checkRuntimeBinaries({ DISCOCLAW_FAST_RUNTIME: 'openrouter' }, notFound);
+    const c = checks.find((r) => r.label.includes('OPENROUTER_API_KEY'));
+    expect(c?.ok).toBe(false);
+    expect(c?.info).toBeFalsy();
+  });
+
+  it('requires OPENROUTER_API_KEY when FORGE_DRAFTER_RUNTIME=openrouter', () => {
+    const checks = checkRuntimeBinaries({ FORGE_DRAFTER_RUNTIME: 'openrouter' }, notFound);
+    const c = checks.find((r) => r.label.includes('OPENROUTER_API_KEY'));
+    expect(c?.ok).toBe(false);
+    expect(c?.info).toBeFalsy();
+  });
+
+  it('requires OPENROUTER_API_KEY when FORGE_AUDITOR_RUNTIME=openrouter', () => {
+    const checks = checkRuntimeBinaries({ FORGE_AUDITOR_RUNTIME: 'openrouter' }, notFound);
+    const c = checks.find((r) => r.label.includes('OPENROUTER_API_KEY'));
+    expect(c?.ok).toBe(false);
+    expect(c?.info).toBeFalsy();
+  });
 });

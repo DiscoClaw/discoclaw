@@ -42,6 +42,9 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
       'GEMINI_BIN',
       'GEMINI_MODEL',
       'OPENAI_API_KEY',
+      'OPENROUTER_API_KEY',
+      'OPENROUTER_BASE_URL',
+      'OPENROUTER_MODEL',
       'DISCOCLAW_FAST_RUNTIME',
       'DISCOCLAW_TIER_OPENAI_FAST',
       'CODEX_BIN',
@@ -72,6 +75,9 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
       'GEMINI_BIN',
       'GEMINI_MODEL',
       'OPENAI_API_KEY',
+      'OPENROUTER_API_KEY',
+      'OPENROUTER_BASE_URL',
+      'OPENROUTER_MODEL',
       'CODEX_BIN',
       'CODEX_MODEL',
       'CODEX_BYPASS_APPROVALS',
@@ -86,6 +92,9 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
       if (vals.GEMINI_BIN) lines.push(`GEMINI_BIN=${vals.GEMINI_BIN}`);
       if (vals.GEMINI_MODEL) lines.push(`GEMINI_MODEL=${vals.GEMINI_MODEL}`);
       if (vals.OPENAI_API_KEY) lines.push(`OPENAI_API_KEY=${vals.OPENAI_API_KEY}`);
+      if (vals.OPENROUTER_API_KEY) lines.push(`OPENROUTER_API_KEY=${vals.OPENROUTER_API_KEY}`);
+      if (vals.OPENROUTER_BASE_URL) lines.push(`OPENROUTER_BASE_URL=${vals.OPENROUTER_BASE_URL}`);
+      if (vals.OPENROUTER_MODEL) lines.push(`OPENROUTER_MODEL=${vals.OPENROUTER_MODEL}`);
       if (vals.CODEX_BIN) lines.push(`CODEX_BIN=${vals.CODEX_BIN}`);
       if (vals.CODEX_MODEL) lines.push(`CODEX_MODEL=${vals.CODEX_MODEL}`);
       if (vals.CODEX_BYPASS_APPROVALS) lines.push(`CODEX_BYPASS_APPROVALS=${vals.CODEX_BYPASS_APPROVALS}`);

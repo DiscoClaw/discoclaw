@@ -142,7 +142,8 @@ describe('doctor output contract', () => {
       const result = await runDoctorForTest(fixture.env, fixture.cwd);
 
       expect(result.exitCode).toBe(0);
-      expect(result.output).toContain('This source-checkout preflight only reports prerequisites Discoclaw can verify locally today.');
+      expect(result.output).toContain('This source-checkout preflight only reports config/bootstrap prerequisites Discoclaw can verify locally today.');
+      expect(result.output).toContain('It does not prove provider auth, live runtime credential probes, or end-to-end workload success.');
       expect(result.output).toContain(`This \`pnpm preflight*\` surface is source-checkout evidence only. For npm/global installs, use \`discoclaw doctor\` and the install-mode guidance in ${CONFIGURATION_DOC}.`);
       expect(result.output).toContain('Claude source auth is a separate proof gate: run `pnpm claude:auth-smoke` after this check.');
       expect(result.output).toContain(`This command does not auto-run Claude auth validation; follow the pre-login and post-login validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
@@ -177,6 +178,28 @@ describe('doctor output contract', () => {
       expect(result.output).toContain('Next proof gate: capture separate evidence that the required `OPENAI_API_KEY` path can authenticate; preflight only proves config presence.');
       expect(result.output).not.toContain('Claude source auth is a separate proof gate');
       expect(result.output).not.toContain('pnpm claude:auth-smoke');
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('prints OpenRouter proof-gate wording when runtime routing uses that path', async () => {
+    const fixture = makeDoctorFixture({
+      fileEnv: {
+        PRIMARY_RUNTIME: 'openrouter',
+        OPENROUTER_API_KEY: 'sk-or-key',
+      },
+    });
+
+    try {
+      const result = await runDoctorForTest(fixture.env, fixture.cwd);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain('OpenRouter runtime proof is a separate gate: this check only verifies whether `OPENROUTER_API_KEY` is present when current runtime routing requires it.');
+      expect(result.output).toContain('Preflight does not start discoclaw or prove the running process can complete the shipped OpenRouter `GET /models` credential probe.');
+      expect(result.output).toContain('Next proof gate: start discoclaw and confirm `!status` (or the startup credential report) shows `openrouter-key: ok` for the active OpenRouter path.');
+      expect(result.output).not.toContain('Claude source auth is a separate proof gate');
+      expect(result.output).not.toContain('OpenAI runtime auth is a separate proof gate');
     } finally {
       fixture.cleanup();
     }
@@ -266,6 +289,7 @@ describe('doctor output contract', () => {
       expect(result.output).toContain('Claude source auth is a separate proof gate: run `pnpm claude:auth-smoke` after this check.');
       expect(result.output).not.toContain('Codex CLI session auth is a separate proof gate');
       expect(result.output).not.toContain('OpenAI runtime auth is a separate proof gate');
+      expect(result.output).not.toContain('OpenRouter runtime proof is a separate gate');
       expect(result.output).not.toContain('Next proof gate: capture separate evidence that the source-checkout Codex CLI session is authenticated; preflight does not invoke `codex`.');
       expect(result.output).not.toContain('Next proof gate: capture separate evidence that the required `OPENAI_API_KEY` path can authenticate; preflight only proves config presence.');
     } finally {
