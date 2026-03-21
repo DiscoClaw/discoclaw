@@ -625,9 +625,14 @@ describe('manual message finalization guard', () => {
     const stagedWarningIndex = order.findIndex(
       (entry) => entry.startsWith('stage:') && entry.includes(PROMISED_ACTION_WARNING),
     );
-    const finalEditWarningIndex = order.findLastIndex(
-      (entry) => entry.startsWith('edit:') && entry.includes(PROMISED_ACTION_WARNING),
-    );
+    let finalEditWarningIndex = -1;
+    for (let i = order.length - 1; i >= 0; i -= 1) {
+      const entry = order[i];
+      if (entry.startsWith('edit:') && entry.includes(PROMISED_ACTION_WARNING)) {
+        finalEditWarningIndex = i;
+        break;
+      }
+    }
     expect(stagedWarningIndex).toBeGreaterThanOrEqual(0);
     expect(finalEditWarningIndex).toBeGreaterThanOrEqual(0);
     expect(stagedWarningIndex).toBeLessThan(finalEditWarningIndex);
