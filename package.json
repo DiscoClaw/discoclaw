@@ -40,6 +40,7 @@
     "discord:smoke-test": "node scripts/discord-smoke-test.mjs",
     "discord:join-threads": "node scripts/discord-join-threads.mjs",
     "claude:install-skills": "tsx scripts/install-claude-skills.ts",
+    "claude:auth-smoke": "tsx scripts/claude-auth-smoke.ts",
     "sync:discord-context": "tsx scripts/sync-discord-context.ts",
     "guard:legacy": "tsx scripts/legacy-token-guard.ts",
     "preflight": "tsx scripts/doctor.ts",

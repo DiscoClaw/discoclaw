@@ -122,10 +122,12 @@ describe('doctor output contract', () => {
       const result = await runDoctorForTest(fixture.env, fixture.cwd);
 
       expect(result.exitCode).toBe(0);
-      expect(result.output).toContain('Claude auth is a manual validation step; this command does not auto-check Claude login state.');
-      expect(result.output).toContain(`Follow the manual pre-login and post-login validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
+      expect(result.output).toContain('Claude auth validation is separate: run `pnpm claude:auth-smoke` after this check.');
+      expect(result.output).toContain(`This command does not auto-run Claude auth validation; follow the pre-login and post-login validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
       expect(result.output).toContain('All automated checks passed.');
-      expect(result.output).toContain(`Claude auth still requires the manual validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
+      expect(result.output).toContain(`Next run \`pnpm claude:auth-smoke\` for Claude auth validation; preflight does not auto-run it. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
+      expect(result.output).not.toContain('Discoclaw Claude auth smoke');
+      expect(result.output).not.toContain('Running claude -p -- "Reply with OK"');
       expect(result.output).not.toContain('All checks passed.');
     } finally {
       fixture.cleanup();

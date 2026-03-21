@@ -312,13 +312,14 @@ pnpm run setup        # guided interactive setup
 #   DISCORD_ALLOW_USER_IDS
 # For all ~90 options: cp .env.example.full .env
 pnpm preflight:blank-machine
+pnpm claude:auth-smoke  # if PRIMARY_RUNTIME=claude
 ```
 
-If `PRIMARY_RUNTIME=claude`, complete the Claude validation path below before `pnpm dev`.
+If `PRIMARY_RUNTIME=claude`, run both `pnpm preflight:blank-machine` and `pnpm claude:auth-smoke` before `pnpm dev`.
 
 ### Claude runtime validation
 
-Current 1.0 audit verdict: fully automated Claude readiness is `FAIL`. `pnpm preflight:blank-machine`, `pnpm preflight`, and `discoclaw doctor` only claim the prerequisites Discoclaw can verify today; Claude login/auth is still a manual gate. See [docs/audit/claude-blank-machine-readiness.md](docs/audit/claude-blank-machine-readiness.md).
+Current 1.0 audit verdict: fully automated Claude readiness is `FAIL`. `pnpm preflight:blank-machine` and `pnpm preflight` only claim the prerequisites Discoclaw can verify today; Claude login/auth is still a separate gate checked with `pnpm claude:auth-smoke`. See [docs/audit/claude-blank-machine-readiness.md](docs/audit/claude-blank-machine-readiness.md).
 
 1. Run the automated checks:
    ```bash
@@ -335,7 +336,7 @@ Current 1.0 audit verdict: fully automated Claude readiness is `FAIL`. `pnpm pre
    - Neither command proves Claude login/auth state.
 3. Before logging in, run the required failure check:
    ```bash
-   claude -p -- "Reply with OK"
+   pnpm claude:auth-smoke
    ```
    Confirm it fails with an auth/login error.
 4. Log in interactively:
@@ -344,7 +345,7 @@ Current 1.0 audit verdict: fully automated Claude readiness is `FAIL`. `pnpm pre
    ```
 5. Run the happy-path check:
    ```bash
-   claude -p -- "Reply with OK"
+   pnpm claude:auth-smoke
    ```
    Confirm it returns normal text instead of an auth/login error.
 6. Start DiscoClaw after both gates pass:
@@ -379,7 +380,7 @@ pnpm install
 pnpm build
 ```
 
-Run `pnpm preflight` after changes to validate the automated contract again. It checks the local prerequisites Discoclaw can prove today: Node, pnpm, runtime binary presence/version, `.env` presence, env formatting, forum bootstrap eligibility, and config-doctor findings. It does not verify Claude login/auth. Use `pnpm preflight:blank-machine` when you need the audit to ignore inherited shell env and inspect only the current `.env`, or `pnpm preflight:blank-machine:online` if you also want a live Discord token/intents check.
+Run `pnpm preflight` after changes to validate the automated contract again. It checks the local prerequisites Discoclaw can prove today: Node, pnpm, runtime binary presence/version, `.env` presence, env formatting, forum bootstrap eligibility, and config-doctor findings. It does not verify Claude login/auth. Use `pnpm preflight:blank-machine` when you need the audit to ignore inherited shell env and inspect only the current `.env`, `pnpm preflight:blank-machine:online` if you also want a live Discord token/intents check, and `pnpm claude:auth-smoke` for the Claude login/auth smoke step.
 
 You can also run `discoclaw doctor` to inspect config drift and related issues, `discoclaw doctor --fix` to apply safe remediations, or use `!doctor` / `!doctor fix` from Discord (`!health doctor` / `!health doctor fix` remain supported). Restart the service afterward for fixed config to take effect.
 
@@ -442,6 +443,7 @@ pnpm preflight         # automated prerequisite check; Claude auth remains manua
 pnpm preflight:blank-machine         # same check, but ignore inherited shell env and use only .env
 pnpm preflight:online  # adds live Discord login/intents validation
 pnpm preflight:blank-machine:online  # blank-machine check plus live Discord login/intents validation
+pnpm claude:auth-smoke # Claude CLI login/auth smoke check
 pnpm dev        # start dev mode
 pnpm build      # compile TypeScript
 pnpm test       # run tests

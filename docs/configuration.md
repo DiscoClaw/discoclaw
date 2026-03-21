@@ -4,15 +4,15 @@ All configuration is done through environment variables, typically set in a `.en
 
 Boolean values accept `0`/`1` or `true`/`false`.
 
-## Setup Boundary: Config vs Bootstrap vs Manual Auth
+## Setup Boundary: Source Config vs Bootstrap vs Claude Auth Smoke
 
-DiscoClaw has three separate setup surfaces, and they should not be conflated:
+For the source-checkout path, DiscoClaw has three separate setup surfaces, and the shipped commands are intentionally split:
 
-1. **Config-only setup** covers repo-checkable prerequisites such as required env vars, binary presence, binary versions, and model/runtime configuration files. `pnpm preflight`, `pnpm preflight:blank-machine`, and `discoclaw doctor` can verify this boundary directly.
+1. **Config-only source checks** are handled by [`scripts/doctor.ts`](/home/davidmarsh/code/discoclaw/scripts/doctor.ts), surfaced through `pnpm preflight` and `pnpm preflight:blank-machine`. That boundary covers repo-checkable prerequisites such as required env vars, binary presence, binary versions, and model/runtime configuration files. It does not invoke Claude itself.
 2. **Bootstrap-derived Discord forum state** covers whether DiscoClaw can resolve the cron/task forum channels from checked config or from first-run bootstrap state. That state is considered satisfiable when you already have explicit forum IDs, when persisted scaffold/bootstrap state can supply them, or when `DISCORD_GUILD_ID` is present so the repo can create the missing forums on startup.
-3. **Manual Claude login validation** is outside the automated contract today. The repo can verify that the Claude CLI binary exists and that its version/config shape looks valid, but it cannot prove that Claude CLI auth/login is healthy on a blank machine.
+3. **Claude auth validation** is handled separately by [`scripts/claude-auth-smoke.ts`](/home/davidmarsh/code/discoclaw/scripts/claude-auth-smoke.ts). In this source-checkout flow, that script is the only shipped Claude auth validator: it runs one minimal Claude prompt and classifies the result as authenticated, unauthenticated, missing CLI, or another failure.
 
-That boundary is intentional: the checked-in audit memo at [docs/audit/claude-blank-machine-readiness.md](audit/claude-blank-machine-readiness.md) is the authoritative 1.0 readiness verdict for Claude on a blank machine. Treat a passing `pnpm preflight:blank-machine`, `pnpm preflight`, or `discoclaw doctor` run as evidence for binary/version/config prerequisites only, not as proof that Claude login/OAuth is ready end-to-end.
+That boundary is intentional: the checked-in audit memo at [docs/audit/claude-blank-machine-readiness.md](audit/claude-blank-machine-readiness.md) is the authoritative 1.0 readiness verdict for Claude on a blank machine. Treat a passing `pnpm preflight:blank-machine` or `pnpm preflight` run as evidence for binary/version/config prerequisites only. Treat the Claude auth smoke result separately as the repo-owned Claude login/auth check for this source path.
 
 ## Discord
 
@@ -103,7 +103,9 @@ This changes failure shape, not runtime configuration: operators do not need new
 
 ### Claude CLI
 
-`pnpm preflight`, `pnpm preflight:blank-machine`, and `discoclaw doctor` can verify Claude CLI presence, version, and related config. They do **not** verify interactive Claude authentication. Use `pnpm preflight:blank-machine` when you need the audit to ignore inherited shell env and validate only the written `.env`. The manual validation path in [docs/audit/claude-blank-machine-readiness.md](audit/claude-blank-machine-readiness.md) remains the current blank-machine authority for Claude login/auth readiness.
+For the source-checkout flow, [`scripts/doctor.ts`](/home/davidmarsh/code/discoclaw/scripts/doctor.ts) remains config-only. Through `pnpm preflight` and `pnpm preflight:blank-machine`, it can verify Claude CLI presence, version, and related config, but it does **not** invoke Claude or prove interactive authentication. Use `pnpm preflight:blank-machine` when you need the audit to ignore inherited shell env and validate only the written `.env`.
+
+Claude auth is a separate step owned by [`scripts/claude-auth-smoke.ts`](/home/davidmarsh/code/discoclaw/scripts/claude-auth-smoke.ts). That script is the only shipped Claude auth validator in this plan: it runs one minimal prompt from the repo and reports whether Claude answered, appears unauthenticated, is missing, or failed for another reason. The blank-machine audit in [docs/audit/claude-blank-machine-readiness.md](audit/claude-blank-machine-readiness.md) remains the authority for how to combine the config-only preflight result with that Claude auth smoke result.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
