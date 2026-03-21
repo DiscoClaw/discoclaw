@@ -257,7 +257,8 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
 ### Operations
 
 - [Configuration reference](docs/configuration.md) — all environment variables indexed by category
-- [Claude blank-machine audit](docs/audit/claude-blank-machine-readiness.md) — current 1.0 readiness verdict and the manual Claude auth gate
+- [Claude source-checkout audit](docs/audit/claude-blank-machine-readiness.md) — current 1.0 verdict for the repo-owned `pnpm preflight*` + `pnpm claude:auth-smoke` path
+- [Claude npm-managed audit](docs/audit/claude-npm-managed-path.md) — current 1.0 verdict for `npm install -g discoclaw`, `discoclaw init`, and the daemon/runtime-path gap
 - [Managed browser launcher guide](#managed-browser-launcher) — dedicated profile flow, headed login, verified CDP handoff, and storage rules
 - [Runtime/model switching](docs/runtime-switching.md) — operator guide for switching adapters, models, and defaults safely
 - [Webhook exposure](docs/webhook-exposure.md) — tunnel/proxy setup and webhook security
@@ -299,7 +300,12 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
    set `DISCOCLAW_DASHBOARD_TRUSTED_HOSTS` to your tailnet IP or MagicDNS hostname.
    See [docs/dashboard-tailscale.md](docs/dashboard-tailscale.md).
 
-If you are using the Claude runtime, complete the Claude validation path below before treating the machine as ready. For global installs, `discoclaw init` gives you the npm-managed/manual Claude login check. The `pnpm` commands below are the source-checkout path.
+If you are using the Claude runtime, keep the two validation paths separate:
+
+- Global installs use the npm-managed/manual path: `discoclaw init` tells you how to run the Claude login check from the installed shell, and the installed CLI also exposes `discoclaw claude auth-smoke` for that same shell-level smoke test.
+- Source checkouts use the repo-owned path below: `pnpm preflight*` plus `pnpm claude:auth-smoke`.
+
+Current npm-managed blocker: `discoclaw install-daemon` still renders services with `/usr/bin/node` and a fixed service `PATH`, while `discoclaw init` does not persist `CLAUDE_BIN`. A Claude check that passes in your interactive npm shell is therefore not yet a support claim for the installed daemon path.
 
 #### From source (contributors)
 
@@ -319,7 +325,9 @@ If `PRIMARY_RUNTIME=claude`, run both `pnpm preflight:blank-machine` and `pnpm c
 
 ### Claude runtime validation
 
-Current 1.0 audit verdict for the repo-owned source-checkout Claude readiness path: `PASS`. It is still not a single-command automated login proof: `pnpm preflight:blank-machine` and `pnpm preflight` only claim the prerequisites Discoclaw can verify today, and Claude login/auth remains a separate gate checked with `pnpm claude:auth-smoke`. See [docs/audit/claude-blank-machine-readiness.md](docs/audit/claude-blank-machine-readiness.md).
+Source-checkout 1.0 audit verdict: `PASS`. That verdict is only for the repo-owned Claude path: `pnpm preflight:blank-machine` / `pnpm preflight` prove the local prerequisites Discoclaw can verify today, and `pnpm claude:auth-smoke` remains the separate Claude login/auth gate. See [docs/audit/claude-blank-machine-readiness.md](docs/audit/claude-blank-machine-readiness.md).
+
+Npm-managed 1.0 audit verdict: `NOT YET SUPPORT-CLAIMABLE`. The installed CLI now has a shell-level Claude check, but the daemon path still is not claimable because `discoclaw install-daemon` hardcodes `/usr/bin/node` plus a fixed service `PATH`, and `discoclaw init` does not persist `CLAUDE_BIN`. See [docs/audit/claude-npm-managed-path.md](docs/audit/claude-npm-managed-path.md).
 
 1. Run the automated checks:
    ```bash
@@ -371,6 +379,8 @@ discoclaw install-daemon   # re-register the service after updating
 # If you used a custom service name, pass it again:
 # discoclaw install-daemon --service-name personal
 ```
+
+For Claude on npm-managed installs, keep using the installed-shell validation path after updates: rerun `discoclaw init` if you need the manual login guidance, and use `discoclaw claude auth-smoke` if you want the shipped shell-level smoke check. Do not treat `pnpm preflight*` or `pnpm claude:auth-smoke` as npm-managed evidence; those remain source-checkout-only. Re-registering the daemon also does not remove the current service-path blocker: the generated service still pins `/usr/bin/node` and a fixed `PATH`, so a passing interactive shell smoke test does not yet prove the daemon will resolve the same Node and Claude binaries.
 
 **From source:**
 

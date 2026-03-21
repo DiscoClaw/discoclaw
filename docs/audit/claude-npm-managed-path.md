@@ -23,7 +23,7 @@ Verdict: `NOT YET SUPPORT-CLAIMABLE`
 Reason:
 
 - global install and npm-managed update mechanics exist
-- the npm-managed Claude path still lacks a shipped auth-smoke surface: `src/cli/index.ts` exposes no Claude auth-smoke subcommand, the published package omits `scripts/claude-auth-smoke.ts`, and `discoclaw doctor` / `!doctor` remain config-only
+- the npm-managed Claude path now has a shipped shell-level auth-smoke surface through `discoclaw claude auth-smoke`, but `discoclaw doctor` / `!doctor` remain config-only and are not Claude auth proof
 - `discoclaw init` detects Claude interactively but does not persist `CLAUDE_BIN`, so the daemon path cannot rely on the same Claude binary resolution that succeeded in the user shell
 - `src/cli/daemon-installer.ts` hardcodes `/usr/bin/node` and a fixed service `PATH`, so daemon startup can diverge from the operator's interactive npm / Claude environment before the bot reaches a first useful reply
 
@@ -32,9 +32,9 @@ Reason:
 | Step | Current state | Evidence | Blocker classification |
 | --- | --- | --- | --- |
 | Global install | The npm package exposes the `discoclaw` binary and includes compiled runtime files, so `npm install -g discoclaw` is a real install surface. npm-managed detection is explicit and not inferred from Discord command usage. | `package.json`, `src/npm-managed.ts`, `src/cli/index.ts` | `no-blocker` |
-| Init / login validation | `discoclaw init` detects `claude` in the current shell and prints a manual raw `claude -p -- "Reply with OK"` sequence, but it explicitly says it does not auto-check login state. The generated `.env` does not persist `CLAUDE_BIN`. There is no npm-side `discoclaw claude-auth-smoke` command, and the published package does not ship `scripts/claude-auth-smoke.ts`. | `src/cli/init-wizard.ts`, `package.json`, `scripts/claude-auth-smoke.ts`, `src/cli/index.ts` | `blocker-missing-shipped-auth-smoke`, `blocker-missing-claude-bin-persistence` |
+| Init / login validation | `discoclaw init` detects `claude` in the current shell, prints the manual raw `claude -p -- "Reply with OK"` sequence, and still says it does not auto-check login state. The installed CLI also exposes `discoclaw claude auth-smoke`, which loads `.env` first so `CLAUDE_BIN` is honored when set. The generated `.env` still does not persist `CLAUDE_BIN`, so the validated shell path is not carried forward into the daemon path. | `src/cli/init-wizard.ts`, `src/cli/index.ts` | `accepted-manual-gate`, `blocker-missing-claude-bin-persistence` |
 | Daemon install / startup | The service renderers pin `/usr/bin/node` and a fixed `PATH`. The runtime later resolves `CLAUDE_BIN` from env or falls back to bare `claude`, then exits early if `claude --version` fails. Because init does not persist `CLAUDE_BIN`, the daemon can start in a different Node / Claude environment than the one the operator validated interactively. | `src/cli/daemon-installer.ts`, `src/config.ts`, `src/index.ts`, `src/cli/init-wizard.ts` | `blocker-daemon-runtime-path` |
-| First useful reply | Shared reply machinery exists, but the npm-managed Claude path cannot currently claim this step as a supported stranger path because there is no shipped npm auth-smoke proof and the daemon/runtime path can fail before Discord ever reaches Claude. | `src/index.ts`, `src/cli/index.ts`, `src/cli/daemon-installer.ts`, `src/cli/init-wizard.ts` | `blocked-by-auth-and-daemon-gaps` |
+| First useful reply | Shared reply machinery exists, and the installed shell now has a Claude smoke command, but the npm-managed daemon path still cannot claim this stranger-run step because service startup can diverge from the interactive Node / Claude environment before Discord ever reaches Claude. | `src/index.ts`, `src/cli/index.ts`, `src/cli/daemon-installer.ts`, `src/cli/init-wizard.ts` | `blocked-by-auth-and-daemon-gaps` |
 | Restart recovery | Shared restart and long-run recovery code exists, but the npm-managed daemon path inherits the same unresolved service-runtime mismatch. If the installed service cannot reliably come back with the same Node / Claude resolution, restart recovery is not support-claimable for this path. | `src/cli/daemon-installer.ts`, `src/config.ts`, `src/index.ts`, `src/discord/update-command.ts` | `blocked-by-daemon-runtime-path` |
 | Update | The real npm-managed update surface is the CLI path in `src/cli/index.ts` plus the npm detection / registry helpers in `src/npm-managed.ts`: check via `npm show discoclaw version`, apply via `npm install -g discoclaw --loglevel=error`. The Discord `!update` command is a wrapper over the same npm-managed mode plus restart behavior; it is not the primary evidence for whether npm-managed update exists. | `src/npm-managed.ts`, `src/cli/index.ts`, `src/discord/update-command.ts` | `no-blocker` |
 
@@ -52,19 +52,19 @@ The shipped npm package does expose a real global-install and update path:
 
 That is enough to claim install and upgrade mechanics. It is not enough to claim that the npm-managed Claude runtime path is production-ready for strangers.
 
-### Finding 2: The npm-managed Claude path has no shipped auth-smoke proof
+### Finding 2: The npm-managed shell path now has Claude auth smoke, but the daemon path is still unresolved
 
-Classification: `blocker-missing-shipped-auth-smoke`
+Classification: `accepted-manual-gate`
 
-The repo does contain `scripts/claude-auth-smoke.ts`, but that is source-path evidence, not npm-managed evidence:
+The installed CLI now ships a real npm-managed Claude smoke surface:
 
-- the published `files` list in `package.json` does not include `scripts/`
-- `src/cli/index.ts` has no `claude-auth-smoke` subcommand
+- `src/cli/index.ts` exposes `discoclaw claude auth-smoke`
+- that command loads `.env` first and honors `CLAUDE_BIN` when it is already set
 - `discoclaw init` falls back to a handwritten raw Claude prompt and explicitly says it does not auto-check login state
 - `discoclaw doctor` only runs `inspect()` / `applyFixes()` from `src/health/config-doctor.ts`
 - Discord `!doctor` and `!health doctor` route through the same config-doctor path in `src/discord/message-coordinator.ts`
 
-So the shipped npm-managed product still has no code-owned Claude auth validation surface that a stranger can run after `npm install -g discoclaw`.
+That is enough to claim a shell-level npm-managed Claude validation surface. It is not enough to claim daemon readiness, because the service install path still does not record the same Node and Claude executables that worked in the interactive shell.
 
 ### Finding 3: The daemon path can diverge from the shell path that init validated
 
@@ -86,9 +86,10 @@ Classification: `blocked-by-auth-and-daemon-gaps`
 This is the key scoping point for the 1.0 claim:
 
 - the repo does have shared Discord reply, update, and recovery code
-- but the npm-managed Claude path still lacks the product work needed to prove that the installed service can authenticate Claude, start under the right runtime path, survive restart, and return to a useful reply state
+- the installed shell now has a Claude smoke command
+- but the npm-managed Claude daemon path still lacks the product work needed to prove that the installed service can start under the right runtime path, survive restart, and return to a useful reply state
 
-Until the auth-smoke surface is shipped and the daemon/runtime path records the real Node and Claude executables it validated, those later steps stay blocked for the npm-managed stranger path.
+Until the daemon/runtime path records the real Node and Claude executables it validated, those later steps stay blocked for the npm-managed stranger path.
 
 ## Final 1.0 Decision
 
@@ -98,12 +99,12 @@ What currently passes:
 
 - `npm install -g discoclaw`
 - npm-managed detection
+- shell-level Claude validation via `discoclaw init` guidance and `discoclaw claude auth-smoke`
 - version check / upgrade mechanics via `discoclaw update` and `discoclaw update apply`
 
 What still blocks a 1.0 support claim:
 
-- no shipped npm-managed Claude auth-smoke command
-- config-only doctor surfaces that do not prove Claude auth
 - init detects Claude but does not persist `CLAUDE_BIN`
 - daemon install assumes `/usr/bin/node` and a fixed service `PATH`
+- config-only doctor surfaces do not prove Claude auth or daemon parity
 - first useful reply and restart recovery inherit those unresolved runtime-path gaps
