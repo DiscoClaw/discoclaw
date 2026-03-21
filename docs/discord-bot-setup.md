@@ -105,6 +105,8 @@ discoclaw install-daemon # register as a user-level systemd service
 
 The `discoclaw init` wizard prompts for your bot token, user/channel IDs, and other essentials, then writes `.env` for you. No manual file editing required.
 
+For npm-managed installs, that `.env` creation step is config setup, not full Claude-readiness proof. Before treating the global-install path as ready, follow the npm-managed validation flow in [docs/audit/claude-npm-managed-path.md](/home/davidmarsh/code/discoclaw/docs/audit/claude-npm-managed-path.md) and the checklist below.
+
 ### From source (contributors / developers)
 
 ```bash
@@ -176,26 +178,36 @@ Run through this checklist in order. Each step should produce the expected outpu
    - **Global install:** the `discoclaw init` wizard creates `.env` automatically — nothing to do here.
    - **From source:** `test -f .env && echo "ok" || echo "missing — run: cp .env.example .env"`
 
-   > **From source only — steps 4 and 5 below use repo convenience scripts not available to global-install users. If you installed via `npm install -g discoclaw`, skip directly to step 6.**
+4. **Npm-managed Claude validation (global install):**
+   - Read [docs/audit/claude-npm-managed-path.md](/home/davidmarsh/code/discoclaw/docs/audit/claude-npm-managed-path.md) before treating the npm path as support-claimable.
+   - Run:
+     ```bash
+     discoclaw claude auth-smoke
+     ```
+   - Treat a successful result here as shell-level Claude auth evidence only.
+   - Repo-owned source helpers such as `pnpm claude:auth-smoke` and `pnpm discord:smoke-test` are unavailable in the published npm package by design; `package.json.files` ships the compiled CLI and selected docs/assets, not the repo `scripts/` tree.
+   - If you plan to use `discoclaw install-daemon`, note the current service caveat: the installer writes a service that uses `/usr/bin/node` and a fixed service `PATH`, so the daemon can still diverge from the interactive npm / Claude shell that passed `discoclaw claude auth-smoke`. Set `CLAUDE_BIN` manually when needed and verify the service logs before assuming daemon parity.
 
-4. **Smoke test (bot token + connection):**
+   > **From source only — steps 5 and 6 below use repo convenience scripts not available to global-install users. If you installed via `npm install -g discoclaw`, do step 4 and then continue to step 7.**
+
+5. **From source: smoke test (bot token + connection):**
    ```bash
    pnpm discord:smoke-test
    ```
    Expected: `Discord bot ready`. If it hangs or errors, double-check `DISCORD_TOKEN` in `.env`.
 
-5. **Smoke test with guild verification:**
+6. **From source: smoke test with guild verification:**
    ```bash
    pnpm discord:smoke-test -- --guild-id <YOUR_SERVER_ID>
    ```
    Expected: `Discord bot ready (guild ok: ...)`.
 
-6. **Live test:**
+7. **Live test:**
    - DM the bot → it should respond (if your user ID is in `DISCORD_ALLOW_USER_IDS`).
    - Post in an allowlisted channel → it should respond.
    - Post in a non-allowlisted channel → it should **not** respond.
 
-7. **Channel context auto-scaffold (optional):**
+8. **Channel context auto-scaffold (optional):**
    - Create a new channel and post once. DiscoClaw should auto-create a stub context file under `content/discord/channels/` and add it to `content/discord/DISCORD.md`.
 
 ## Canvas Activities (optional)
