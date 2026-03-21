@@ -565,6 +565,131 @@ describe('image input precedence — direct > reply-ref > history', () => {
   });
 });
 
+describe('manual message finalization guard', () => {
+  const PROMISED_ACTION_WARNING =
+    'Warning: this reply says Discord-managed work is starting or being handled now';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetAbortRegistry();
+    resetInflightReplies();
+  });
+
+  it('warns and stages recovery when a reply claims immediate work but emits zero actionable or executed actions', async () => {
+    const order: string[] = [];
+    const runtime = {
+      id: 'test',
+      capabilities: new Set<string>(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: "I'm creating that task now." };
+        yield { type: 'done' };
+      },
+    };
+    const reply = {
+      id: 'reply-1',
+      edit: vi.fn(async (opts: { content: string }) => {
+        order.push(`edit:${opts.content}`);
+      }),
+      delete: vi.fn(async () => undefined),
+      react: vi.fn(async () => ({ remove: vi.fn(async () => undefined) })),
+    };
+    const msg = makeGuildMessage(reply);
+    const actionsMod = await import('./actions.js');
+    const watchdog = {
+      start: vi.fn(async () => ({})),
+      stageRecovery: vi.fn(async (_runId: string, input: { text?: string | null }) => {
+        order.push(`stage:${input.text ?? ''}`);
+        return {};
+      }),
+      complete: vi.fn(async () => null),
+      startupSweep: vi.fn(async () => ({
+        interruptedRuns: 0,
+        finalRetried: 0,
+        finalPosted: 0,
+        finalFailed: 0,
+      })),
+    };
+    const params = makeParams(runtime, { longRunWatchdog: watchdog });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(vi.mocked(actionsMod.executeDiscordActions)).not.toHaveBeenCalled();
+    expect(watchdog.stageRecovery).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        text: expect.stringContaining(PROMISED_ACTION_WARNING),
+      }),
+    );
+    const stagedWarningIndex = order.findIndex(
+      (entry) => entry.startsWith('stage:') && entry.includes(PROMISED_ACTION_WARNING),
+    );
+    const finalEditWarningIndex = order.findLastIndex(
+      (entry) => entry.startsWith('edit:') && entry.includes(PROMISED_ACTION_WARNING),
+    );
+    expect(stagedWarningIndex).toBeGreaterThanOrEqual(0);
+    expect(finalEditWarningIndex).toBeGreaterThanOrEqual(0);
+    expect(stagedWarningIndex).toBeLessThan(finalEditWarningIndex);
+    expect(reply.edit).toHaveBeenLastCalledWith({
+      content: expect.stringContaining(PROMISED_ACTION_WARNING),
+      allowedMentions: { parse: [] },
+    });
+  });
+
+  it('does not warn when a real action executed', async () => {
+    const runtime = {
+      id: 'test',
+      capabilities: new Set<string>(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: "I'm creating that task now." };
+        yield { type: 'done' };
+      },
+    };
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply);
+    const actionsMod = await import('./actions.js');
+    vi.mocked(actionsMod.parseDiscordActions).mockReturnValueOnce({
+      actions: [{ type: 'sendMessage' } as any],
+      cleanText: "I'm creating that task now.",
+      strippedUnrecognizedTypes: [],
+      parseFailures: 0,
+    });
+    vi.mocked(actionsMod.executeDiscordActions).mockResolvedValueOnce([
+      { ok: true, summary: 'sent' } as any,
+    ]);
+    const watchdog = {
+      start: vi.fn(async () => ({})),
+      stageRecovery: vi.fn(async () => ({})),
+      complete: vi.fn(async () => null),
+      startupSweep: vi.fn(async () => ({
+        interruptedRuns: 0,
+        finalRetried: 0,
+        finalPosted: 0,
+        finalFailed: 0,
+      })),
+    };
+    const params = makeParams(runtime, { longRunWatchdog: watchdog });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(vi.mocked(actionsMod.executeDiscordActions)).toHaveBeenCalledTimes(1);
+    expect(reply.edit).toHaveBeenLastCalledWith({
+      content: "I'm creating that task now.",
+      allowedMentions: { parse: [] },
+    });
+    expect(watchdog.stageRecovery).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        text: "I'm creating that task now.",
+      }),
+    );
+    expect(reply.edit.mock.calls.at(-1)?.[0]?.content).not.toContain(PROMISED_ACTION_WARNING);
+  });
+});
+
 describe('message finalization recovery staging', () => {
   const COMPLETED_WITHOUT_VISIBLE_OUTPUT =
     'Completed successfully. Discord actions ran, but there was no additional reply text.';

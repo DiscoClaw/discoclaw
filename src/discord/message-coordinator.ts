@@ -85,7 +85,7 @@ import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
 import { TaskStore } from '../tasks/store.js';
 import { isChannelPublic, appendEntry, buildExcerptSummary } from './shortterm-memory.js';
-import { editThenSendChunks, editThenSendChunksWithPrefix, shouldSuppressFollowUp, appendUnavailableActionTypesNotice, appendParseFailureNotice, buildFailureRetryPlaceholder } from './output-common.js';
+import { editThenSendChunks, editThenSendChunksWithPrefix, shouldSuppressFollowUp, appendUnavailableActionTypesNotice, appendParseFailureNotice, appendPromisedDiscordActionWithoutExecutionNotice, buildFailureRetryPlaceholder } from './output-common.js';
 import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import { resolveReplyReference } from './reply-reference.js';
 import type { MessageWithReference } from './reply-reference.js';
@@ -4223,6 +4223,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               processedText = parsedCapsule.cleanText;
               processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
               processedText = appendParseFailureNotice(processedText, parseFailuresCount);
+              processedText = appendPromisedDiscordActionWithoutExecutionNotice(
+                processedText,
+                actions.length,
+                actionResults.length,
+              );
 
               const shouldQueueFollowUp =
                 followUpDepth < params.actionFollowupDepth
