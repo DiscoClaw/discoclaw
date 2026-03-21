@@ -53,7 +53,7 @@ Legend: **done** | *stub* | ~~cut~~
 | Universal CLI adapter factory (spawns any CLI runtime via strategy) | `src/runtime/cli-adapter.ts` | **done** |
 | CLI strategy interface (contract for Claude/Codex/Gemini strategies) | `src/runtime/cli-strategy.ts` | **done** |
 | Template strategy (documents how to add a new CLI runtime) | `src/runtime/strategies/template-strategy.ts` | **done** |
-| OpenRouter runtime (OpenAI-compat adapter at `openrouter.ai/api/v1`, `id: 'openrouter'`) | `src/runtime/openai-compat.ts`, `src/health/credential-check.ts` | **done** |
+| OpenRouter env-key path (OpenAI-compat adapter at `openrouter.ai/api/v1`, `id: 'openrouter'`, with shipped `GET /models` credential proof and `openrouter-key: ok` readiness surface; broader parity deferred, see [OpenRouter env-key parity checklist](configuration.md#openrouter-env-key-parity-checklist)) | `src/runtime/openai-compat.ts`, `src/health/credential-check.ts`, `src/discord/status-command.ts` | **done** |
 | Loop detector (detects runaway tool-calling patterns and aborts degenerate runs) | `src/runtime/loop-detector.ts`, `src/runtime/loop-detector.test.ts` | **done** |
 | Global supervisor wrapper (runtime-wide `plan -> execute -> evaluate -> decide` loop with retries/escalation, deterministic retry blocking, structured bail handoff, and cycle audit events) | `src/runtime/global-supervisor.ts`, `src/index.runtime.ts`, `src/index.ts` | **done** |
 | Runtime failure normalization (`RuntimeFailure` envelope, legacy payload parsing, centralized user-message mapping) | `src/runtime/runtime-failure.ts`, `src/runtime/runtime-failure.test.ts`, `src/discord/user-errors.ts` | **done** |

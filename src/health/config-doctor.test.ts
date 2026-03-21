@@ -86,6 +86,30 @@ describe('detectNpmManagedRuntimeSupportBoundary', () => {
     expect(findings[0]?.recommendation).not.toContain('discoclaw claude auth-smoke');
   });
 
+  it('treats OPENROUTER_API_KEY as config presence only and points operators at live readiness evidence', async () => {
+    const cwd = await makeTempInstall('doctor-npm-managed-openrouter-runtime-boundary');
+    await writeEnv(cwd, [
+      'PRIMARY_RUNTIME=openrouter',
+      'OPENROUTER_API_KEY=sk-or-test',
+    ]);
+
+    const ctx = await loadDoctorContext({ cwd });
+    const findings = detectNpmManagedRuntimeSupportBoundary(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      id: 'npm-managed:runtime-support-boundary',
+      severity: 'warn',
+      autoFixable: false,
+    });
+    expect(findings[0]?.message).toContain('config-only');
+    expect(findings[0]?.message).toContain('does not prove');
+    expect(findings[0]?.message).toContain('OPENROUTER_API_KEY-backed');
+    expect(findings[0]?.recommendation).toContain('OPENROUTER_API_KEY as config presence only');
+    expect(findings[0]?.recommendation).toContain('openrouter-key: ok');
+    expect(findings[0]?.recommendation).not.toContain('auth success');
+  });
+
   it('stays quiet on source installs', async () => {
     const cwd = await makeTempInstall('doctor-source-runtime-boundary');
     await fs.mkdir(path.join(cwd, '.git'));
@@ -363,6 +387,22 @@ describe('inspect', () => {
     expect(report.findings.map((finding) => finding.id)).toEqual([
       'npm-managed:runtime-support-boundary',
     ]);
+  });
+
+  it('includes the OpenRouter npm-managed boundary finding without overclaiming readiness', async () => {
+    const cwd = await makeTempInstall('doctor-inspect-npm-managed-openrouter-runtime-boundary');
+    await writeEnv(cwd, [
+      'PRIMARY_RUNTIME=openrouter',
+      'OPENROUTER_API_KEY=sk-or-test',
+    ]);
+
+    const report = await inspect({ cwd });
+
+    expect(report.installMode).toBe('npm-managed');
+    expect(report.findings.map((finding) => finding.id)).toEqual([
+      'npm-managed:runtime-support-boundary',
+    ]);
+    expect(report.findings[0]?.recommendation).toContain('openrouter-key: ok');
   });
 
 });

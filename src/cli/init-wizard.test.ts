@@ -292,6 +292,15 @@ describe('init wizard copy contract', () => {
       'For daemon installs, keep parity as a manual check: the service installer still pins `/usr/bin/node` plus a fixed `PATH`, so the service can diverge from the shell that passed the Codex prompt.',
     );
   });
+
+  it('uses the revised OpenRouter proof-boundary guidance', () => {
+    expect(initWizardSource).toContain(
+      '`discoclaw init` only writes the existing `OPENROUTER_API_KEY` env-key path; it does not prove broader OpenRouter readiness.',
+    );
+    expect(initWizardSource).toContain(
+      'Start discoclaw and confirm `!status` (or the startup credential report) shows `openrouter-key: ok`.',
+    );
+  });
 });
 
 describe('runInitWizard', () => {
@@ -394,7 +403,7 @@ describe('runInitWizard', () => {
       throw new Error('binary not found');
     });
     vi.mocked(ensureWorkspaceBootstrapFiles).mockResolvedValue([]);
-    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     try {
       await runInitWizard();
@@ -408,6 +417,12 @@ describe('runInitWizard', () => {
     expect(newEnv).toContain('OPENROUTER_MODEL=anthropic/claude-sonnet-4-20250514');
     expect(newEnv).toContain('DISCOCLAW_DISCORD_ACTIONS=1');
     expect(newEnv).toContain(`DISCOCLAW_DATA_DIR=${path.join(tmpDir, 'data')}`);
+    expect(logSpy).toHaveBeenCalledWith(
+      '  1. `discoclaw init` only writes the existing `OPENROUTER_API_KEY` env-key path; it does not prove broader OpenRouter readiness.',
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      '  2. Start discoclaw and confirm `!status` (or the startup credential report) shows `openrouter-key: ok`.',
+    );
   });
 
   it('writes codex fast-runtime split config when provider 4 and OpenAI key are provided', async () => {

@@ -401,6 +401,13 @@ export function detectNpmManagedRuntimeSupportBoundary(ctx: DoctorContext): Doct
     );
   }
 
+  if (configuredRuntimes.has('openrouter')) {
+    proofGates.push('a live OPENROUTER_API_KEY-backed request for the OpenRouter path');
+    recommendations.push(
+      'For OpenRouter paths, treat OPENROUTER_API_KEY as config presence only; start discoclaw and confirm `!status` (or the startup credential report) shows `openrouter-key: ok` before claiming the shipped runtime sees that path.',
+    );
+  }
+
   if (configuredRuntimes.has('claude')) {
     proofGates.push('Claude auth, first useful reply, or daemon/restart parity for the Claude path');
     recommendations.push(

@@ -169,6 +169,31 @@ describe('handleModelsCommand', () => {
     spy.mockRestore();
   });
 
+  it('show appends the OpenRouter support-boundary note when OpenRouter is active', () => {
+    const spy = vi.spyOn(actionsConfig, 'executeConfigAction').mockReturnValue({
+      ok: true,
+      summary: '**runtime**: `openrouter`\n**chat**: `anthropic/claude-sonnet-4`',
+    });
+    const result = handleModelsCommand(
+      { action: 'show' },
+      {
+        configCtx: {
+          ...mockConfigCtx,
+          runtime: {
+            id: 'openrouter',
+            defaultModel: 'anthropic/claude-sonnet-4',
+          } as any,
+          runtimeName: 'openrouter',
+        },
+        configEnabled: true,
+      },
+    );
+    expect(result).toContain('OPENROUTER_API_KEY');
+    expect(result).toContain('config/routing state only');
+    expect(result).toContain('openrouter-key: ok');
+    spy.mockRestore();
+  });
+
   it('set delegates to executeConfigAction modelSet', () => {
     const spy = vi.spyOn(actionsConfig, 'executeConfigAction').mockReturnValue({
       ok: true,
@@ -183,6 +208,32 @@ describe('handleModelsCommand', () => {
       mockConfigCtx,
     );
     expect(result).toContain('Model updated');
+    spy.mockRestore();
+  });
+
+  it('set appends the OpenRouter verification note after switching chat to OpenRouter', () => {
+    const openrouterCtx: ConfigContext = {
+      ...mockConfigCtx,
+      runtime: {
+        id: 'openrouter',
+        defaultModel: 'anthropic/claude-sonnet-4',
+      } as any,
+      runtimeName: 'openrouter',
+    };
+    const spy = vi.spyOn(actionsConfig, 'executeConfigAction').mockImplementation(() => {
+      openrouterCtx.runtimeName = 'openrouter';
+      return {
+        ok: true,
+        summary: 'Model updated: runtime → openrouter, chat → anthropic/claude-sonnet-4 (adapter default)',
+      };
+    });
+    const result = handleModelsCommand(
+      { action: 'set', role: 'chat', model: 'openrouter' },
+      { configCtx: openrouterCtx, configEnabled: true },
+    );
+    expect(result).toContain('runtime → openrouter');
+    expect(result).toContain('OPENROUTER_API_KEY');
+    expect(result).toContain('!status');
     spy.mockRestore();
   });
 
@@ -205,6 +256,13 @@ describe('handleModelsCommand', () => {
     expect(result).toContain('chat');
     expect(result).toContain('forge-drafter');
     expect(result).toContain('!models set chat sonnet');
+  });
+
+  it('help documents the OpenRouter env-key path and verification boundary', () => {
+    const result = handleModelsCommand({ action: 'help' }, enabled);
+    expect(result).toContain('OPENROUTER_API_KEY');
+    expect(result).toContain('config/routing only');
+    expect(result).toContain('openrouter-key: ok');
   });
 
   it('help mentions imagegen configuration', () => {

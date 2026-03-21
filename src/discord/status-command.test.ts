@@ -21,6 +21,11 @@ function makeSnapshot(overrides: Partial<StatusSnapshot> = {}): StatusSnapshot {
     rollingSummaryCharCount: 0,
     coldStorageChunkCount: null,
     apiChecks: [],
+    openrouter: {
+      enabled: false,
+      baseUrl: 'https://openrouter.ai/api/v1',
+      check: null,
+    },
     paFiles: [],
     ...overrides,
   };
@@ -147,6 +152,26 @@ describe('renderStatusReport', () => {
     expect(out).toContain('API: discord-token: ok, openai-key: skip');
   });
 
+  it('renders explicit OpenRouter proof row for an active runtime path', () => {
+    const snap = makeSnapshot({
+      apiChecks: [
+        { name: 'discord-token', status: 'ok' },
+        { name: 'openrouter-key', status: 'ok' },
+      ],
+      openrouter: {
+        enabled: true,
+        baseUrl: 'https://openrouter.ai/api/v1',
+        check: { name: 'openrouter-key', status: 'ok' },
+      },
+    });
+    const out = renderStatusReport(snap);
+    expect(out).toContain(
+      'OpenRouter: openrouter-key: ok (OPENROUTER_API_KEY via GET /models; base=https://openrouter.ai/api/v1)',
+    );
+    expect(out).toContain('API: discord-token: ok');
+    expect(out).not.toContain('API: discord-token: ok, openrouter-key: ok');
+  });
+
   it('renders API FAIL with message', () => {
     const snap = makeSnapshot({
       apiChecks: [
@@ -155,6 +180,38 @@ describe('renderStatusReport', () => {
     });
     const out = renderStatusReport(snap);
     expect(out).toContain('discord-token: FAIL (invalid or revoked token (401))');
+  });
+
+  it('renders OpenRouter FAIL with failure detail and custom base URL', () => {
+    const snap = makeSnapshot({
+      apiChecks: [
+        {
+          name: 'openrouter-key',
+          status: 'fail',
+          message: 'invalid OPENROUTER_API_KEY (401 from GET /models)',
+        },
+      ],
+      openrouter: {
+        enabled: true,
+        baseUrl: 'https://custom-or.example.com/v1',
+        check: {
+          name: 'openrouter-key',
+          status: 'fail',
+          message: 'invalid OPENROUTER_API_KEY (401 from GET /models)',
+        },
+      },
+    });
+    const out = renderStatusReport(snap);
+    expect(out).toContain(
+      'OpenRouter: openrouter-key: FAIL (invalid OPENROUTER_API_KEY (401 from GET /models); base=https://custom-or.example.com/v1)',
+    );
+  });
+
+  it('renders OpenRouter inactive when the provider is not configured', () => {
+    const out = renderStatusReport(makeSnapshot());
+    expect(out).toContain(
+      'OpenRouter: inactive (provider not configured; base=https://openrouter.ai/api/v1)',
+    );
   });
 
   it('renders API: no checks when array is empty', () => {
@@ -401,10 +458,15 @@ describe('collectStatusSnapshot', () => {
     });
     expect(snap.apiChecks).toHaveLength(2);
     expect(snap.apiChecks[1]).toEqual({ name: 'openrouter-key', status: 'skip' });
+    expect(snap.openrouter).toEqual({
+      enabled: true,
+      baseUrl: 'https://openrouter.ai/api/v1',
+      check: { name: 'openrouter-key', status: 'skip' },
+    });
   });
 
   it('passes openrouterBaseUrl to checkOpenRouterKey', async () => {
-    await collectStatusSnapshot(
+    const snap = await collectStatusSnapshot(
       baseOpts({
         openrouterApiKey: 'sk-or-key',
         openrouterBaseUrl: 'https://custom-or.example.com/v1',
@@ -415,6 +477,7 @@ describe('collectStatusSnapshot', () => {
       apiKey: 'sk-or-key',
       baseUrl: 'https://custom-or.example.com/v1',
     });
+    expect(snap.openrouter.baseUrl).toBe('https://custom-or.example.com/v1');
   });
 
   it('runs both openai and openrouter checks when both are in activeProviders', async () => {
@@ -428,6 +491,17 @@ describe('collectStatusSnapshot', () => {
     expect(credentialCheck.checkOpenAiKey).toHaveBeenCalled();
     expect(credentialCheck.checkOpenRouterKey).toHaveBeenCalled();
     expect(snap.apiChecks).toHaveLength(3);
+  });
+
+  it('marks the OpenRouter proof row inactive when openrouter is not an active provider', async () => {
+    const snap = await collectStatusSnapshot(
+      baseOpts({ openrouterApiKey: 'sk-or-key', activeProviders: new Set(['claude']) }),
+    );
+    expect(snap.openrouter).toEqual({
+      enabled: false,
+      baseUrl: 'https://openrouter.ai/api/v1',
+      check: null,
+    });
   });
 
   it('passes coldStorageChunkCount through to snapshot', async () => {

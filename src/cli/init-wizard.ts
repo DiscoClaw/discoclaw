@@ -483,8 +483,9 @@ export async function runInitWizard(): Promise<void> {
       console.log('  7. For daemon installs, keep parity as a manual check: the service installer still pins `/usr/bin/node` plus a fixed `PATH`, so the service can diverge from the shell that passed the Codex prompt.');
     }
   } else if (values.PRIMARY_RUNTIME === 'openrouter') {
-    console.log('  1. Verify your OPENROUTER_API_KEY is correct.');
-    console.log(`  2. ${daemonHint}`);
+    console.log('  1. `discoclaw init` only writes the existing `OPENROUTER_API_KEY` env-key path; it does not prove broader OpenRouter readiness.');
+    console.log('  2. Start discoclaw and confirm `!status` (or the startup credential report) shows `openrouter-key: ok`.');
+    console.log(`  3. ${daemonHint}`);
   }
   console.log('');
 

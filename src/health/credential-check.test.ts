@@ -189,38 +189,50 @@ describe('checkOpenRouterKey', () => {
   it('returns ok for a 200 response', async () => {
     mockFetch(200, '{"object":"list","data":[]}');
     const result = await checkOpenRouterKey({ apiKey: 'sk-or-valid' });
-    expect(result.name).toBe('openrouter-key');
-    expect(result.status).toBe('ok');
-    expect(result.message).toBeUndefined();
+    expect(result).toEqual({
+      name: 'openrouter-key',
+      status: 'ok',
+    });
   });
 
-  it('returns fail with 401 message for an invalid key', async () => {
+  it('returns a stable invalid-key classification for 401', async () => {
     mockFetch(401, '{"error":{"message":"Invalid API key"}}');
     const result = await checkOpenRouterKey({ apiKey: 'sk-or-bad' });
-    expect(result.status).toBe('fail');
-    expect(result.message).toContain('401');
+    expect(result).toEqual({
+      name: 'openrouter-key',
+      status: 'fail',
+      message: 'invalid OPENROUTER_API_KEY (401 from GET /models)',
+    });
   });
 
-  it('returns fail with 403 message for a key lacking permissions', async () => {
+  it('returns a stable permission-failure classification for 403', async () => {
     mockFetch(403, '{"error":{"message":"Forbidden"}}');
     const result = await checkOpenRouterKey({ apiKey: 'sk-or-no-perms' });
-    expect(result.status).toBe('fail');
-    expect(result.message).toContain('403');
+    expect(result).toEqual({
+      name: 'openrouter-key',
+      status: 'fail',
+      message: 'permission failure for OPENROUTER_API_KEY (403 from GET /models)',
+    });
   });
 
   it('returns fail for an unexpected HTTP status', async () => {
     mockFetch(429, '{"error":{"message":"Rate limit exceeded"}}');
     const result = await checkOpenRouterKey({ apiKey: 'sk-or-test' });
-    expect(result.status).toBe('fail');
-    expect(result.message).toContain('429');
+    expect(result).toEqual({
+      name: 'openrouter-key',
+      status: 'fail',
+      message: 'unexpected status 429 from OpenRouter GET /models',
+    });
   });
 
-  it('returns fail on network error without throwing', async () => {
+  it('returns a stable network-failure classification without throwing', async () => {
     mockFetchError('connect ETIMEDOUT');
     const result = await checkOpenRouterKey({ apiKey: 'sk-or-test' });
-    expect(result.status).toBe('fail');
-    expect(result.message).toContain('network error');
-    expect(result.message).toContain('ETIMEDOUT');
+    expect(result).toEqual({
+      name: 'openrouter-key',
+      status: 'fail',
+      message: 'network failure reaching OpenRouter GET /models: connect ETIMEDOUT',
+    });
   });
 
   it('uses the default OpenRouter base URL when none is provided', async () => {
@@ -522,5 +534,18 @@ describe('formatCredentialReport', () => {
     const out = formatCredentialReport(report);
     expect(out).toContain('discord-token: ok');
     expect(out).toContain('openai-key: FAIL (invalid or expired key (401))');
+  });
+
+  it('formats the stable openrouter-key wording verbatim', () => {
+    const report = makeReport([
+      {
+        name: 'openrouter-key',
+        status: 'fail',
+        message: 'invalid OPENROUTER_API_KEY (401 from GET /models)',
+      },
+    ]);
+    expect(formatCredentialReport(report)).toBe(
+      'openrouter-key: FAIL (invalid OPENROUTER_API_KEY (401 from GET /models))',
+    );
   });
 });
