@@ -5,13 +5,13 @@ Scope: what `pnpm preflight:blank-machine` / `discoclaw doctor` can actually pro
 
 ## 1.0 Verdict
 
-Verdict: `FAIL` for fully automated Claude readiness.
+Verdict: `PASS` for the repo-owned source-checkout Claude readiness path.
 
 Reason:
 
 - the automated doctor can verify local prerequisites such as Node, pnpm, Claude CLI presence/version, Discord env formatting, and the forum bootstrap path
-- it cannot verify Claude login/auth state today
-- Claude login remains a manual operator gate until the codebase has an auth-aware smoke check
+- the repo now ships `pnpm claude:auth-smoke` as the Claude auth-aware smoke check for this source path
+- Claude login still happens interactively, but the pre-login and post-login validation step is now a checked-in repo command instead of a handwritten raw prompt
 
 ## Automated Contract
 
@@ -24,6 +24,13 @@ Reason:
 
 They should not claim that Claude is ready end-to-end just because the CLI binary exists.
 
+`pnpm claude:auth-smoke` is the separate Claude auth validator for this path. It runs one minimal Claude prompt from the repo and classifies the result as:
+
+- authenticated
+- unauthenticated
+- missing CLI
+- other Claude smoke failure
+
 ## Manual Validation Path
 
 ### Pre-login
@@ -33,7 +40,15 @@ They should not claim that Claude is ready end-to-end just because the CLI binar
    pnpm preflight:blank-machine
    ```
 2. Confirm the automated checks pass.
-3. Confirm the output explicitly says Claude auth is manual and points back to this audit memo.
+3. Confirm the output explicitly says Claude auth validation is separate and points you to `pnpm claude:auth-smoke`.
+4. Run:
+   ```bash
+   pnpm claude:auth-smoke
+   ```
+5. Confirm the expected pre-login result includes:
+   ```text
+   Claude CLI appears installed but not authenticated.
+   ```
 
 ### Login gate
 
@@ -42,16 +57,19 @@ They should not claim that Claude is ready end-to-end just because the CLI binar
 
 ### Post-login
 
-1. Run a trivial Claude CLI prompt from the repo:
+1. Re-run:
    ```bash
-   claude -p -- "Reply with OK"
+   pnpm claude:auth-smoke
    ```
-2. Confirm the CLI returns a normal text response instead of an auth/login error.
-3. Treat that manual prompt result, together with a passing `pnpm preflight:blank-machine`, as the current 1.0 readiness check.
+2. Confirm the expected post-login result includes:
+   ```text
+   Claude CLI answered the minimal prompt.
+   ```
+3. Treat that authenticated smoke result, together with a passing `pnpm preflight:blank-machine`, as the current 1.0 readiness check for this source path.
 
 ## Follow-up Gap
 
-To move this audit to `PASS`, the repo needs a non-misleading automated auth smoke path that can distinguish:
+This is now `PASS` for the current source-checkout contract, but it is still not a single-command fully automated Claude login proof. The remaining gap to that higher bar is an integrated flow that can distinguish:
 
 - Claude CLI missing
 - Claude CLI installed but not authenticated

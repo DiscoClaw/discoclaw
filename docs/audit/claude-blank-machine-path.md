@@ -9,7 +9,7 @@ This audit checks the shipped path a new operator would actually encounter:
 
 - setup and init copy
 - `pnpm preflight` / doctor copy
-- the required unauthenticated Claude smoke step
+- the required repo-owned unauthenticated Claude smoke step
 - the post-login rerun
 - first reply, follow-up reply, task flow, cron flow, and restart/recovery behavior
 
@@ -22,7 +22,7 @@ Verdict: `PASS`
 Reason:
 
 - the stranger-facing setup, init, preflight, and configuration surfaces now describe the real contract instead of implying full end-to-end Claude readiness
-- the required unauthenticated failure and post-login rerun are explicitly recorded as a manual Claude CLI validation gate
+- the required unauthenticated failure and post-login rerun are explicitly recorded through the shipped `pnpm claude:auth-smoke` command rather than a handwritten raw Claude prompt
 - the first reply, follow-up, task, cron, and restart/recovery paths all have direct code or test coverage in the repo
 
 Non-goal of this `PASS`:
@@ -35,8 +35,8 @@ Non-goal of this `PASS`:
 | --- | --- | --- | --- |
 | Setup / init surfaces | `pnpm run setup` and `discoclaw init` tell the operator that forum channels can auto-create on first connect and that Claude login is manual. | `scripts/setup.ts`, `scripts/setup.test.ts`, `src/cli/init-wizard.ts`, `src/cli/init-wizard.test.ts` | `no-blocker` |
 | Preflight / doctor surfaces | `pnpm preflight:blank-machine` explicitly says it only verifies local prerequisites, allows bootstrap-derived forum IDs, and points Claude operators to a manual auth validation path. | `scripts/doctor.ts`, `scripts/doctor.test.ts`, `scripts/doctor-lib.test.ts`, `docs/configuration.md` | `no-blocker` |
-| Unauthenticated first run | The shipped stranger path now explicitly requires running `claude -p -- "Reply with OK"` before login and confirming an auth/login failure. That is the correct expected first-run failure. | `scripts/setup.ts`, `scripts/setup.test.ts`, `src/cli/init-wizard.ts`, `src/cli/init-wizard.test.ts` | `accepted-manual-gate` |
-| Post-login rerun | The shipped path then requires logging in with `claude`, rerunning the same prompt, and confirming normal text output. The repo documents this, but does not auto-prove it. | `scripts/setup.ts`, `src/cli/init-wizard.ts`, `docs/audit/claude-blank-machine-readiness.md` | `accepted-manual-gate` |
+| Unauthenticated first run | The shipped stranger path now explicitly requires running `pnpm claude:auth-smoke` before login and confirming `Claude CLI appears installed but not authenticated.` That is the correct expected first-run failure. | `package.json`, `scripts/claude-auth-smoke.ts`, `scripts/claude-auth-smoke.test.ts`, `scripts/setup.ts`, `src/cli/init-wizard.ts` | `accepted-manual-gate` |
+| Post-login rerun | The shipped path then requires logging in with `claude`, rerunning `pnpm claude:auth-smoke`, and confirming `Claude CLI answered the minimal prompt.` The repo documents this, but does not auto-run it from preflight. | `package.json`, `scripts/claude-auth-smoke.ts`, `scripts/claude-auth-smoke.test.ts`, `scripts/setup.ts`, `docs/audit/claude-blank-machine-readiness.md` | `accepted-manual-gate` |
 | First reply | Normal message runs start a real watchdog-backed reply lifecycle instead of relying on a generic completion notice, and reply rendering/edit behavior is covered. | `src/discord-followup.test.ts`, `src/discord/output-common.test.ts` | `no-blocker` |
 | Follow-up reply | Query-action follow-ups post an explicit placeholder, keep lifecycle state on that placeholder, and complete with the follow-up result. | `src/discord-followup.test.ts`, `src/discord/message-coordinator.followup-lifecycle.test.ts` | `no-blocker` |
 | Task flow | Tasks resolve from an explicit forum ID or bootstrap-provided system forum ID, and `taskCreate` is covered as a direct action path. | `src/tasks/initialize.ts`, `src/tasks/initialize.test.ts`, `src/tasks/task-action-executor.test.ts`, `docs/tasks.md` | `no-blocker` |
@@ -55,17 +55,17 @@ The repo now consistently says the same thing in the three stranger-facing entry
 - `discoclaw init`
 - `pnpm preflight:blank-machine` / doctor
 
-Those surfaces no longer claim that Claude is fully ready just because the binary exists. They explicitly stop at what the repo can verify locally and push Claude auth into a manual smoke step.
+Those surfaces no longer claim that Claude is fully ready just because the binary exists. They explicitly stop at what the repo can verify locally and push Claude auth into the repo-owned `pnpm claude:auth-smoke` step.
 
-### Finding 2: Claude login/auth remains a required human gate
+### Finding 2: Claude login/auth remains a required human gate, but the smoke path is repo-owned
 
 Classification: `accepted-manual-gate`
 
 This is still a real dependency, but under the narrowed 1.0 contract it is recorded, not hidden. The required sequence is:
 
-1. Run `claude -p -- "Reply with OK"` before login and confirm an auth/login failure.
+1. Run `pnpm claude:auth-smoke` before login and confirm `Claude CLI appears installed but not authenticated.`
 2. Log in with `claude`.
-3. Repeat the same prompt and confirm normal text output.
+3. Repeat `pnpm claude:auth-smoke` and confirm `Claude CLI answered the minimal prompt.`
 
 That is acceptable for this 1.0 audit because the automated surfaces no longer overclaim beyond that boundary.
 
@@ -95,4 +95,4 @@ Why it passes:
 
 What would change this from "manual-gate PASS" to "fully automated PASS":
 
-- a checked auth-aware Claude smoke path that can distinguish missing CLI, unauthenticated CLI, and authenticated minimal prompt success without relying on ambiguous operator interpretation
+- a single-command automated flow that runs the auth-aware Claude smoke itself instead of requiring the operator to execute `pnpm claude:auth-smoke` around the interactive login step
