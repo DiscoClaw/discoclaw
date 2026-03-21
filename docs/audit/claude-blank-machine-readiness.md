@@ -1,7 +1,7 @@
 # Claude Blank-Machine Readiness Audit
 
 Date: 2026-03-20
-Scope: what `pnpm preflight:blank-machine` / `discoclaw doctor` can actually prove for a first-time Claude operator on this repo today.
+Scope: what the source-checkout preflight surface owned by `scripts/doctor.ts` can actually prove for a first-time Claude operator on this repo today.
 
 ## 1.0 Verdict
 
@@ -15,7 +15,7 @@ Reason:
 
 ## Automated Contract
 
-`pnpm preflight:blank-machine` and `discoclaw doctor` should only claim the prerequisites they can verify directly:
+`pnpm preflight:blank-machine` and the underlying `scripts/doctor.ts` source-checkout flow should only claim the prerequisites they can verify directly:
 
 - local binaries and versions
 - required env presence and basic formatting

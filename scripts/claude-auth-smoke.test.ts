@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CLAUDE_AUTH_SMOKE_PROMPT,
@@ -7,6 +8,12 @@ import {
   runClaudeAuthSmoke,
   type ClaudeAuthSmokeCommandResult,
 } from './claude-auth-smoke.js';
+
+const packageJson = JSON.parse(
+  fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as {
+  scripts?: Record<string, string>;
+};
 
 function makeResult(overrides: Partial<ClaudeAuthSmokeCommandResult> = {}): ClaudeAuthSmokeCommandResult {
   return {
@@ -21,6 +28,10 @@ function makeResult(overrides: Partial<ClaudeAuthSmokeCommandResult> = {}): Clau
 }
 
 describe('claude-auth-smoke', () => {
+  it('exports pnpm claude:auth-smoke through the repo-owned script entrypoint', () => {
+    expect(packageJson.scripts?.['claude:auth-smoke']).toBe('tsx scripts/claude-auth-smoke.ts');
+  });
+
   it('runs the repo-owned minimal Claude prompt at the live boundary', async () => {
     const env: NodeJS.ProcessEnv = { CLAUDE_BIN: 'claude-custom' };
     const lines: string[] = [];
