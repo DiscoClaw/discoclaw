@@ -3,6 +3,12 @@
 Date: 2026-03-21
 Scope: the first auditable DiscoClaw slice for the shipped `OPENROUTER_API_KEY` path, limited to what the product can prove today through its existing readiness surfaces.
 
+This memo intentionally stays narrow. Use it for the credential-only question:
+
+- can the running DiscoClaw instance see the configured `OPENROUTER_API_KEY` path and complete the shipped `GET /models` probe?
+
+For the broader first-slice parity boundary, including install-mode differences, the repo smoke evidence path for source checkouts, the enforcement behind read-only-tool claims, and the deferred tier-default / model-recommendation work, use [OpenRouter Parity Audit](openrouter-parity-audit.md).
+
 ## 1.0 Verdict
 
 Verdict: `PASS` for the narrowed `OPENROUTER_API_KEY` support slice only.
@@ -77,3 +83,5 @@ This audit exists because summary/setup docs had previously compressed too many 
 - `docs/configuration.md` OpenRouter configuration summary
 
 Those docs should now be read as summary surfaces only. This file is the durable reference for what the shipped `OPENROUTER_API_KEY` path can actually support-claim today, what evidence counts, and where the boundary stops.
+
+For anything broader than that env-key proof, do not extend this memo by implication. Hand off to [OpenRouter Parity Audit](openrouter-parity-audit.md), which is the authoritative audit for the wider `ws-1285` install-mode and workload boundary in this first slice.
