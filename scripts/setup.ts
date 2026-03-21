@@ -257,14 +257,27 @@ if (values.PRIMARY_RUNTIME === 'claude') {
   }
 } else {
   console.log('\nNext steps:');
+  let finalStepNumber = 2;
   if (values.PRIMARY_RUNTIME === 'gemini') {
     console.log('  1. Authenticate with Gemini: run `gemini` and follow the prompts.');
   } else if (values.PRIMARY_RUNTIME === 'openai') {
-    console.log('  1. Verify your OPENAI_API_KEY is correct.');
+    finalStepNumber = 3;
+    console.log('  1. `OPENAI_API_KEY` auth is a separate source-checkout proof gate; setup only wrote the config.');
+    console.log('  2. Run `OPENAI_SMOKE_TEST_TIERS=fast pnpm test` and confirm the `openai / fast` smoke passes.');
+    console.log('     If you need exact model evidence instead of the fast-tier check, replace `fast` with your intended tier or model ID.');
   } else if (values.PRIMARY_RUNTIME === 'codex') {
-    console.log('  1. Ensure the Codex binary is installed and accessible.');
+    finalStepNumber = 3;
+    const codexBin = values.CODEX_BIN || 'codex';
+    const codexModel = values.CODEX_MODEL || 'gpt-5.4';
+    console.log('  1. Codex CLI session auth is a separate source-checkout proof gate; setup only wrote the config.');
+    console.log(`  2. Run \`${codexBin} exec -m ${codexModel} --skip-git-repo-check --ephemeral -s read-only -- "Reply with OK"\` and confirm it returns normal text.`);
+    if (values.OPENAI_API_KEY && values.DISCOCLAW_FAST_RUNTIME === 'openai') {
+      finalStepNumber = 4;
+      console.log('  3. The optional OpenAI fast-tier path needs separate `OPENAI_API_KEY` evidence.');
+      console.log('     Run `OPENAI_SMOKE_TEST_TIERS=fast pnpm test` and confirm the `openai / fast` smoke passes.');
+    }
   }
-  console.log('  2. pnpm build && pnpm dev\n');
+  console.log(`  ${finalStepNumber}. pnpm build && pnpm dev\n`);
 }
 
 completed = true;
