@@ -8,7 +8,16 @@ vi.mock('node:fs', () => ({
   existsSync: vi.fn(),
 }));
 
-import { getLocalVersion, getLatestNpmVersion, isNpmManaged, npmGlobalUpgrade } from './npm-managed.js';
+import {
+  getLocalVersion,
+  getLatestNpmVersion,
+  getNpmManagedClaude1p0Audit,
+  getNpmManagedClaude1p0BlockedSurfaces,
+  getNpmManagedClaude1p0ClaimableSurfaces,
+  isNpmManaged,
+  NPM_MANAGED_CLAUDE_1P0_AUDIT,
+  npmGlobalUpgrade,
+} from './npm-managed.js';
 
 // ---------------------------------------------------------------------------
 // getLocalVersion
@@ -19,6 +28,61 @@ describe('getLocalVersion', () => {
     const v = getLocalVersion();
     expect(typeof v).toBe('string');
     expect(v).toMatch(/^\d+\.\d+\.\d+/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// npm-managed Claude 1.0 audit
+// ---------------------------------------------------------------------------
+
+describe('NPM_MANAGED_CLAUDE_1P0_AUDIT', () => {
+  it('pins the current 1.0 verdict to not yet support-claimable', () => {
+    const audit = getNpmManagedClaude1p0Audit();
+
+    expect(audit).toBe(NPM_MANAGED_CLAUDE_1P0_AUDIT);
+    expect(audit.releaseGate).toBe('1.0');
+    expect(audit.installCommand).toBe('npm install -g discoclaw');
+    expect(audit.verdict).toBe('not-yet-support-claimable');
+    expect(audit.supportClaimable).toBe(false);
+  });
+
+  it('keeps the claimable surfaces narrowed to install and update mechanics', () => {
+    expect(getNpmManagedClaude1p0ClaimableSurfaces()).toEqual([
+      expect.objectContaining({ id: 'global-install', supportClaimable: true, state: 'supported' }),
+      expect.objectContaining({ id: 'update', supportClaimable: true, state: 'supported' }),
+    ]);
+  });
+
+  it('keeps auth, daemon, first reply, and restart explicitly blocked', () => {
+    expect(getNpmManagedClaude1p0BlockedSurfaces()).toEqual([
+      expect.objectContaining({
+        id: 'init-login-validation',
+        blockerCodes: ['missing-shipped-auth-smoke', 'missing-claude-bin-persistence'],
+      }),
+      expect.objectContaining({
+        id: 'daemon-install-startup',
+        blockerCodes: ['missing-claude-bin-persistence', 'daemon-runtime-path-mismatch'],
+      }),
+      expect.objectContaining({
+        id: 'first-useful-reply',
+        blockerCodes: ['blocked-by-auth-and-daemon-gaps'],
+      }),
+      expect.objectContaining({
+        id: 'restart-recovery',
+        blockerCodes: ['daemon-runtime-path-mismatch'],
+      }),
+    ]);
+  });
+
+  it('retains the full blocker set for the npm-managed Claude path', () => {
+    const blockerCodes = NPM_MANAGED_CLAUDE_1P0_AUDIT.blockers.map((blocker) => blocker.code);
+
+    expect(blockerCodes).toEqual([
+      'missing-shipped-auth-smoke',
+      'missing-claude-bin-persistence',
+      'daemon-runtime-path-mismatch',
+      'blocked-by-auth-and-daemon-gaps',
+    ]);
   });
 });
 
