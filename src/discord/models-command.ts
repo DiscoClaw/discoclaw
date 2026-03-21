@@ -71,6 +71,36 @@ export type ModelsCommandOpts = {
   configEnabled: boolean;
 };
 
+function isOpenRouterActive(configCtx: ConfigContext): boolean {
+  const activeRuntimeName = configCtx.runtimeName ?? configCtx.runtime.id;
+  const voiceRuntimeName = configCtx.voiceRuntimeName
+    ?? configCtx.botParams.voiceModelCtx?.runtimeName
+    ?? configCtx.botParams.voiceModelCtx?.runtime?.id;
+  return activeRuntimeName === 'openrouter' || voiceRuntimeName === 'openrouter';
+}
+
+function formatOpenRouterBoundaryNote(): string {
+  return [
+    '**OpenRouter path:**',
+    'When OpenRouter is configured, `!models set chat openrouter` or `!models set voice openrouter` uses the existing `OPENROUTER_API_KEY` env-key path.',
+    'That switch is config/routing only; it does not prove broader OpenRouter readiness.',
+    'Verify the shipped runtime path with `!status` (or the startup credential report) and confirm `openrouter-key: ok`.',
+  ].join('\n');
+}
+
+function appendOpenRouterRuntimeNote(summary: string, configCtx: ConfigContext): string {
+  if (!isOpenRouterActive(configCtx)) {
+    return summary;
+  }
+
+  return [
+    summary,
+    '',
+    '**OpenRouter note:** Current routing uses the configured `OPENROUTER_API_KEY` env-key path when OpenRouter is registered.',
+    'This `!models` view shows config/routing state only; verify live readiness with `!status` and confirm `openrouter-key: ok`.',
+  ].join('\n');
+}
+
 export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts): string {
   const { configCtx, configEnabled } = opts;
   if (!configCtx) {
@@ -97,6 +127,7 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '',
       '**Runtime switching (chat and voice roles):**',
       'Setting the `chat` or `voice` role to a runtime name (`openrouter`, `openai`, `gemini`, `codex`, `claude`) switches the active runtime adapter so invocations route through that provider.',
+      formatOpenRouterBoundaryNote(),
       '',
       '**Examples:**',
       '- `!models set chat sonnet`',
@@ -120,7 +151,7 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
 
   if (cmd.action === 'show') {
     const result = executeConfigAction({ type: 'modelShow' }, configCtx);
-    return result.ok ? result.summary : `Error: ${result.error}`;
+    return result.ok ? appendOpenRouterRuntimeNote(result.summary, configCtx) : `Error: ${result.error}`;
   }
 
   if (cmd.action === 'reset') {
@@ -130,5 +161,5 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
 
   // action === 'set'
   const result = executeConfigAction({ type: 'modelSet', role: cmd.role, model: cmd.model }, configCtx);
-  return result.ok ? result.summary : `Error: ${result.error}`;
+  return result.ok ? appendOpenRouterRuntimeNote(result.summary, configCtx) : `Error: ${result.error}`;
 }
