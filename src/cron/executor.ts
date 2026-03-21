@@ -395,7 +395,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         throw new Error(shellOutcome.message);
       }
       shellResult = shellOutcome.shellResult;
-      if (shellResult.stdout === '' && shellResult.stderr === '') {
+      if (preRunRecord?.silent && shellResult.stdout === '' && shellResult.stderr === '') {
         ctx.log?.info({ jobId: job.id, cronId: job.cronId }, 'cron:exec silent shell input produced no output; skipping AI');
         metrics.increment('cron.run.success');
         await recordSuccess(ctx, job);

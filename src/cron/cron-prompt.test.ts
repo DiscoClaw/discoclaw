@@ -281,8 +281,12 @@ describe('buildCronPromptBody — shell input mode', () => {
     expect(body).toContain('stdout:\n```text\nready\n\n```');
     expect(body).toContain('stderr:\n```text\nwarn\n\n```');
     expect(body).toContain('## Cron Output Contract');
-    expect(body).toContain('- `post`: Return only the final Discord message content to post to the target channel.');
-    expect(body).toContain('- `no-post`: Prefer an empty response with no prose or explanation.');
+    expect(body).toContain('- `post`: Return only the final Discord message content to post to the target channel. You may optionally prefix it with `<cron-output>{\"mode\":\"post\"}</cron-output>`.');
+    expect(body).toContain('- `no-post`: Prefer exactly `<cron-output>{\"mode\":\"no-post\"}</cron-output>` and nothing else.');
+    expect(body).toContain('Structured control blocks accepted by the executor:');
+    expect(body).toContain('`<cron-output>{"mode":"post"}</cron-output>`');
+    expect(body).toContain('`<cron-output>{"mode":"no-post"}</cron-output>`');
+    expect(body).toContain('If you emit the `post` block, place the final Discord message content after it.');
     expect(body).toContain('Legacy fallback: if you cannot emit an empty no-post response, respond with exactly `HEARTBEAT_OK` and nothing else.');
     expect(body).toContain('Your output will be posted automatically to the Discord channel #ops.');
   });
@@ -328,8 +332,11 @@ describe('buildCronPromptBody — shell input mode', () => {
     });
 
     expect(body).toContain('## Cron Output Contract');
-    expect(body).toContain('- `post`: Return a non-empty JSON array in the routing format described below.');
-    expect(body).toContain('- `no-post`: Return exactly `[]` and nothing else.');
+    expect(body).toContain('- `post`: Return a non-empty JSON array in the routing format described below. You may optionally prefix it with `<cron-output>{\"mode\":\"post\"}</cron-output>`.');
+    expect(body).toContain('- `no-post`: Prefer exactly `<cron-output>{\"mode\":\"no-post\"}</cron-output>` and nothing else.');
+    expect(body).toContain('`<cron-output>{"mode":"post"}</cron-output>`');
+    expect(body).toContain('`<cron-output>{"mode":"no-post"}</cron-output>`');
+    expect(body).toContain('If you emit the `post` block, place the non-empty JSON routing array after it. If you emit the `no-post` block, do not return a routing payload.');
     expect(body).toContain('Legacy fallback: if you cannot follow the contract cleanly, `[]` remains the accepted no-post sentinel.');
     expect(body).toContain('Respond with a JSON array of routing objects.');
   });

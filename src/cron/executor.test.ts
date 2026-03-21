@@ -1315,6 +1315,28 @@ describe('executeCronJob shell input mode', () => {
     expect(statsStore.getRecord('cron-test0001')?.lastRunStatus).toBe('success');
   });
 
+  it('still invokes the AI when a non-silent shell-input pre-command succeeds with empty stdout and stderr', async () => {
+    const statsPath = path.join(statsDir, 'stats.json');
+    const statsStore = await loadRunStats(statsPath);
+    await statsStore.upsertRecord('cron-test0001', 'thread-1', {
+      silent: false,
+      inputMode: 'shell',
+      inputShell: 'true',
+    });
+
+    const { runtime, invokeSpy } = makeCapturingRuntime('All clear.');
+    const ctx = makeCtx({ statsStore, runtime });
+    const job = makeJob();
+
+    await executeCronJob(job, ctx);
+
+    expect(invokeSpy).toHaveBeenCalledOnce();
+    const guild = (ctx.client as any).guilds.cache.get('guild-1');
+    const channel = guild.channels.cache.get('general');
+    expect(channel.send).toHaveBeenCalledOnce();
+    expect(channel.send.mock.calls[0][0].content).toContain('All clear.');
+  });
+
   it('still invokes the AI when a successful shell-input pre-command writes only to stderr', async () => {
     const statsPath = path.join(statsDir, 'stats.json');
     const statsStore = await loadRunStats(statsPath);

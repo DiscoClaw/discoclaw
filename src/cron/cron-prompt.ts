@@ -206,12 +206,13 @@ function buildShellResultSection(inputShell: string | undefined, shellResult: Cr
 function buildShellOutputContract(routingMode: CronRoutingMode | undefined, silent: boolean | undefined): string {
   const postInstruction =
     routingMode === 'json'
-      ? 'Return a non-empty JSON array in the routing format described below.'
-      : 'Return only the final Discord message content to post to the target channel.';
-  const noPostInstruction =
+      ? 'Return a non-empty JSON array in the routing format described below. You may optionally prefix it with `<cron-output>{"mode":"post"}</cron-output>`.'
+      : 'Return only the final Discord message content to post to the target channel. You may optionally prefix it with `<cron-output>{"mode":"post"}</cron-output>`.';
+  const noPostInstruction = 'Prefer exactly `<cron-output>{"mode":"no-post"}</cron-output>` and nothing else.';
+  const structuredPayloadInstruction =
     routingMode === 'json'
-      ? 'Return exactly `[]` and nothing else.'
-      : 'Prefer an empty response with no prose or explanation.';
+      ? 'If you emit the `post` block, place the non-empty JSON routing array after it. If you emit the `no-post` block, do not return a routing payload.'
+      : 'If you emit the `post` block, place the final Discord message content after it.';
   const fallbackInstruction =
     routingMode === 'json'
       ? 'Legacy fallback: if you cannot follow the contract cleanly, `[]` remains the accepted no-post sentinel.'
@@ -225,6 +226,11 @@ function buildShellOutputContract(routingMode: CronRoutingMode | undefined, sile
     'Choose exactly one outcome after reviewing the shell result:',
     `- \`post\`: ${postInstruction}`,
     `- \`no-post\`: ${noPostInstruction}`,
+    '',
+    'Structured control blocks accepted by the executor:',
+    '`<cron-output>{"mode":"post"}</cron-output>`',
+    '`<cron-output>{"mode":"no-post"}</cron-output>`',
+    structuredPayloadInstruction,
     fallbackInstruction,
   ]
     .filter((line): line is string => Boolean(line))
