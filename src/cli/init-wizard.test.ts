@@ -264,6 +264,34 @@ describe('init wizard copy contract', () => {
       'Review docs/audit/claude-blank-machine-readiness.md if you need the source-checkout audit details.',
     );
   });
+
+  it('uses the revised Codex/OpenAI manual validation guidance', () => {
+    expect(initWizardSource).toContain(
+      '`pnpm preflight`, `pnpm preflight:blank-machine`, and `discoclaw doctor` stay config-only; they do not prove the OpenAI key.',
+    );
+    expect(initWizardSource).toContain(
+      'Start discoclaw and confirm `!status` (or the startup credential report) shows `openai-key: ok`.',
+    );
+    expect(initWizardSource).toContain(
+      'Source checkouts: `pnpm preflight` / `pnpm preflight:blank-machine` are config-only, and the repo does not ship a Codex auth-smoke helper yet.',
+    );
+    expect(initWizardSource).toContain(
+      'npm/global installs: `discoclaw doctor` is also config-only, and no shipped `discoclaw codex auth-smoke` exists yet.',
+    );
+    expect(initWizardSource).toContain(
+      'Before logging in, run `codex exec --skip-git-repo-check -- "Reply with OK"` and confirm it fails with a Codex auth/session error.',
+    );
+    expect(initWizardSource).toContain('Log in with `codex`.');
+    expect(initWizardSource).toContain(
+      'Repeat `codex exec --skip-git-repo-check -- "Reply with OK"` and confirm it returns normal text.',
+    );
+    expect(initWizardSource).toContain(
+      'Because you enabled the optional OpenAI fast tier, start discoclaw and confirm `!status` (or the startup credential report) shows `openai-key: ok`.',
+    );
+    expect(initWizardSource).toContain(
+      'For daemon installs, keep parity as a manual check: the service installer still pins `/usr/bin/node` plus a fixed `PATH`, so the service can diverge from the shell that passed the Codex prompt.',
+    );
+  });
 });
 
 describe('runInitWizard', () => {
