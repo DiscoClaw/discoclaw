@@ -208,15 +208,20 @@ describe('setup: wizard copy contract', () => {
   it('describes guild bootstrap instead of requiring forum IDs up front', () => {
     expect(setupSource).toContain('and at least one allowed Discord user ID.');
     expect(setupSource).toContain('If you set DISCORD_GUILD_ID, Discoclaw can auto-create the Tasks/Automations forums on first connect.');
+    expect(setupSource).toContain('If you leave DISCORD_GUILD_ID empty, you need existing scaffold state or explicit forum IDs later.');
+    expect(setupSource).toContain('leave empty only if you already have scaffold/forum state another way');
     expect(setupSource).not.toContain('and your Tasks/Cron forum channel IDs from Discord.');
     expect(setupSource).not.toContain('Tasks forum channel ID (required): ');
     expect(setupSource).not.toContain('Automations forum channel ID (required): ');
   });
 
-  it('tells Claude operators to validate the unauthenticated smoke failure before logging in', () => {
-    expect(setupSource).toContain('Preflight only checks local prerequisites; Claude auth still needs a manual smoke test.');
+  it('only shows the manual Claude smoke steps after automated preflight passes', () => {
+    expect(setupSource).toContain('Automated checks passed. Claude auth still needs a manual smoke test.');
     expect(setupSource).toContain('Before logging in, run `claude -p -- "Reply with OK"` and confirm it fails with an auth/login error.');
     expect(setupSource).toContain('Log in with `claude`.');
     expect(setupSource).toContain('Repeat `claude -p -- "Reply with OK"` and confirm it returns normal text.');
+    expect(setupSource).toContain('Fix the preflight issues above.');
+    expect(setupSource).toContain('Re-run `pnpm preflight` until the automated checks pass.');
+    expect(setupSource).toContain('Only after that should you do the manual Claude smoke test described in README.md or docs/configuration.md.');
   });
 });

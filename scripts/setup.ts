@@ -54,6 +54,7 @@ This wizard creates a .env file with your Discord bot configuration.
 You'll need your bot token from https://discord.com/developers/applications
 and at least one allowed Discord user ID.
 If you set DISCORD_GUILD_ID, Discoclaw can auto-create the Tasks/Automations forums on first connect.
+If you leave DISCORD_GUILD_ID empty, you need existing scaffold state or explicit forum IDs later.
 `);
 
 // --- Check existing .env ---
@@ -178,7 +179,7 @@ if (providerChoice === '1') {
 const configRecommended = await ask('\nConfigure recommended settings? [Y/n] ');
 if (configRecommended.toLowerCase() !== 'n') {
   const guildId = await askOptional(
-    'Discord guild (server) ID [recommended: enables first-connect Tasks/Automations forum bootstrap; leave empty to skip]: ',
+    'Discord guild (server) ID [recommended: enables first-connect Tasks/Automations forum bootstrap; leave empty only if you already have scaffold/forum state another way]: ',
     (val) => {
       if (!val) return null;
       return validateSnowflake(val) ? null : 'Must be a 17-20 digit number';
@@ -231,18 +232,27 @@ console.log('\n.env written successfully.\n');
 // --- Run preflight (Claude only) or print next-steps ---
 if (values.PRIMARY_RUNTIME === 'claude') {
   console.log('Running pnpm preflight to validate...\n');
+  let preflightPassed = false;
   try {
     execFileSync('pnpm', ['run', 'preflight'], { cwd: root, stdio: 'inherit' });
+    preflightPassed = true;
   } catch {
     console.log('\nPreflight reported issues above. Fix them and run pnpm preflight again.\n');
   }
-  console.log('Preflight only checks local prerequisites; Claude auth still needs a manual smoke test.\n');
   console.log('\nNext steps:');
-  console.log('  1. Before logging in, run `claude -p -- "Reply with OK"` and confirm it fails with an auth/login error.');
-  console.log('  2. Log in with `claude`.');
-  console.log('  3. Repeat `claude -p -- "Reply with OK"` and confirm it returns normal text.');
-  console.log('  4. Review docs/audit/claude-blank-machine-readiness.md if you need the full manual validation path.');
-  console.log('  5. pnpm build && pnpm dev\n');
+  if (preflightPassed) {
+    console.log('  Automated checks passed. Claude auth still needs a manual smoke test.');
+    console.log('  1. Before logging in, run `claude -p -- "Reply with OK"` and confirm it fails with an auth/login error.');
+    console.log('  2. Log in with `claude`.');
+    console.log('  3. Repeat `claude -p -- "Reply with OK"` and confirm it returns normal text.');
+    console.log('  4. Review README.md or docs/configuration.md if you need the full manual validation path.');
+    console.log('  5. pnpm build && pnpm dev\n');
+  } else {
+    console.log('  1. Fix the preflight issues above.');
+    console.log('  2. Re-run `pnpm preflight` until the automated checks pass.');
+    console.log('  3. Only after that should you do the manual Claude smoke test described in README.md or docs/configuration.md.');
+    console.log('  4. pnpm build && pnpm dev\n');
+  }
 } else {
   console.log('\nNext steps:');
   if (values.PRIMARY_RUNTIME === 'gemini') {
