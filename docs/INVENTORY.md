@@ -301,6 +301,8 @@ Config: `DISCOCLAW_WEBHOOK_ENABLED`, `DISCOCLAW_WEBHOOK_PORT`, `DISCOCLAW_WEBHOO
 
 | Command | Description | File(s) | Status |
 |---------|-------------|---------|--------|
+| `pnpm preflight` / `pnpm preflight:blank-machine` | Source-checkout preflight surface for local config/runtime prerequisites only; wraps the config-only doctor flow and explicitly leaves Claude auth to the separate smoke step | `scripts/doctor.ts`, `scripts/doctor-lib.ts`, `src/health/config-doctor.ts` | **done** |
+| `tsx scripts/claude-auth-smoke.ts` | Repo-owned source-checkout Claude auth smoke command; runs one minimal Claude prompt and classifies authenticated vs unauthenticated vs missing CLI for the blank-machine/setup path | `scripts/claude-auth-smoke.ts` | **done** |
 | `discoclaw browser` | Browser operator commands: `setup`, `doctor`, and `launch [--headless]` for the managed-profile plus verified-CDP flow | `src/cli/index.ts`, `src/cli/index.test.ts`, `src/browser/managed-browser.ts` | **done** |
 | `discoclaw dashboard` | Launches the operator dashboard for common admin tasks: inspect service/runtime state, review config doctor findings, change model assignments, and trigger service actions through the loopback-by-default web UI/HTTP server, with optional trusted-host Tailscale access | `src/cli/index.ts`, `src/cli/dashboard.ts`, `src/cli/dashboard.test.ts`, `src/dashboard/server.ts`, `src/dashboard/page.ts`, `src/service-control.ts`, `src/health/config-doctor.ts` | **done** |
 
@@ -379,7 +381,7 @@ Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DEEPGRAM_STT_MODEL
 
 - [x] **README rewrite** — user-facing overview, setup, and quickstart are now in `README.md`.
 - [x] **`.env.example`** — slimmed to essentials; `.env.example.full` has all ~90 options.
-- [x] **First-run experience** — `pnpm run setup` provides guided interactive configuration; `pnpm preflight` validates the result.
+- [x] **First-run experience** — `pnpm run setup` provides guided interactive configuration; `pnpm preflight` validates repo-checkable prerequisites; the repo-owned Claude login/auth smoke step for source checkouts lives in `scripts/claude-auth-smoke.ts`.
 - [x] **Graceful degradation when external prerequisites missing** — tasks no longer require the `bd` CLI at runtime (the in-process `TaskStore` is the live path); `bd` is only needed for one-time data migration. Cron requires a forum channel. Clean errors / skip when prerequisites aren't configured.
 
 ### Nice-to-have before MVP
