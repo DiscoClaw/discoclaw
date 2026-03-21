@@ -66,6 +66,22 @@ vi.mock('./reply-reference.js', () => ({
   resolveReplyReference: vi.fn(async () => null),
 }));
 
+vi.mock('../health/config-doctor.js', () => ({
+  inspect: vi.fn(async () => ({
+    installMode: 'npm-managed',
+    findings: [],
+    configPaths: {
+      env: '/tmp/workspace/.env',
+      dataDir: '/tmp/workspace/data',
+    },
+  })),
+  applyFixes: vi.fn(async () => ({
+    applied: [],
+    skipped: [],
+    errors: [],
+  })),
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -296,6 +312,30 @@ describe('guild-chat prompt assembly — capability-refusal grounding', () => {
     const selectionArgs = buildTiered.mock.calls.at(-1)?.[2];
     expect(selectionArgs?.userText).toContain('Make an interactive chart from this dataset');
     expect(selectionArgs?.userText).toContain('report.csv');
+  });
+});
+
+describe('system command routing', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetAbortRegistry();
+    resetInflightReplies();
+  });
+
+  it('appends a Claude-auth disclaimer to !doctor replies', async () => {
+    const runtime = makeCaptureRuntime();
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply, { content: '!doctor' });
+    const params = makeParams(runtime, { healthCommandsEnabled: true });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    const replyCall = vi.mocked(msg.reply).mock.calls[0]?.[0];
+    expect(replyCall?.content).toContain('Config Doctor');
+    expect(replyCall?.content).toContain('config drift and missing secrets only');
+    expect(replyCall?.content).toContain('discoclaw claude auth-smoke');
   });
 });
 
