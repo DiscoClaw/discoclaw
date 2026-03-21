@@ -34,6 +34,10 @@ describe('parseUpdateCommand', () => {
     expect(parseUpdateCommand('!update apply')).toEqual({ action: 'apply' });
   });
 
+  it('parses !update audit', () => {
+    expect(parseUpdateCommand('!update audit')).toEqual({ action: 'audit' });
+  });
+
   it('parses !update help', () => {
     expect(parseUpdateCommand('!update help')).toEqual({ action: 'help' });
   });
@@ -68,8 +72,38 @@ describe('handleUpdateCommand: help', () => {
     const result = await handleUpdateCommand({ action: 'help' });
     expect(result.reply).toContain('!update commands');
     expect(result.reply).toContain('!update apply');
+    expect(result.reply).toContain('!update audit');
     expect(result.deferred).toBeUndefined();
     expect(execFile).not.toHaveBeenCalled();
+  });
+});
+
+describe('handleUpdateCommand: audit', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders the npm-managed Claude audit for npm-managed installs', async () => {
+    const mod = await import('../npm-managed.js');
+    (mod.isNpmManaged as any).mockResolvedValue(true);
+
+    const result = await handleUpdateCommand({ action: 'audit' });
+
+    expect(result.reply).toContain('npm-managed Claude audit');
+    expect(result.reply).toContain('!doctor');
+    expect(result.reply).toContain('discoclaw claude auth-smoke');
+    expect(result.reply).toContain('does not prove daemon/runtime-path parity');
+    expect(result.deferred).toBeUndefined();
+  });
+
+  it('notes when the current instance is not npm-managed', async () => {
+    const mod = await import('../npm-managed.js');
+    (mod.isNpmManaged as any).mockResolvedValue(false);
+
+    const result = await handleUpdateCommand({ action: 'audit' });
+
+    expect(result.reply).toContain('This running instance is not npm-managed');
+    expect(result.reply).toContain('npm install -g discoclaw');
   });
 });
 
@@ -365,6 +399,13 @@ describe('handleUpdateCommand: npm-managed mode', () => {
     expect(result.reply).toContain('Already on latest');
     expect(result.reply).toContain('1.2.3');
     expect(result.deferred).toBeUndefined();
+  });
+
+  it('help clarifies the npm update surface is separate from Claude auth', async () => {
+    const result = await handleUpdateCommand({ action: 'help' });
+    expect(result.reply).toContain('!update audit');
+    expect(result.reply).toContain('Claude auth is separate');
+    expect(result.reply).toContain('config-only');
   });
 
   it('check reports available update when behind', async () => {

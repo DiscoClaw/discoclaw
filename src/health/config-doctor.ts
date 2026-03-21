@@ -365,6 +365,20 @@ export function detectInstallDrift(ctx: DoctorContext): DoctorFinding[] {
   }];
 }
 
+export function detectNpmManagedClaudeSupportBoundary(ctx: DoctorContext): DoctorFinding[] {
+  if (ctx.installMode !== 'npm-managed') return [];
+
+  return [{
+    id: 'npm-managed-claude:runtime-support-boundary',
+    severity: 'warn',
+    message:
+      'On npm-managed installs, config doctor remains config-only. It does not prove Claude auth, first useful reply, or daemon/restart parity for the Claude path.',
+    recommendation:
+      'Use `discoclaw claude auth-smoke` for shell-level Claude validation. For daemon installs, keep runtime parity as a manual check: `discoclaw init` does not persist `CLAUDE_BIN`, and the service installers still pin `/usr/bin/node` plus a fixed `PATH`.',
+    autoFixable: false,
+  }];
+}
+
 export function detectDeprecatedEnvVars(ctx: DoctorContext): DoctorFinding[] {
   const findings: DoctorFinding[] = [];
   if (envKeyIsExplicit(ctx, 'RUNTIME_MODEL')) {
@@ -669,6 +683,7 @@ export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> 
   const findings = [
     ...detectInvalidModelsFile(ctx),
     ...detectInstallDrift(ctx),
+    ...detectNpmManagedClaudeSupportBoundary(ctx),
     ...detectWorkspaceBootstrapWarnings(ctx),
     ...detectDeprecatedEnvVars(ctx),
     ...detectConflictingOverrides(ctx),

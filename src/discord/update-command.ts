@@ -7,7 +7,7 @@ import { getActiveOrchestrator, getRunningPlanIds } from './forge-plan-registry.
 import { isNpmManaged, getLocalVersion, getLatestNpmVersion } from '../npm-managed.js';
 
 export type UpdateCommand = {
-  action: 'check' | 'apply' | 'help';
+  action: 'check' | 'apply' | 'help' | 'audit';
 };
 
 export type UpdateOpts = {
@@ -29,8 +29,29 @@ export function parseUpdateCommand(content: string): UpdateCommand | null {
   const normalized = content.trim().toLowerCase().replace(/\s+/g, ' ');
   if (normalized === '!update') return { action: 'check' };
   if (normalized === '!update apply') return { action: 'apply' };
+  if (normalized === '!update audit') return { action: 'audit' };
   if (normalized === '!update help') return { action: 'help' };
   return null;
+}
+
+function renderNpmManagedClaudeAudit(npmMode: boolean): string {
+  const lines = [
+    '**npm-managed Claude audit:**',
+    '- `npm install -g discoclaw` is a real install surface.',
+    '- `!update` / `!update apply` are the shipped npm-managed code update surface.',
+    '- `!doctor` / `!health doctor` remain config-only and are not Claude auth proof.',
+    '- `discoclaw claude auth-smoke` is the shipped host-side Claude auth check.',
+    '- This Discord surface does not prove daemon/runtime-path parity or first-reply readiness for the npm-managed Claude path.',
+  ];
+
+  if (!npmMode) {
+    lines.unshift(
+      'This running instance is not npm-managed. The audit below describes the `npm install -g discoclaw` path.',
+      '',
+    );
+  }
+
+  return lines.join('\n');
 }
 
 function run(
@@ -82,7 +103,10 @@ export async function handleUpdateCommand(cmd: UpdateCommand, opts: UpdateOpts =
           '**!update commands (npm):**',
           '- `!update` — check for available updates on npm',
           '- `!update apply` — upgrade discoclaw via npm and restart',
+          '- `!update audit` — show the current npm-managed Claude claim boundary',
           '- `!update help` — this message',
+          '',
+          'Note: `!update` only covers code updates. Claude auth is separate: run `discoclaw claude auth-smoke` on the host. `!doctor` / `!health doctor` remain config-only.',
         ].join('\n'),
       };
     }
@@ -91,9 +115,14 @@ export async function handleUpdateCommand(cmd: UpdateCommand, opts: UpdateOpts =
         '**!update commands:**',
         '- `!update` — check for available updates from main',
         '- `!update apply` — pull, install, build, and restart',
+        '- `!update audit` — show the current npm-managed Claude claim boundary',
         '- `!update help` — this message',
       ].join('\n'),
     };
+  }
+
+  if (cmd.action === 'audit') {
+    return { reply: renderNpmManagedClaudeAudit(npmMode) };
   }
 
   if (cmd.action === 'check') {

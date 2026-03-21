@@ -365,10 +365,17 @@ export type StatusRef = { current: StatusPoster | null };
 const turnCounters = new Map<string, number>();
 const summaryWorkQueue = new KeyedQueue();
 const latestSummarySequence = new Map<string, number>();
+const CONFIG_DOCTOR_SCOPE_NOTE =
+  'Config doctor checks config drift and missing secrets only. It does not verify Claude login/auth. Use `discoclaw claude auth-smoke` on the host for the shipped Claude auth check.';
 
 export function _resetMessageCoordinatorStateForTests(): void {
   turnCounters.clear();
   latestSummarySequence.clear();
+}
+
+function appendConfigDoctorScopeNote(report: string): string {
+  const trimmed = String(report ?? '').trimEnd();
+  return trimmed ? `${trimmed}\n\n${CONFIG_DOCTOR_SCOPE_NOTE}` : CONFIG_DOCTOR_SCOPE_NOTE;
 }
 
 
@@ -1132,11 +1139,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             ? await applyFixes(doctorReport, { cwd: params.projectCwd, env: process.env })
             : undefined;
           await msg.reply({
-            content: renderHealthDoctorReport({
+            content: appendConfigDoctorScopeNote(renderHealthDoctorReport({
               report: doctorReport,
               fixResult,
               botDisplayName: params.botDisplayName,
-            }),
+            })),
             allowedMentions: NO_MENTIONS,
           });
         } catch (err) {
@@ -1314,6 +1321,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           log: params.log,
           projectCwd: params.projectCwd,
           dataDir: params.dataDir,
+          userId: msg.author.id,
           restartCmd: params.updateRestartCmd,
           serviceName: params.serviceName,
         });

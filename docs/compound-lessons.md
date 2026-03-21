@@ -76,9 +76,9 @@ Format notes:
 
 ### 2026-03-20 - Automated readiness surfaces must not claim manual auth success
 Tags: #audit #workflow #setup
-Lesson: Setup, preflight, and doctor surfaces must only claim prerequisites they can directly verify. When end-to-end readiness still depends on a manual login or OAuth/auth step, keep that boundary explicit in the operator docs and point to the audit or smoke path that currently serves as the authoritative gate instead of implying full readiness from binary presence alone.
-Source: `docs/audit/claude-blank-machine-readiness.md` blank-machine audit; dedup search on 2026-03-20 found no existing setup/workflow lesson covering the automated-vs-manual readiness boundary, so this audit was promoted as a new distinct lesson
-Applied: `docs/configuration.md`, `docs/audit/claude-blank-machine-readiness.md`
+Lesson: Setup, preflight, doctor, and install-mode-specific smoke surfaces must only claim prerequisites they can directly verify. When end-to-end readiness still depends on a separate auth step or on daemon/runtime-path parity, keep that boundary explicit in operator docs and point to the audit or smoke path that owns that gate instead of implying full readiness from binary presence or interactive-shell success alone. For npm-managed daemon installs, a shell-level Claude auth smoke does not prove that a service unit using different executable or `PATH` resolution can reach the same Claude binary.
+Source: `docs/audit/claude-blank-machine-readiness.md` blank-machine audit; `docs/audit/claude-npm-managed-path.md` npm-managed audit; dedup search on 2026-03-21 found this entry already covered the readiness-boundary pattern, so the daemon/runtime-path refinement was folded into the existing lesson instead of creating a near-duplicate entry
+Applied: `docs/configuration.md`, `docs/discord-bot-setup.md`, `docs/audit/claude-blank-machine-readiness.md`, `docs/audit/claude-npm-managed-path.md`
 Status: active
 
 ### 2026-03-20 - Stage terminal Discord summaries durably before risky delivery

@@ -4,6 +4,7 @@
  * Usage: discoclaw <command> [options]
  */
 
+import { execa } from 'execa';
 import { createRequire } from 'node:module';
 import net from 'node:net';
 import path from 'node:path';
@@ -84,7 +85,38 @@ export type BrowserCliDeps = {
 export type CliDeps = {
   dashboard?: DashboardCliDeps;
   browser?: BrowserCliDeps;
+  claude?: ClaudeCliDeps;
 };
+
+export type ClaudeAuthSmokeStatus =
+  | 'authenticated'
+  | 'unauthenticated'
+  | 'missing-cli'
+  | 'failed';
+
+export type ClaudeAuthSmokeCommandResult = {
+  ok: boolean;
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  failed: boolean;
+  timedOut: boolean;
+  errorCode?: string;
+  shortMessage?: string;
+};
+
+export type ClaudeCliDeps = {
+  loadDotenv: (options: { path: string }) => { parsed?: Record<string, string> } | undefined;
+  runClaudeFn: (
+    bin: string,
+    args: string[],
+    opts: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number },
+  ) => Promise<ClaudeAuthSmokeCommandResult>;
+  log: Pick<typeof console, 'log' | 'error'>;
+};
+
+const CLAUDE_AUTH_SMOKE_PROMPT = 'Reply with OK';
+const CLAUDE_AUTH_SMOKE_TIMEOUT_MS = 60_000;
 
 export async function probeTcpPortOccupancy(
   host: string,
@@ -154,6 +186,16 @@ async function loadBrowserCliDeps(): Promise<BrowserCliDeps> {
     doctor: selectBrowserCliHandler(module, ['doctorManagedBrowser', 'runBrowserDoctor', 'browserDoctor']),
     launch: selectBrowserCliHandler(module, ['launchManagedBrowser', 'runBrowserLaunch', 'browserLaunch']),
     loadDotenv: config,
+    log: console,
+  };
+}
+
+async function loadClaudeCliDeps(): Promise<ClaudeCliDeps> {
+  const { config } = await import('dotenv');
+
+  return {
+    loadDotenv: config,
+    runClaudeFn: runClaudeAuthSmokeCommand,
     log: console,
   };
 }
@@ -258,6 +300,44 @@ export async function runBrowserCliCommand(options: {
   }
 }
 
+export async function runClaudeCliCommand(options: {
+  argv?: string[];
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  deps?: ClaudeCliDeps;
+} = {}): Promise<number> {
+  const argv = options.argv ?? process.argv;
+  const cwd = options.cwd ?? process.cwd();
+  const env = options.env ?? process.env;
+  const deps = options.deps ?? await loadClaudeCliDeps();
+  const subcommand = argv[3];
+
+  const dotenvResult = deps.loadDotenv({ path: path.join(cwd, '.env') });
+  const runtimeEnv = {
+    ...env,
+    ...(dotenvResult?.parsed ?? {}),
+  };
+
+  switch (subcommand) {
+    case 'auth-smoke':
+      return await runClaudeAuthSmoke({
+        argv,
+        cwd,
+        env: runtimeEnv,
+        deps,
+      });
+    case undefined:
+    case '--help':
+    case '-h':
+      printClaudeHelp(deps.log.log);
+      return 0;
+    default:
+      deps.log.error(`Unknown claude subcommand: ${subcommand}\n`);
+      printClaudeHelp(deps.log.error);
+      return 1;
+  }
+}
+
 export async function runCli(argv = process.argv, deps: CliDeps = {}): Promise<number> {
   const [, , command] = argv;
 
@@ -272,6 +352,8 @@ export async function runCli(argv = process.argv, deps: CliDeps = {}): Promise<n
       return await runDashboardCliCommand({ argv, cwd: process.cwd(), env: process.env, deps: deps.dashboard });
     case 'browser':
       return await runBrowserCliCommand({ argv, cwd: process.cwd(), env: process.env, deps: deps.browser });
+    case 'claude':
+      return await runClaudeCliCommand({ argv, cwd: process.cwd(), env: process.env, deps: deps.claude });
     case 'doctor': {
       const cwd = process.cwd();
       const shouldFix = argv.includes('--fix');
@@ -358,9 +440,10 @@ function printHelp(ver: string): void {
       `  browser setup                         Create the managed browser profile and print one-time login guidance\n` +
       `  browser doctor                        Inspect browser readiness, storage enforcement, and managed-instance status\n` +
       `  browser launch [--headless]           Launch or reuse the managed browser profile after verified CDP handoff\n` +
+      `  claude auth-smoke                     Run one minimal Claude CLI prompt to verify the npm-managed shell can reach an authenticated Claude session\n` +
       `  init                                  Interactive setup wizard — creates .env and workspace/\n` +
       `  dashboard                             Local web dashboard for common admin tasks (HTTP on 127.0.0.1 by default)\n` +
-      `  doctor [--fix]                        Inspect config drift, deprecated env vars, conflicting/stale overrides, and missing secrets; use --fix for auto-fixes\n` +
+      `  doctor [--fix]                        Inspect config drift, deprecated env vars, conflicting/stale overrides, and missing secrets; config-only, not Claude auth proof\n` +
       `  install-daemon [--service-name <name>]  Register discoclaw as a persistent background service\n` +
       `                                          Use --service-name to run multiple instances side-by-side.\n` +
       `                                          Defaults to "discoclaw".\n` +
@@ -369,6 +452,17 @@ function printHelp(ver: string): void {
       `\nOptions:\n` +
       `  -v, --version   Print version\n` +
       `  -h, --help      Print this help\n`,
+  );
+}
+
+function printClaudeHelp(write: (message: string) => void): void {
+  write(
+    `Usage: discoclaw claude <subcommand>\n` +
+      `\nSubcommands:\n` +
+      `  auth-smoke   Run one minimal Claude CLI prompt to verify the configured Claude binary can answer\n` +
+      `\nNotes:\n` +
+      `  - Loads .env first so CLAUDE_BIN is honored when set\n` +
+      `  - Separate from \`discoclaw doctor\`, which remains config-only\n`,
   );
 }
 
@@ -490,6 +584,147 @@ function isBrowserCliReport(value: unknown): value is BrowserCliReport {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<BrowserCliReport>;
   return typeof candidate.ok === 'boolean' && typeof candidate.summary === 'string';
+}
+
+function previewClaudeOutput(value: string, maxLen = 160): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  return normalized.length <= maxLen
+    ? normalized
+    : `${normalized.slice(0, maxLen - 1)}...`;
+}
+
+function looksLikeClaudeAuthFailure(output: string): boolean {
+  const normalized = output.toLowerCase();
+  return [
+    'auth',
+    'authenticate',
+    'authentication',
+    'credential',
+    'login',
+    'log in',
+    'logged out',
+    'not logged in',
+    'not authenticated',
+    'sign in',
+    'unauthenticated',
+  ].some((pattern) => normalized.includes(pattern));
+}
+
+function looksLikeMissingClaudeBinary(result: ClaudeAuthSmokeCommandResult, claudeBin: string): boolean {
+  if (result.errorCode === 'ENOENT') return true;
+
+  const combined = `${result.stderr}\n${result.shortMessage ?? ''}`.toLowerCase();
+  return combined.includes('enoent')
+    || combined.includes('command not found')
+    || combined.includes(`spawn ${claudeBin.toLowerCase()}`);
+}
+
+function classifyClaudeAuthSmokeResult(
+  result: ClaudeAuthSmokeCommandResult,
+  claudeBin: string,
+): ClaudeAuthSmokeStatus {
+  if (looksLikeMissingClaudeBinary(result, claudeBin)) return 'missing-cli';
+
+  const combinedOutput = `${result.stdout}\n${result.stderr}\n${result.shortMessage ?? ''}`.trim();
+  if (result.ok && previewClaudeOutput(result.stdout)) return 'authenticated';
+  if (looksLikeClaudeAuthFailure(combinedOutput)) return 'unauthenticated';
+  return 'failed';
+}
+
+async function runClaudeAuthSmokeCommand(
+  bin: string,
+  args: string[],
+  opts: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number },
+): Promise<ClaudeAuthSmokeCommandResult> {
+  try {
+    const result = await execa(bin, args, {
+      cwd: opts.cwd,
+      env: opts.env,
+      reject: false,
+      timeout: opts.timeoutMs,
+    });
+    return {
+      ok: result.exitCode === 0,
+      exitCode: result.exitCode ?? 0,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      failed: result.failed,
+      timedOut: result.timedOut,
+    };
+  } catch (error) {
+    const typed = error as {
+      code?: unknown;
+      message?: unknown;
+      shortMessage?: unknown;
+      exitCode?: unknown;
+      stdout?: unknown;
+      stderr?: unknown;
+      timedOut?: unknown;
+    };
+    return {
+      ok: false,
+      exitCode: typeof typed.exitCode === 'number' ? typed.exitCode : 1,
+      stdout: typeof typed.stdout === 'string' ? typed.stdout : '',
+      stderr: typeof typed.stderr === 'string' ? typed.stderr : '',
+      failed: true,
+      timedOut: typed.timedOut === true,
+      errorCode: typeof typed.code === 'string' ? typed.code : undefined,
+      shortMessage: typeof typed.shortMessage === 'string'
+        ? typed.shortMessage
+        : typeof typed.message === 'string'
+          ? typed.message
+          : undefined,
+    };
+  }
+}
+
+async function runClaudeAuthSmoke(options: {
+  argv: string[];
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  deps: ClaudeCliDeps;
+}): Promise<number> {
+  const claudeBin = (options.env.CLAUDE_BIN ?? '').trim() || 'claude';
+
+  if (options.argv.includes('--help') || options.argv.includes('-h')) {
+    printClaudeHelp(options.deps.log.log);
+    return 0;
+  }
+
+  options.deps.log.log('\nDiscoclaw Claude auth smoke\n');
+  options.deps.log.log(`  Running ${claudeBin} -p -- ${JSON.stringify(CLAUDE_AUTH_SMOKE_PROMPT)}`);
+  options.deps.log.log('  This checks whether the current shell can reach an authenticated Claude CLI session.');
+
+  const result = await options.deps.runClaudeFn(claudeBin, ['-p', '--', CLAUDE_AUTH_SMOKE_PROMPT], {
+    cwd: options.cwd,
+    env: options.env,
+    timeoutMs: CLAUDE_AUTH_SMOKE_TIMEOUT_MS,
+  });
+  const status = classifyClaudeAuthSmokeResult(result, claudeBin);
+  const combinedPreview = previewClaudeOutput(`${result.stdout}\n${result.stderr}\n${result.shortMessage ?? ''}`);
+
+  switch (status) {
+    case 'authenticated':
+      options.deps.log.log('  Claude CLI answered the minimal prompt.');
+      if (combinedPreview) options.deps.log.log(`    Output preview: ${combinedPreview}`);
+      return 0;
+    case 'unauthenticated':
+      options.deps.log.error('  Claude CLI appears installed but not authenticated.');
+      options.deps.log.error(`    Run \`${claudeBin}\` to complete login, then rerun this command.`);
+      if (combinedPreview) options.deps.log.error(`    CLI output: ${combinedPreview}`);
+      return 1;
+    case 'missing-cli':
+      options.deps.log.error(`  Claude CLI not found (looked for "${claudeBin}").`);
+      options.deps.log.error('    Install Claude Code or set CLAUDE_BIN to the correct binary before rerunning this command.');
+      if (combinedPreview) options.deps.log.error(`    Launch error: ${combinedPreview}`);
+      return 1;
+    default:
+      options.deps.log.error('  Claude CLI smoke failed for a non-auth reason.');
+      if (result.timedOut) options.deps.log.error(`    Timed out after ${CLAUDE_AUTH_SMOKE_TIMEOUT_MS} ms.`);
+      if (combinedPreview) options.deps.log.error(`    CLI output: ${combinedPreview}`);
+      return 1;
+  }
 }
 
 function selectBrowserCliHandler(
