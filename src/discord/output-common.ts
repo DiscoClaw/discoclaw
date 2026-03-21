@@ -239,6 +239,82 @@ export function shouldSuppressFollowUp(
   return chars < 50;
 }
 
+const DISCORD_ACTION_INTENT_BASE_VERBS = String.raw`create|send|edit|delete|close|open|post|react|launch|remember|forget|pin|unpin|crosspost|archive|ban|kick|timeout|set`;
+const DISCORD_ACTION_INTENT_PROGRESSIVE_VERBS = String.raw`creating|sending|editing|deleting|closing|opening|posting|reacting|launching|remembering|forgetting|pinning|unpinning|crossposting|archiving|banning|kicking|setting`;
+const DISCORD_ACTION_INTENT_RESOURCE_NOUNS = String.raw`channel|thread|message|reply|task|plan|cron|poll|reaction|pin|user|member|nickname|status|activity|canvas|image|file|attachment|memory|preference|fact|note`;
+const DISCORD_ACTION_INTENT_NEGATION_RE =
+  /\b(?:i have not started yet|i haven't started yet|have not started yet|haven't started yet|not started yet|i have not begun yet|i haven't begun yet|have not begun yet|haven't begun yet|i am not starting|i'm not starting|i am not doing that yet|i'm not doing that yet|not proceeding now|not handling it now)\b/i;
+const DISCORD_ACTION_INTENT_EXPLANATION_RE =
+  /\b(?:example(?: only)?|for example|for instance|e\.g\.|i can|i could|i would|you can|you could|you would|if you want|when you're ready|would use|would emit|would send|would create|would run|do not run|don't run|not run)\b/i;
+const DISCORD_ACTION_INTENT_PATTERNS = [
+  new RegExp(
+    String.raw`\b(?:i am|i'm)\s+(?:${DISCORD_ACTION_INTENT_PROGRESSIVE_VERBS})\b[^.!?\n]{0,80}\b(?:${DISCORD_ACTION_INTENT_RESOURCE_NOUNS})s?\b(?:[^.!?\n]{0,40}\b(?:now|already)\b)?`,
+    'i',
+  ),
+  new RegExp(
+    String.raw`\b(?:i am|i'm)\s+going to\s+(?:${DISCORD_ACTION_INTENT_BASE_VERBS})\b[^.!?\n]{0,80}\b(?:${DISCORD_ACTION_INTENT_RESOURCE_NOUNS})s?\b[^.!?\n]{0,40}\b(?:now|for you|in this response)\b`,
+    'i',
+  ),
+  new RegExp(
+    String.raw`\b(?:i will|i'll)\s+(?:go ahead and\s+)?(?:${DISCORD_ACTION_INTENT_BASE_VERBS})\b[^.!?\n]{0,80}\b(?:${DISCORD_ACTION_INTENT_RESOURCE_NOUNS})s?\b[^.!?\n]{0,40}\b(?:now|for you|in this response)\b`,
+    'i',
+  ),
+  /\b(?:(?:i am|i'm)\s+)?proceeding now\b/i,
+  /\b(?:(?:i am|i'm)\s+)?already handling (?:it|that|this)(?: now)?\b/i,
+  /\b(?:(?:i am|i'm)\s+)?taking the next pass(?: now)?\b/i,
+  /\b(?:(?:i am|i'm)\s+)?cleaning(?: [^.!?\n]{0,40})? up now\b/i,
+];
+
+function stripCodeLikeDiscordActionText(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`\n]*`/g, ' ')
+    .replace(/^(?: {4}|\t).*(?:\r?\n|$)/gm, ' ');
+}
+
+export function claimsImmediateDiscordActionIntent(text: string): boolean {
+  const normalized = stripCodeLikeDiscordActionText(String(text ?? ''))
+    .replace(/[’]/g, '\'')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) return false;
+
+  const sentences = normalized.split(/(?<=[.!?])\s+|\n+/);
+  for (const sentence of sentences) {
+    const candidate = sentence.trim();
+    if (!candidate) continue;
+    if (DISCORD_ACTION_INTENT_NEGATION_RE.test(candidate)) continue;
+    if (DISCORD_ACTION_INTENT_EXPLANATION_RE.test(candidate)) continue;
+    if (DISCORD_ACTION_INTENT_PATTERNS.some((re) => re.test(candidate))) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+export function buildPromisedDiscordActionWithoutExecutionNotice(
+  visibleReplyText: string,
+  actionsCount: number,
+  actionResultsCount: number,
+): string {
+  if (actionsCount > 0 || actionResultsCount > 0) return '';
+  if (!claimsImmediateDiscordActionIntent(visibleReplyText)) return '';
+  return 'Warning: this reply says Discord-managed work is starting or being handled now, but this turn ended with zero actionable `<discord-action>` blocks and zero executed action results. If work has not started yet, say that clearly instead.';
+}
+
+export function appendPromisedDiscordActionWithoutExecutionNotice(
+  text: string,
+  actionsCount: number,
+  actionResultsCount: number,
+): string {
+  const notice = buildPromisedDiscordActionWithoutExecutionNotice(text, actionsCount, actionResultsCount);
+  if (!notice) return text;
+  const base = closeFenceIfOpen(String(text ?? '').trimEnd());
+  return base ? `${base}\n\n${notice}` : notice;
+}
+
 /**
  * Known-but-flag-gated action types mapped to actionable enable instructions.
  * Types not listed here are treated as truly unknown (typo or hallucination).

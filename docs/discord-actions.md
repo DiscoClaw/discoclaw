@@ -183,13 +183,15 @@ Capability/gating note (important):
   - Each category contributes examples via its `*ActionsPromptSection()` function.
 
 2. Model emits action blocks:
-  - It includes one or more `<discord-action>...</discord-action>` blocks in its response.
+  - It includes one or more `<discord-action>...</discord-action>` blocks in its response when it is asking DiscoClaw to perform Discord-managed work.
+  - V1 contract for the normal manual message/finalization path: prose must not be treated as sufficient proof that Discord-managed work started. If the reply claims it is starting or performing Discord-managed work but the finalization pass ends with zero actionable/executed `<discord-action>` blocks, DiscoClaw surfaces a visible warning/failure instead of posting the prose as an ambiguous no-op.
 
 3. Parse:
   - `parseDiscordActions(text, flags)` in `src/discord/actions.ts` extracts JSON blocks.
-  - It drops malformed JSON silently.
+  - It drops malformed JSON at parse time.
   - It drops actions whose `type` is not enabled by the current flags.
   - It returns `{ cleanText, actions, strippedUnrecognizedTypes }` where `cleanText` has the blocks removed.
+  - On the normal manual finalization path, parse-time stripping is not the end of the contract: if that leaves the turn with zero actionable/executed blocks after prose claimed Discord-managed work, the coordinator treats that as a visible warning/failure boundary rather than silently tolerating the empty result.
 
 4. Execute:
   - `executeDiscordActions(actions, ctx, log, subsystemContexts)` in `src/discord/actions.ts` dispatches to the right category module based on `action.type`.
@@ -198,6 +200,7 @@ Capability/gating note (important):
 
 5. Post-processing:
   - The bot appends "Done:" / "Failed:" lines after `cleanText` and posts the result.
+  - On the normal manual message finalization path, "no action results" is only acceptable when the prose did not claim Discord-managed work. If the prose claimed a Discord-managed start/perform action but no actionable blocks survived parsing/execution, the posted result is a visible warning/failure so operators are not left with a silent no-op.
 
 6. Optional auto-follow-up:
   - If any action type is listed in `QUERY_ACTION_TYPES` (`src/discord/action-categories.ts`) and at least one of those query actions succeeded, `src/discord.ts` can automatically invoke the model again with the results.
