@@ -6,10 +6,13 @@ import {
   replyThenSendChunks,
   sendChunks,
   shouldSuppressFollowUp,
+  claimsImmediateDiscordActionIntent,
   buildUnavailableActionTypesNotice,
   appendUnavailableActionTypesNotice,
   buildParseFailureNotice,
   appendParseFailureNotice,
+  buildPromisedDiscordActionWithoutExecutionNotice,
+  appendPromisedDiscordActionWithoutExecutionNotice,
 } from './output-common.js';
 import type { ImageData } from '../runtime/types.js';
 
@@ -173,6 +176,58 @@ describe('shouldSuppressFollowUp', () => {
 
   it('does not suppress when strippedUnrecognizedCount > 0, even with zero actions and images', () => {
     expect(shouldSuppressFollowUp('short', 0, 0, 3)).toBe(false);
+  });
+});
+
+describe('claimsImmediateDiscordActionIntent', () => {
+  it('matches immediate first-person action intent', () => {
+    expect(claimsImmediateDiscordActionIntent("I'm creating that task now.")).toBe(true);
+  });
+
+  it('does not match capability explanations', () => {
+    expect(claimsImmediateDiscordActionIntent('I can create that task with a taskCreate action block when you are ready.')).toBe(false);
+  });
+
+  it('does not match explicit not-started-yet replies', () => {
+    expect(claimsImmediateDiscordActionIntent('I have not started yet.')).toBe(false);
+  });
+
+  it('does not match quoted example discord-action text', () => {
+    expect(claimsImmediateDiscordActionIntent('Example only: `<discord-action>{"type":"taskCreate","title":"Ship it"}</discord-action>`')).toBe(false);
+  });
+
+  it('does not match prose that discusses actions without claiming current execution', () => {
+    expect(claimsImmediateDiscordActionIntent('To create that task, I would emit a taskCreate action block with the title and details.')).toBe(false);
+  });
+});
+
+describe('buildPromisedDiscordActionWithoutExecutionNotice', () => {
+  it('returns empty string when the reply does not claim immediate action intent', () => {
+    expect(buildPromisedDiscordActionWithoutExecutionNotice('I have not started yet.', 0, 0)).toBe('');
+  });
+
+  it('returns empty string when actionable work or results exist', () => {
+    expect(buildPromisedDiscordActionWithoutExecutionNotice("I'm creating that task now.", 1, 0)).toBe('');
+    expect(buildPromisedDiscordActionWithoutExecutionNotice("I'm creating that task now.", 0, 1)).toBe('');
+  });
+
+  it('returns a warning when the reply promises current work but nothing ran', () => {
+    const out = buildPromisedDiscordActionWithoutExecutionNotice("I'm creating that task now.", 0, 0);
+    expect(out).toContain('Discord-managed work is starting or being handled now');
+    expect(out).toContain('zero actionable `<discord-action>` blocks');
+    expect(out).toContain('zero executed action results');
+  });
+});
+
+describe('appendPromisedDiscordActionWithoutExecutionNotice', () => {
+  it('appends the warning beneath the visible reply text', () => {
+    const out = appendPromisedDiscordActionWithoutExecutionNotice("I'm creating that task now.", 0, 0);
+    expect(out).toContain("I'm creating that task now.");
+    expect(out).toContain('zero actionable `<discord-action>` blocks');
+  });
+
+  it('returns the original text when no warning is needed', () => {
+    expect(appendPromisedDiscordActionWithoutExecutionNotice('I have not started yet.', 0, 0)).toBe('I have not started yet.');
   });
 });
 
