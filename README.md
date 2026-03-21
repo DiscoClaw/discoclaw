@@ -299,7 +299,7 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
    set `DISCOCLAW_DASHBOARD_TRUSTED_HOSTS` to your tailnet IP or MagicDNS hostname.
    See [docs/dashboard-tailscale.md](docs/dashboard-tailscale.md).
 
-If you are using the Claude runtime, complete the Claude validation path below before treating the machine as ready.
+If you are using the Claude runtime, complete the Claude validation path below before treating the machine as ready. For global installs, `discoclaw init` gives you the npm-managed/manual Claude login check. The `pnpm` commands below are the source-checkout path.
 
 #### From source (contributors)
 
@@ -319,7 +319,7 @@ If `PRIMARY_RUNTIME=claude`, run both `pnpm preflight:blank-machine` and `pnpm c
 
 ### Claude runtime validation
 
-Current 1.0 audit verdict: fully automated Claude readiness is `FAIL`. `pnpm preflight:blank-machine` and `pnpm preflight` only claim the prerequisites Discoclaw can verify today; Claude login/auth is still a separate gate checked with `pnpm claude:auth-smoke`. See [docs/audit/claude-blank-machine-readiness.md](docs/audit/claude-blank-machine-readiness.md).
+Current 1.0 audit verdict for the repo-owned source-checkout Claude readiness path: `PASS`. It is still not a single-command automated login proof: `pnpm preflight:blank-machine` and `pnpm preflight` only claim the prerequisites Discoclaw can verify today, and Claude login/auth remains a separate gate checked with `pnpm claude:auth-smoke`. See [docs/audit/claude-blank-machine-readiness.md](docs/audit/claude-blank-machine-readiness.md).
 
 1. Run the automated checks:
    ```bash
