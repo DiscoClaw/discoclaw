@@ -45,8 +45,9 @@ For `openai`, prove the active path the same way:
 
 For `openrouter`, the current shipped boundary is narrower:
 - Set `OPENROUTER_API_KEY` in the authoritative `.env`, but treat that as config presence only.
+- For source checkouts, `pnpm preflight*` remains setup/bootstrap evidence only, and repo smoke-path validation is the only shipped workload-proof surface for OpenRouter-backed routes.
 - Start or restart DiscoClaw and confirm `!status` or the startup credential report shows `openrouter-key: ok`.
-- Treat `!models set chat openrouter`, `PRIMARY_RUNTIME=openrouter`, or `.env` key presence alone as routing/config only until that proof appears.
+- Treat `!models set chat openrouter`, `PRIMARY_RUNTIME=openrouter`, `.env` key presence, and npm-managed `discoclaw doctor` as routing/config evidence only until that proof appears.
 
 For `openai` and `openrouter`, set `OPENAI_COMPAT_TOOLS_ENABLED=1` if you expect full tool use. In logs, the Claude adapter runtime ID is `claude_code` even though the user-facing adapter name is `claude`.
 
@@ -145,7 +146,7 @@ DISCOCLAW_TIER_OPENROUTER_CAPABLE=anthropic/claude-sonnet-4
 DISCOCLAW_TIER_OPENROUTER_DEEP=google/gemini-2.5-pro
 ```
 
-At startup, DiscoClaw reads any `DISCOCLAW_TIER_<RUNTIME>_{FAST,CAPABLE,DEEP}` env vars. For `OPENROUTER`, set only the tiers you actually need. Each defined tier becomes usable for OpenRouter tier resolution, and even a single unique entry is enough for exact-string reverse-mapping in fast/voice runtime auto-switching. Examples:
+At startup, DiscoClaw reads any `DISCOCLAW_TIER_<RUNTIME>_{FAST,CAPABLE,DEEP}` env vars. For `OPENROUTER`, set only the tiers you actually need. Each defined tier becomes usable for OpenRouter tier resolution, and even a single unique entry is enough for exact-string reverse-mapping in fast/voice runtime auto-switching. This remains manual operator config in the current audited slice; DiscoClaw still does not ship built-in OpenRouter tier defaults or audited tier recommendations. Examples:
 - Set `DISCOCLAW_TIER_OPENROUTER_CAPABLE=anthropic/claude-sonnet-4` if you want `!models set chat capable` while already on OpenRouter.
 - Set `DISCOCLAW_TIER_OPENROUTER_FAST=openai/gpt-5-mini` if you want `!models set fast openai/gpt-5-mini` to auto-switch to OpenRouter.
 
@@ -154,9 +155,9 @@ Exact-match rules:
 - `gpt-5-mini` does not match `openai/gpt-5-mini`
 - `fast` does not match anything because it is a tier name, not a concrete model string
 
-Without the relevant tier vars, `PRIMARY_RUNTIME=openrouter` and `OPENROUTER_MODEL` still work, but OpenRouter only participates in tier resolution or fast/voice auto-switching for the specific tiers you defined.
+Without the relevant tier vars, `PRIMARY_RUNTIME=openrouter` and `OPENROUTER_MODEL` still work, but OpenRouter only participates in tier resolution or fast/voice auto-switching for the specific tiers you defined. Keep the support claim narrow: source checkouts can pair this manual config with repo smoke-path validation for the exact OpenRouter-backed workload under test, while npm-managed installs should stop at post-start evidence such as `openrouter-key: ok`.
 
-This guide intentionally does not recommend default OpenRouter tier mappings or preferred models yet. Tier defaults and model recommendations are deferred to a later plan; for now, define only the exact `DISCOCLAW_TIER_OPENROUTER_<TIER>` entries you need for your current instance.
+This guide intentionally does not recommend default OpenRouter tier mappings or preferred models yet. Tier defaults and model recommendations are deferred to a later plan; for now, define only the exact `DISCOCLAW_TIER_OPENROUTER_<TIER>` entries you need for your current instance and do not infer broader parity from that manual setup.
 
 ## Where each kind of change persists
 

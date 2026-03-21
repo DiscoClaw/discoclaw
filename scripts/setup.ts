@@ -122,9 +122,10 @@ console.log('  1) Claude');
 console.log('  2) Gemini');
 console.log('  3) OpenAI');
 console.log('  4) Codex');
+console.log('  5) OpenRouter');
 const providerChoice = await askValidated(
-  'Provider [1-4]: ',
-  (val) => (['1', '2', '3', '4'].includes(val) ? null : 'Enter 1, 2, 3, or 4'),
+  'Provider [1-5]: ',
+  (val) => (['1', '2', '3', '4', '5'].includes(val) ? null : 'Enter 1, 2, 3, 4, or 5'),
 );
 
 if (providerChoice === '1') {
@@ -173,6 +174,15 @@ if (providerChoice === '1') {
   if (bypassApprovals.toLowerCase() === 'y') {
     values.CODEX_DANGEROUSLY_BYPASS_APPROVALS_AND_SANDBOX = '1';
   }
+} else if (providerChoice === '5') {
+  values.PRIMARY_RUNTIME = 'openrouter';
+  console.log('  Note: the OpenRouter adapter is HTTP-only.');
+  values.OPENROUTER_API_KEY = await askValidated(
+    'OpenRouter API key: ',
+    (val) => (val ? null : 'API key is required'),
+  );
+  values.OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+  values.OPENROUTER_MODEL = 'anthropic/claude-sonnet-4-20250514';
 }
 
 // --- Recommended values ---
@@ -257,27 +267,35 @@ if (values.PRIMARY_RUNTIME === 'claude') {
   }
 } else {
   console.log('\nNext steps:');
-  let finalStepNumber = 2;
+  const nextSteps: string[] = [];
   if (values.PRIMARY_RUNTIME === 'gemini') {
-    console.log('  1. Authenticate with Gemini: run `gemini` and follow the prompts.');
+    nextSteps.push('Authenticate with Gemini: run `gemini` and follow the prompts.');
   } else if (values.PRIMARY_RUNTIME === 'openai') {
-    finalStepNumber = 3;
-    console.log('  1. `OPENAI_API_KEY` auth is a separate source-checkout proof gate; setup only wrote the config.');
-    console.log('  2. Run `OPENAI_SMOKE_TEST_TIERS=fast pnpm test` and confirm the `openai / fast` smoke passes.');
-    console.log('     If you need exact model evidence instead of the fast-tier check, replace `fast` with your intended tier or model ID.');
+    nextSteps.push('`OPENAI_API_KEY` auth is a separate source-checkout proof gate; setup only wrote the config.');
+    nextSteps.push('Run `OPENAI_SMOKE_TEST_TIERS=fast pnpm test` and confirm the `openai / fast` smoke passes.');
+    nextSteps.push('If you need exact model evidence instead of the fast-tier check, replace `fast` with your intended tier or model ID.');
   } else if (values.PRIMARY_RUNTIME === 'codex') {
-    finalStepNumber = 3;
     const codexBin = values.CODEX_BIN || 'codex';
     const codexModel = values.CODEX_MODEL || 'gpt-5.4';
-    console.log('  1. Codex CLI session auth is a separate source-checkout proof gate; setup only wrote the config.');
-    console.log(`  2. Run \`${codexBin} exec -m ${codexModel} --skip-git-repo-check --ephemeral -s read-only -- "Reply with OK"\` and confirm it returns normal text.`);
+    nextSteps.push('Codex CLI session auth is a separate source-checkout proof gate; setup only wrote the config.');
+    nextSteps.push(`Run \`${codexBin} exec -m ${codexModel} --skip-git-repo-check --ephemeral -s read-only -- "Reply with OK"\` and confirm it returns normal text.`);
     if (values.OPENAI_API_KEY && values.DISCOCLAW_FAST_RUNTIME === 'openai') {
-      finalStepNumber = 4;
-      console.log('  3. The optional OpenAI fast-tier path needs separate `OPENAI_API_KEY` evidence.');
-      console.log('     Run `OPENAI_SMOKE_TEST_TIERS=fast pnpm test` and confirm the `openai / fast` smoke passes.');
+      nextSteps.push('The optional OpenAI fast-tier path needs separate `OPENAI_API_KEY` evidence.');
+      nextSteps.push('Run `OPENAI_SMOKE_TEST_TIERS=fast pnpm test` and confirm the `openai / fast` smoke passes.');
     }
+  } else if (values.PRIMARY_RUNTIME === 'openrouter') {
+    nextSteps.push('Run `pnpm preflight:blank-machine` and fix any config issues it reports.');
+    nextSteps.push('Run `pnpm build`.');
+    nextSteps.push('Start discoclaw with `pnpm dev` and confirm `!status` (or the startup credential report) shows `openrouter-key: ok` for the active OpenRouter path.');
+    nextSteps.push('Treat that `openrouter-key: ok` signal as proof only for the shipped `OPENROUTER_API_KEY` path, not broader OpenRouter parity.');
   }
-  console.log(`  ${finalStepNumber}. pnpm build && pnpm dev\n`);
+  if (values.PRIMARY_RUNTIME !== 'openrouter') {
+    nextSteps.push('pnpm build && pnpm dev');
+  }
+  nextSteps.forEach((step, index) => {
+    console.log(`  ${index + 1}. ${step}`);
+  });
+  console.log('');
 }
 
 completed = true;

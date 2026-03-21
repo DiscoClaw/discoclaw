@@ -144,6 +144,17 @@ function buildRuntimeProofGates(env: NodeJS.ProcessEnv): RuntimeProofGate[] {
     });
   }
 
+  if (neededRuntimes.has('openrouter')) {
+    gates.push({
+      introLines: [
+        'OpenRouter runtime proof is a separate gate: this check only verifies whether `OPENROUTER_API_KEY` is present when current runtime routing requires it.',
+        'Preflight does not start discoclaw or prove the running process can complete the shipped OpenRouter `GET /models` credential probe.',
+      ],
+      successLine: 'Next proof gate: start discoclaw and confirm `!status` (or the startup credential report) shows `openrouter-key: ok` for the active OpenRouter path.',
+      failureLine: 'After fixing the failures, start discoclaw and confirm `!status` (or the startup credential report) shows `openrouter-key: ok` for the active OpenRouter path.',
+    });
+  }
+
   return gates;
 }
 
@@ -192,7 +203,8 @@ function loadEnvFile(
 }
 
 function emitDoctorContractNotes(log: DoctorReporter, blankMachine: boolean, env: NodeJS.ProcessEnv) {
-  log.info('This source-checkout preflight only reports prerequisites Discoclaw can verify locally today.');
+  log.info('This source-checkout preflight only reports config/bootstrap prerequisites Discoclaw can verify locally today.');
+  log.info('It does not prove provider auth, live runtime credential probes, or end-to-end workload success.');
   if (blankMachine) {
     log.info('Blank-machine mode is active: ignoring inherited shell env and reading only the current .env values.');
   }

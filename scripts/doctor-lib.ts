@@ -41,7 +41,7 @@ function normalizeRuntimeName(raw: string): string {
 
 /**
  * Check whether the Claude, Gemini, and Codex CLI binaries are present, and whether
- * required API keys (OPENAI_API_KEY) are set.
+ * required API keys (OPENAI_API_KEY, OPENROUTER_API_KEY) are set.
  * Reads PRIMARY_RUNTIME, DISCOCLAW_FAST_RUNTIME, FORGE_DRAFTER_RUNTIME, and FORGE_AUDITOR_RUNTIME from env
  * to decide which binaries/keys are required. A missing needed binary or key is a fail;
  * a missing unneeded one is informational (ok: true, info: true).
@@ -77,6 +77,7 @@ export function checkRuntimeBinaries(
   const geminiNeeded = neededRuntimes.has('gemini');
   const codexNeeded = neededRuntimes.has('codex');
   const openaiNeeded = neededRuntimes.has('openai');
+  const openrouterNeeded = neededRuntimes.has('openrouter');
 
   const checks: DoctorCheckResult[] = [];
 
@@ -145,6 +146,23 @@ export function checkRuntimeBinaries(
       ok: true,
       info: true,
       label: 'OPENAI_API_KEY is not set — not needed for current runtime',
+    });
+  }
+
+  const openrouterKey = (env.OPENROUTER_API_KEY ?? '').trim();
+  if (openrouterKey) {
+    checks.push({ ok: true, label: 'OPENROUTER_API_KEY is set' });
+  } else if (openrouterNeeded) {
+    checks.push({
+      ok: false,
+      label: 'OPENROUTER_API_KEY is not set',
+      hint: 'Set OPENROUTER_API_KEY to your OpenRouter API key',
+    });
+  } else {
+    checks.push({
+      ok: true,
+      info: true,
+      label: 'OPENROUTER_API_KEY is not set — not needed for current runtime',
     });
   }
 

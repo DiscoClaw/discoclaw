@@ -402,9 +402,9 @@ export function detectNpmManagedRuntimeSupportBoundary(ctx: DoctorContext): Doct
   }
 
   if (configuredRuntimes.has('openrouter')) {
-    proofGates.push('a live OPENROUTER_API_KEY-backed request for the OpenRouter path');
+    proofGates.push('post-start OPENROUTER_API_KEY-backed evidence that the running instance can see the shipped OpenRouter path');
     recommendations.push(
-      'For OpenRouter paths, treat OPENROUTER_API_KEY as config presence only; start discoclaw and confirm `!status` (or the startup credential report) shows `openrouter-key: ok` before claiming the shipped runtime sees that path.',
+      'For OpenRouter paths, treat OPENROUTER_API_KEY as config presence only; after startup, confirm `!status` (or the startup credential report) shows `openrouter-key: ok` for the running instance, then use docs/audit/openrouter-api-key-support-boundary.md for the exact support boundary of that shipped env-key path. Do not treat this config finding as proof of broader OpenRouter model or tool readiness.',
     );
   }
 

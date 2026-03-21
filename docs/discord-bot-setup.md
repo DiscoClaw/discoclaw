@@ -204,8 +204,9 @@ Run through this checklist in order. Each step should produce the expected outpu
      - If the install also routes fast/alternate work through OpenAI, do not stop at key presence alone; confirm the live runtime-visible `openai-key: ok` evidence described in that audit after startup.
    - **Global install (`npm install -g discoclaw`) + OpenRouter path:**
      - `discoclaw init` only writes the existing `OPENROUTER_API_KEY` env-key path.
+     - Run `discoclaw doctor` if you want the shipped config/bootstrap check for this install mode.
      - Start DiscoClaw and confirm `!status` or the startup credential report shows `openrouter-key: ok`.
-     - Treat that live `openrouter-key: ok` signal as the current runtime-visible proof gate for npm-managed installs.
+     - Treat `discoclaw doctor` as config-only and treat that live `openrouter-key: ok` signal as the current proof gate for npm-managed installs.
    - **From source + Claude path:**
      - Run:
        ```bash
@@ -228,8 +229,9 @@ Run through this checklist in order. Each step should produce the expected outpu
        ```bash
        pnpm preflight:blank-machine
        ```
+     - Treat `pnpm preflight:blank-machine` as setup/bootstrap evidence only for the OpenRouter path.
      - Start DiscoClaw and confirm `!status` or the startup credential report shows `openrouter-key: ok`.
-     - Treat `pnpm preflight:blank-machine` as config/bootstrap evidence only for the OpenRouter env-key path.
+     - If you need to claim an OpenRouter-backed workload from a source checkout, run the repo smoke harness against the exact OpenRouter-backed route or model you intend to use; that smoke path is the shipped workload-proof surface for this install mode.
    - Repo-owned source helpers such as `pnpm claude:auth-smoke` and `pnpm discord:smoke-test` are unavailable in the published npm package by design; `package.json.files` ships the compiled CLI and selected docs/assets, not the repo `scripts/` tree.
    - If you plan to use `discoclaw install-daemon`, note the current service caveat: the installer writes a service that uses `/usr/bin/node` and a fixed service `PATH`, so the daemon can still diverge from the interactive shell you just validated. Verify service logs before assuming daemon parity.
 
