@@ -57,7 +57,7 @@ describe('NPM_MANAGED_CLAUDE_1P0_AUDIT', () => {
     expect(getNpmManagedClaude1p0BlockedSurfaces()).toEqual([
       expect.objectContaining({
         id: 'init-login-validation',
-        blockerCodes: ['missing-shipped-auth-smoke', 'missing-claude-bin-persistence'],
+        blockerCodes: ['missing-claude-bin-persistence'],
       }),
       expect.objectContaining({
         id: 'daemon-install-startup',
@@ -78,7 +78,6 @@ describe('NPM_MANAGED_CLAUDE_1P0_AUDIT', () => {
     const blockerCodes = NPM_MANAGED_CLAUDE_1P0_AUDIT.blockers.map((blocker) => blocker.code);
 
     expect(blockerCodes).toEqual([
-      'missing-shipped-auth-smoke',
       'missing-claude-bin-persistence',
       'daemon-runtime-path-mismatch',
       'blocked-by-auth-and-daemon-gaps',

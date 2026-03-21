@@ -105,7 +105,7 @@ discoclaw install-daemon # register as a user-level systemd service
 
 The `discoclaw init` wizard prompts for your bot token, user/channel IDs, and other essentials, then writes `.env` for you. No manual file editing required.
 
-For npm-managed installs, that `.env` creation step is config setup, not full Claude-readiness proof. Before treating the global-install path as ready, follow the npm-managed validation flow in [docs/audit/claude-npm-managed-path.md](/home/davidmarsh/code/discoclaw/docs/audit/claude-npm-managed-path.md) and the checklist below.
+For npm-managed installs, that `.env` creation step is config setup, not full Claude-readiness proof. Before treating the global-install path as ready, follow the npm-managed validation flow in [docs/audit/claude-npm-managed-path.md](audit/claude-npm-managed-path.md) and the checklist below.
 
 ### From source (contributors / developers)
 
@@ -179,7 +179,7 @@ Run through this checklist in order. Each step should produce the expected outpu
    - **From source:** `test -f .env && echo "ok" || echo "missing — run: cp .env.example .env"`
 
 4. **Npm-managed Claude validation (global install):**
-   - Read [docs/audit/claude-npm-managed-path.md](/home/davidmarsh/code/discoclaw/docs/audit/claude-npm-managed-path.md) before treating the npm path as support-claimable.
+   - Read [docs/audit/claude-npm-managed-path.md](audit/claude-npm-managed-path.md) before treating the npm path as support-claimable.
    - Run:
      ```bash
      discoclaw claude auth-smoke

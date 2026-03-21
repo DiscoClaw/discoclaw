@@ -11,7 +11,6 @@ export type NpmManagedClaudeAuditVerdict = 'support-claimable' | 'not-yet-suppor
 export type NpmManagedClaudeSupportState = 'supported' | 'blocked';
 
 export type NpmManagedClaudeBlockerCode =
-  | 'missing-shipped-auth-smoke'
   | 'missing-claude-bin-persistence'
   | 'daemon-runtime-path-mismatch'
   | 'blocked-by-auth-and-daemon-gaps';
@@ -57,26 +56,21 @@ export const NPM_MANAGED_CLAUDE_1P0_AUDIT = {
   verdict: 'not-yet-support-claimable',
   supportClaimable: false,
   summary:
-    'The npm-managed path can claim install and update mechanics, but cannot yet claim a supported stranger-run Claude workflow for 1.0.',
+    'The npm-managed path can claim install and update mechanics plus shell-level Claude validation, but cannot yet claim a supported stranger-run Claude workflow for 1.0.',
   supportedClaims: [
     'global install via `npm install -g discoclaw`',
     'npm-managed install detection',
+    'shell-level Claude validation via `discoclaw claude auth-smoke`',
     'version checks via `npm show discoclaw version`',
     'global upgrade via `npm install -g discoclaw --loglevel=error`',
   ],
   blockedClaims: [
-    'shipped npm-managed Claude auth-smoke validation',
     'persisting the interactively validated Claude binary into `.env` as `CLAUDE_BIN`',
     'daemon startup that records the validated Node and Claude runtime paths',
     'first useful Claude-backed reply on the npm-managed stranger path',
     'restart recovery on the npm-managed Claude daemon path',
   ],
   blockers: [
-    {
-      code: 'missing-shipped-auth-smoke',
-      summary:
-        'The shipped npm package has no npm-managed Claude auth-smoke subcommand, and the published files omit the source-only auth smoke script.',
-    },
     {
       code: 'missing-claude-bin-persistence',
       summary:
@@ -90,7 +84,7 @@ export const NPM_MANAGED_CLAUDE_1P0_AUDIT = {
     {
       code: 'blocked-by-auth-and-daemon-gaps',
       summary:
-        'First useful reply and restart recovery stay blocked until the npm-managed path ships auth proof and daemon/runtime-path parity.',
+        'First useful reply and restart recovery stay blocked until the npm-managed path ships daemon/runtime-path parity between the validated shell and installed service.',
     },
   ],
   surfaces: [
@@ -110,8 +104,8 @@ export const NPM_MANAGED_CLAUDE_1P0_AUDIT = {
       state: 'blocked',
       supportClaimable: false,
       summary:
-        '`discoclaw init` can detect Claude in the current shell and prints manual guidance, but there is no shipped npm-managed auth-smoke command and the generated `.env` does not persist `CLAUDE_BIN`.',
-      blockerCodes: ['missing-shipped-auth-smoke', 'missing-claude-bin-persistence'],
+        '`discoclaw init` can detect Claude in the current shell, and the shipped `discoclaw claude auth-smoke` command can validate shell-level Claude access, but the generated `.env` does not persist `CLAUDE_BIN` for the daemon path.',
+      blockerCodes: ['missing-claude-bin-persistence'],
       evidence: ['src/cli/init-wizard.ts', 'src/cli/index.ts', 'package.json'],
     },
     {
@@ -130,7 +124,7 @@ export const NPM_MANAGED_CLAUDE_1P0_AUDIT = {
       state: 'blocked',
       supportClaimable: false,
       summary:
-        'Shared Discord reply machinery exists, but the npm-managed Claude path cannot currently prove auth and daemon/runtime parity well enough to claim this stranger-run step.',
+        'Shared Discord reply machinery exists, but the npm-managed Claude path cannot currently prove daemon/runtime parity well enough to claim this stranger-run step.',
       blockerCodes: ['blocked-by-auth-and-daemon-gaps'],
       evidence: ['src/index.ts', 'src/cli/index.ts', 'src/cli/daemon-installer.ts', 'src/cli/init-wizard.ts'],
     },
