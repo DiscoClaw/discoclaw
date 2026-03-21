@@ -398,7 +398,7 @@ describe('collectDashboardSnapshot', () => {
       },
     );
 
-    expect(snapshot.doctorSummary).toBe('1 findings (errors=1, warnings=0, info=0)');
+    expect(snapshot.doctorSummary).toBe('2 findings (errors=1, warnings=1, info=0)');
     expect(snapshot.modelRows.find((row) => row.role === 'chat')).toEqual({
       role: 'chat',
       effectiveModel: 'capable',
