@@ -221,6 +221,8 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Browser launcher operator guide (managed profile path, verified CDP launch/reuse flow, and service-environment limits) | `docs/browser-launcher.md` | **done** |
 | Official integration docs index | `docs/official-docs.md` | **done** |
 | Canonical runtime/model switching operator guide (startup defaults, live overrides, OpenRouter tier override workflow) | `docs/runtime-switching.md` | **done** |
+| Codex source-checkout readiness audit (separate Codex session-auth and optional OpenAI smoke proof gates) | `docs/audit/codex-blank-machine-readiness.md` | **done** |
+| Codex npm-managed path audit (global install boundary, manual Codex gate, and live OpenAI alternate-path proof) | `docs/audit/codex-npm-managed-path.md` | **done** |
 | Dashboard Tailscale access guide | `docs/dashboard-tailscale.md` | **done** |
 | Compound lessons artifact (ownership, promotion rules, promotion workflow) | `docs/compound-lessons.md` | **done** |
 | This inventory | `docs/INVENTORY.md` | **done** |
@@ -301,7 +303,7 @@ Config: `DISCOCLAW_WEBHOOK_ENABLED`, `DISCOCLAW_WEBHOOK_PORT`, `DISCOCLAW_WEBHOO
 
 | Command | Description | File(s) | Status |
 |---------|-------------|---------|--------|
-| `pnpm preflight` / `pnpm preflight:blank-machine` | Source-checkout preflight surface for local config/runtime prerequisites only; wraps the config-only doctor flow and explicitly leaves Claude auth to the separate smoke step | `scripts/doctor.ts`, `scripts/doctor-lib.ts`, `src/health/config-doctor.ts` | **done** |
+| `pnpm preflight` / `pnpm preflight:blank-machine` | Source-checkout preflight surface for local config/runtime prerequisites only; wraps the config-only doctor flow and leaves provider auth/runtime proof to separate Claude, Codex, and OpenAI gates | `scripts/doctor.ts`, `scripts/doctor-lib.ts`, `src/health/config-doctor.ts` | **done** |
 | `tsx scripts/claude-auth-smoke.ts` | Repo-owned source-checkout Claude auth smoke command; runs one minimal Claude prompt and classifies authenticated vs unauthenticated vs missing CLI for the blank-machine/setup path | `scripts/claude-auth-smoke.ts` | **done** |
 | `discoclaw browser` | Browser operator commands: `setup`, `doctor`, and `launch [--headless]` for the managed-profile plus verified-CDP flow | `src/cli/index.ts`, `src/cli/index.test.ts`, `src/browser/managed-browser.ts` | **done** |
 | `discoclaw dashboard` | Launches the operator dashboard for common admin tasks: inspect service/runtime state, review config doctor findings, change model assignments, and trigger service actions through the loopback-by-default web UI/HTTP server, with optional trusted-host Tailscale access | `src/cli/index.ts`, `src/cli/dashboard.ts`, `src/cli/dashboard.test.ts`, `src/dashboard/server.ts`, `src/dashboard/page.ts`, `src/service-control.ts`, `src/health/config-doctor.ts` | **done** |

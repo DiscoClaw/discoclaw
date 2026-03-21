@@ -194,10 +194,12 @@ For source checkouts, repo-local managed browser storage is supported only at th
 - One primary runtime:
   - **Claude CLI** on your `PATH` — check with `claude --version` (see [Claude CLI docs](https://docs.anthropic.com/en/docs/claude-code) to install), or
   - **Gemini CLI** on your `PATH` — check with `gemini --version`, or
-  - **Codex CLI** on your `PATH` — check with `codex --version`, or
-  - **OpenAI-compatible API key** via `OPENAI_API_KEY`, or
+  - **Codex CLI** on your `PATH` — check with `codex --version` (binary presence only; session auth is a separate proof gate), or
+  - **OpenAI-compatible API key** via `OPENAI_API_KEY` (config presence only; live auth is a separate proof gate), or
   - **OpenRouter API key** via `OPENROUTER_API_KEY` (access to many providers)
 - Runtime-specific access for your chosen provider (Anthropic plan/API credits for Claude, Google account for Gemini, OpenAI access for Codex/OpenAI models)
+
+For Codex and OpenAI paths, treat binary/key presence as readiness prerequisites only. The install-mode-specific support claims live in the [Codex source-checkout audit](docs/audit/codex-blank-machine-readiness.md) and [Codex npm-managed audit](docs/audit/codex-npm-managed-path.md).
 
 **Contributors (from source):**
 - Everything above, plus **pnpm** — enable via Corepack (`corepack enable`) or install separately
@@ -259,6 +261,8 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
 - [Configuration reference](docs/configuration.md) — all environment variables indexed by category
 - [Claude source-checkout audit](docs/audit/claude-blank-machine-readiness.md) — current 1.0 verdict for the repo-owned `pnpm preflight*` + `pnpm claude:auth-smoke` path
 - [Claude npm-managed audit](docs/audit/claude-npm-managed-path.md) — current 1.0 verdict for `npm install -g discoclaw`, `discoclaw init`, and the daemon/runtime-path gap
+- [Codex source-checkout audit](docs/audit/codex-blank-machine-readiness.md) — current 1.0 verdict for the repo-owned `pnpm preflight*` path plus the separate Codex/OpenAI proof gates
+- [Codex npm-managed audit](docs/audit/codex-npm-managed-path.md) — current 1.0 verdict for `npm install -g discoclaw`, manual Codex login proof, optional OpenAI fast-path proof, and the daemon/runtime-path gap
 - [Managed browser launcher guide](#managed-browser-launcher) — dedicated profile flow, headed login, verified CDP handoff, and storage rules
 - [Runtime/model switching](docs/runtime-switching.md) — operator guide for switching adapters, models, and defaults safely
 - [Webhook exposure](docs/webhook-exposure.md) — tunnel/proxy setup and webhook security
@@ -300,12 +304,13 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
    set `DISCOCLAW_DASHBOARD_TRUSTED_HOSTS` to your tailnet IP or MagicDNS hostname.
    See [docs/dashboard-tailscale.md](docs/dashboard-tailscale.md).
 
-If you are using the Claude runtime, keep the two validation paths separate:
+If you are validating runtime auth, keep the install mode and auth method separate:
 
-- Global installs use the npm-managed/manual path: `discoclaw init` tells you how to run the Claude login check from the installed shell, and the installed CLI also exposes `discoclaw claude auth-smoke` for that same shell-level smoke test.
-- Source checkouts use the repo-owned path below: `pnpm preflight*` plus `pnpm claude:auth-smoke`.
+- Claude: global installs use the npm-managed path (`discoclaw init` guidance plus `discoclaw claude auth-smoke`), while source checkouts use `pnpm preflight*` plus `pnpm claude:auth-smoke`.
+- Codex from source: `pnpm preflight*` is config-only; prove the Codex session separately with `codex exec ...`, and prove any OpenAI fast/alternate path separately with `OPENAI_SMOKE_TEST_TIERS=... pnpm test`.
+- Codex from npm/global install: `discoclaw doctor` is config-only and no shipped `discoclaw codex auth-smoke` exists yet; use the same-shell `codex exec --skip-git-repo-check -- "Reply with OK"` login check, then confirm `openai-key: ok` separately if you enabled an OpenAI fast/alternate path.
 
-Current npm-managed blocker: `discoclaw install-daemon` still renders services with `/usr/bin/node` and a fixed service `PATH`, while `discoclaw init` does not persist `CLAUDE_BIN`. A Claude check that passes in your interactive npm shell is therefore not yet a support claim for the installed daemon path.
+Current npm-managed blocker for both Claude and Codex daemon claims: `discoclaw install-daemon` still renders services with `/usr/bin/node` and a fixed service `PATH`. The interactive shell check can therefore pass while the installed daemon resolves different Node or runtime binaries.
 
 #### From source (contributors)
 
@@ -319,9 +324,11 @@ pnpm run setup        # guided interactive setup
 # For all ~90 options: cp .env.example.full .env
 pnpm preflight:blank-machine
 pnpm claude:auth-smoke  # if PRIMARY_RUNTIME=claude
+codex exec -m gpt-5.4 --skip-git-repo-check --ephemeral -s read-only -- "Reply with OK"  # if PRIMARY_RUNTIME=codex
+OPENAI_SMOKE_TEST_TIERS=fast pnpm test  # if any source-checkout path routes through OpenAI
 ```
 
-If `PRIMARY_RUNTIME=claude`, run both `pnpm preflight:blank-machine` and `pnpm claude:auth-smoke` before `pnpm dev`.
+If `PRIMARY_RUNTIME=claude`, run both `pnpm preflight:blank-machine` and `pnpm claude:auth-smoke` before `pnpm dev`. If `PRIMARY_RUNTIME=codex`, treat `pnpm preflight:blank-machine` as config/bootstrap evidence only, then capture separate Codex session-auth evidence with the `codex exec ...` prompt. If any source-checkout route uses OpenAI, capture separate `OPENAI_API_KEY` evidence with `OPENAI_SMOKE_TEST_TIERS=... pnpm test`.
 
 ### Claude runtime validation
 
@@ -361,6 +368,17 @@ Npm-managed 1.0 audit verdict: `NOT YET SUPPORT-CLAIMABLE`. The installed CLI no
    pnpm build && pnpm dev
    ```
 
+### Codex runtime validation
+
+Codex 1.0 support matrix:
+
+| Install mode | Config/bootstrap evidence only | Separate auth proof gates | 1.0 verdict |
+| --- | --- | --- | --- |
+| Source checkout | `pnpm preflight:blank-machine` / `pnpm preflight` prove local prerequisites only. They do not invoke Codex or OpenAI. | 1. Prove the Codex CLI session in the same shell with `codex exec -m gpt-5.4 --skip-git-repo-check --ephemeral -s read-only -- "Reply with OK"` before and after `codex` login. 2. If any source-checkout path routes through OpenAI, run `OPENAI_SMOKE_TEST_TIERS=fast pnpm test` or replace `fast` with your intended tier/model. | `PASS` for the repo-owned source path. See [docs/audit/codex-blank-machine-readiness.md](docs/audit/codex-blank-machine-readiness.md). |
+| npm / global install | `discoclaw doctor`, `!doctor`, and `discoclaw init` detection stay config-only. No shipped `discoclaw codex auth-smoke` exists yet. | 1. Run `codex exec --skip-git-repo-check -- "Reply with OK"` before and after `codex` login in the same installed shell. 2. If you enabled an OpenAI fast/alternate path, start DiscoClaw and confirm `!status` or the startup credential report shows `openai-key: ok`. | `NOT YET SUPPORT-CLAIMABLE` for the daemon path. See [docs/audit/codex-npm-managed-path.md](docs/audit/codex-npm-managed-path.md). |
+
+Do not treat `codex --version`, `OPENAI_API_KEY` presence, `pnpm preflight*`, or `discoclaw doctor` as full Codex readiness proof by themselves. Those are prerequisite/config surfaces only.
+
 ## Updating
 
 **Global install:**
@@ -382,6 +400,8 @@ discoclaw install-daemon   # re-register the service after updating
 
 For Claude on npm-managed installs, keep using the installed-shell validation path after updates: rerun `discoclaw init` if you need the manual login guidance, and use `discoclaw claude auth-smoke` if you want the shipped shell-level smoke check. Do not treat `pnpm preflight*` or `pnpm claude:auth-smoke` as npm-managed evidence; those remain source-checkout-only. Re-registering the daemon also does not remove the current service-path blocker: the generated service still pins `/usr/bin/node` and a fixed `PATH`, so a passing interactive shell smoke test does not yet prove the daemon will resolve the same Node and Claude binaries.
 
+For Codex on npm-managed installs, `discoclaw doctor` remains config-only and there is still no shipped `discoclaw codex auth-smoke`. Repeat the same-shell `codex exec --skip-git-repo-check -- "Reply with OK"` login check after updates, and if you enabled an OpenAI fast/alternate path confirm the restarted instance reports `openai-key: ok`. Re-registering the daemon still does not remove the service-path blocker: the generated service pins `/usr/bin/node` and a fixed `PATH`, and init does not persist `CODEX_BIN`, so interactive shell success is not yet daemon-proof.
+
 **From source:**
 
 ```bash
@@ -390,7 +410,7 @@ pnpm install
 pnpm build
 ```
 
-Run `pnpm preflight` after changes to validate the automated contract again. It checks the local prerequisites Discoclaw can prove today: Node, pnpm, runtime binary presence/version, `.env` presence, env formatting, forum bootstrap eligibility, and config-doctor findings. It does not verify Claude login/auth. Use `pnpm preflight:blank-machine` when you need the audit to ignore inherited shell env and inspect only the current `.env`, `pnpm preflight:blank-machine:online` if you also want a live Discord token/intents check, and `pnpm claude:auth-smoke` for the Claude login/auth smoke step.
+Run `pnpm preflight` after changes to validate the automated contract again. It checks the local prerequisites Discoclaw can prove today: Node, pnpm, runtime binary presence/version, `.env` presence, env formatting, forum bootstrap eligibility, and config-doctor findings. It does not verify Codex session auth, OpenAI runtime auth, or Claude login/auth. Use `pnpm preflight:blank-machine` when you need the audit to ignore inherited shell env and inspect only the current `.env`, `pnpm preflight:blank-machine:online` if you also want a live Discord token/intents check, `pnpm claude:auth-smoke` for the Claude login/auth smoke step, and the Codex/OpenAI proof gates above for those runtime paths.
 
 You can also run `discoclaw doctor` to inspect config drift and related issues, `discoclaw doctor --fix` to apply safe remediations, or use `!doctor` / `!doctor fix` from Discord (`!health doctor` / `!health doctor fix` remain supported). Restart the service afterward for fixed config to take effect.
 

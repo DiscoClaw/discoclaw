@@ -465,11 +465,23 @@ export async function runInitWizard(): Promise<void> {
     console.log('  1. Authenticate: run `gemini` and follow the prompts.');
     console.log(`  2. ${daemonHint}`);
   } else if (values.PRIMARY_RUNTIME === 'openai') {
-    console.log('  1. Verify your OPENAI_API_KEY is correct.');
-    console.log(`  2. ${daemonHint}`);
+    console.log('  1. `pnpm preflight`, `pnpm preflight:blank-machine`, and `discoclaw doctor` stay config-only; they do not prove the OpenAI key.');
+    console.log('  2. Start discoclaw and confirm `!status` (or the startup credential report) shows `openai-key: ok`.');
+    console.log(`  3. ${daemonHint}`);
   } else if (values.PRIMARY_RUNTIME === 'codex') {
-    console.log('  1. Ensure the Codex binary is installed and accessible.');
-    console.log(`  2. ${daemonHint}`);
+    console.log('  1. Source checkouts: `pnpm preflight` / `pnpm preflight:blank-machine` are config-only, and the repo does not ship a Codex auth-smoke helper yet.');
+    console.log('  2. npm/global installs: `discoclaw doctor` is also config-only, and no shipped `discoclaw codex auth-smoke` exists yet.');
+    console.log('  3. Before logging in, run `codex exec --skip-git-repo-check -- "Reply with OK"` and confirm it fails with a Codex auth/session error.');
+    console.log('  4. Log in with `codex`.');
+    console.log('  5. Repeat `codex exec --skip-git-repo-check -- "Reply with OK"` and confirm it returns normal text.');
+    if (values.OPENAI_API_KEY) {
+      console.log('  6. Because you enabled the optional OpenAI fast tier, start discoclaw and confirm `!status` (or the startup credential report) shows `openai-key: ok`.');
+      console.log(`  7. ${daemonHint}`);
+      console.log('  8. For daemon installs, keep parity as a manual check: the service installer still pins `/usr/bin/node` plus a fixed `PATH`, so the service can diverge from the shell that passed the Codex prompt.');
+    } else {
+      console.log(`  6. ${daemonHint}`);
+      console.log('  7. For daemon installs, keep parity as a manual check: the service installer still pins `/usr/bin/node` plus a fixed `PATH`, so the service can diverge from the shell that passed the Codex prompt.');
+    }
   } else if (values.PRIMARY_RUNTIME === 'openrouter') {
     console.log('  1. Verify your OPENROUTER_API_KEY is correct.');
     console.log(`  2. ${daemonHint}`);

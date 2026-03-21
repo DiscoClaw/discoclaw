@@ -227,4 +227,18 @@ describe('setup: wizard copy contract', () => {
     expect(setupSource).toContain('Only after that should you run `pnpm claude:auth-smoke` for the manual Claude auth check.');
     expect(setupSource).not.toContain('claude -p -- "Reply with OK"');
   });
+
+  it('uses explicit source-checkout proof gates for OpenAI and Codex instead of install-only placeholders', () => {
+    expect(setupSource).toContain('`OPENAI_API_KEY` auth is a separate source-checkout proof gate; setup only wrote the config.');
+    expect(setupSource).toContain('Run `OPENAI_SMOKE_TEST_TIERS=fast pnpm test` and confirm the `openai / fast` smoke passes.');
+    expect(setupSource).toContain('If you need exact model evidence instead of the fast-tier check, replace `fast` with your intended tier or model ID.');
+    expect(setupSource).toContain('Codex CLI session auth is a separate source-checkout proof gate; setup only wrote the config.');
+    expect(setupSource).toContain("const codexBin = values.CODEX_BIN || 'codex';");
+    expect(setupSource).toContain("const codexModel = values.CODEX_MODEL || 'gpt-5.4';");
+    expect(setupSource).toContain('--skip-git-repo-check --ephemeral -s read-only -- "Reply with OK"');
+    expect(setupSource).toContain('confirm it returns normal text.');
+    expect(setupSource).toContain('The optional OpenAI fast-tier path needs separate `OPENAI_API_KEY` evidence.');
+    expect(setupSource).not.toContain('Verify your OPENAI_API_KEY is correct.');
+    expect(setupSource).not.toContain('Ensure the Codex binary is installed and accessible.');
+  });
 });

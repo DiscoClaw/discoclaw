@@ -30,10 +30,18 @@ Important: `!models reset` means "reset to this instance's startup defaults as r
 | --- | --- | --- |
 | `claude` | yes | Claude CLI available |
 | `gemini` | yes | Gemini CLI or `GEMINI_API_KEY`, depending on your install path |
-| `codex` | yes | Codex CLI available |
-| `openai` | yes | `OPENAI_API_KEY` |
+| `codex` | yes | Install-mode-specific Codex proof gate, not binary presence alone |
+| `openai` | yes | Install-mode-specific OpenAI proof gate, not `OPENAI_API_KEY` presence alone |
 | `openrouter` | yes | `OPENROUTER_API_KEY` |
 | `anthropic` | no | Voice-only direct API runtime; not a valid `PRIMARY_RUNTIME` |
+
+For `codex`, use the proof gate that matches the install mode you are actually operating:
+- Source checkout: [docs/audit/codex-blank-machine-readiness.md](audit/codex-blank-machine-readiness.md), including the manual `codex exec ...` session-auth step.
+- npm-managed install: [docs/audit/codex-npm-managed-path.md](audit/codex-npm-managed-path.md). That path is currently not fully support-claimable; the documented shell gate does not by itself prove daemon parity.
+
+For `openai`, prove the active path the same way:
+- Source checkout: when any configured route uses OpenAI, use the repo smoke harness described in [docs/audit/codex-blank-machine-readiness.md](audit/codex-blank-machine-readiness.md), for example `OPENAI_SMOKE_TEST_TIERS=fast pnpm test`.
+- npm-managed Codex/OpenAI alternate path: follow [docs/audit/codex-npm-managed-path.md](audit/codex-npm-managed-path.md) and confirm live runtime-visible evidence such as `openai-key: ok` after startup. `OPENAI_API_KEY` in `.env` is config only.
 
 For `openai` and `openrouter`, set `OPENAI_COMPAT_TOOLS_ENABLED=1` if you expect full tool use. In logs, the Claude adapter runtime ID is `claude_code` even though the user-facing adapter name is `claude`.
 

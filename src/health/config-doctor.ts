@@ -294,6 +294,13 @@ function envKeyIsExplicit(ctx: DoctorContext, key: string): boolean {
   return ctx.explicitEnvKeys.has(key);
 }
 
+function joinWithAnd(values: string[]): string {
+  if (values.length === 0) return '';
+  if (values.length === 1) return values[0] ?? '';
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(', ')}, and ${values[values.length - 1]}`;
+}
+
 export async function loadDoctorContext(opts: InspectOptions = {}): Promise<DoctorContext> {
   const cwd = path.resolve(opts.cwd ?? process.cwd());
   const envPath = path.join(cwd, '.env');
@@ -365,16 +372,55 @@ export function detectInstallDrift(ctx: DoctorContext): DoctorFinding[] {
   }];
 }
 
-export function detectNpmManagedClaudeSupportBoundary(ctx: DoctorContext): DoctorFinding[] {
+export function detectNpmManagedRuntimeSupportBoundary(ctx: DoctorContext): DoctorFinding[] {
   if (ctx.installMode !== 'npm-managed') return [];
 
+  const configuredRuntimes = new Set([
+    normalizeRuntimeName(ctx.env.PRIMARY_RUNTIME),
+    normalizeRuntimeName(ctx.env.DISCOCLAW_FAST_RUNTIME),
+    normalizeRuntimeName(ctx.env.FORGE_DRAFTER_RUNTIME),
+    normalizeRuntimeName(ctx.env.FORGE_AUDITOR_RUNTIME),
+    normalizeRuntimeName(ctx.runtimeOverrides.fastRuntime),
+    normalizeRuntimeName(ctx.runtimeOverrides.voiceRuntime),
+  ].filter((value): value is string => value !== undefined));
+
+  const proofGates: string[] = [];
+  const recommendations: string[] = [];
+
+  if (configuredRuntimes.has('codex')) {
+    proofGates.push('Codex CLI session auth for the Codex path');
+    recommendations.push(
+      'For Codex paths, no shipped `discoclaw codex auth-smoke` exists yet; use `codex exec --skip-git-repo-check -- "Reply with OK"` before and after `codex` login to prove the session in the same host shell.',
+    );
+  }
+
+  if (configuredRuntimes.has('openai')) {
+    proofGates.push('a live OPENAI_API_KEY-backed request for the OpenAI fast/alternate runtime path');
+    recommendations.push(
+      'For OpenAI fast/alternate paths, treat OPENAI_API_KEY as a config prerequisite only; start discoclaw and confirm `!status` (or the startup credential report) shows `openai-key: ok` before claiming the shipped runtime sees that path.',
+    );
+  }
+
+  if (configuredRuntimes.has('claude')) {
+    proofGates.push('Claude auth, first useful reply, or daemon/restart parity for the Claude path');
+    recommendations.push(
+      'Use `discoclaw claude auth-smoke` for shell-level Claude validation. For daemon installs, keep runtime parity as a manual check: `discoclaw init` does not persist `CLAUDE_BIN`, and the service installers still pin `/usr/bin/node` plus a fixed `PATH`.',
+    );
+  }
+
+  if (proofGates.length === 0) {
+    proofGates.push('provider auth or runtime success for the configured runtime path');
+    recommendations.push(
+      'Treat provider login and first live runtime success as separate manual gates for npm-managed installs.',
+    );
+  }
+
   return [{
-    id: 'npm-managed-claude:runtime-support-boundary',
+    id: 'npm-managed:runtime-support-boundary',
     severity: 'warn',
     message:
-      'On npm-managed installs, config doctor remains config-only. It does not prove Claude auth, first useful reply, or daemon/restart parity for the Claude path.',
-    recommendation:
-      'Use `discoclaw claude auth-smoke` for shell-level Claude validation. For daemon installs, keep runtime parity as a manual check: `discoclaw init` does not persist `CLAUDE_BIN`, and the service installers still pin `/usr/bin/node` plus a fixed `PATH`.',
+      `On npm-managed installs, config doctor remains config-only. It can inspect install mode plus local config files, but it does not prove ${joinWithAnd(proofGates)}.`,
+    recommendation: recommendations.join(' '),
     autoFixable: false,
   }];
 }
@@ -683,7 +729,7 @@ export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> 
   const findings = [
     ...detectInvalidModelsFile(ctx),
     ...detectInstallDrift(ctx),
-    ...detectNpmManagedClaudeSupportBoundary(ctx),
+    ...detectNpmManagedRuntimeSupportBoundary(ctx),
     ...detectWorkspaceBootstrapWarnings(ctx),
     ...detectDeprecatedEnvVars(ctx),
     ...detectConflictingOverrides(ctx),
