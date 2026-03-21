@@ -637,6 +637,48 @@ describe('manual message finalization guard', () => {
     });
   });
 
+  it('warns for successful delta-only completions that claim immediate work but never emit actions', async () => {
+    const runtime = {
+      id: 'test',
+      capabilities: new Set<string>(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_delta', text: "I'm creating that task now." };
+        yield { type: 'done' };
+      },
+    };
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply);
+    const actionsMod = await import('./actions.js');
+    const watchdog = {
+      start: vi.fn(async () => ({})),
+      stageRecovery: vi.fn(async () => ({})),
+      complete: vi.fn(async () => null),
+      startupSweep: vi.fn(async () => ({
+        interruptedRuns: 0,
+        finalRetried: 0,
+        finalPosted: 0,
+        finalFailed: 0,
+      })),
+    };
+    const params = makeParams(runtime, { longRunWatchdog: watchdog });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(vi.mocked(actionsMod.parseDiscordActions)).not.toHaveBeenCalled();
+    expect(watchdog.stageRecovery).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        text: expect.stringContaining(PROMISED_ACTION_WARNING),
+      }),
+    );
+    expect(reply.edit).toHaveBeenLastCalledWith({
+      content: expect.stringContaining(PROMISED_ACTION_WARNING),
+      allowedMentions: { parse: [] },
+    });
+  });
+
   it('does not warn when a real action executed', async () => {
     const runtime = {
       id: 'test',
@@ -676,6 +718,52 @@ describe('manual message finalization guard', () => {
     await handler(msg as any);
 
     expect(vi.mocked(actionsMod.executeDiscordActions)).toHaveBeenCalledTimes(1);
+    expect(reply.edit).toHaveBeenLastCalledWith({
+      content: "I'm creating that task now.",
+      allowedMentions: { parse: [] },
+    });
+    expect(watchdog.stageRecovery).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        text: "I'm creating that task now.",
+      }),
+    );
+    expect(reply.edit.mock.calls.at(-1)?.[0]?.content).not.toContain(PROMISED_ACTION_WARNING);
+  });
+
+  it('does not warn when the manual Discord action path is disabled entirely', async () => {
+    const runtime = {
+      id: 'test',
+      capabilities: new Set<string>(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: "I'm creating that task now." };
+        yield { type: 'done' };
+      },
+    };
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply);
+    const actionsMod = await import('./actions.js');
+    const watchdog = {
+      start: vi.fn(async () => ({})),
+      stageRecovery: vi.fn(async () => ({})),
+      complete: vi.fn(async () => null),
+      startupSweep: vi.fn(async () => ({
+        interruptedRuns: 0,
+        finalRetried: 0,
+        finalPosted: 0,
+        finalFailed: 0,
+      })),
+    };
+    const params = makeParams(runtime, {
+      discordActionsEnabled: false,
+      longRunWatchdog: watchdog,
+    });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(vi.mocked(actionsMod.parseDiscordActions)).not.toHaveBeenCalled();
     expect(reply.edit).toHaveBeenLastCalledWith({
       content: "I'm creating that task now.",
       allowedMentions: { parse: [] },

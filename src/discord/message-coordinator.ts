@@ -4064,6 +4064,11 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
               const canParseActions = streamCompletedForActions
                 && (hadTextFinal || processedText.includes('<discord-action>'));
+              const shouldApplyPromisedDiscordActionGuard =
+                followUpDepth === 0
+                && params.discordActionsEnabled
+                && Boolean(msg.guild)
+                && streamCompletedForActions;
               if (params.discordActionsEnabled && msg.guild && canParseActions) {
                 const parsed = parseDiscordActions(processedText, actionFlags);
                 parseFailuresCount = parsed.parseFailures;
@@ -4223,11 +4228,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               processedText = parsedCapsule.cleanText;
               processedText = appendUnavailableActionTypesNotice(processedText, strippedUnrecognizedTypes);
               processedText = appendParseFailureNotice(processedText, parseFailuresCount);
-              processedText = appendPromisedDiscordActionWithoutExecutionNotice(
-                processedText,
-                actions.length,
-                actionResults.length,
-              );
+              if (shouldApplyPromisedDiscordActionGuard) {
+                processedText = appendPromisedDiscordActionWithoutExecutionNotice(
+                  processedText,
+                  actions.length,
+                  actionResults.length,
+                );
+              }
 
               const shouldQueueFollowUp =
                 followUpDepth < params.actionFollowupDepth

@@ -495,6 +495,60 @@ describe('message auto-follow-up lifecycle', () => {
     );
   });
 
+  it('does not append the promised-action warning during suppressed auto-follow-up turns', async () => {
+    const order: string[] = [];
+    const initialReply = makeReply('initial-reply');
+    const followUpReply = makeReply('follow-up-reply');
+    const runtime = makeRuntimeWithFollowUpText(order, "I'm creating that task now.");
+    const watchdog = {
+      start: vi.fn(async () => ({ deduped: false, run: {} })),
+      stageRecovery: vi.fn(async () => ({})),
+      complete: vi.fn(async () => null),
+      startupSweep: vi.fn(async () => ({ interruptedRuns: 0, finalRetried: 0, finalPosted: 0, finalFailed: 0 })),
+    };
+    const channelSend = vi.fn(async (_opts: { content: string }) => followUpReply);
+    const msg = {
+      id: 'm1',
+      type: 0,
+      content: 'hello',
+      author: { id: 'user-1', bot: false },
+      guildId: 'guild-1',
+      guild: { id: 'guild-1' },
+      channelId: 'ch-1',
+      channel: {
+        id: 'ch-1',
+        name: 'general',
+        send: channelSend,
+        isThread: () => false,
+      },
+      client: { channels: { cache: new Map() }, user: { id: 'bot-1' } },
+      attachments: new Map(),
+      stickers: new Map(),
+      embeds: [],
+      mentions: { has: () => false },
+      reply: vi.fn().mockResolvedValue(initialReply),
+    };
+
+    const { createMessageCreateHandler } = await import('./message-coordinator.js');
+    const handler = createMessageCreateHandler(makeParams(runtime, watchdog), {
+      run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()),
+    } as any);
+
+    await handler(msg as any);
+
+    const placeholderContent = channelSend.mock.calls[0]?.[0]?.content as string;
+    const token = placeholderContent.match(/`([^`]+)`/)?.[1];
+    expect(token).toBeTruthy();
+    expect(channelSend).toHaveBeenCalledTimes(1);
+    expect(followUpReply.edit).toHaveBeenLastCalledWith({
+      content: `Auto-follow-up \`${token}\`: completed.`,
+      allowedMentions: { parse: [] },
+    });
+    expect(followUpReply.edit.mock.calls.some((call) =>
+      String(call[0]?.content ?? '').includes('zero actionable `<discord-action>` blocks')
+    )).toBe(false);
+  });
+
   it('preserves primary delivery confirmation when shutdown interrupts a later follow-up turn', async () => {
     let callCount = 0;
     const runtime = {

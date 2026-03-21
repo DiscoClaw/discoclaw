@@ -239,17 +239,30 @@ export function shouldSuppressFollowUp(
   return chars < 50;
 }
 
-const DISCORD_ACTION_INTENT_BASE_VERBS = String.raw`create|send|edit|delete|close|open|start|run|fetch|check|update|post|react|launch|join|leave|remember|forget|show|sync|resume|approve|list|read|download|upload|pin|unpin|crosspost|archive|look\s+up`;
-const DISCORD_ACTION_INTENT_PROGRESSIVE_VERBS = String.raw`creating|sending|editing|deleting|closing|opening|starting|running|fetching|checking|updating|posting|reacting|launching|joining|leaving|remembering|forgetting|showing|syncing|resuming|approving|listing|reading|downloading|uploading|pinning|unpinning|crossposting|archiving|looking\s+up`;
+const DISCORD_ACTION_INTENT_BASE_VERBS = String.raw`create|send|edit|delete|close|open|post|react|launch|remember|forget|pin|unpin|crosspost|archive|ban|kick|timeout|set`;
+const DISCORD_ACTION_INTENT_PROGRESSIVE_VERBS = String.raw`creating|sending|editing|deleting|closing|opening|posting|reacting|launching|remembering|forgetting|pinning|unpinning|crossposting|archiving|banning|kicking|setting`;
+const DISCORD_ACTION_INTENT_RESOURCE_NOUNS = String.raw`channel|thread|message|reply|task|plan|cron|poll|reaction|pin|user|member|nickname|status|activity|canvas|image|file|attachment|memory|preference|fact|note`;
 const DISCORD_ACTION_INTENT_NEGATION_RE =
   /\b(?:i have not started yet|i haven't started yet|have not started yet|haven't started yet|not started yet|i have not begun yet|i haven't begun yet|have not begun yet|haven't begun yet|i am not starting|i'm not starting|i am not doing that yet|i'm not doing that yet|not proceeding now|not handling it now)\b/i;
 const DISCORD_ACTION_INTENT_EXPLANATION_RE =
   /\b(?:example(?: only)?|for example|for instance|e\.g\.|i can|i could|i would|you can|you could|you would|if you want|when you're ready|would use|would emit|would send|would create|would run|do not run|don't run|not run)\b/i;
 const DISCORD_ACTION_INTENT_PATTERNS = [
-  new RegExp(String.raw`\b(?:i am|i'm)\s+(?:${DISCORD_ACTION_INTENT_PROGRESSIVE_VERBS})\b(?:[^.!?\n]{0,80}\b(?:now|already)\b)?`, 'i'),
-  new RegExp(String.raw`\b(?:i am|i'm)\s+going to\s+(?:${DISCORD_ACTION_INTENT_BASE_VERBS})\b[^.!?\n]{0,80}\b(?:now|for you|in this response)\b`, 'i'),
-  new RegExp(String.raw`\b(?:i will|i'll|let me)\s+(?:go ahead and\s+)?(?:${DISCORD_ACTION_INTENT_BASE_VERBS})\b[^.!?\n]{0,80}\b(?:now|for you|in this response)\b`, 'i'),
-  /\b(?:proceeding now|already handling (?:it|that|this)|taking the next pass now|working on (?:it|that|this) now|doing that now)\b/i,
+  new RegExp(
+    String.raw`\b(?:i am|i'm)\s+(?:${DISCORD_ACTION_INTENT_PROGRESSIVE_VERBS})\b[^.!?\n]{0,80}\b(?:${DISCORD_ACTION_INTENT_RESOURCE_NOUNS})s?\b(?:[^.!?\n]{0,40}\b(?:now|already)\b)?`,
+    'i',
+  ),
+  new RegExp(
+    String.raw`\b(?:i am|i'm)\s+going to\s+(?:${DISCORD_ACTION_INTENT_BASE_VERBS})\b[^.!?\n]{0,80}\b(?:${DISCORD_ACTION_INTENT_RESOURCE_NOUNS})s?\b[^.!?\n]{0,40}\b(?:now|for you|in this response)\b`,
+    'i',
+  ),
+  new RegExp(
+    String.raw`\b(?:i will|i'll)\s+(?:go ahead and\s+)?(?:${DISCORD_ACTION_INTENT_BASE_VERBS})\b[^.!?\n]{0,80}\b(?:${DISCORD_ACTION_INTENT_RESOURCE_NOUNS})s?\b[^.!?\n]{0,40}\b(?:now|for you|in this response)\b`,
+    'i',
+  ),
+  /\b(?:(?:i am|i'm)\s+)?proceeding now\b/i,
+  /\b(?:(?:i am|i'm)\s+)?already handling (?:it|that|this)(?: now)?\b/i,
+  /\b(?:(?:i am|i'm)\s+)?taking the next pass(?: now)?\b/i,
+  /\b(?:(?:i am|i'm)\s+)?cleaning(?: [^.!?\n]{0,40})? up now\b/i,
 ];
 
 function stripCodeLikeDiscordActionText(text: string): string {
