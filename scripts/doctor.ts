@@ -23,6 +23,7 @@ const defaultRoot = path.resolve(import.meta.dirname, '..');
 
 export const MIN_CLAUDE_VERSION = '2.1.0';
 export const CLAUDE_BLANK_MACHINE_AUDIT_DOC = 'docs/audit/claude-blank-machine-readiness.md';
+export const CONFIGURATION_DOC = 'docs/configuration.md';
 
 type DoctorLogFn = (line: string) => void;
 
@@ -34,6 +35,12 @@ type DoctorReporter = {
 };
 
 type InspectResult = Awaited<ReturnType<typeof inspect>>;
+
+type RuntimeProofGate = {
+  introLines: string[];
+  successLine: string;
+  failureLine: string;
+};
 
 export type DoctorDeps = {
   log?: DoctorLogFn;
@@ -82,6 +89,64 @@ function defaultResolveHooksDir(cwd: string): string {
   }
 }
 
+function normalizeRuntimeName(raw: string): string {
+  const lower = raw.trim().toLowerCase();
+  return lower === 'claude_code' ? 'claude' : lower;
+}
+
+function collectNeededRuntimes(env: NodeJS.ProcessEnv): Set<string> {
+  const runtimes = [
+    (env.PRIMARY_RUNTIME ?? '').trim() || 'claude',
+    (env.DISCOCLAW_FAST_RUNTIME ?? '').trim(),
+    (env.FORGE_DRAFTER_RUNTIME ?? '').trim(),
+    (env.FORGE_AUDITOR_RUNTIME ?? '').trim(),
+  ]
+    .filter(Boolean)
+    .map(normalizeRuntimeName);
+
+  return new Set(runtimes);
+}
+
+function buildRuntimeProofGates(env: NodeJS.ProcessEnv): RuntimeProofGate[] {
+  const neededRuntimes = collectNeededRuntimes(env);
+  const gates: RuntimeProofGate[] = [];
+
+  if (neededRuntimes.has('claude')) {
+    gates.push({
+      introLines: [
+        'Claude source auth is a separate proof gate: run `pnpm claude:auth-smoke` after this check.',
+        `This command does not auto-run Claude auth validation; follow the pre-login and post-login validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`,
+      ],
+      successLine: `Next proof gate: run \`pnpm claude:auth-smoke\` for the source-checkout Claude auth check. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`,
+      failureLine: `After fixing the failures, run \`pnpm claude:auth-smoke\` for the source-checkout Claude auth check. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`,
+    });
+  }
+
+  if (neededRuntimes.has('codex')) {
+    gates.push({
+      introLines: [
+        'Codex CLI session auth is a separate proof gate: this check only verifies Codex binary/version/config prerequisites.',
+        'Preflight does not invoke Codex CLI or prove the current Codex session can authenticate.',
+      ],
+      successLine: 'Next proof gate: capture separate evidence that the source-checkout Codex CLI session is authenticated; preflight does not invoke `codex`.',
+      failureLine: 'After fixing the failures, capture separate evidence that the source-checkout Codex CLI session is authenticated; preflight does not invoke `codex`.',
+    });
+  }
+
+  if (neededRuntimes.has('openai')) {
+    gates.push({
+      introLines: [
+        'OpenAI runtime auth is a separate proof gate: this check only verifies whether `OPENAI_API_KEY` is present when current runtime routing requires it.',
+        'Preflight does not invoke the OpenAI fast/alternate runtime path or prove API auth.',
+      ],
+      successLine: 'Next proof gate: capture separate evidence that the required `OPENAI_API_KEY` path can authenticate; preflight only proves config presence.',
+      failureLine: 'After fixing the failures, capture separate evidence that the required `OPENAI_API_KEY` path can authenticate; preflight only proves config presence.',
+    });
+  }
+
+  return gates;
+}
+
 function parseSemver(versionStr: string): [number, number, number] | null {
   const match = versionStr.match(/(\d+)\.(\d+)\.(\d+)/);
   if (!match) return null;
@@ -126,14 +191,18 @@ function loadEnvFile(
   return dotenv.parse(readFileSync(envPath, 'utf8'));
 }
 
-function emitDoctorContractNotes(log: DoctorReporter, blankMachine: boolean) {
-  log.info('This check only reports prerequisites Discoclaw can verify locally today.');
+function emitDoctorContractNotes(log: DoctorReporter, blankMachine: boolean, env: NodeJS.ProcessEnv) {
+  log.info('This source-checkout preflight only reports prerequisites Discoclaw can verify locally today.');
   if (blankMachine) {
     log.info('Blank-machine mode is active: ignoring inherited shell env and reading only the current .env values.');
   }
+  log.info(`This \`pnpm preflight*\` surface is source-checkout evidence only. For npm/global installs, use \`discoclaw doctor\` and the install-mode guidance in ${CONFIGURATION_DOC}.`);
   log.info('Forum IDs may be bootstrap-derived: persisted scaffold state or first-connect creation via DISCORD_GUILD_ID can satisfy them when env vars are unset.');
-  log.info('Claude auth validation is separate: run `pnpm claude:auth-smoke` after this check.');
-  log.info(`This command does not auto-run Claude auth validation; follow the pre-login and post-login validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
+  for (const gate of buildRuntimeProofGates(env)) {
+    for (const line of gate.introLines) {
+      log.info(line);
+    }
+  }
 }
 
 function emitCheckResult(check: DoctorCheckResult, reporter: DoctorReporter) {
@@ -172,7 +241,7 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<number>
     : { ...baseEnv, ...envFile };
 
   log('\nDiscoclaw preflight check\n');
-  emitDoctorContractNotes(reporter, blankMachine);
+  emitDoctorContractNotes(reporter, blankMachine, env);
 
   const nodeVersion = process.versions.node;
   const nodeMajor = Number(nodeVersion.split('.')[0]);
@@ -348,14 +417,21 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<number>
   }
 
   log('');
+  const proofGates = buildRuntimeProofGates(env);
   if (reporter.failures() === 0) {
     log('All automated checks passed.');
-    log(`Next run \`pnpm claude:auth-smoke\` for Claude auth validation; preflight does not auto-run it. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.\n`);
+    for (const gate of proofGates) {
+      log(gate.successLine);
+    }
+    log('');
     return 0;
   }
 
   log(`${reporter.failures()} automated check(s) failed.`);
-  log(`After fixing the failures, run \`pnpm claude:auth-smoke\` for Claude auth validation; preflight does not auto-run it. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.\n`);
+  for (const gate of proofGates) {
+    log(gate.failureLine);
+  }
+  log('');
   return 1;
 }
 
