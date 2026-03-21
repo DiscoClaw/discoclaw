@@ -6,6 +6,8 @@ import type { CronScheduler } from '../cron/scheduler.js';
 import type { TaskStore } from '../tasks/store.js';
 
 const DEFAULT_API_CHECK_TIMEOUT_MS = 5000;
+const DEFAULT_OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
+const OPENROUTER_PROBE_LABEL = 'GET /models';
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
@@ -82,6 +84,12 @@ export type StatusPaFile = {
   exists: boolean;
 };
 
+export type StatusOpenRouterRow = {
+  enabled: boolean;
+  baseUrl: string;
+  check: CredentialCheckResult | null;
+};
+
 export type StatusSnapshot = {
   uptimeMs: number;
   lastMessageAt: number | null;
@@ -91,6 +99,7 @@ export type StatusSnapshot = {
   rollingSummaryCharCount: number;
   coldStorageChunkCount: number | null;
   apiChecks: CredentialCheckResult[];
+  openrouter: StatusOpenRouterRow;
   paFiles: StatusPaFile[];
 };
 
@@ -205,6 +214,8 @@ async function checkPaFiles(
 export async function collectStatusSnapshot(opts: CollectStatusOpts): Promise<StatusSnapshot> {
   const now = Date.now();
   const apiCheckTimeoutMs = opts.apiCheckTimeoutMs ?? DEFAULT_API_CHECK_TIMEOUT_MS;
+  const openrouterEnabled = opts.activeProviders !== undefined && opts.activeProviders.has('openrouter');
+  const openrouterBaseUrl = (opts.openrouterBaseUrl ?? DEFAULT_OPENROUTER_BASE_URL).replace(/\/$/, '');
 
   const [durableItemCount, rollingSummaryCharCount, apiChecks, paFiles] = await Promise.all([
     opts.durableDataDir ? countDurableItems(opts.durableDataDir) : Promise.resolve(0),
@@ -247,6 +258,11 @@ export async function collectStatusSnapshot(opts: CollectStatusOpts): Promise<St
     rollingSummaryCharCount,
     coldStorageChunkCount: opts.coldStorageChunkCount,
     apiChecks,
+    openrouter: {
+      enabled: openrouterEnabled,
+      baseUrl: openrouterBaseUrl,
+      check: apiChecks.find((check) => check.name === 'openrouter-key') ?? null,
+    },
     paFiles,
   };
 }
@@ -283,6 +299,36 @@ function formatNextRun(date: Date): string {
   if (hours < 24) return `in ${hours}h ${minutes % 60}m`;
   const days = Math.floor(hours / 24);
   return `in ${days}d ${hours % 24}h`;
+}
+
+function formatCredentialCheck(result: CredentialCheckResult): string {
+  const tag = result.status === 'ok' ? 'ok' : result.status === 'skip' ? 'skip' : 'FAIL';
+  const detail = result.message ? ` (${result.message})` : '';
+  return `${result.name}: ${tag}${detail}`;
+}
+
+function formatOpenRouterRow(snapshot: StatusSnapshot): string {
+  const { openrouter } = snapshot;
+  const baseDetail = `base=${openrouter.baseUrl}`;
+
+  if (!openrouter.enabled) {
+    return `OpenRouter: inactive (provider not configured; ${baseDetail})`;
+  }
+
+  if (!openrouter.check) {
+    return `OpenRouter: DEGRADED (expected openrouter-key probe missing; ${baseDetail})`;
+  }
+
+  if (openrouter.check.status === 'ok') {
+    return `OpenRouter: openrouter-key: ok (OPENROUTER_API_KEY via ${OPENROUTER_PROBE_LABEL}; ${baseDetail})`;
+  }
+
+  if (openrouter.check.status === 'skip') {
+    return `OpenRouter: openrouter-key: skip (OPENROUTER_API_KEY not set; ${OPENROUTER_PROBE_LABEL} not attempted; ${baseDetail})`;
+  }
+
+  const failureDetail = openrouter.check.message ?? 'probe failed';
+  return `OpenRouter: openrouter-key: FAIL (${failureDetail}; ${baseDetail})`;
 }
 
 export function renderStatusReport(snapshot: StatusSnapshot, botDisplayName = 'Discoclaw'): string {
@@ -329,12 +375,12 @@ export function renderStatusReport(snapshot: StatusSnapshot, botDisplayName = 'D
     lines.push('Cold storage: off');
   }
 
+  lines.push(formatOpenRouterRow(snapshot));
+
   // API connectivity
-  const apiParts = snapshot.apiChecks.map((r) => {
-    const tag = r.status === 'ok' ? 'ok' : r.status === 'skip' ? 'skip' : 'FAIL';
-    const detail = r.message ? ` (${r.message})` : '';
-    return `${r.name}: ${tag}${detail}`;
-  });
+  const apiParts = snapshot.apiChecks
+    .filter((r) => r.name !== 'openrouter-key')
+    .map(formatCredentialCheck);
   lines.push(`API: ${apiParts.length > 0 ? apiParts.join(', ') : 'no checks'}`);
 
   // Workspace PA files
