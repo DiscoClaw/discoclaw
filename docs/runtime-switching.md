@@ -32,7 +32,7 @@ Important: `!models reset` means "reset to this instance's startup defaults as r
 | `gemini` | yes | Gemini CLI or `GEMINI_API_KEY`, depending on your install path |
 | `codex` | yes | Install-mode-specific Codex proof gate, not binary presence alone |
 | `openai` | yes | Install-mode-specific OpenAI proof gate, not `OPENAI_API_KEY` presence alone |
-| `openrouter` | yes | `OPENROUTER_API_KEY` |
+| `openrouter` | yes | Shipped env-key path plus live `openrouter-key: ok` proof; not key presence alone |
 | `anthropic` | no | Voice-only direct API runtime; not a valid `PRIMARY_RUNTIME` |
 
 For `codex`, use the proof gate that matches the install mode you are actually operating:
@@ -42,6 +42,11 @@ For `codex`, use the proof gate that matches the install mode you are actually o
 For `openai`, prove the active path the same way:
 - Source checkout: when any configured route uses OpenAI, use the repo smoke harness described in [docs/audit/codex-blank-machine-readiness.md](audit/codex-blank-machine-readiness.md), for example `OPENAI_SMOKE_TEST_TIERS=fast pnpm test`.
 - npm-managed Codex/OpenAI alternate path: follow [docs/audit/codex-npm-managed-path.md](audit/codex-npm-managed-path.md) and confirm live runtime-visible evidence such as `openai-key: ok` after startup. `OPENAI_API_KEY` in `.env` is config only.
+
+For `openrouter`, the current shipped boundary is narrower:
+- Set `OPENROUTER_API_KEY` in the authoritative `.env`, but treat that as config presence only.
+- Start or restart DiscoClaw and confirm `!status` or the startup credential report shows `openrouter-key: ok`.
+- Treat `!models set chat openrouter`, `PRIMARY_RUNTIME=openrouter`, or `.env` key presence alone as routing/config only until that proof appears.
 
 For `openai` and `openrouter`, set `OPENAI_COMPAT_TOOLS_ENABLED=1` if you expect full tool use. In logs, the Claude adapter runtime ID is `claude_code` even though the user-facing adapter name is `claude`.
 
@@ -150,6 +155,8 @@ Exact-match rules:
 - `fast` does not match anything because it is a tier name, not a concrete model string
 
 Without the relevant tier vars, `PRIMARY_RUNTIME=openrouter` and `OPENROUTER_MODEL` still work, but OpenRouter only participates in tier resolution or fast/voice auto-switching for the specific tiers you defined.
+
+This guide intentionally does not recommend default OpenRouter tier mappings or preferred models yet. Tier defaults and model recommendations are deferred to a later plan; for now, define only the exact `DISCOCLAW_TIER_OPENROUTER_<TIER>` entries you need for your current instance.
 
 ## Where each kind of change persists
 
