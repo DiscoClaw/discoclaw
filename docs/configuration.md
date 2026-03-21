@@ -4,6 +4,16 @@ All configuration is done through environment variables, typically set in a `.en
 
 Boolean values accept `0`/`1` or `true`/`false`.
 
+## Setup Boundary: Config vs Bootstrap vs Manual Auth
+
+DiscoClaw has three separate setup surfaces, and they should not be conflated:
+
+1. **Config-only setup** covers repo-checkable prerequisites such as required env vars, binary presence, binary versions, and model/runtime configuration files. `pnpm preflight` and `discoclaw doctor` can verify this boundary directly.
+2. **Bootstrap-derived Discord forum state** covers whether DiscoClaw can resolve the cron/task forum channels from checked config or from first-run bootstrap state. That state is considered satisfiable when you already have explicit forum IDs, when persisted scaffold/bootstrap state can supply them, or when `DISCORD_GUILD_ID` is present so the repo can create the missing forums on startup.
+3. **Manual Claude login validation** is outside the automated contract today. The repo can verify that the Claude CLI binary exists and that its version/config shape looks valid, but it cannot prove that Claude CLI auth/login is healthy on a blank machine.
+
+That boundary is intentional: the checked-in audit memo at [docs/audit/claude-blank-machine-readiness.md](audit/claude-blank-machine-readiness.md) is the authoritative 1.0 readiness verdict for Claude on a blank machine. Treat a passing `pnpm preflight` or `discoclaw doctor` run as evidence for binary/version/config prerequisites only, not as proof that Claude login/OAuth is ready end-to-end.
+
 ## Discord
 
 | Variable | Default | Description |
@@ -12,7 +22,7 @@ Boolean values accept `0`/`1` or `true`/`false`.
 | `DISCORD_ALLOW_USER_IDS` | — | Comma-separated user IDs allowed to interact with the bot (fail-closed: empty = respond to nobody) |
 | `DISCORD_ALLOW_BOT_IDS` | — | Comma-separated bot IDs trusted for message handling |
 | `DISCORD_CHANNEL_IDS` | — | Comma-separated channel IDs the bot responds in (empty = all channels) |
-| `DISCORD_GUILD_ID` | — | Server (guild) ID; required for auto-creating forum channels |
+| `DISCORD_GUILD_ID` | — | Server (guild) ID; enables config-only verification of the forum bootstrap path and is required when DiscoClaw must auto-create missing cron/task forum channels |
 | `DISCORD_REQUIRE_CHANNEL_CONTEXT` | `true` | Require a channel context file before responding in a channel |
 | `DISCORD_AUTO_INDEX_CHANNEL_CONTEXT` | `true` | Auto-create context files for new channels |
 | `DISCORD_AUTO_JOIN_THREADS` | `true` | Auto-join public threads the bot encounters |
@@ -92,6 +102,8 @@ Runtime emitters that still use `type: 'error'` now attach `error.failure` while
 This changes failure shape, not runtime configuration: operators do not need new env vars or migration steps to adopt the unified envelope.
 
 ### Claude CLI
+
+`pnpm preflight` / `discoclaw doctor` can verify Claude CLI presence, version, and related config. They do **not** verify interactive Claude authentication. Use the manual validation path in [docs/audit/claude-blank-machine-readiness.md](audit/claude-blank-machine-readiness.md) as the current blank-machine authority for Claude login/auth readiness.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -222,10 +234,12 @@ See [docs/plan-and-forge.md](plan-and-forge.md) for usage details.
 
 See [docs/cron.md](cron.md) for the operator guide.
 
+When `DISCOCLAW_CRON_FORUM` is unset, forum state may still be bootstrap-satisfiable if persisted scaffold state already recorded the forum ID or if `DISCORD_GUILD_ID` is present so startup can create the forum. That is a configuration/bootstrap check only; it is separate from Claude login validation.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DISCOCLAW_CRON_ENABLED` | `true` | Enable the cron subsystem |
-| `DISCOCLAW_CRON_FORUM` | — | Forum channel ID for cron job definitions (auto-created if missing) |
+| `DISCOCLAW_CRON_FORUM` | — | Explicit forum channel ID for cron job definitions; when unset, DiscoClaw relies on persisted bootstrap state or `DISCORD_GUILD_ID` to create/resolve the forum |
 | `DISCOCLAW_CRON_MODEL` | `fast` | Model tier for cron definition parsing |
 | `DISCOCLAW_CRON_EXEC_MODEL` | `capable` | Model tier for cron execution |
 | `DISCOCLAW_CRON_AUTO_TAG` | `true` | Auto-tag cron forum threads |
@@ -237,10 +251,12 @@ See [docs/cron.md](cron.md) for the operator guide.
 
 See [docs/tasks.md](tasks.md) for the operator guide.
 
+The same forum-boundary rule applies to tasks: `DISCOCLAW_TASKS_FORUM` is the direct config path, while persisted scaffold state or `DISCORD_GUILD_ID` covers the bootstrap-derived path that automated setup can check today.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DISCOCLAW_TASKS_ENABLED` | `true` | Enable the task subsystem |
-| `DISCOCLAW_TASKS_FORUM` | — | Forum channel ID for task threads (auto-created if missing) |
+| `DISCOCLAW_TASKS_FORUM` | — | Explicit forum channel ID for task threads; when unset, DiscoClaw relies on persisted bootstrap state or `DISCORD_GUILD_ID` to create/resolve the forum |
 | `DISCOCLAW_TASKS_CWD` | — | Override task working directory |
 | `DISCOCLAW_TASKS_TAG_MAP` | — | Override task tag map file path |
 | `DISCOCLAW_TASKS_MENTION_USER` | — | User ID to @mention on task creation; fresh `discoclaw init` / `pnpm setup` configs default this to the first `DISCORD_ALLOW_USER_IDS` entry |
