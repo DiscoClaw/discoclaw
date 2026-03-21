@@ -1,8 +1,19 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { checkRequiredForums, checkRuntimeBinaries } from './doctor-lib.js';
 
 describe('doctor-lib: required forums', () => {
-  it('fails when enabled-by-default forums are missing', () => {
+  it('passes blank-machine first connect when DISCORD_GUILD_ID is set', () => {
+    const checks = checkRequiredForums({
+      DISCORD_GUILD_ID: '1000000000000000000',
+    });
+    expect(checks.some((c) => c.ok && c.label.includes('DISCOCLAW_CRON_FORUM can be auto-created'))).toBe(true);
+    expect(checks.some((c) => c.ok && c.label.includes('DISCOCLAW_TASKS_FORUM can be auto-created'))).toBe(true);
+  });
+
+  it('fails when forums are missing and DISCORD_GUILD_ID is absent', () => {
     const checks = checkRequiredForums({});
     expect(checks.some((c) => !c.ok && c.label.includes('DISCOCLAW_CRON_FORUM is required'))).toBe(true);
     expect(checks.some((c) => !c.ok && c.label.includes('DISCOCLAW_TASKS_FORUM is required'))).toBe(true);
@@ -15,6 +26,24 @@ describe('doctor-lib: required forums', () => {
     });
     expect(checks.some((c) => c.ok && c.label.includes('DISCOCLAW_CRON_FORUM is set and valid'))).toBe(true);
     expect(checks.some((c) => c.ok && c.label.includes('DISCOCLAW_TASKS_FORUM is set and valid'))).toBe(true);
+  });
+
+  it('passes when missing forums are already persisted in scaffold state', () => {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'doctor-lib-test-'));
+    const scaffoldStatePath = path.join(dataDir, 'system-scaffold.json');
+    fs.writeFileSync(scaffoldStatePath, JSON.stringify({
+      guildId: '1000000000000000000',
+      cronsForumId: '1000000000000000001',
+      tasksForumId: '1000000000000000002',
+    }));
+
+    const checks = checkRequiredForums({
+      DISCOCLAW_DATA_DIR: dataDir,
+    });
+    expect(checks.some((c) => c.ok && c.label.includes('DISCOCLAW_CRON_FORUM resolved from persisted scaffold state'))).toBe(true);
+    expect(checks.some((c) => c.ok && c.label.includes('DISCOCLAW_TASKS_FORUM resolved from persisted scaffold state'))).toBe(true);
+
+    fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
   it('does not require cron forum when cron is disabled', () => {

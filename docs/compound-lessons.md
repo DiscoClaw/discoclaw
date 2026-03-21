@@ -74,6 +74,13 @@ Format notes:
 
 ## Lessons
 
+### 2026-03-20 - Automated readiness surfaces must not claim manual auth success
+Tags: #audit #workflow #setup
+Lesson: Setup, preflight, and doctor surfaces must only claim prerequisites they can directly verify. When end-to-end readiness still depends on a manual login or OAuth/auth step, keep that boundary explicit in the operator docs and point to the audit or smoke path that currently serves as the authoritative gate instead of implying full readiness from binary presence alone.
+Source: `docs/audit/claude-blank-machine-readiness.md` blank-machine audit; dedup search on 2026-03-20 found no existing setup/workflow lesson covering the automated-vs-manual readiness boundary, so this audit was promoted as a new distinct lesson
+Applied: `docs/configuration.md`, `docs/audit/claude-blank-machine-readiness.md`
+Status: active
+
 ### 2026-03-20 - Stage terminal Discord summaries durably before risky delivery
 Tags: #discord #workflow #state
 Lesson: When a run is about to emit its terminal user-visible Discord artifact, stage the final recovery payload durably before any risky edit/send so retries and startup recovery can repost the real summary instead of inventing one later. Treat that staged payload as part of this file's durable-artifact contract: normalize and bound it before persistence, explicitly acknowledge successful visible delivery back into the durable state, and convert staging failure into an explicit visible failure notice rather than a silent recoverable-success path.

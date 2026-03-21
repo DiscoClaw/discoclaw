@@ -23,6 +23,7 @@ import { backupFileName, buildEnvContent, runInitWizard, selectDefaultProvider }
 const initialSigintListeners = new Set(process.listeners('SIGINT'));
 const initialSigtermListeners = new Set(process.listeners('SIGTERM'));
 const originalIsTTY = (process.stdin as any).isTTY;
+const initWizardSource = fs.readFileSync(new URL('./init-wizard.ts', import.meta.url), 'utf8');
 
 function makeReadline(answers: string[]) {
   let closeHandler: (() => void) | undefined;
@@ -240,6 +241,25 @@ describe('init wizard helpers', () => {
     expect(content).not.toContain('# AUTO-DETECTED');
     expect(content).not.toContain('DISCOCLAW_TASKS_FORUM');
     expect(content).not.toContain('DISCOCLAW_CRON_FORUM');
+  });
+});
+
+describe('init wizard copy contract', () => {
+  it('uses the revised Claude manual validation guidance', () => {
+    expect(initWizardSource).toContain('Note: The bot will auto-create its forum channels on first connect.');
+    expect(initWizardSource).toContain(
+      'Claude login is handled by the `claude` CLI itself; `discoclaw init` does not auto-check login state.',
+    );
+    expect(initWizardSource).toContain(
+      'Before logging in, run `claude -p -- "Reply with OK"` and confirm it fails with an auth/login error.',
+    );
+    expect(initWizardSource).toContain('Log in with `claude`.');
+    expect(initWizardSource).toContain(
+      'Repeat `claude -p -- "Reply with OK"` and confirm it returns normal text.',
+    );
+    expect(initWizardSource).toContain(
+      'Review docs/audit/claude-blank-machine-readiness.md if you need the full manual validation path.',
+    );
   });
 });
 

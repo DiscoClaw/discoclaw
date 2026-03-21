@@ -1,57 +1,201 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { validateDiscordToken, validateSnowflake, validateSnowflakes } from '../src/validate.js';
+import { CLAUDE_BLANK_MACHINE_AUDIT_DOC, runDoctor } from './doctor.js';
 
-/**
- * Doctor integration tests — verify that the validator functions used by
- * doctor.ts produce the expected results for typical doctor scenarios.
- *
- * We don't spawn the full doctor script (it has side effects: dotenv, process.exit).
- * Instead we test the validation logic it depends on.
- */
+const VALID_TOKEN = 'MTIzNDU2Nzg5MDEyMzQ1Njc4OQ.G1x2y3.abcdefghijklmnopqrstuvwxyz1234567890AB';
+const VALID_USER_ID = '292029371241537536';
+const VALID_GUILD_ID = '1000000000000000000';
 
-describe('doctor: token format validation', () => {
-  it('accepts a well-formed bot token', () => {
-    // Real tokens have this shape: base64(bot_id).timestamp.hmac
-    const result = validateDiscordToken('MTIzNDU2Nzg5MDEyMzQ1Njc4OQ.G1x2y3.abcdefghijklmnopqrstuvwxyz1234567890AB');
-    expect(result.valid).toBe(true);
+type DoctorFixtureOptions = {
+  env?: NodeJS.ProcessEnv;
+  scaffoldState?: {
+    guildId?: string;
+    cronsForumId?: string;
+    tasksForumId?: string;
+  };
+};
+
+function makeDoctorFixture(options: DoctorFixtureOptions = {}) {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'doctor-test-'));
+  const envPath = path.join(cwd, '.env');
+  const envExamplePath = path.join(cwd, '.env.example');
+
+  fs.writeFileSync(envPath, [
+    `DISCORD_TOKEN=${VALID_TOKEN}`,
+    `DISCORD_ALLOW_USER_IDS=${VALID_USER_ID}`,
+    `DISCORD_GUILD_ID=${VALID_GUILD_ID}`,
+  ].join('\n'));
+  fs.writeFileSync(envExamplePath, [
+    'DISCORD_TOKEN=',
+    'DISCORD_ALLOW_USER_IDS=',
+    'DISCORD_GUILD_ID=',
+  ].join('\n'));
+
+  const env: NodeJS.ProcessEnv = {
+    DISCORD_TOKEN: VALID_TOKEN,
+    DISCORD_ALLOW_USER_IDS: VALID_USER_ID,
+    DISCORD_GUILD_ID: VALID_GUILD_ID,
+    ...options.env,
+  };
+
+  if (options.scaffoldState) {
+    const dataDir = path.join(cwd, 'data');
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'system-scaffold.json'), JSON.stringify(options.scaffoldState));
+    env.DISCOCLAW_DATA_DIR = dataDir;
+  }
+
+  return {
+    cwd,
+    env,
+    cleanup() {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    },
+  };
+}
+
+async function runDoctorForTest(env: NodeJS.ProcessEnv, cwd: string) {
+  const lines: string[] = [];
+
+  const exitCode = await runDoctor({
+    cwd,
+    env,
+    argv: ['node', 'scripts/doctor.ts'],
+    deps: {
+      log: (line) => {
+        lines.push(line);
+      },
+      whichFn: (bin) => bin === 'claude' ? '/usr/bin/claude' : null,
+      versionOfFn: (bin) => {
+        if (bin === 'pnpm') return '10.28.2';
+        if (bin === 'claude') return '2.1.5';
+        return null;
+      },
+      inspectFn: async () => ({ findings: [] }),
+      resolveHooksDir: (root) => path.join(root, '.git', 'hooks'),
+    },
   });
 
-  it('rejects a token missing segments (common copy-paste error)', () => {
-    const result = validateDiscordToken('MTIzNDU2Nzg5MDEyMzQ1Njc4OQ');
-    expect(result.valid).toBe(false);
-    expect(result.reason).toMatch(/1$/);
+  return {
+    exitCode,
+    lines,
+    output: lines.join('\n'),
+  };
+}
+
+async function runDoctorForTestWithArgs(env: NodeJS.ProcessEnv, cwd: string, args: string[]) {
+  const lines: string[] = [];
+
+  const exitCode = await runDoctor({
+    cwd,
+    env,
+    argv: ['node', 'scripts/doctor.ts', ...args],
+    deps: {
+      log: (line) => {
+        lines.push(line);
+      },
+      whichFn: (bin) => bin === 'claude' ? '/usr/bin/claude' : null,
+      versionOfFn: (bin) => {
+        if (bin === 'pnpm') return '10.28.2';
+        if (bin === 'claude') return '2.1.5';
+        return null;
+      },
+      inspectFn: async () => ({ findings: [] }),
+      resolveHooksDir: (root) => path.join(root, '.git', 'hooks'),
+    },
   });
 
-  it('rejects an Application ID pasted as token (no dots)', () => {
-    const result = validateDiscordToken('123456789012345678');
-    expect(result.valid).toBe(false);
+  return {
+    exitCode,
+    lines,
+    output: lines.join('\n'),
+  };
+}
+
+describe('doctor output contract', () => {
+  it('prints explicit manual Claude auth guidance instead of claiming full readiness', async () => {
+    const fixture = makeDoctorFixture();
+
+    try {
+      const result = await runDoctorForTest(fixture.env, fixture.cwd);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain('Claude auth is a manual validation step; this command does not auto-check Claude login state.');
+      expect(result.output).toContain(`Follow the manual pre-login and post-login validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
+      expect(result.output).toContain('All automated checks passed.');
+      expect(result.output).toContain(`Claude auth still requires the manual validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
+      expect(result.output).not.toContain('All checks passed.');
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('treats forum IDs as bootstrap-derived when DISCORD_GUILD_ID enables first-connect creation', async () => {
+    const fixture = makeDoctorFixture({
+      env: {
+        DISCOCLAW_CRON_FORUM: '',
+        DISCOCLAW_TASKS_FORUM: '',
+      },
+    });
+
+    try {
+      const result = await runDoctorForTest(fixture.env, fixture.cwd);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain('Forum IDs may be bootstrap-derived: persisted scaffold state or first-connect creation via DISCORD_GUILD_ID can satisfy them when env vars are unset.');
+      expect(result.output).toContain('DISCOCLAW_CRON_FORUM can be auto-created on first connect via DISCORD_GUILD_ID');
+      expect(result.output).toContain('DISCOCLAW_TASKS_FORUM can be auto-created on first connect via DISCORD_GUILD_ID');
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('reports persisted scaffold forum IDs as satisfying the doctor checks', async () => {
+    const fixture = makeDoctorFixture({
+      env: {
+        DISCORD_GUILD_ID: '',
+        DISCOCLAW_CRON_FORUM: '',
+        DISCOCLAW_TASKS_FORUM: '',
+      },
+      scaffoldState: {
+        guildId: VALID_GUILD_ID,
+        cronsForumId: '1000000000000000001',
+        tasksForumId: '1000000000000000002',
+      },
+    });
+
+    try {
+      const result = await runDoctorForTest(fixture.env, fixture.cwd);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain('DISCOCLAW_CRON_FORUM resolved from persisted scaffold state');
+      expect(result.output).toContain('DISCOCLAW_TASKS_FORUM resolved from persisted scaffold state');
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('supports a blank-machine mode that ignores inherited shell env', async () => {
+    const fixture = makeDoctorFixture({
+      env: {
+        DISCOCLAW_CRON_FORUM: '1000000000000000001',
+        DISCOCLAW_TASKS_FORUM: '1000000000000000002',
+      },
+    });
+
+    try {
+      const result = await runDoctorForTestWithArgs(fixture.env, fixture.cwd, ['--blank-machine']);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain('Blank-machine mode is active: ignoring inherited shell env and reading only the current .env values.');
+      expect(result.output).toContain('DISCOCLAW_CRON_FORUM can be auto-created on first connect via DISCORD_GUILD_ID');
+      expect(result.output).toContain('DISCOCLAW_TASKS_FORUM can be auto-created on first connect via DISCORD_GUILD_ID');
+      expect(result.output).not.toContain('DISCOCLAW_CRON_FORUM is set and valid');
+      expect(result.output).not.toContain('DISCOCLAW_TASKS_FORUM is set and valid');
+    } finally {
+      fixture.cleanup();
+    }
   });
 });
-
-describe('doctor: snowflake validation', () => {
-  it('accepts a real-looking user ID', () => {
-    expect(validateSnowflake('292029371241537536')).toBe(true);
-  });
-
-  it('rejects a non-numeric user ID', () => {
-    expect(validateSnowflake('david#1234')).toBe(false);
-  });
-
-  it('rejects a short numeric string', () => {
-    expect(validateSnowflake('12345')).toBe(false);
-  });
-});
-
-describe('doctor: snowflake list validation', () => {
-  it('validates a comma-separated allowlist', () => {
-    const result = validateSnowflakes('292029371241537536,123456789012345678');
-    expect(result.valid).toBe(true);
-  });
-
-  it('catches a non-numeric ID in a mixed list', () => {
-    const result = validateSnowflakes('292029371241537536,badid,123456789012345678');
-    expect(result.valid).toBe(false);
-    expect(result.invalidIds).toEqual(['badid']);
-  });
-});
-

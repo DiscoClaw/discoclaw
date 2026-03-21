@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { validateSnowflake } from '../src/validate.js';
 
 export type DoctorCheckResult = {
@@ -6,6 +8,12 @@ export type DoctorCheckResult = {
   hint?: string;
   /** True when the result is informational rather than a pass/fail (e.g. a missing binary that is not needed). */
   info?: boolean;
+};
+
+type PersistedScaffoldState = {
+  guildId?: string;
+  cronsForumId?: string;
+  tasksForumId?: string;
 };
 
 export function parseBooleanSetting(
@@ -145,6 +153,9 @@ export function checkRuntimeBinaries(
 
 export function checkRequiredForums(env: NodeJS.ProcessEnv): DoctorCheckResult[] {
   const checks: DoctorCheckResult[] = [];
+  const guildId = (env.DISCORD_GUILD_ID ?? '').trim();
+  const canBootstrapForums = validateSnowflake(guildId);
+  const scaffoldState = loadPersistedScaffoldState(env);
 
   const cronEnabled = parseBooleanSetting(env, 'DISCOCLAW_CRON_ENABLED', true);
   if (cronEnabled.error) {
@@ -157,11 +168,17 @@ export function checkRequiredForums(env: NodeJS.ProcessEnv): DoctorCheckResult[]
   if (cronEnabled.value) {
     const cronForum = (env.DISCOCLAW_CRON_FORUM ?? '').trim();
     if (!cronForum) {
-      checks.push({
-        ok: false,
-        label: 'DISCOCLAW_CRON_FORUM is required when DISCOCLAW_CRON_ENABLED=1',
-        hint: 'Set DISCOCLAW_CRON_FORUM to your automations forum channel ID (17-20 digits)',
-      });
+      if (scaffoldState.cronsForumId) {
+        checks.push({ ok: true, label: 'DISCOCLAW_CRON_FORUM resolved from persisted scaffold state' });
+      } else if (canBootstrapForums) {
+        checks.push({ ok: true, label: 'DISCOCLAW_CRON_FORUM can be auto-created on first connect via DISCORD_GUILD_ID' });
+      } else {
+        checks.push({
+          ok: false,
+          label: 'DISCOCLAW_CRON_FORUM is required when DISCOCLAW_CRON_ENABLED=1 and no bootstrap path is available',
+          hint: 'Set DISCOCLAW_CRON_FORUM to your automations forum channel ID (17-20 digits), or set DISCORD_GUILD_ID so startup can auto-create and persist it',
+        });
+      }
     } else if (!validateSnowflake(cronForum)) {
       checks.push({
         ok: false,
@@ -184,11 +201,17 @@ export function checkRequiredForums(env: NodeJS.ProcessEnv): DoctorCheckResult[]
   if (tasksEnabled.value) {
     const tasksForum = (env.DISCOCLAW_TASKS_FORUM ?? '').trim();
     if (!tasksForum) {
-      checks.push({
-        ok: false,
-        label: 'DISCOCLAW_TASKS_FORUM is required when DISCOCLAW_TASKS_ENABLED=1',
-        hint: 'Set DISCOCLAW_TASKS_FORUM to your tasks forum channel ID (17-20 digits)',
-      });
+      if (scaffoldState.tasksForumId) {
+        checks.push({ ok: true, label: 'DISCOCLAW_TASKS_FORUM resolved from persisted scaffold state' });
+      } else if (canBootstrapForums) {
+        checks.push({ ok: true, label: 'DISCOCLAW_TASKS_FORUM can be auto-created on first connect via DISCORD_GUILD_ID' });
+      } else {
+        checks.push({
+          ok: false,
+          label: 'DISCOCLAW_TASKS_FORUM is required when DISCOCLAW_TASKS_ENABLED=1 and no bootstrap path is available',
+          hint: 'Set DISCOCLAW_TASKS_FORUM to your tasks forum channel ID (17-20 digits), or set DISCORD_GUILD_ID so startup can auto-create and persist it',
+        });
+      }
     } else if (!validateSnowflake(tasksForum)) {
       checks.push({
         ok: false,
@@ -201,4 +224,34 @@ export function checkRequiredForums(env: NodeJS.ProcessEnv): DoctorCheckResult[]
   }
 
   return checks;
+}
+
+function loadPersistedScaffoldState(env: NodeJS.ProcessEnv): PersistedScaffoldState {
+  const dataDir = (env.DISCOCLAW_DATA_DIR ?? '').trim() || path.join(process.cwd(), 'data');
+  const scaffoldStatePath = path.join(dataDir, 'system-scaffold.json');
+
+  try {
+    const raw = fs.readFileSync(scaffoldStatePath, 'utf8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object') return {};
+
+    const currentGuildId = (env.DISCORD_GUILD_ID ?? '').trim();
+    const savedGuildId = typeof parsed.guildId === 'string' ? parsed.guildId.trim() : '';
+    if (currentGuildId && savedGuildId && currentGuildId !== savedGuildId) {
+      return {};
+    }
+
+    const state: PersistedScaffoldState = {};
+    if (savedGuildId) state.guildId = savedGuildId;
+
+    const savedCronForumId = typeof parsed.cronsForumId === 'string' ? parsed.cronsForumId.trim() : '';
+    if (validateSnowflake(savedCronForumId)) state.cronsForumId = savedCronForumId;
+
+    const savedTasksForumId = typeof parsed.tasksForumId === 'string' ? parsed.tasksForumId.trim() : '';
+    if (validateSnowflake(savedTasksForumId)) state.tasksForumId = savedTasksForumId;
+
+    return state;
+  } catch {
+    return {};
+  }
 }

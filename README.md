@@ -257,6 +257,7 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
 ### Operations
 
 - [Configuration reference](docs/configuration.md) — all environment variables indexed by category
+- [Claude blank-machine audit](docs/audit/claude-blank-machine-readiness.md) — current 1.0 readiness verdict and the manual Claude auth gate
 - [Managed browser launcher guide](#managed-browser-launcher) — dedicated profile flow, headed login, verified CDP handoff, and storage rules
 - [Runtime/model switching](docs/runtime-switching.md) — operator guide for switching adapters, models, and defaults safely
 - [Webhook exposure](docs/webhook-exposure.md) — tunnel/proxy setup and webhook security
@@ -298,18 +299,58 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
    set `DISCOCLAW_DASHBOARD_TRUSTED_HOSTS` to your tailnet IP or MagicDNS hostname.
    See [docs/dashboard-tailscale.md](docs/dashboard-tailscale.md).
 
+If you are using the Claude runtime, complete the Claude validation path below before treating the machine as ready.
+
 #### From source (contributors)
 
 ```bash
 git clone <repo-url> && cd discoclaw
 pnpm install
-pnpm setup            # guided interactive setup
+pnpm run setup        # guided interactive setup
 # Or manually: cp .env.example .env and fill in required vars:
 #   DISCORD_TOKEN
 #   DISCORD_ALLOW_USER_IDS
 # For all ~90 options: cp .env.example.full .env
-pnpm dev
+pnpm preflight:blank-machine
 ```
+
+If `PRIMARY_RUNTIME=claude`, complete the Claude validation path below before `pnpm dev`.
+
+### Claude runtime validation
+
+Current 1.0 audit verdict: fully automated Claude readiness is `FAIL`. `pnpm preflight:blank-machine`, `pnpm preflight`, and `discoclaw doctor` only claim the prerequisites Discoclaw can verify today; Claude login/auth is still a manual gate. See [docs/audit/claude-blank-machine-readiness.md](docs/audit/claude-blank-machine-readiness.md).
+
+1. Run the automated checks:
+   ```bash
+   pnpm preflight:blank-machine
+   ```
+   Optional:
+   ```bash
+   pnpm preflight:blank-machine:online
+   ```
+2. Treat the result correctly:
+   - `pnpm preflight:blank-machine` proves the local prerequisites against the current `.env` only, ignoring inherited shell env from the host machine.
+   - `pnpm preflight:blank-machine:online` adds a live Discord login/gateway-intent check on top of that same blank-machine env boundary.
+   - Plain `pnpm preflight` keeps its broader contributor-oriented behavior and can still be useful for checking the current shell environment.
+   - Neither command proves Claude login/auth state.
+3. Before logging in, run the required failure check:
+   ```bash
+   claude -p -- "Reply with OK"
+   ```
+   Confirm it fails with an auth/login error.
+4. Log in interactively:
+   ```bash
+   claude
+   ```
+5. Run the happy-path check:
+   ```bash
+   claude -p -- "Reply with OK"
+   ```
+   Confirm it returns normal text instead of an auth/login error.
+6. Start DiscoClaw after both gates pass:
+   ```bash
+   pnpm build && pnpm dev
+   ```
 
 ## Updating
 
@@ -338,15 +379,34 @@ pnpm install
 pnpm build
 ```
 
-Run `pnpm preflight` — it flags configuration options from `.env.example` that aren't in your `.env` yet. You can also run `discoclaw doctor` to inspect config drift and related issues, `discoclaw doctor --fix` to apply safe remediations, or use `!doctor` / `!doctor fix` from Discord (`!health doctor` / `!health doctor fix` remain supported). Restart the service afterward for fixed config to take effect.
+Run `pnpm preflight` after changes to validate the automated contract again. It checks the local prerequisites Discoclaw can prove today: Node, pnpm, runtime binary presence/version, `.env` presence, env formatting, forum bootstrap eligibility, and config-doctor findings. It does not verify Claude login/auth. Use `pnpm preflight:blank-machine` when you need the audit to ignore inherited shell env and inspect only the current `.env`, or `pnpm preflight:blank-machine:online` if you also want a live Discord token/intents check.
+
+You can also run `discoclaw doctor` to inspect config drift and related issues, `discoclaw doctor --fix` to apply safe remediations, or use `!doctor` / `!doctor fix` from Discord (`!health doctor` / `!health doctor fix` remain supported). Restart the service afterward for fixed config to take effect.
 
 For a local operator console, run `discoclaw dashboard` in the project directory. It shows the active service target, current model assignments, runtime overrides, config doctor status, and quick actions for status/logs/restart. It binds to `127.0.0.1` by default; configure `DISCOCLAW_DASHBOARD_TRUSTED_HOSTS` to allow Tailscale access via a tailnet IP or MagicDNS hostname while keeping Host-header checks in place for all other names. See [docs/dashboard-tailscale.md](docs/dashboard-tailscale.md).
+
+### Restart and recovery verification
 
 If running as a systemd service, restart it:
 
 ```bash
 systemctl --user restart discoclaw.service
 ```
+
+Then verify the recovery path in order:
+
+1. Confirm the service is back:
+   ```bash
+   systemctl --user status discoclaw.service
+   ```
+2. Inspect recent logs for a clean startup:
+   ```bash
+   journalctl --user -u discoclaw.service -n 50 --no-pager
+   ```
+3. Send a short Discord message and confirm the bot answers normally.
+4. If a long-running reply was interrupted by the restart and `DISCOCLAW_COMPLETION_NOTIFY=1`, confirm startup recovery posts either:
+   - the persisted recovery summary text, or
+   - a generic completion notice ending with `Recovered after restart.`
 
 ## Platform support
 
@@ -378,7 +438,10 @@ The orchestrator runs AI runtimes in a separate working directory (`WORKSPACE_CW
 ## Development
 
 ```bash
-pnpm preflight  # preflight check (Node, pnpm, Claude CLI, .env)
+pnpm preflight         # automated prerequisite check; Claude auth remains manual
+pnpm preflight:blank-machine         # same check, but ignore inherited shell env and use only .env
+pnpm preflight:online  # adds live Discord login/intents validation
+pnpm preflight:blank-machine:online  # blank-machine check plus live Discord login/intents validation
 pnpm dev        # start dev mode
 pnpm build      # compile TypeScript
 pnpm test       # run tests

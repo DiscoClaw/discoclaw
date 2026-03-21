@@ -3,7 +3,7 @@
  * Interactive setup wizard for Discoclaw.
  * Guides the user through creating a .env file with validated inputs.
  *
- * Usage:  pnpm setup
+ * Usage:  pnpm run setup
  */
 
 import * as readline from 'node:readline/promises';
@@ -38,7 +38,7 @@ process.on('SIGINT', cleanup);
 process.on('SIGTERM', cleanup);
 
 if (!input.isTTY) {
-  console.error('Setup requires an interactive terminal. Run: pnpm setup\n');
+  console.error('Setup requires an interactive terminal. Run: pnpm run setup\n');
   process.exit(1);
 }
 
@@ -52,7 +52,9 @@ Discoclaw Setup
 ===============
 This wizard creates a .env file with your Discord bot configuration.
 You'll need your bot token from https://discord.com/developers/applications
-and your Tasks/Cron forum channel IDs from Discord.
+and at least one allowed Discord user ID.
+If you set DISCORD_GUILD_ID, Discoclaw can auto-create the Tasks/Automations forums on first connect.
+If you leave DISCORD_GUILD_ID empty, you need existing scaffold state or explicit forum IDs later.
 `);
 
 // --- Check existing .env ---
@@ -79,7 +81,7 @@ if (fs.existsSync(envPath)) {
 
   const overwrite = await ask('Overwrite with fresh config? [y/N] ');
   if (overwrite.toLowerCase() !== 'y') {
-    console.log('Run pnpm setup after removing .env to reconfigure.\n');
+    console.log('Run pnpm run setup after removing .env to reconfigure.\n');
     completed = true;
     rl.close();
     process.exit(0);
@@ -112,16 +114,6 @@ values.DISCORD_ALLOW_USER_IDS = await askValidated(
     if (!r.valid) return 'At least one valid snowflake ID is required';
     return null;
   },
-);
-
-values.DISCOCLAW_TASKS_FORUM = await askValidated(
-  'Tasks forum channel ID (required): ',
-  (val) => validateSnowflake(val) ? null : 'Must be a 17-20 digit number',
-);
-
-values.DISCOCLAW_CRON_FORUM = await askValidated(
-  'Automations forum channel ID (required): ',
-  (val) => validateSnowflake(val) ? null : 'Must be a 17-20 digit number',
 );
 
 // --- Provider selection ---
@@ -187,7 +179,7 @@ if (providerChoice === '1') {
 const configRecommended = await ask('\nConfigure recommended settings? [Y/n] ');
 if (configRecommended.toLowerCase() !== 'n') {
   const guildId = await askOptional(
-    'Discord guild (server) ID [leave empty to skip]: ',
+    'Discord guild (server) ID [recommended: enables first-connect Tasks/Automations forum bootstrap; leave empty only if you already have scaffold/forum state another way]: ',
     (val) => {
       if (!val) return null;
       return validateSnowflake(val) ? null : 'Must be a 17-20 digit number';
@@ -239,14 +231,28 @@ console.log('\n.env written successfully.\n');
 
 // --- Run preflight (Claude only) or print next-steps ---
 if (values.PRIMARY_RUNTIME === 'claude') {
-  console.log('Running pnpm preflight to validate...\n');
+  console.log('Running pnpm preflight:blank-machine to validate the written .env...\n');
+  let preflightPassed = false;
   try {
-    execFileSync('pnpm', ['run', 'preflight'], { cwd: root, stdio: 'inherit' });
+    execFileSync('pnpm', ['run', 'preflight:blank-machine'], { cwd: root, stdio: 'inherit' });
+    preflightPassed = true;
   } catch {
-    console.log('\nPreflight reported issues above. Fix them and run pnpm preflight again.\n');
+    console.log('\nPreflight reported issues above. Fix them and run pnpm preflight:blank-machine again.\n');
   }
   console.log('\nNext steps:');
-  console.log('  pnpm build && pnpm dev\n');
+  if (preflightPassed) {
+    console.log('  Automated checks passed. Claude auth still needs a manual smoke test.');
+    console.log('  1. Before logging in, run `claude -p -- "Reply with OK"` and confirm it fails with an auth/login error.');
+    console.log('  2. Log in with `claude`.');
+    console.log('  3. Repeat `claude -p -- "Reply with OK"` and confirm it returns normal text.');
+    console.log('  4. Review README.md or docs/configuration.md if you need the full manual validation path.');
+    console.log('  5. pnpm build && pnpm dev\n');
+  } else {
+    console.log('  1. Fix the preflight issues above.');
+    console.log('  2. Re-run `pnpm preflight:blank-machine` until the automated checks pass.');
+    console.log('  3. Only after that should you do the manual Claude smoke test described in README.md or docs/configuration.md.');
+    console.log('  4. pnpm build && pnpm dev\n');
+  }
 } else {
   console.log('\nNext steps:');
   if (values.PRIMARY_RUNTIME === 'gemini') {
