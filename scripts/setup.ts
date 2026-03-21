@@ -3,7 +3,7 @@
  * Interactive setup wizard for Discoclaw.
  * Guides the user through creating a .env file with validated inputs.
  *
- * Usage:  pnpm setup
+ * Usage:  pnpm run setup
  */
 
 import * as readline from 'node:readline/promises';
@@ -38,7 +38,7 @@ process.on('SIGINT', cleanup);
 process.on('SIGTERM', cleanup);
 
 if (!input.isTTY) {
-  console.error('Setup requires an interactive terminal. Run: pnpm setup\n');
+  console.error('Setup requires an interactive terminal. Run: pnpm run setup\n');
   process.exit(1);
 }
 
@@ -81,7 +81,7 @@ if (fs.existsSync(envPath)) {
 
   const overwrite = await ask('Overwrite with fresh config? [y/N] ');
   if (overwrite.toLowerCase() !== 'y') {
-    console.log('Run pnpm setup after removing .env to reconfigure.\n');
+    console.log('Run pnpm run setup after removing .env to reconfigure.\n');
     completed = true;
     rl.close();
     process.exit(0);
@@ -231,13 +231,13 @@ console.log('\n.env written successfully.\n');
 
 // --- Run preflight (Claude only) or print next-steps ---
 if (values.PRIMARY_RUNTIME === 'claude') {
-  console.log('Running pnpm preflight to validate...\n');
+  console.log('Running pnpm preflight:blank-machine to validate the written .env...\n');
   let preflightPassed = false;
   try {
-    execFileSync('pnpm', ['run', 'preflight'], { cwd: root, stdio: 'inherit' });
+    execFileSync('pnpm', ['run', 'preflight:blank-machine'], { cwd: root, stdio: 'inherit' });
     preflightPassed = true;
   } catch {
-    console.log('\nPreflight reported issues above. Fix them and run pnpm preflight again.\n');
+    console.log('\nPreflight reported issues above. Fix them and run pnpm preflight:blank-machine again.\n');
   }
   console.log('\nNext steps:');
   if (preflightPassed) {
@@ -249,7 +249,7 @@ if (values.PRIMARY_RUNTIME === 'claude') {
     console.log('  5. pnpm build && pnpm dev\n');
   } else {
     console.log('  1. Fix the preflight issues above.');
-    console.log('  2. Re-run `pnpm preflight` until the automated checks pass.');
+    console.log('  2. Re-run `pnpm preflight:blank-machine` until the automated checks pass.');
     console.log('  3. Only after that should you do the manual Claude smoke test described in README.md or docs/configuration.md.');
     console.log('  4. pnpm build && pnpm dev\n');
   }

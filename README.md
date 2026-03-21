@@ -306,31 +306,32 @@ If you are using the Claude runtime, complete the Claude validation path below b
 ```bash
 git clone <repo-url> && cd discoclaw
 pnpm install
-pnpm setup            # guided interactive setup
+pnpm run setup        # guided interactive setup
 # Or manually: cp .env.example .env and fill in required vars:
 #   DISCORD_TOKEN
 #   DISCORD_ALLOW_USER_IDS
 # For all ~90 options: cp .env.example.full .env
-pnpm preflight
+pnpm preflight:blank-machine
 ```
 
 If `PRIMARY_RUNTIME=claude`, complete the Claude validation path below before `pnpm dev`.
 
 ### Claude runtime validation
 
-Current 1.0 audit verdict: fully automated Claude readiness is `FAIL`. `pnpm preflight` and `discoclaw doctor` only claim the prerequisites Discoclaw can verify today; Claude login/auth is still a manual gate. See [docs/audit/claude-blank-machine-readiness.md](docs/audit/claude-blank-machine-readiness.md).
+Current 1.0 audit verdict: fully automated Claude readiness is `FAIL`. `pnpm preflight:blank-machine`, `pnpm preflight`, and `discoclaw doctor` only claim the prerequisites Discoclaw can verify today; Claude login/auth is still a manual gate. See [docs/audit/claude-blank-machine-readiness.md](docs/audit/claude-blank-machine-readiness.md).
 
 1. Run the automated checks:
    ```bash
-   pnpm preflight
+   pnpm preflight:blank-machine
    ```
    Optional:
    ```bash
-   pnpm preflight:online
+   pnpm preflight:blank-machine:online
    ```
 2. Treat the result correctly:
-   - `pnpm preflight` can prove local prerequisites such as Node, pnpm, `.env` presence, required env formatting, config-doctor findings, Claude CLI presence/version, and forum bootstrap eligibility.
-   - `pnpm preflight:online` adds a live Discord login/gateway-intent check.
+   - `pnpm preflight:blank-machine` proves the local prerequisites against the current `.env` only, ignoring inherited shell env from the host machine.
+   - `pnpm preflight:blank-machine:online` adds a live Discord login/gateway-intent check on top of that same blank-machine env boundary.
+   - Plain `pnpm preflight` keeps its broader contributor-oriented behavior and can still be useful for checking the current shell environment.
    - Neither command proves Claude login/auth state.
 3. Before logging in, run the required failure check:
    ```bash
@@ -378,7 +379,7 @@ pnpm install
 pnpm build
 ```
 
-Run `pnpm preflight` after changes to validate the automated contract again. It checks the local prerequisites Discoclaw can prove today: Node, pnpm, runtime binary presence/version, `.env` presence, env formatting, forum bootstrap eligibility, and config-doctor findings. It does not verify Claude login/auth. Use `pnpm preflight:online` if you also want a live Discord token/intents check.
+Run `pnpm preflight` after changes to validate the automated contract again. It checks the local prerequisites Discoclaw can prove today: Node, pnpm, runtime binary presence/version, `.env` presence, env formatting, forum bootstrap eligibility, and config-doctor findings. It does not verify Claude login/auth. Use `pnpm preflight:blank-machine` when you need the audit to ignore inherited shell env and inspect only the current `.env`, or `pnpm preflight:blank-machine:online` if you also want a live Discord token/intents check.
 
 You can also run `discoclaw doctor` to inspect config drift and related issues, `discoclaw doctor --fix` to apply safe remediations, or use `!doctor` / `!doctor fix` from Discord (`!health doctor` / `!health doctor fix` remain supported). Restart the service afterward for fixed config to take effect.
 
@@ -438,7 +439,9 @@ The orchestrator runs AI runtimes in a separate working directory (`WORKSPACE_CW
 
 ```bash
 pnpm preflight         # automated prerequisite check; Claude auth remains manual
+pnpm preflight:blank-machine         # same check, but ignore inherited shell env and use only .env
 pnpm preflight:online  # adds live Discord login/intents validation
+pnpm preflight:blank-machine:online  # blank-machine check plus live Discord login/intents validation
 pnpm dev        # start dev mode
 pnpm build      # compile TypeScript
 pnpm test       # run tests

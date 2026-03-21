@@ -379,7 +379,7 @@ Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DEEPGRAM_STT_MODEL
 
 - [x] **README rewrite** — user-facing overview, setup, and quickstart are now in `README.md`.
 - [x] **`.env.example`** — slimmed to essentials; `.env.example.full` has all ~90 options.
-- [x] **First-run experience** — `pnpm setup` provides guided interactive configuration; `pnpm preflight` validates the result.
+- [x] **First-run experience** — `pnpm run setup` provides guided interactive configuration; `pnpm preflight` validates the result.
 - [x] **Graceful degradation when external prerequisites missing** — tasks no longer require the `bd` CLI at runtime (the in-process `TaskStore` is the live path); `bd` is only needed for one-time data migration. Cron requires a forum channel. Clean errors / skip when prerequisites aren't configured.
 
 ### Nice-to-have before MVP

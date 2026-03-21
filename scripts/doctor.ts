@@ -4,14 +4,16 @@
  * can prove today. Exit 0 if every automated check passes, 1 if any check fails.
  *
  * Usage:  pnpm run preflight
+ *         pnpm run preflight:blank-machine
  *         pnpm run preflight:online   (adds Discord connection test)
+ *         pnpm run preflight:blank-machine:online
  */
 
-import 'dotenv/config';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import dotenv from 'dotenv';
 import { inspect } from '../src/health/config-doctor.js';
 import { validateDiscordToken, validateSnowflake, validateSnowflakes } from '../src/validate.js';
 import { missingEnvVars } from './doctor-env-diff.js';
@@ -115,8 +117,20 @@ function createReporter(log: DoctorLogFn): DoctorReporter {
   };
 }
 
-function emitDoctorContractNotes(log: DoctorReporter) {
+function loadEnvFile(
+  envPath: string,
+  existsSync: (filePath: string) => boolean,
+  readFileSync: typeof fs.readFileSync,
+): NodeJS.ProcessEnv {
+  if (!existsSync(envPath)) return {};
+  return dotenv.parse(readFileSync(envPath, 'utf8'));
+}
+
+function emitDoctorContractNotes(log: DoctorReporter, blankMachine: boolean) {
   log.info('This check only reports prerequisites Discoclaw can verify locally today.');
+  if (blankMachine) {
+    log.info('Blank-machine mode is active: ignoring inherited shell env and reading only the current .env values.');
+  }
   log.info('Forum IDs may be bootstrap-derived: persisted scaffold state or first-connect creation via DISCORD_GUILD_ID can satisfy them when env vars are unset.');
   log.info('Claude auth is a manual validation step; this command does not auto-check Claude login state.');
   log.info(`Follow the manual pre-login and post-login validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
@@ -131,7 +145,7 @@ function emitCheckResult(check: DoctorCheckResult, reporter: DoctorReporter) {
 export async function runDoctor(options: RunDoctorOptions = {}): Promise<number> {
   const {
     cwd = defaultRoot,
-    env = process.env,
+    env: baseEnv = process.env,
     argv = process.argv,
     deps = {},
   } = options;
@@ -150,9 +164,15 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<number>
   const testDiscordConnectionFn = deps.testDiscordConnectionFn ?? defaultTestDiscordConnection;
 
   const checkConnection = argv.includes('--check-connection');
+  const blankMachine = argv.includes('--blank-machine');
+  const envPath = path.join(cwd, '.env');
+  const envFile = loadEnvFile(envPath, existsSync, readFileSync);
+  const env: NodeJS.ProcessEnv = blankMachine
+    ? { ...envFile }
+    : { ...baseEnv, ...envFile };
 
   log('\nDiscoclaw preflight check\n');
-  emitDoctorContractNotes(reporter);
+  emitDoctorContractNotes(reporter, blankMachine);
 
   const nodeVersion = process.versions.node;
   const nodeMajor = Number(nodeVersion.split('.')[0]);
@@ -221,7 +241,6 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<number>
     reporter.info('PERMISSIONS.json not found (will use env/default tools until onboarding runs)');
   }
 
-  const envPath = path.join(cwd, '.env');
   if (existsSync(envPath)) {
     reporter.ok('.env file exists');
 
@@ -241,7 +260,7 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<number>
       reporter.info('.env.example not found — skipping env coverage check');
     }
   } else {
-    reporter.fail('.env file missing', 'Run: cp .env.example .env  (or pnpm setup for guided configuration)');
+    reporter.fail('.env file missing', 'Run: cp .env.example .env  (or pnpm run setup for guided configuration)');
   }
 
   const token = (env.DISCORD_TOKEN ?? '').trim();

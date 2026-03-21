@@ -33,8 +33,8 @@ Non-goal of this `PASS`:
 
 | Step | Current state | Evidence | Blocker classification |
 | --- | --- | --- | --- |
-| Setup / init surfaces | `pnpm setup` and `discoclaw init` tell the operator that forum channels can auto-create on first connect and that Claude login is manual. | `scripts/setup.ts`, `scripts/setup.test.ts`, `src/cli/init-wizard.ts`, `src/cli/init-wizard.test.ts` | `no-blocker` |
-| Preflight / doctor surfaces | `pnpm preflight` explicitly says it only verifies local prerequisites, allows bootstrap-derived forum IDs, and points Claude operators to a manual auth validation path. | `scripts/doctor.ts`, `scripts/doctor.test.ts`, `scripts/doctor-lib.test.ts`, `docs/configuration.md` | `no-blocker` |
+| Setup / init surfaces | `pnpm run setup` and `discoclaw init` tell the operator that forum channels can auto-create on first connect and that Claude login is manual. | `scripts/setup.ts`, `scripts/setup.test.ts`, `src/cli/init-wizard.ts`, `src/cli/init-wizard.test.ts` | `no-blocker` |
+| Preflight / doctor surfaces | `pnpm preflight:blank-machine` explicitly says it only verifies local prerequisites, allows bootstrap-derived forum IDs, and points Claude operators to a manual auth validation path. | `scripts/doctor.ts`, `scripts/doctor.test.ts`, `scripts/doctor-lib.test.ts`, `docs/configuration.md` | `no-blocker` |
 | Unauthenticated first run | The shipped stranger path now explicitly requires running `claude -p -- "Reply with OK"` before login and confirming an auth/login failure. That is the correct expected first-run failure. | `scripts/setup.ts`, `scripts/setup.test.ts`, `src/cli/init-wizard.ts`, `src/cli/init-wizard.test.ts` | `accepted-manual-gate` |
 | Post-login rerun | The shipped path then requires logging in with `claude`, rerunning the same prompt, and confirming normal text output. The repo documents this, but does not auto-prove it. | `scripts/setup.ts`, `src/cli/init-wizard.ts`, `docs/audit/claude-blank-machine-readiness.md` | `accepted-manual-gate` |
 | First reply | Normal message runs start a real watchdog-backed reply lifecycle instead of relying on a generic completion notice, and reply rendering/edit behavior is covered. | `src/discord-followup.test.ts`, `src/discord/output-common.test.ts` | `no-blocker` |
@@ -51,9 +51,9 @@ Classification: `no-blocker`
 
 The repo now consistently says the same thing in the three stranger-facing entry points:
 
-- `pnpm setup`
+- `pnpm run setup`
 - `discoclaw init`
-- `pnpm preflight` / doctor
+- `pnpm preflight:blank-machine` / doctor
 
 Those surfaces no longer claim that Claude is fully ready just because the binary exists. They explicitly stop at what the repo can verify locally and push Claude auth into a manual smoke step.
 

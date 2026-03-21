@@ -1,7 +1,7 @@
 # Claude Blank-Machine Readiness Audit
 
 Date: 2026-03-20
-Scope: what `pnpm preflight` / `discoclaw doctor` can actually prove for a first-time Claude operator on this repo today.
+Scope: what `pnpm preflight:blank-machine` / `discoclaw doctor` can actually prove for a first-time Claude operator on this repo today.
 
 ## 1.0 Verdict
 
@@ -15,7 +15,7 @@ Reason:
 
 ## Automated Contract
 
-`pnpm preflight` and `discoclaw doctor` should only claim the prerequisites they can verify directly:
+`pnpm preflight:blank-machine` and `discoclaw doctor` should only claim the prerequisites they can verify directly:
 
 - local binaries and versions
 - required env presence and basic formatting
@@ -30,7 +30,7 @@ They should not claim that Claude is ready end-to-end just because the CLI binar
 
 1. Run:
    ```bash
-   pnpm preflight
+   pnpm preflight:blank-machine
    ```
 2. Confirm the automated checks pass.
 3. Confirm the output explicitly says Claude auth is manual and points back to this audit memo.
@@ -47,7 +47,7 @@ They should not claim that Claude is ready end-to-end just because the CLI binar
    claude -p -- "Reply with OK"
    ```
 2. Confirm the CLI returns a normal text response instead of an auth/login error.
-3. Treat that manual prompt result, together with a passing `pnpm preflight`, as the current 1.0 readiness check.
+3. Treat that manual prompt result, together with a passing `pnpm preflight:blank-machine`, as the current 1.0 readiness check.
 
 ## Follow-up Gap
 

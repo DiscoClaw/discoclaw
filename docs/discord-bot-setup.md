@@ -109,7 +109,7 @@ The `discoclaw init` wizard prompts for your bot token, user/channel IDs, and ot
 
 ```bash
 pnpm i
-pnpm setup     # guided interactive setup
+pnpm run setup # guided interactive setup
 # Or manually:
 cp .env.example .env   # quick start (essentials only)
 # cp .env.example.full .env   # all ~90 options

@@ -8,11 +8,11 @@ Boolean values accept `0`/`1` or `true`/`false`.
 
 DiscoClaw has three separate setup surfaces, and they should not be conflated:
 
-1. **Config-only setup** covers repo-checkable prerequisites such as required env vars, binary presence, binary versions, and model/runtime configuration files. `pnpm preflight` and `discoclaw doctor` can verify this boundary directly.
+1. **Config-only setup** covers repo-checkable prerequisites such as required env vars, binary presence, binary versions, and model/runtime configuration files. `pnpm preflight`, `pnpm preflight:blank-machine`, and `discoclaw doctor` can verify this boundary directly.
 2. **Bootstrap-derived Discord forum state** covers whether DiscoClaw can resolve the cron/task forum channels from checked config or from first-run bootstrap state. That state is considered satisfiable when you already have explicit forum IDs, when persisted scaffold/bootstrap state can supply them, or when `DISCORD_GUILD_ID` is present so the repo can create the missing forums on startup.
 3. **Manual Claude login validation** is outside the automated contract today. The repo can verify that the Claude CLI binary exists and that its version/config shape looks valid, but it cannot prove that Claude CLI auth/login is healthy on a blank machine.
 
-That boundary is intentional: the checked-in audit memo at [docs/audit/claude-blank-machine-readiness.md](audit/claude-blank-machine-readiness.md) is the authoritative 1.0 readiness verdict for Claude on a blank machine. Treat a passing `pnpm preflight` or `discoclaw doctor` run as evidence for binary/version/config prerequisites only, not as proof that Claude login/OAuth is ready end-to-end.
+That boundary is intentional: the checked-in audit memo at [docs/audit/claude-blank-machine-readiness.md](audit/claude-blank-machine-readiness.md) is the authoritative 1.0 readiness verdict for Claude on a blank machine. Treat a passing `pnpm preflight:blank-machine`, `pnpm preflight`, or `discoclaw doctor` run as evidence for binary/version/config prerequisites only, not as proof that Claude login/OAuth is ready end-to-end.
 
 ## Discord
 
@@ -103,7 +103,7 @@ This changes failure shape, not runtime configuration: operators do not need new
 
 ### Claude CLI
 
-`pnpm preflight` / `discoclaw doctor` can verify Claude CLI presence, version, and related config. They do **not** verify interactive Claude authentication. Use the manual validation path in [docs/audit/claude-blank-machine-readiness.md](audit/claude-blank-machine-readiness.md) as the current blank-machine authority for Claude login/auth readiness.
+`pnpm preflight`, `pnpm preflight:blank-machine`, and `discoclaw doctor` can verify Claude CLI presence, version, and related config. They do **not** verify interactive Claude authentication. Use `pnpm preflight:blank-machine` when you need the audit to ignore inherited shell env and validate only the written `.env`. The manual validation path in [docs/audit/claude-blank-machine-readiness.md](audit/claude-blank-machine-readiness.md) remains the current blank-machine authority for Claude login/auth readiness.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -259,7 +259,7 @@ The same forum-boundary rule applies to tasks: `DISCOCLAW_TASKS_FORUM` is the di
 | `DISCOCLAW_TASKS_FORUM` | — | Explicit forum channel ID for task threads; when unset, DiscoClaw relies on persisted bootstrap state or `DISCORD_GUILD_ID` to create/resolve the forum |
 | `DISCOCLAW_TASKS_CWD` | — | Override task working directory |
 | `DISCOCLAW_TASKS_TAG_MAP` | — | Override task tag map file path |
-| `DISCOCLAW_TASKS_MENTION_USER` | — | User ID to @mention on task creation; fresh `discoclaw init` / `pnpm setup` configs default this to the first `DISCORD_ALLOW_USER_IDS` entry |
+| `DISCOCLAW_TASKS_MENTION_USER` | — | User ID to @mention on task creation; fresh `discoclaw init` / `pnpm run setup` configs default this to the first `DISCORD_ALLOW_USER_IDS` entry |
 | `DISCOCLAW_TASKS_SIDEBAR` | `true` | Show tasks in forum sidebar |
 | `DISCOCLAW_TASKS_AUTO_TAG` | `true` | Auto-tag task threads via AI |
 | `DISCOCLAW_TASKS_AUTO_TAG_MODEL` | `fast` | Model tier for auto-tagging |

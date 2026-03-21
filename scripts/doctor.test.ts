@@ -85,6 +85,35 @@ async function runDoctorForTest(env: NodeJS.ProcessEnv, cwd: string) {
   };
 }
 
+async function runDoctorForTestWithArgs(env: NodeJS.ProcessEnv, cwd: string, args: string[]) {
+  const lines: string[] = [];
+
+  const exitCode = await runDoctor({
+    cwd,
+    env,
+    argv: ['node', 'scripts/doctor.ts', ...args],
+    deps: {
+      log: (line) => {
+        lines.push(line);
+      },
+      whichFn: (bin) => bin === 'claude' ? '/usr/bin/claude' : null,
+      versionOfFn: (bin) => {
+        if (bin === 'pnpm') return '10.28.2';
+        if (bin === 'claude') return '2.1.5';
+        return null;
+      },
+      inspectFn: async () => ({ findings: [] }),
+      resolveHooksDir: (root) => path.join(root, '.git', 'hooks'),
+    },
+  });
+
+  return {
+    exitCode,
+    lines,
+    output: lines.join('\n'),
+  };
+}
+
 describe('doctor output contract', () => {
   it('prints explicit manual Claude auth guidance instead of claiming full readiness', async () => {
     const fixture = makeDoctorFixture();
@@ -143,6 +172,28 @@ describe('doctor output contract', () => {
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain('DISCOCLAW_CRON_FORUM resolved from persisted scaffold state');
       expect(result.output).toContain('DISCOCLAW_TASKS_FORUM resolved from persisted scaffold state');
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('supports a blank-machine mode that ignores inherited shell env', async () => {
+    const fixture = makeDoctorFixture({
+      env: {
+        DISCOCLAW_CRON_FORUM: '1000000000000000001',
+        DISCOCLAW_TASKS_FORUM: '1000000000000000002',
+      },
+    });
+
+    try {
+      const result = await runDoctorForTestWithArgs(fixture.env, fixture.cwd, ['--blank-machine']);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain('Blank-machine mode is active: ignoring inherited shell env and reading only the current .env values.');
+      expect(result.output).toContain('DISCOCLAW_CRON_FORUM can be auto-created on first connect via DISCORD_GUILD_ID');
+      expect(result.output).toContain('DISCOCLAW_TASKS_FORUM can be auto-created on first connect via DISCORD_GUILD_ID');
+      expect(result.output).not.toContain('DISCOCLAW_CRON_FORUM is set and valid');
+      expect(result.output).not.toContain('DISCOCLAW_TASKS_FORUM is set and valid');
     } finally {
       fixture.cleanup();
     }
