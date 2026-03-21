@@ -3,8 +3,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   runBrowserCliCommand,
   runCli,
+  runClaudeCliCommand,
   type BrowserCliDeps,
   type BrowserCliReport,
+  type ClaudeCliDeps,
+  type ClaudeAuthSmokeCommandResult,
   formatDashboardPortConflictMessage,
   probeTcpPortOccupancy,
   runDashboardCliCommand,
@@ -94,6 +97,30 @@ function makeBrowserDeps(overrides: Partial<BrowserCliDeps> = {}): BrowserCliDep
       nextSteps: ['Reuse this profile later with `discoclaw browser launch --headless`.'],
     })),
     loadDotenv: vi.fn(),
+    log: {
+      log: vi.fn(),
+      error: vi.fn(),
+    },
+    ...overrides,
+  };
+}
+
+function makeClaudeResult(overrides: Partial<ClaudeAuthSmokeCommandResult> = {}): ClaudeAuthSmokeCommandResult {
+  return {
+    ok: true,
+    exitCode: 0,
+    stdout: 'OK',
+    stderr: '',
+    failed: false,
+    timedOut: false,
+    ...overrides,
+  };
+}
+
+function makeClaudeDeps(overrides: Partial<ClaudeCliDeps> = {}): ClaudeCliDeps {
+  return {
+    loadDotenv: vi.fn(() => undefined),
+    runClaudeFn: vi.fn(async () => makeClaudeResult()),
     log: {
       log: vi.fn(),
       error: vi.fn(),
@@ -282,6 +309,19 @@ describe('runCli browser commands', () => {
   });
 });
 
+describe('runCli claude commands', () => {
+  it('prints the claude auth-smoke command in top-level help', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    const exitCode = await runCli(['node', 'discoclaw', '--help']);
+
+    expect(exitCode).toBe(0);
+    const output = loggedText(log);
+    expect(output).toContain('claude auth-smoke');
+    expect(output).toContain('config-only, not Claude auth proof');
+  });
+});
+
 describe('runBrowserCliCommand', () => {
   it('returns a non-zero exit code for rejected in-repo custom data dirs', async () => {
     const deps = makeBrowserDeps({
@@ -407,5 +447,77 @@ describe('runBrowserCliCommand', () => {
     expect(output).toContain('[ERROR] verification_cleanup_failed');
     expect(output).toContain('Failed to remove stale launcher state');
     expect(output).toContain('Delete the stale state file');
+  });
+});
+
+describe('runClaudeCliCommand', () => {
+  it('loads .env and prefers CLAUDE_BIN from dotenv for auth smoke', async () => {
+    const deps = makeClaudeDeps({
+      loadDotenv: vi.fn(() => ({
+        parsed: {
+          CLAUDE_BIN: '/opt/claude/bin/claude',
+        },
+      })),
+    });
+
+    const exitCode = await runClaudeCliCommand({
+      argv: ['node', 'discoclaw', 'claude', 'auth-smoke'],
+      cwd: '/repo',
+      env: {},
+      deps,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(deps.loadDotenv).toHaveBeenCalledWith({ path: '/repo/.env' });
+    expect(deps.runClaudeFn).toHaveBeenCalledWith(
+      '/opt/claude/bin/claude',
+      ['-p', '--', 'Reply with OK'],
+      {
+        cwd: '/repo',
+        env: { CLAUDE_BIN: '/opt/claude/bin/claude' },
+        timeoutMs: 60_000,
+      },
+    );
+  });
+
+  it('returns non-zero with a clear message when Claude is unauthenticated', async () => {
+    const deps = makeClaudeDeps({
+      runClaudeFn: vi.fn(async () => makeClaudeResult({
+        ok: false,
+        exitCode: 1,
+        stdout: '',
+        stderr: 'You are not authenticated. Please log in.',
+        failed: true,
+      })),
+    });
+
+    const exitCode = await runClaudeCliCommand({
+      argv: ['node', 'discoclaw', 'claude', 'auth-smoke'],
+      cwd: '/repo',
+      env: { CLAUDE_BIN: 'claude' },
+      deps,
+    });
+
+    expect(exitCode).toBe(1);
+    const output = loggedText(deps.log.error as ReturnType<typeof vi.fn>);
+    expect(output).toContain('not authenticated');
+    expect(output).toContain('Run `claude` to complete login');
+  });
+
+  it('prints claude subcommand help for unknown subcommands', async () => {
+    const deps = makeClaudeDeps();
+
+    const exitCode = await runClaudeCliCommand({
+      argv: ['node', 'discoclaw', 'claude', 'unknown'],
+      cwd: '/repo',
+      env: {},
+      deps,
+    });
+
+    expect(exitCode).toBe(1);
+    const output = loggedText(deps.log.error as ReturnType<typeof vi.fn>);
+    expect(output).toContain('Unknown claude subcommand: unknown');
+    expect(output).toContain('Usage: discoclaw claude <subcommand>');
+    expect(output).toContain('Separate from `discoclaw doctor`');
   });
 });
