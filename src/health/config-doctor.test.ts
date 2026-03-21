@@ -10,6 +10,7 @@ import {
   detectInvalidModelsFile,
   detectInstallDrift,
   detectMissingSecrets,
+  detectNpmManagedClaudeSupportBoundary,
   detectWorkspaceBootstrapWarnings,
   detectStaleRuntimeAndModelOverrides,
   inspect,
@@ -53,6 +54,41 @@ describe('detectInstallDrift', () => {
     expect(findings).toHaveLength(1);
     expect(findings[0]?.id).toBe('install-drift:split-data-dir');
     expect(findings[0]?.autoFixable).toBe(false);
+  });
+});
+
+describe('detectNpmManagedClaudeSupportBoundary', () => {
+  it('warns npm-managed installs that doctor is config-only and does not prove daemon parity', async () => {
+    const cwd = await makeTempInstall('doctor-npm-managed-claude-boundary');
+    await writeEnv(cwd, [
+      'PRIMARY_RUNTIME=claude',
+    ]);
+
+    const ctx = await loadDoctorContext({ cwd });
+    const findings = detectNpmManagedClaudeSupportBoundary(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      id: 'npm-managed-claude:runtime-support-boundary',
+      severity: 'warn',
+      autoFixable: false,
+    });
+    expect(findings[0]?.message).toContain('config-only');
+    expect(findings[0]?.recommendation).toContain('discoclaw claude auth-smoke');
+    expect(findings[0]?.recommendation).toContain('CLAUDE_BIN');
+    expect(findings[0]?.recommendation).toContain('/usr/bin/node');
+  });
+
+  it('stays quiet on source installs', async () => {
+    const cwd = await makeTempInstall('doctor-source-claude-boundary');
+    await fs.mkdir(path.join(cwd, '.git'));
+    await writeEnv(cwd, [
+      'PRIMARY_RUNTIME=claude',
+    ]);
+
+    const ctx = await loadDoctorContext({ cwd });
+
+    expect(detectNpmManagedClaudeSupportBoundary(ctx)).toEqual([]);
   });
 });
 
@@ -288,6 +324,7 @@ describe('inspect', () => {
 
   it('includes an explicit finding when models.json is corrupt', async () => {
     const cwd = await makeTempInstall('doctor-inspect-invalid-models-file');
+    await fs.mkdir(path.join(cwd, '.git'));
     await writeEnv(cwd, [
       'PRIMARY_RUNTIME=claude',
     ]);
@@ -301,11 +338,26 @@ describe('inspect', () => {
     ]);
   });
 
+  it('includes the npm-managed Claude boundary finding on published-style installs', async () => {
+    const cwd = await makeTempInstall('doctor-inspect-npm-managed-claude-boundary');
+    await writeEnv(cwd, [
+      'PRIMARY_RUNTIME=claude',
+    ]);
+
+    const report = await inspect({ cwd });
+
+    expect(report.installMode).toBe('npm-managed');
+    expect(report.findings.map((finding) => finding.id)).toEqual([
+      'npm-managed-claude:runtime-support-boundary',
+    ]);
+  });
+
 });
 
 describe('applyFixes', () => {
   it('comments the migrated voice env var and prunes only auto-fixable runtime override issues', async () => {
     const cwd = await makeTempInstall('doctor-apply-fixes');
+    await fs.mkdir(path.join(cwd, '.git'));
     await writeEnv(cwd, [
       'RUNTIME_MODEL=capable',
       'DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL=voice-home-123',
@@ -355,6 +407,7 @@ describe('applyFixes', () => {
 
   it('preserves unknown runtime-overrides keys when applying known runtime override fixes', async () => {
     const cwd = await makeTempInstall('doctor-apply-preserve-unknown-runtime-keys');
+    await fs.mkdir(path.join(cwd, '.git'));
     await writeEnv(cwd, [
       'PRIMARY_RUNTIME=claude',
     ]);
@@ -383,6 +436,7 @@ describe('applyFixes', () => {
 
   it('skips non-auto-fixable findings', async () => {
     const cwd = await makeTempInstall('doctor-apply-skip');
+    await fs.mkdir(path.join(cwd, '.git'));
     await writeEnv(cwd, [
       'RUNTIME_MODEL=capable',
       'PRIMARY_RUNTIME=openrouter',
