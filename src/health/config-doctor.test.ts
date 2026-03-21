@@ -10,7 +10,7 @@ import {
   detectInvalidModelsFile,
   detectInstallDrift,
   detectMissingSecrets,
-  detectNpmManagedClaudeSupportBoundary,
+  detectNpmManagedRuntimeSupportBoundary,
   detectWorkspaceBootstrapWarnings,
   detectStaleRuntimeAndModelOverrides,
   inspect,
@@ -57,38 +57,47 @@ describe('detectInstallDrift', () => {
   });
 });
 
-describe('detectNpmManagedClaudeSupportBoundary', () => {
-  it('warns npm-managed installs that doctor is config-only and does not prove daemon parity', async () => {
-    const cwd = await makeTempInstall('doctor-npm-managed-claude-boundary');
+describe('detectNpmManagedRuntimeSupportBoundary', () => {
+  it('warns npm-managed Codex/OpenAI installs that doctor stays config-only and points at the proof gates', async () => {
+    const cwd = await makeTempInstall('doctor-npm-managed-runtime-boundary');
     await writeEnv(cwd, [
-      'PRIMARY_RUNTIME=claude',
+      'PRIMARY_RUNTIME=codex',
+      'DISCOCLAW_FAST_RUNTIME=openai',
+      'OPENAI_API_KEY=sk-test',
     ]);
 
     const ctx = await loadDoctorContext({ cwd });
-    const findings = detectNpmManagedClaudeSupportBoundary(ctx);
+    const findings = detectNpmManagedRuntimeSupportBoundary(ctx);
 
     expect(findings).toHaveLength(1);
     expect(findings[0]).toMatchObject({
-      id: 'npm-managed-claude:runtime-support-boundary',
+      id: 'npm-managed:runtime-support-boundary',
       severity: 'warn',
       autoFixable: false,
     });
     expect(findings[0]?.message).toContain('config-only');
-    expect(findings[0]?.recommendation).toContain('discoclaw claude auth-smoke');
-    expect(findings[0]?.recommendation).toContain('CLAUDE_BIN');
-    expect(findings[0]?.recommendation).toContain('/usr/bin/node');
+    expect(findings[0]?.message).toContain('does not prove');
+    expect(findings[0]?.message).toContain('Codex CLI session auth');
+    expect(findings[0]?.message).toContain('OPENAI_API_KEY-backed');
+    expect(findings[0]?.message).not.toContain('auth success');
+    expect(findings[0]?.recommendation).toContain('no shipped `discoclaw codex auth-smoke` exists yet');
+    expect(findings[0]?.recommendation).toContain('codex exec --skip-git-repo-check -- "Reply with OK"');
+    expect(findings[0]?.recommendation).toContain('openai-key: ok');
+    expect(findings[0]?.recommendation).not.toContain('discoclaw claude auth-smoke');
   });
 
   it('stays quiet on source installs', async () => {
-    const cwd = await makeTempInstall('doctor-source-claude-boundary');
+    const cwd = await makeTempInstall('doctor-source-runtime-boundary');
     await fs.mkdir(path.join(cwd, '.git'));
     await writeEnv(cwd, [
-      'PRIMARY_RUNTIME=claude',
+      'PRIMARY_RUNTIME=codex',
+      'DISCOCLAW_FAST_RUNTIME=openai',
+      'OPENAI_API_KEY=sk-test',
     ]);
 
     const ctx = await loadDoctorContext({ cwd });
 
-    expect(detectNpmManagedClaudeSupportBoundary(ctx)).toEqual([]);
+    expect(detectNpmManagedRuntimeSupportBoundary(ctx)).toEqual([]);
   });
 });
 
@@ -338,17 +347,21 @@ describe('inspect', () => {
     ]);
   });
 
-  it('includes the npm-managed Claude boundary finding on published-style installs', async () => {
-    const cwd = await makeTempInstall('doctor-inspect-npm-managed-claude-boundary');
+  it('includes the npm-managed runtime boundary finding on published-style installs', async () => {
+    const cwd = await makeTempInstall('doctor-inspect-npm-managed-runtime-boundary');
     await writeEnv(cwd, [
-      'PRIMARY_RUNTIME=claude',
+      'PRIMARY_RUNTIME=codex',
+      'OPENAI_API_KEY=sk-test',
     ]);
+    await writeJson(path.join(cwd, 'data', 'runtime-overrides.json'), {
+      fastRuntime: 'openai',
+    });
 
     const report = await inspect({ cwd });
 
     expect(report.installMode).toBe('npm-managed');
     expect(report.findings.map((finding) => finding.id)).toEqual([
-      'npm-managed-claude:runtime-support-boundary',
+      'npm-managed:runtime-support-boundary',
     ]);
   });
 
