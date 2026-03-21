@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 const DISCORD_API_BASE = 'https://discord.com/api/v10';
 const OPENAI_API_DEFAULT_BASE = 'https://api.openai.com/v1';
 const OPENROUTER_API_DEFAULT_BASE = 'https://openrouter.ai/api/v1';
+const OPENROUTER_MODELS_PROBE = 'GET /models';
 
 export type CredentialStatus = 'ok' | 'fail' | 'skip';
 
@@ -88,6 +89,8 @@ export async function checkOpenAiKey(opts: {
 /**
  * Validate the OpenRouter API key by calling GET /models on the configured base URL.
  * Returns 'skip' when no key is configured.
+ * Failure messages are intentionally stable so operator-facing readiness surfaces
+ * can classify this lightweight probe without depending on provider-specific body text.
  * Always resolves — returns a 'fail' result on network error instead of throwing.
  */
 export async function checkOpenRouterKey(opts: {
@@ -110,15 +113,31 @@ export async function checkOpenRouterKey(opts: {
       return { name, status: 'ok' };
     }
     if (res.status === 401) {
-      return { name, status: 'fail', message: 'invalid or expired key (401)' };
+      return {
+        name,
+        status: 'fail',
+        message: `invalid OPENROUTER_API_KEY (401 from ${OPENROUTER_MODELS_PROBE})`,
+      };
     }
     if (res.status === 403) {
-      return { name, status: 'fail', message: 'key lacks required permissions (403)' };
+      return {
+        name,
+        status: 'fail',
+        message: `permission failure for OPENROUTER_API_KEY (403 from ${OPENROUTER_MODELS_PROBE})`,
+      };
     }
-    return { name, status: 'fail', message: `unexpected status ${res.status}` };
+    return {
+      name,
+      status: 'fail',
+      message: `unexpected status ${res.status} from OpenRouter ${OPENROUTER_MODELS_PROBE}`,
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    return { name, status: 'fail', message: `network error: ${msg}` };
+    return {
+      name,
+      status: 'fail',
+      message: `network failure reaching OpenRouter ${OPENROUTER_MODELS_PROBE}: ${msg}`,
+    };
   }
 }
 
