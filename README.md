@@ -79,7 +79,7 @@ Full setup guide: [docs/voice.md](docs/voice.md)
 
 ## How it works
 
-DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with Gemini, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). The OpenAI-compatible and OpenRouter adapters support optional tool use (function calling) when `OPENAI_COMPAT_TOOLS_ENABLED=1` is set. It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
+DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with Gemini, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). The OpenAI-compatible and OpenRouter adapters can expose optional tool use when `OPENAI_COMPAT_TOOLS_ENABLED=1` is set, but OpenRouter support claims stop at the narrower audited boundary described below. It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
 
 1. Checks the user allowlist (fail-closed — empty list means respond to nobody)
 2. Assembles context: per-channel rules, conversation history, rolling summary, and durable memory
@@ -111,9 +111,11 @@ When multiple messages arrive while the bot is thinking (i.e., an AI invocation 
 
 ### OpenRouter
 
-Set `PRIMARY_RUNTIME=openrouter` to route requests through [OpenRouter](https://openrouter.ai), which provides access to models from Anthropic, OpenAI, Google, and others via a single API key — useful if you want to switch models without managing multiple provider accounts.
+Set `PRIMARY_RUNTIME=openrouter` to route requests through [OpenRouter](https://openrouter.ai), which provides access to models from Anthropic, OpenAI, Google, and others via a single API key.
 
-Required: `OPENROUTER_API_KEY`. Optional overrides: `OPENROUTER_BASE_URL` (default: `https://openrouter.ai/api/v1`) and `OPENROUTER_MODEL` (default: `anthropic/claude-sonnet-4`). OpenRouter does not have a built-in `fast`/`capable`/`deep` tier map inside DiscoClaw, so if you want tier names or fast/voice auto-switching to resolve through OpenRouter, define the specific `DISCOCLAW_TIER_OPENROUTER_<TIER>` vars you need in `.env` and restart. A single unique entry such as `DISCOCLAW_TIER_OPENROUTER_FAST=openai/gpt-5-mini` is enough for that exact-string fast/voice reverse-mapping. See `.env.example` for the full reference.
+Required: `OPENROUTER_API_KEY`. Optional overrides: `OPENROUTER_BASE_URL` (default: `https://openrouter.ai/api/v1`) and `OPENROUTER_MODEL` (default: `anthropic/claude-sonnet-4-20250514`). Treat `.env` presence, `PRIMARY_RUNTIME=openrouter`, and `!models set chat openrouter` as config/routing intent only until the running instance proves the shipped OpenRouter path with `!status` or the startup credential report showing `openrouter-key: ok`.
+
+For source checkouts, workload evidence beyond that key-visibility proof exists only through the repo smoke path, and read-only tool coverage is the only validated tool subset today. Built-in OpenRouter `fast`/`capable`/`deep` tier defaults are still deferred; if you need tier-based switching, define only the specific `DISCOCLAW_TIER_OPENROUTER_<TIER>` vars you need. See [docs/audit/openrouter-api-key-support-boundary.md](docs/audit/openrouter-api-key-support-boundary.md) for the support boundary that npm installs and source checkouts both ship.
 
 ## Model Overrides
 
@@ -196,10 +198,10 @@ For source checkouts, repo-local managed browser storage is supported only at th
   - **Gemini CLI** on your `PATH` — check with `gemini --version`, or
   - **Codex CLI** on your `PATH` — check with `codex --version` (binary presence only; session auth is a separate proof gate), or
   - **OpenAI-compatible API key** via `OPENAI_API_KEY` (config presence only; live auth is a separate proof gate), or
-  - **OpenRouter API key** via `OPENROUTER_API_KEY` (access to many providers)
+  - **OpenRouter API key** via `OPENROUTER_API_KEY` (config presence only until `!status` or the startup credential report shows `openrouter-key: ok`)
 - Runtime-specific access for your chosen provider (Anthropic plan/API credits for Claude, Google account for Gemini, OpenAI access for Codex/OpenAI models)
 
-For Codex and OpenAI paths, treat binary/key presence as readiness prerequisites only. The install-mode-specific support claims live in the [Codex source-checkout audit](docs/audit/codex-blank-machine-readiness.md) and [Codex npm-managed audit](docs/audit/codex-npm-managed-path.md).
+For Codex and OpenAI paths, treat binary/key presence as readiness prerequisites only. The install-mode-specific support claims live in the [Codex source-checkout audit](docs/audit/codex-blank-machine-readiness.md) and [Codex npm-managed audit](docs/audit/codex-npm-managed-path.md). For OpenRouter, the shipped support claim is narrower: [docs/audit/openrouter-api-key-support-boundary.md](docs/audit/openrouter-api-key-support-boundary.md) documents only the runtime-visible env-key proof boundary, with source-checkout workload evidence limited to the repo smoke path.
 
 **Contributors (from source):**
 - Everything above, plus **pnpm** — enable via Corepack (`corepack enable`) or install separately
@@ -209,6 +211,7 @@ For Codex and OpenAI paths, treat binary/key presence as readiness prerequisites
 DiscoClaw assumes reliable structured output for several runtime paths (for example: Discord actions, cron JSON routing, and tool-call loops).
 
 - For OpenAI-compatible and OpenRouter adapters, pick models that reliably support JSON-shaped output and function calling.
+- For OpenRouter-backed source-checkout workloads, treat repo smoke-path validation as the workload proof surface, and treat read-only tool coverage as the only validated tool subset today.
 - "OpenAI-compatible" API shape alone is not a capability guarantee.
 - If a model fails JSON/tool-call smoke tests, treat it as unsupported for DiscoClaw runtime use.
 - Use the [model validation smoke test checklist](docs/configuration.md#model-validation-smoke-test-recommended) before adopting a new model.

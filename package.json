@@ -22,6 +22,7 @@
     "docs/audit/claude-npm-managed-path.md",
     "docs/audit/codex-blank-machine-readiness.md",
     "docs/audit/codex-npm-managed-path.md",
+    "docs/audit/openrouter-api-key-support-boundary.md",
     "systemd/",
     ".context/",
     ".env.example",
