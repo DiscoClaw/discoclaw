@@ -132,8 +132,8 @@ function emitDoctorContractNotes(log: DoctorReporter, blankMachine: boolean) {
     log.info('Blank-machine mode is active: ignoring inherited shell env and reading only the current .env values.');
   }
   log.info('Forum IDs may be bootstrap-derived: persisted scaffold state or first-connect creation via DISCORD_GUILD_ID can satisfy them when env vars are unset.');
-  log.info('Claude auth is a manual validation step; this command does not auto-check Claude login state.');
-  log.info(`Follow the manual pre-login and post-login validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
+  log.info('Claude auth validation is separate: run `pnpm claude:auth-smoke` after this check.');
+  log.info(`This command does not auto-run Claude auth validation; follow the pre-login and post-login validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
 }
 
 function emitCheckResult(check: DoctorCheckResult, reporter: DoctorReporter) {
@@ -350,12 +350,12 @@ export async function runDoctor(options: RunDoctorOptions = {}): Promise<number>
   log('');
   if (reporter.failures() === 0) {
     log('All automated checks passed.');
-    log(`Claude auth still requires the manual validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.\n`);
+    log(`Next run \`pnpm claude:auth-smoke\` for Claude auth validation; preflight does not auto-run it. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.\n`);
     return 0;
   }
 
   log(`${reporter.failures()} automated check(s) failed.`);
-  log(`Claude auth still requires the manual validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.\n`);
+  log(`After fixing the failures, run \`pnpm claude:auth-smoke\` for Claude auth validation; preflight does not auto-run it. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.\n`);
   return 1;
 }
 
