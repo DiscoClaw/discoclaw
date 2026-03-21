@@ -242,15 +242,17 @@ if (values.PRIMARY_RUNTIME === 'claude') {
   console.log('\nNext steps:');
   if (preflightPassed) {
     console.log('  Automated checks passed. Claude auth still needs a manual smoke test.');
-    console.log('  1. Before logging in, run `claude -p -- "Reply with OK"` and confirm it fails with an auth/login error.');
+    console.log('  1. Before logging in, run `pnpm claude:auth-smoke`.');
+    console.log('     On a fresh machine, the expected result is `Claude CLI appears installed but not authenticated.`');
     console.log('  2. Log in with `claude`.');
-    console.log('  3. Repeat `claude -p -- "Reply with OK"` and confirm it returns normal text.');
+    console.log('  3. Repeat `pnpm claude:auth-smoke`.');
+    console.log('     After login, the expected result is `Claude CLI answered the minimal prompt.`');
     console.log('  4. Review README.md or docs/configuration.md if you need the full manual validation path.');
     console.log('  5. pnpm build && pnpm dev\n');
   } else {
     console.log('  1. Fix the preflight issues above.');
     console.log('  2. Re-run `pnpm preflight:blank-machine` until the automated checks pass.');
-    console.log('  3. Only after that should you do the manual Claude smoke test described in README.md or docs/configuration.md.');
+    console.log('  3. Only after that should you run `pnpm claude:auth-smoke` for the manual Claude auth check.');
     console.log('  4. pnpm build && pnpm dev\n');
   }
 } else {
