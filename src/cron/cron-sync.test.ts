@@ -46,6 +46,7 @@ function makeStatsStore(records: CronRunRecord[]): CronRunStats {
     upsertRecord: vi.fn(async (cronId: string, threadId: string, updates?: Partial<CronRunRecord>) => {
       const existing = store[cronId] ?? makeRecord({ cronId, threadId });
       if (updates) Object.assign(existing, updates);
+      existing.threadId = threadId;
       store[cronId] = existing;
       return existing;
     }),
@@ -87,12 +88,18 @@ type ForumThreadFixture = {
   name: string;
   parentId: string;
   appliedTags?: string[];
+  send?: (payload: { embeds?: unknown[]; allowedMentions?: { parse: string[] } }) => Promise<{ id: string; pin: () => Promise<unknown> }>;
   client?: { rest: object };
   edit?: (this: any, payload: { appliedTags?: string[]; name?: string }) => Promise<unknown>;
   setName?: (this: any, name: string) => Promise<unknown>;
 };
 
-function makeForum(threads: ForumThreadFixture[]) {
+function makeForum(
+  threads: ForumThreadFixture[],
+  opts?: {
+    create?: (payload: { name: string; message: { content: string } }) => Promise<{ id: string }>;
+  },
+) {
   const threadMap = new Map(threads.map((fixture) => {
     const thread = {
       id: fixture.id,
@@ -100,6 +107,7 @@ function makeForum(threads: ForumThreadFixture[]) {
       parentId: fixture.parentId,
       appliedTags: fixture.appliedTags ?? [],
       client: fixture.client ?? { rest: {} },
+      isThread: () => true,
     } as any;
 
     thread.edit = fixture.edit ?? vi.fn(async function (this: any, payload: { appliedTags?: string[]; name?: string }) {
@@ -111,23 +119,34 @@ function makeForum(threads: ForumThreadFixture[]) {
       this.name = name;
       return this;
     });
+    thread.send = fixture.send ?? vi.fn(async () => ({
+      id: `msg-${thread.id}`,
+      pin: vi.fn(async () => {}),
+    }));
 
     return [thread.id, thread];
   }));
   return {
     id: 'forum-1',
+    guildId: 'guild-1',
     type: ChannelType.GuildForum,
     threads: {
       fetchActive: vi.fn(async () => ({ threads: threadMap })),
+      create: opts?.create ?? vi.fn(async ({ name, message }: { name: string; message: { content: string } }) => ({
+        id: `thread-created-${threadMap.size + 1}`,
+        name,
+        message,
+      })),
     },
   };
 }
 
-function makeClient(forum: ReturnType<typeof makeForum>) {
+function makeClient(forum: ReturnType<typeof makeForum>, extraChannels: Array<{ id: string }> = []) {
+  const channelMap = new Map<string, any>([[forum.id, forum], ...extraChannels.map((channel) => [channel.id, channel])]);
   return {
     channels: {
-      cache: { get: (id: string) => id === forum.id ? forum : undefined },
-      fetch: vi.fn(async (id: string) => id === forum.id ? forum : null),
+      cache: { get: (id: string) => channelMap.get(id) },
+      fetch: vi.fn(async (id: string) => channelMap.get(id) ?? null),
     },
   };
 }
@@ -360,6 +379,111 @@ describe('runCronSync', () => {
       expect.objectContaining({ err: expect.any(Error), forumId: 'forum-1' }),
       expect.stringContaining('failed to fetch active threads'),
     );
+  });
+
+  it('phase 3.5: backfills prompt messages with shell-input metadata from the canonical record', async () => {
+    const forum = makeForum([{ id: 'thread-4', name: 'Shell Job', parentId: 'forum-1' }]);
+    const thread = (await forum.threads.fetchActive()).threads.get('thread-4') as any;
+    const client = makeClient(forum, [thread]);
+    const statsStore = makeStatsStore([
+      makeRecord({
+        cronId: 'cron-4',
+        threadId: 'thread-4',
+        cadence: 'daily',
+        purposeTags: ['monitoring'],
+        model: 'haiku',
+        prompt: 'Review the pre-command output and summarize actionable changes.',
+        inputMode: 'shell',
+        inputShell: 'printf "ready\\n"',
+      }),
+    ]);
+    const scheduler = makeScheduler([
+      {
+        id: 'thread-4',
+        threadId: 'thread-4',
+        cronId: 'cron-4',
+        name: 'Shell Job',
+        schedule: '0 7 * * *',
+        prompt: 'Review the pre-command output and summarize actionable changes.',
+      },
+    ]);
+
+    const result = await runCronSync({
+      client: client as any,
+      forumId: 'forum-1',
+      scheduler,
+      statsStore,
+      runtime: makeMockRuntime('monitoring'),
+      tagMap: { ...defaultTagMap },
+      autoTag: false,
+      autoTagModel: 'haiku',
+      cwd: '/tmp',
+      log: mockLog(),
+      throttleMs: 0,
+    });
+
+    expect(result.promptMessagesCreated).toBe(1);
+    const payload = thread.send.mock.calls[0][0];
+    expect(payload.embeds[0].data.description).toContain('**Input:** shell-input');
+    expect(payload.embeds[0].data.description).toContain('printf "ready\\n"');
+    expect(payload.embeds[0].data.description).toContain('Review the pre-command output');
+    expect(statsStore.getRecord('cron-4')?.promptMessageId).toBe('msg-thread-4');
+  });
+
+  it('phase 5: recreates missing projections with shell-input metadata from the canonical record', async () => {
+    const create = vi.fn(async ({ name, message }: { name: string; message: { content: string } }) => ({
+      id: 'thread-new',
+      name,
+      message,
+    }));
+    const forum = makeForum([], { create });
+    const client = makeClient(forum);
+    const statsStore = makeStatsStore([
+      makeRecord({
+        cronId: 'cron-5',
+        threadId: 'thread-old',
+        cadence: 'daily',
+        disabled: false,
+        schedule: '0 7 * * *',
+        timezone: 'UTC',
+        channel: 'general',
+        prompt: 'Review the pre-command output and summarize actionable changes.',
+        inputMode: 'shell',
+        inputShell: 'printf "ready\\n"',
+        projectionStatus: 'missing',
+        projectionHash: 'stale-hash',
+      }),
+    ]);
+    const scheduler = makeScheduler([]);
+
+    const result = await runCronSync({
+      client: client as any,
+      forumId: 'forum-1',
+      scheduler,
+      statsStore,
+      runtime: makeMockRuntime('monitoring'),
+      tagMap: { ...defaultTagMap },
+      autoTag: false,
+      autoTagModel: 'haiku',
+      cwd: '/tmp',
+      log: mockLog(),
+      throttleMs: 0,
+    });
+
+    expect(result.projectionsRepaired).toBe(1);
+    expect(create).toHaveBeenCalledWith({
+      name: buildCronThreadName('Review the pre-command output and summarize action', 'daily'),
+      message: {
+        content: expect.stringContaining('**Input:** shell-input'),
+      },
+    });
+    const starterContent = create.mock.calls[0][0].message.content;
+    expect(starterContent).toContain('printf "ready\\n"');
+    expect(starterContent).toContain('Review the pre-command output and summarize actionable changes.');
+    expect(starterContent).toContain('[cronId:cron-5]');
+    expect(statsStore.getRecord('cron-5')?.threadId).toBe('thread-new');
+    expect(statsStore.getRecord('cron-5')?.projectionStatus).toBe('synced');
+    expect((scheduler.register as any).mock.calls[0][0]).toBe('thread-new');
   });
 
   it('phase 4: detects orphan threads', async () => {

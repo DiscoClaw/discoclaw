@@ -3,7 +3,7 @@ import type { Client, ThreadChannel } from 'discord.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import { CADENCE_TAGS, computeDefinitionHash } from './run-stats.js';
-import type { CronRunStats } from './run-stats.js';
+import type { CronRunRecord, CronRunStats } from './run-stats.js';
 import type { ParsedCronDef } from './types.js';
 import type { CronScheduler } from './scheduler.js';
 import { detectCadence } from './cadence.js';
@@ -51,6 +51,67 @@ async function sleep(ms: number | undefined): Promise<void> {
 function purposeTagNames(tagMap: TagMap): string[] {
   const cadenceSet = new Set<string>(CADENCE_TAGS);
   return Object.keys(tagMap).filter((k) => !cadenceSet.has(k));
+}
+
+function normalizeProjectionInputMode(
+  inputMode?: CronRunRecord['inputMode'],
+  inputShell?: CronRunRecord['inputShell'],
+): 'prompt' | 'shell' {
+  return inputMode === 'shell' || Boolean(inputShell?.trim()) ? 'shell' : 'prompt';
+}
+
+function describeProjectionInputMode(
+  inputMode?: CronRunRecord['inputMode'],
+  inputShell?: CronRunRecord['inputShell'],
+): string {
+  return normalizeProjectionInputMode(inputMode, inputShell) === 'shell' ? 'shell-input' : 'prompt-only';
+}
+
+function truncateProjectionText(text: string, limit: number, continuation: string): string {
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}${continuation}`;
+}
+
+function buildPromptMessageDescription(record: CronRunRecord): string {
+  const inputShell = record.inputShell?.trim() ? record.inputShell.trim() : undefined;
+  const lines = [`**Input:** ${describeProjectionInputMode(record.inputMode, inputShell)}`];
+
+  if (normalizeProjectionInputMode(record.inputMode, inputShell) === 'shell' && inputShell) {
+    lines.push(
+      '```bash',
+      truncateProjectionText(inputShell, 1000, '\n# ... shell truncated'),
+      '```',
+    );
+  }
+
+  const header = lines.join('\n');
+  const prompt = record.prompt ?? '';
+  const remaining = Math.max(0, 4096 - header.length - 2);
+  const promptBody = prompt.length <= remaining
+    ? prompt
+    : truncateProjectionText(prompt, Math.max(0, remaining - 22), '\n... (prompt truncated)');
+
+  return [header, promptBody].filter(Boolean).join('\n\n').slice(0, 4096);
+}
+
+function buildMissingProjectionStarterContent(cronId: string, record: CronRunRecord): string {
+  const inputShell = record.inputShell?.trim() ? record.inputShell.trim() : undefined;
+  const lines = [
+    `**Schedule:** \`${record.schedule ?? 'N/A'}\` (${record.timezone ?? 'UTC'})`,
+    `**Channel:** #${record.channel ?? 'unknown'}`,
+    `**Input:** ${describeProjectionInputMode(record.inputMode, inputShell)}`,
+  ];
+
+  if (normalizeProjectionInputMode(record.inputMode, inputShell) === 'shell' && inputShell) {
+    lines.push(
+      '```bash',
+      truncateProjectionText(inputShell, 300, '\n# ... shell truncated'),
+      '```',
+    );
+  }
+
+  lines.push('', record.prompt ?? '', '', `[cronId:${cronId}]`);
+  return lines.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -282,7 +343,7 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
 
       const embed = new EmbedBuilder()
         .setTitle('\uD83D\uDCCB Cron Prompt')
-        .setDescription(record.prompt.slice(0, 4096))
+        .setDescription(buildPromptMessageDescription(record))
         .setColor(0x5865F2);
 
       const msg = await thread.send({ embeds: [embed], allowedMentions: { parse: [] } });
@@ -335,14 +396,7 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
         const baseName = record.prompt.slice(0, 50).replace(/\n/g, ' ').trim() || cronId;
         const cadence = record.cadence ?? null;
         const threadName = buildCronThreadName(baseName, cadence);
-
-        const starterContent = [
-          `**Schedule:** \`${record.schedule ?? 'N/A'}\``,
-          `**Timezone:** ${record.timezone ?? 'UTC'}`,
-          `**Channel:** ${record.channel}`,
-          `**Prompt:** ${record.prompt}`,
-          `\n[cronId:${cronId}]`,
-        ].join('\n');
+        const starterContent = buildMissingProjectionStarterContent(cronId, record);
 
         const newThread = await forum.threads.create({
           name: threadName,
