@@ -473,7 +473,7 @@ describe('OpenAI-compat runtime adapter', () => {
       id: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
       apiKey: 'test-key',
-      defaultModel: 'anthropic/claude-sonnet-4.6',
+      defaultModel: 'anthropic/claude-opus-4.6',
       providerPreferences,
     });
 
@@ -1028,7 +1028,7 @@ describe('OpenAI-compat tool loop', () => {
       id: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
       apiKey: 'test-key',
-      defaultModel: 'anthropic/claude-sonnet-4.6',
+      defaultModel: 'anthropic/claude-opus-4.6',
       enableTools: true,
       providerPreferences,
     });
