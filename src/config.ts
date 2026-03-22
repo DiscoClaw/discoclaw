@@ -2,6 +2,12 @@ import path from 'node:path';
 import { isAllowlisted, parseAllowBotIds, parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
 import { parseDashboardTrustedHosts } from './dashboard/options.js';
 import { OPENROUTER_DEFAULT_MODEL } from './runtime/model-tiers.js';
+import {
+  canonicalizeRuntimePathName,
+  listCanonicalRuntimeNames,
+  parseRuntimeNameForPlacement,
+  type RuntimePathPlacement,
+} from './runtime/runtime-path-contract.js';
 
 export const KNOWN_TOOLS = new Set([
   'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Pipeline', 'Step',
@@ -397,13 +403,23 @@ function parseTrimmedString(
 function parseRuntimeName(
   env: NodeJS.ProcessEnv,
   name: string,
+  placement: RuntimePathPlacement,
 ): string | undefined {
   const raw = parseTrimmedString(env, name);
   if (!raw) return undefined;
-  const normalized = raw.toLowerCase();
-  if (normalized === 'claude_code') return 'claude';
-  if (normalized === 'gemini') return 'gemini-api';
-  return normalized;
+
+  const canonicalName = parseRuntimeNameForPlacement(raw, placement);
+  if (canonicalName) return canonicalName;
+
+  const supportedRuntimeNames = listCanonicalRuntimeNames(placement).join('|');
+  const knownRuntimeName = canonicalizeRuntimePathName(raw);
+  if (knownRuntimeName) {
+    throw new Error(
+      `${name} does not support runtime "${raw}". Supported values: ${supportedRuntimeNames}`,
+    );
+  }
+
+  throw new Error(`${name} must be one of ${supportedRuntimeNames}, got "${raw}"`);
 }
 
 function parseEnum<T extends string>(
@@ -850,16 +866,16 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     tasksForum = undefined;
   }
 
-  const primaryRuntime = parseRuntimeName(env, 'PRIMARY_RUNTIME') ?? 'claude';
-  const fastRuntime = parseRuntimeName(env, 'DISCOCLAW_FAST_RUNTIME');
+  const primaryRuntime = parseRuntimeName(env, 'PRIMARY_RUNTIME', 'startup:PRIMARY_RUNTIME') ?? 'claude';
+  const fastRuntime = parseRuntimeName(env, 'DISCOCLAW_FAST_RUNTIME', 'startup:DISCOCLAW_FAST_RUNTIME');
   if (fastRuntime) {
     warnings.push(
       "DISCOCLAW_FAST_RUNTIME is deprecated — use '!models set fast <model>' instead. " +
       'The env var still works for initial startup but is ignored by !models reset.',
     );
   }
-  const forgeDrafterRuntime = parseRuntimeName(env, 'FORGE_DRAFTER_RUNTIME');
-  const forgeAuditorRuntime = parseRuntimeName(env, 'FORGE_AUDITOR_RUNTIME');
+  const forgeDrafterRuntime = parseRuntimeName(env, 'FORGE_DRAFTER_RUNTIME', 'startup:FORGE_DRAFTER_RUNTIME');
+  const forgeAuditorRuntime = parseRuntimeName(env, 'FORGE_AUDITOR_RUNTIME', 'startup:FORGE_AUDITOR_RUNTIME');
   const openaiApiKey = parseTrimmedString(env, 'OPENAI_API_KEY');
   const openaiBaseUrl = parseTrimmedString(env, 'OPENAI_BASE_URL');
   const openaiModel = parseTrimmedString(env, 'OPENAI_MODEL') ?? 'gpt-4o';
