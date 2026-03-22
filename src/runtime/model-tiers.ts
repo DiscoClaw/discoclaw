@@ -19,6 +19,11 @@ const defaults: Record<string, Record<ModelTier, string>> = {
   claude_code: { fast: 'haiku', capable: 'claude-opus-4-6', deep: 'claude-opus-4-6' },
   gemini: { fast: 'gemini-2.5-flash', capable: 'gemini-2.5-pro', deep: 'gemini-2.5-pro' },
   openai: { fast: 'gpt-5-mini', capable: 'gpt-5.4', deep: 'gpt-5.4-pro' },
+  openrouter: {
+    fast: 'openai/gpt-5-mini',
+    capable: 'anthropic/claude-sonnet-4.6',
+    deep: 'anthropic/claude-opus-4.6',
+  },
   codex: { fast: 'gpt-5.1-codex-mini', capable: 'gpt-5.4', deep: 'gpt-5.4' },
 };
 
