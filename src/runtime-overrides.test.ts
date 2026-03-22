@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   loadOverrides,
+  normalizeRuntimeOverrides,
   resolveOverridesPath,
   saveOverrides,
 } from './runtime-overrides.js';
@@ -134,6 +135,40 @@ describe('loadOverrides', () => {
     await fs.writeFile(filePath, JSON.stringify({ voiceRuntime: 123 }), 'utf-8');
     const result = await loadOverrides(filePath);
     expect(result).toEqual({});
+  });
+});
+
+describe('normalizeRuntimeOverrides', () => {
+  it('canonicalizes accepted voice runtime aliases', () => {
+    const result = normalizeRuntimeOverrides({ voiceRuntime: 'Gemini' });
+    expect(result).toEqual({
+      overrides: { voiceRuntime: 'gemini-api' },
+      changed: true,
+    });
+  });
+
+  it('canonicalizes accepted fast runtime aliases', () => {
+    const result = normalizeRuntimeOverrides({ fastRuntime: 'claude_code' });
+    expect(result).toEqual({
+      overrides: { fastRuntime: 'claude' },
+      changed: true,
+    });
+  });
+
+  it('leaves invalid or already-canonical runtime values unchanged', () => {
+    const result = normalizeRuntimeOverrides({
+      voiceRuntime: 'anthropic',
+      fastRuntime: 'not-a-runtime',
+      ttsVoice: 'aura-2-asteria-en',
+    });
+    expect(result).toEqual({
+      overrides: {
+        voiceRuntime: 'anthropic',
+        fastRuntime: 'not-a-runtime',
+        ttsVoice: 'aura-2-asteria-en',
+      },
+      changed: false,
+    });
   });
 });
 

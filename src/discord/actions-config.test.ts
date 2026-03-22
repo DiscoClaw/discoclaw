@@ -39,6 +39,13 @@ const geminiCliRuntime: RuntimeAdapter = {
   async *invoke() { /* no-op */ },
 };
 
+const anthropicRuntime: RuntimeAdapter = {
+  id: 'claude_code',
+  capabilities: new Set(),
+  defaultModel: 'claude-sonnet-4-6',
+  async *invoke() { /* no-op */ },
+};
+
 function makeRegistry(...entries: [string, RuntimeAdapter][]): RuntimeRegistry {
   const reg = new RuntimeRegistry();
   for (const [name, adapter] of entries) {
@@ -585,6 +592,19 @@ describe('modelSet runtime swap', () => {
     expect(ctx.botParams.runtimeModel).toBe('capable');
   });
 
+  it('rejects voice-only runtimes for chat with an explicit error', () => {
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['anthropic', anthropicRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'anthropic' }, ctx);
+    expect(result).toEqual({
+      ok: false,
+      error: 'Runtime "anthropic" is voice-only; use it with the voice role',
+    });
+    expect(ctx.botParams.runtime).toBe(stubRuntime);
+    expect(ctx.runtime).toBe(stubRuntime);
+    expect(ctx.botParams.runtimeModel).toBe('capable');
+  });
+
   it('keeps gemini-cli as an explicit runtime selection', () => {
     const ctx = makeCtx();
     ctx.runtimeRegistry = makeRegistry(['gemini-cli', geminiCliRuntime]);
@@ -642,6 +662,20 @@ describe('modelSet runtime swap', () => {
     executeConfigAction({ type: 'modelSet', role: 'chat', model: 'gpt-4o' }, ctx);
     expect(ctx.botParams.runtime).toBe(openrouterRuntime);
     expect(ctx.botParams.runtimeModel).toBe('gpt-4o');
+  });
+
+  it('keeps chat runtime swaps live-only instead of persisting a models.json override', () => {
+    let persistOverrideCalled = false;
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
+    ctx.overrideSources = {};
+    ctx.persistOverride = () => { persistOverrideCalled = true; };
+
+    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'openrouter' }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(persistOverrideCalled).toBe(false);
+    expect(ctx.overrideSources.chat).toBeUndefined();
   });
 
   it('propagation to syncCoordinator.setRuntime is called when present', () => {
@@ -749,6 +783,24 @@ describe('modelShow runtime line', () => {
 // ---------------------------------------------------------------------------
 
 describe('modelSet voice runtime swap', () => {
+  it('accepts the voice-only anthropic runtime when it is registered', () => {
+    let persistVoiceRuntimeName: string | undefined;
+    const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
+    ctx.runtimeRegistry = makeRegistry(['anthropic', anthropicRuntime]);
+    ctx.persistVoiceRuntime = (name) => { persistVoiceRuntimeName = name; };
+
+    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'anthropic' }, ctx);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(ctx.botParams.voiceModelCtx!.runtime).toBe(anthropicRuntime);
+    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('anthropic');
+    expect(ctx.botParams.voiceModelCtx!.model).toBe('claude-sonnet-4-6');
+    expect(ctx.voiceRuntimeName).toBe('anthropic');
+    expect(persistVoiceRuntimeName).toBe('anthropic');
+    expect(result.summary).toContain('voice runtime → anthropic');
+  });
+
   it('canonicalizes the legacy gemini alias for voice runtime swaps', () => {
     const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
     ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime]);
@@ -860,6 +912,48 @@ describe('modelReset voice runtime', () => {
   });
 });
 
+describe('modelReset fast runtime', () => {
+  it('clears the persisted fast runtime overlay and restores the startup runtime', () => {
+    const ctx = makeCtx();
+    ctx.envDefaults = { fast: 'fast' };
+    ctx.botParams.fastRuntime = geminiRuntime;
+    ctx.botParams.cronCtx!.runtime = geminiRuntime;
+    ctx.botParams.taskCtx!.runtime = geminiRuntime;
+    ctx.fastRuntimeName = 'gemini-api';
+    let clearFastRuntimeCalled = false;
+    ctx.clearFastRuntime = () => { clearFastRuntimeCalled = true; };
+
+    const result = executeConfigAction({ type: 'modelReset', role: 'fast' }, ctx);
+
+    expect(result.ok).toBe(true);
+    expect(ctx.botParams.fastRuntime).toBe(stubRuntime);
+    expect(ctx.botParams.cronCtx!.runtime).toBe(stubRuntime);
+    expect(ctx.botParams.taskCtx!.runtime).toBe(stubRuntime);
+    expect(ctx.fastRuntimeName).toBeUndefined();
+    expect(clearFastRuntimeCalled).toBe(true);
+  });
+});
+
+describe('modelSet fast runtime overlay', () => {
+  it('keeps fast runtime overlay auto-switch behavior unchanged', () => {
+    let persistedFastRuntimeName: string | undefined;
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['gemini-api', geminiRuntime]);
+    ctx.persistFastRuntime = (name) => { persistedFastRuntimeName = name; };
+
+    const result = executeConfigAction({ type: 'modelSet', role: 'fast', model: 'gemini-2.5-flash' }, ctx);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(ctx.botParams.fastRuntime).toBe(geminiRuntime);
+    expect(ctx.botParams.cronCtx!.runtime).toBe(geminiRuntime);
+    expect(ctx.botParams.taskCtx!.runtime).toBe(geminiRuntime);
+    expect(ctx.fastRuntimeName).toBe('gemini-api');
+    expect(persistedFastRuntimeName).toBe('gemini-api');
+    expect(result.summary).toContain('fast runtime → gemini-api (auto-switched)');
+  });
+});
+
 // ---------------------------------------------------------------------------
 // modelShow — voice runtime display
 // ---------------------------------------------------------------------------
@@ -959,7 +1053,7 @@ describe('workspaceWarnings', () => {
 // ---------------------------------------------------------------------------
 
 describe('configActionsPromptSection', () => {
-  it('documents modelSet and modelShow', () => {
+  it('documents the runtime/model persistence split accurately', () => {
     const section = configActionsPromptSection();
     expect(section).toContain('modelShow');
     expect(section).toContain('modelSet');
@@ -969,7 +1063,16 @@ describe('configActionsPromptSection', () => {
     expect(section).toContain('fast');
     expect(section).toContain('forge-drafter');
     expect(section).toContain('forge-auditor');
-    expect(section).toContain('persisted');
     expect(section).toContain('modelReset');
+    expect(section).toContain('models.json');
+    expect(section).toContain('runtime-overrides.json');
+    expect(section).toContain('Chat runtime swaps are live-only memory changes');
+    expect(section).toContain('`gemini-api`');
+    expect(section).toContain('`gemini-cli`');
+    expect(section).toContain('`anthropic`');
+    expect(section).toContain('compatibility aliases');
+    expect(section).toContain('write startup defaults back to `models.json`');
+    expect(section).not.toContain('Changes are **persisted** to `models.json` and survive restart.');
+    expect(section).not.toContain('clear the override file entry');
   });
 });

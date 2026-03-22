@@ -126,7 +126,13 @@ import {
   resolveForgeRuntimes,
 } from './index.runtime.js';
 import { buildActionCategoriesEnabled, publishBootReport, runPostConnectStartupChecks } from './index.post-connect.js';
-import { loadOverrides, saveOverrides, resolveOverridesPath, type RuntimeOverrides } from './runtime-overrides.js';
+import {
+  loadOverrides,
+  normalizeRuntimeOverrides,
+  saveOverrides,
+  resolveOverridesPath,
+  type RuntimeOverrides,
+} from './runtime-overrides.js';
 import {
   DEFAULTS as MODEL_DEFAULTS,
   loadModelConfig,
@@ -1124,7 +1130,13 @@ if (cfg.anthropicApiKey) {
 
 // --- Load runtime-overrides.json (voice/tts only — models moved to models.json) ---
 const overrides = await loadOverrides(overridesPath, (msg, data) => log.warn(data ?? {}, msg));
-let currentOverridesState: RuntimeOverrides = { ...overrides };
+const normalizedOverrides = normalizeRuntimeOverrides(overrides);
+let currentOverridesState: RuntimeOverrides = { ...normalizedOverrides.overrides };
+if (normalizedOverrides.changed) {
+  saveOverrides(overridesPath, currentOverridesState).catch((err) =>
+    log.warn({ err, overrides: currentOverridesState }, 'runtime-overrides: canonicalization save failed'),
+  );
+}
 
 // --- Load models.json (persistent model configuration) ---
 const modelsJsonPath = resolveModelsJsonPath(dataDir, projectRoot);
@@ -1178,41 +1190,41 @@ if (currentModelConfig['cron']) {
   cronAutoTagModel = currentModelConfig['cron'];
   log.info({ cronAutoTagModel }, 'models: cron model applied');
 }
-if (overrides.voiceRuntime) {
-  const voiceRt = runtimeRegistry.get(overrides.voiceRuntime);
+if (currentOverridesState.voiceRuntime) {
+  const voiceRt = runtimeRegistry.get(currentOverridesState.voiceRuntime);
   if (voiceRt) {
     voiceRuntimeRef.runtime = voiceRt;
-    voiceRuntimeRef.name = overrides.voiceRuntime;
+    voiceRuntimeRef.name = currentOverridesState.voiceRuntime;
     voiceModelRef.runtime = voiceRt;
-    voiceModelRef.runtimeName = overrides.voiceRuntime;
+    voiceModelRef.runtimeName = currentOverridesState.voiceRuntime;
     if (!currentModelConfig['voice']) {
       // Re-resolve the voice model against the new runtime's tier mapping so tier names
       // like 'capable' or 'fast' map to the correct concrete model for this adapter.
       const reResolved = resolveModel(cfg.voiceModel, voiceRt.id);
       voiceModelRef.model = reResolved || voiceRt.defaultModel || voiceModelRef.model;
     }
-    log.info({ voiceRuntime: overrides.voiceRuntime, voiceModel: voiceModelRef.model }, 'runtime-overrides: voice runtime override applied');
+    log.info({ voiceRuntime: currentOverridesState.voiceRuntime, voiceModel: voiceModelRef.model }, 'runtime-overrides: voice runtime override applied');
   } else {
     log.warn(
-      { voiceRuntime: overrides.voiceRuntime, availableRuntimes: runtimeRegistry.list() },
+      { voiceRuntime: currentOverridesState.voiceRuntime, availableRuntimes: runtimeRegistry.list() },
       'runtime-overrides: voiceRuntime is not a registered runtime; ignoring',
     );
   }
 }
-if (overrides.fastRuntime) {
-  const fastRt = runtimeRegistry.get(overrides.fastRuntime);
+if (currentOverridesState.fastRuntime) {
+  const fastRt = runtimeRegistry.get(currentOverridesState.fastRuntime);
   if (fastRt) {
     fastRuntime = fastRt;
-    log.info({ fastRuntime: overrides.fastRuntime }, 'runtime-overrides: fast runtime override applied');
+    log.info({ fastRuntime: currentOverridesState.fastRuntime }, 'runtime-overrides: fast runtime override applied');
   } else {
     log.warn(
-      { fastRuntime: overrides.fastRuntime, availableRuntimes: runtimeRegistry.list() },
+      { fastRuntime: currentOverridesState.fastRuntime, availableRuntimes: runtimeRegistry.list() },
       'runtime-overrides: fastRuntime is not a registered runtime; ignoring',
     );
   }
 }
-if (overrides.ttsVoice) {
-  log.info({ ttsVoice: overrides.ttsVoice }, 'runtime-overrides: ttsVoice override will be applied');
+if (currentOverridesState.ttsVoice) {
+  log.info({ ttsVoice: currentOverridesState.ttsVoice }, 'runtime-overrides: ttsVoice override will be applied');
 }
 
 // Track which roles have active file-backed overrides (used by !models show).

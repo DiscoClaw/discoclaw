@@ -147,9 +147,24 @@ describe('parseConfig', () => {
     expect(config.fastRuntime).toBe('gemini-cli');
   });
 
+  it('does not warn when PRIMARY_RUNTIME=gemini-cli without GEMINI_API_KEY', () => {
+    const { warnings } = parseConfig(env({ PRIMARY_RUNTIME: 'gemini-cli', GEMINI_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('PRIMARY_RUNTIME=gemini'))).toBe(false);
+  });
+
   it('normalizes PRIMARY_RUNTIME=gemini to the legacy gemini-api alias', () => {
     const { config } = parseConfig(env({ PRIMARY_RUNTIME: 'gemini', GEMINI_API_KEY: 'gemini-key' }));
     expect(config.primaryRuntime).toBe('gemini-api');
+  });
+
+  it('normalizes DISCOCLAW_FAST_RUNTIME=gemini to the legacy gemini-api alias', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_FAST_RUNTIME: 'gemini', GEMINI_API_KEY: 'gemini-key' }));
+    expect(config.fastRuntime).toBe('gemini-api');
+  });
+
+  it('throws when PRIMARY_RUNTIME=anthropic because anthropic is not supported at startup', () => {
+    expect(() => parseConfig(env({ PRIMARY_RUNTIME: 'anthropic', ANTHROPIC_API_KEY: 'anthropic-key' })))
+      .toThrow(/PRIMARY_RUNTIME does not support runtime "anthropic"/);
   });
 
   it('warns when PRIMARY_RUNTIME=openai without OPENAI_API_KEY', () => {
@@ -531,6 +546,21 @@ describe('parseConfig', () => {
   it('normalizes FORGE_DRAFTER_RUNTIME claude_code to claude', () => {
     const { config } = parseConfig(env({ FORGE_DRAFTER_RUNTIME: 'claude_code' }));
     expect(config.forgeDrafterRuntime).toBe('claude');
+  });
+
+  it('parses FORGE_AUDITOR_RUNTIME=gemini-cli explicitly', () => {
+    const { config } = parseConfig(env({ FORGE_AUDITOR_RUNTIME: 'gemini-cli' }));
+    expect(config.forgeAuditorRuntime).toBe('gemini-cli');
+  });
+
+  it('normalizes FORGE_DRAFTER_RUNTIME=gemini to the legacy gemini-api alias', () => {
+    const { config } = parseConfig(env({ FORGE_DRAFTER_RUNTIME: 'gemini', GEMINI_API_KEY: 'gemini-key' }));
+    expect(config.forgeDrafterRuntime).toBe('gemini-api');
+  });
+
+  it('throws when FORGE_DRAFTER_RUNTIME=anthropic because anthropic is not supported at startup', () => {
+    expect(() => parseConfig(env({ FORGE_DRAFTER_RUNTIME: 'anthropic', ANTHROPIC_API_KEY: 'anthropic-key' })))
+      .toThrow(/FORGE_DRAFTER_RUNTIME does not support runtime "anthropic"/);
   });
 
   it('warns when FORGE_DRAFTER_RUNTIME=openai without OPENAI_API_KEY', () => {
