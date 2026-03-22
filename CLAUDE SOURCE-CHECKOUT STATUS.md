@@ -6,17 +6,17 @@ Scope: evidence-backed closeout memo for DiscoClaw's blessed Claude source-check
 
 ## Current Call
 
-Status: `PARTIAL` for the Claude source-checkout path
+Status: `SUPPORTED FOR 1.0` for the Claude source-checkout path
 
-First-login stranger gate: `OPEN`
+First-login stranger gate: `CLOSED`
 
 What that status means today:
 
 - a fresh clone can install and run the repo-owned Claude source-checkout helpers
 - an isolated no-session Claude shell still returns the expected pre-login unauthenticated result
-- the same fresh clone can answer the minimal prompt from a shell that is already logged into Claude
-- this does **not** mean that a fresh clone by itself proves unauthenticated-shell behavior
-- this rerun did **not** close the first-login stranger gate, because no interactive `claude` login was completed inside the same no-session shell and rerun afterward
+- that same isolated no-session Claude home can complete interactive Claude CLI login and pass the post-login `pnpm claude:auth-smoke` rerun
+- the first-login stranger auth gate is now backed by same-shell evidence instead of inference from a separately logged-in shell
+- the broader source-checkout operator loop had already been proven for the fresh-clone post-login path, so the remaining release-gate item was this same-shell auth proof
 
 ## What Actually Happened
 
@@ -28,9 +28,15 @@ What that status means today:
 - `HOME=/tmp/discoclaw-qa-qu0E0N-home XDG_CONFIG_HOME=/tmp/discoclaw-qa-qu0E0N-home/.config XDG_STATE_HOME=/tmp/discoclaw-qa-qu0E0N-home/.state XDG_DATA_HOME=/tmp/discoclaw-qa-qu0E0N-home/.local/share pnpm claude:auth-smoke`
   Result: `EXPECTED PRE-LOGIN FAILURE`
   Evidence: `Claude CLI appears installed but not authenticated.` and `Not logged in · Please run /login`
-- `pnpm claude:auth-smoke` in the same throwaway checkout from the default host shell
+- `HOME=/tmp/discoclaw-qa-qu0E0N-home ... claude auth login --console`
+  Result: `PASS`
+  Evidence: `Login successful.`
+- `HOME=/tmp/discoclaw-qa-qu0E0N-home ... pnpm claude:auth-smoke`
   Result: `PASS`
   Evidence: `Claude CLI answered the minimal prompt.` and `Output preview: OK`
+- one stale browser-window retry during login
+  Result: `SHARP EDGE`
+  Evidence: rejected localhost callback from a recycled browser tab; a fresh terminal-driven login completed successfully afterward
 - `pnpm preflight:blank-machine` in `/home/davidmarsh/code/discoclaw`
   Result: `FAIL`
   Evidence: current maintainer config still reports stale repo-local state, deprecated `RUNTIME_MODEL`, and a persisted summary override drift
@@ -48,13 +54,10 @@ That means this memo proves the fresh-clone install path and the Claude auth beh
 
 ## Audit Call
 
-- Current support-safe claim: `fresh-clone post-login path proven`
-- Still open: `first-login stranger gate`
-- Do not claim that a fresh clone alone proves an unauthenticated Claude shell
-- Do not close the first-login gate until the same no-session shell or account records:
-  - the expected pre-login `pnpm claude:auth-smoke` failure
-  - interactive `claude` login
-  - the expected post-login `pnpm claude:auth-smoke` success rerun
+- Current support-safe claim: `SUPPORTED FOR 1.0` for the repo-owned Claude source-checkout path
+- First-login stranger gate: `CLOSED`
+- Keep the support claim narrow: it is based on a real clone-local `.env`, isolated repo/data paths on the maintainer machine, the expected pre-login failure, interactive Claude CLI login in that same isolated home, and the post-login rerun success
+- Keep the stale-browser callback rejection documented as a sharp edge, but it is not a blocker because a fresh CLI-driven login in the same isolated home succeeded
 
 ## Tightened 1.0 Closeout Checklist
 
@@ -70,5 +73,5 @@ That means this memo proves the fresh-clone install path and the Claude auth beh
 10. Confirm the expected post-login result contains `Claude CLI answered the minimal prompt.`
 11. Run `pnpm build && pnpm dev`, then confirm a short Discord prompt receives a normal reply.
 12. Restart the running service/process and verify clean startup, one normal post-restart reply, and if applicable either the persisted recovery summary or the generic notice ending with `Recovered after restart.`
-13. Only after steps 6 through 10 happen in the same no-session shell or account may release closeout mark the first-login stranger gate closed.
-14. If the passing auth smoke came from an already-logged-in shell or account, keep the claim narrowed to `fresh-clone post-login path only`.
+13. Release closeout may mark the first-login stranger gate closed once steps 6 through 10 happen in the same no-session shell or account.
+14. If the passing auth smoke came from an already-logged-in shell or account instead, keep the claim narrowed to `fresh-clone post-login path only`.

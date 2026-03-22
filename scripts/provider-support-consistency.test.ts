@@ -9,16 +9,16 @@ function readRepoFile(relativePath: string): string {
 }
 
 describe('provider support docs stay consistent', () => {
-  it('does not mark Claude source checkout as supported while the first-login gate is open', () => {
+  it('marks Claude source checkout supported only when the first-login gate is closed everywhere', () => {
     const readinessAudit = readRepoFile('docs/audit/claude-blank-machine-readiness.md');
     const providerMatrix = readRepoFile('docs/audit/provider-auth-1.0-matrix.md');
     const readme = readRepoFile('README.md');
     const closeoutMemo = readRepoFile('CLAUDE SOURCE-CHECKOUT STATUS.md');
 
-    expect(readinessAudit).toContain('First-login stranger path release gate: `OPEN`');
-    expect(providerMatrix).toContain('| Claude CLI / OAuth | Source checkout | `PARTIAL` |');
-    expect(readme).toContain('Source-checkout 1.0 support status: `PARTIAL` for the repo-owned Claude path');
-    expect(closeoutMemo).toContain('Status: `PARTIAL` for the Claude source-checkout path');
-    expect(closeoutMemo).toContain('Current support-safe claim: `fresh-clone post-login path proven`');
+    expect(readinessAudit).toContain('First-login stranger path release gate: `CLOSED`');
+    expect(providerMatrix).toContain('| Claude CLI / OAuth | Source checkout | `SUPPORTED FOR 1.0` |');
+    expect(readme).toContain('Source-checkout 1.0 support status: `SUPPORTED FOR 1.0` for the repo-owned Claude path');
+    expect(closeoutMemo).toContain('Status: `SUPPORTED FOR 1.0` for the Claude source-checkout path');
+    expect(closeoutMemo).toContain('First-login stranger gate: `CLOSED`');
   });
 });
