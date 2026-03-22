@@ -301,6 +301,19 @@ describe('init wizard copy contract', () => {
       'Start discoclaw and confirm `!status` (or the startup credential report) shows `openrouter-key: ok`.',
     );
   });
+
+  it('uses the explicit Gemini CLI wording instead of a generic Gemini path', () => {
+    expect(initWizardSource).toContain("  2) Gemini CLI");
+    expect(initWizardSource).toContain(
+      'Note: this selects the limited Gemini CLI path; auth is handled by the gemini binary itself (run `gemini` to authenticate).',
+    );
+    expect(initWizardSource).toContain(
+      'This wizard selected the limited Gemini CLI path (`PRIMARY_RUNTIME=gemini-cli`).',
+    );
+    expect(initWizardSource).toContain(
+      'If you want the API-backed Gemini path instead, set `PRIMARY_RUNTIME=gemini-api` and `GEMINI_API_KEY` manually.',
+    );
+  });
 });
 
 describe('runInitWizard', () => {
@@ -460,6 +473,47 @@ describe('runInitWizard', () => {
     expect(newEnv).toContain('OPENAI_API_KEY=sk-fast-key');
     expect(newEnv).toContain('DISCOCLAW_FAST_RUNTIME=openai');
     expect(newEnv).toContain('DISCOCLAW_TIER_OPENAI_FAST=gpt-5-mini');
+  });
+
+  it('writes gemini-cli config when provider 2 is selected', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
+    const previousCwd = process.cwd();
+    const answers = [
+      '', // install directory (default)
+      '', // Press Enter to continue
+      '', // data directory (default cwd/data)
+      'a.b.c', // DISCORD_TOKEN
+      '1000000000000000001', // DISCORD_ALLOW_USER_IDS
+      '5000000000000000001', // DISCORD_GUILD_ID
+      '2', // provider selection -> Gemini CLI
+      'n', // enable voice -> no
+    ];
+
+    process.chdir(tmpDir);
+
+    vi.mocked(createInterface).mockReturnValue(makeReadline(answers) as any);
+    vi.mocked(execFileSync).mockImplementation(() => {
+      throw new Error('binary not found');
+    });
+    vi.mocked(ensureWorkspaceBootstrapFiles).mockResolvedValue([]);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    try {
+      await runInitWizard();
+    } finally {
+      process.chdir(previousCwd);
+    }
+
+    const newEnv = fs.readFileSync(path.join(tmpDir, '.env'), 'utf8');
+    expect(newEnv).toContain('PRIMARY_RUNTIME=gemini-cli');
+    expect(newEnv).toContain('GEMINI_BIN=gemini');
+    expect(newEnv).toContain('GEMINI_MODEL=gemini-2.5-pro');
+    expect(logSpy).toHaveBeenCalledWith(
+      '  1. This wizard selected the limited Gemini CLI path (`PRIMARY_RUNTIME=gemini-cli`).',
+    );
+    expect(logSpy).toHaveBeenCalledWith(
+      '  3. If you want the API-backed Gemini path instead, set `PRIMARY_RUNTIME=gemini-api` and `GEMINI_API_KEY` manually.',
+    );
   });
 
   it('always writes DISCOCLAW_DATA_DIR when a custom path is given', async () => {

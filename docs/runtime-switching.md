@@ -39,6 +39,8 @@ Important: if chat is currently live-swapped to another runtime, `!models reset`
 | `openrouter` | yes | Shipped env-key path plus live `openrouter-key: ok` proof; not key presence alone |
 | `anthropic` | no | Voice-only direct API runtime; not a valid `PRIMARY_RUNTIME` |
 
+For the authoritative 1.0 provider/auth verdicts, including the blessed `Claude CLI` default path, the supported `Codex CLI` secondary path, the `PARTIAL` status of OpenAI/OpenRouter/Gemini, and the `OUT OF SCOPE` status of direct Anthropic for chat/startup, see [docs/audit/provider-auth-1.0-matrix.md](audit/provider-auth-1.0-matrix.md).
+
 Use these canonical names in operator-facing docs, prompts, and commands. `gemini` is accepted only as a compatibility alias and normalizes to the canonical name `gemini-api`.
 
 For Gemini, keep the runtime paths explicit:
@@ -46,6 +48,7 @@ For Gemini, keep the runtime paths explicit:
 - `gemini-cli` is the CLI-backed Gemini runtime. It is intentionally narrow: `src/runtime/strategies/gemini-strategy.ts` advertises only `streaming_text`, and DiscoClaw enforces that limit through `resolveEffectiveTools()` in `src/discord/prompt-common.ts` plus `filterToolsByCapabilities()` in `src/runtime/tool-capabilities.ts`, which drop unsupported tools before the turn starts.
 - Model-based runtime inference is still provider-level for Gemini. When you need a specific subpath, use an explicit runtime-name switch (`gemini-api` or `gemini-cli`) or set `PRIMARY_RUNTIME` explicitly instead of relying on model ownership inference.
 - Treat `GEMINI_API_KEY` and Gemini CLI binary availability as proof for different subpaths, not as a single interchangeable "Gemini is supported" story.
+- `discoclaw init` currently scaffolds the limited `gemini-cli` path, not the API-backed `gemini-api` path.
 
 For `codex`, use the proof gate that matches the install mode you are actually operating:
 - Source checkout: [docs/audit/codex-blank-machine-readiness.md](audit/codex-blank-machine-readiness.md), including the manual `codex exec ...` session-auth step.
@@ -54,12 +57,14 @@ For `codex`, use the proof gate that matches the install mode you are actually o
 For `openai`, prove the active path the same way:
 - Source checkout: when any configured route uses OpenAI, use the repo smoke harness described in [docs/audit/codex-blank-machine-readiness.md](audit/codex-blank-machine-readiness.md), for example `OPENAI_SMOKE_TEST_TIERS=fast pnpm test`.
 - npm-managed Codex/OpenAI alternate path: follow [docs/audit/codex-npm-managed-path.md](audit/codex-npm-managed-path.md) and confirm live runtime-visible evidence such as `openai-key: ok` after startup. `OPENAI_API_KEY` in `.env` is config only.
+- Treat both as `PARTIAL` in the 1.0 matrix unless the exact route and model under test have the separate proof they require.
 
 For `openrouter`, the current shipped boundary is narrower:
 - Set `OPENROUTER_API_KEY` in the authoritative `.env`, but treat that as config presence only.
 - For source checkouts, `pnpm preflight*` remains setup/bootstrap evidence only, and repo smoke-path validation is the only shipped workload-proof surface for OpenRouter-backed routes.
 - Start or restart DiscoClaw and confirm `!status` or the startup credential report shows `openrouter-key: ok`.
 - Treat `!models set chat openrouter`, `PRIMARY_RUNTIME=openrouter`, `.env` key presence, and npm-managed `discoclaw doctor` as routing/config evidence only until that proof appears.
+- Treat the path as `PARTIAL` in the 1.0 matrix unless you are making only the narrower env-key or exact-workload claim that the audits permit.
 
 For `openai` and `openrouter`, set `OPENAI_COMPAT_TOOLS_ENABLED=1` if you expect full tool use. In logs, the Claude adapter runtime ID is `claude_code` even though the user-facing adapter name is `claude`.
 

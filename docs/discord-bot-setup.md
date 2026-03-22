@@ -188,6 +188,11 @@ Run through this checklist in order. Each step should produce the expected outpu
    - **From source:** `test -f .env && echo "ok" || echo "missing — run: cp .env.example .env"`
 
 4. **Install-mode-specific provider proof gate:**
+   - Before following a provider-specific path below, read the consolidated [provider/auth 1.0 matrix](audit/provider-auth-1.0-matrix.md). It is the authoritative verdict for which paths are the blessed default, the supported secondary path, and which current paths remain `PARTIAL` or `OUT OF SCOPE`.
+   - **Any install mode + OpenAI or Gemini path:**
+     - Use the matrix above first.
+     - `openai` remains a narrower manual/proof-gated path rather than a blanket one-command setup claim.
+     - `discoclaw init` currently scaffolds `gemini-cli`, not `gemini-api`; configure `gemini-api` manually if that is the route you want.
    - **Global install (`npm install -g discoclaw`) + Claude path:**
      - Read [docs/audit/claude-npm-managed-path.md](audit/claude-npm-managed-path.md).
      - Run:

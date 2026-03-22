@@ -346,7 +346,7 @@ export async function runInitWizard(): Promise<void> {
 
   console.log('\nSelect your AI provider:');
   console.log('  1) Claude' + (detected.includes('claude') ? ' (detected)' : ''));
-  console.log('  2) Gemini' + (detected.includes('gemini') ? ' (detected)' : ''));
+  console.log('  2) Gemini CLI' + (detected.includes('gemini') ? ' (detected)' : ''));
   console.log('  3) OpenAI');
   console.log('  4) Codex' + (detected.includes('codex') ? ' (detected)' : ''));
   console.log('  5) OpenRouter');
@@ -367,8 +367,8 @@ export async function runInitWizard(): Promise<void> {
     values.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS = '1';
     values.CLAUDE_OUTPUT_FORMAT = 'stream-json';
   } else if (finalChoice === '2') {
-    values.PRIMARY_RUNTIME = 'gemini';
-    console.log('  Note: auth is handled by the gemini binary itself (run `gemini` to authenticate).');
+    values.PRIMARY_RUNTIME = 'gemini-cli';
+    console.log('  Note: this selects the limited Gemini CLI path; auth is handled by the gemini binary itself (run `gemini` to authenticate).');
     values.GEMINI_BIN = 'gemini';
     values.GEMINI_MODEL = 'gemini-2.5-pro';
   } else if (finalChoice === '3') {
@@ -462,9 +462,11 @@ export async function runInitWizard(): Promise<void> {
     console.log('  4. For global installs, that raw Claude prompt is the current equivalent of the repo `pnpm claude:auth-smoke` check.');
     console.log('  5. Review docs/audit/claude-blank-machine-readiness.md if you need the source-checkout audit details.');
     console.log(`  6. ${daemonHint}`);
-  } else if (values.PRIMARY_RUNTIME === 'gemini') {
-    console.log('  1. Authenticate: run `gemini` and follow the prompts.');
-    console.log(`  2. ${daemonHint}`);
+  } else if (values.PRIMARY_RUNTIME === 'gemini-cli') {
+    console.log('  1. This wizard selected the limited Gemini CLI path (`PRIMARY_RUNTIME=gemini-cli`).');
+    console.log('  2. Authenticate: run `gemini` and follow the prompts.');
+    console.log('  3. If you want the API-backed Gemini path instead, set `PRIMARY_RUNTIME=gemini-api` and `GEMINI_API_KEY` manually.');
+    console.log(`  4. ${daemonHint}`);
   } else if (values.PRIMARY_RUNTIME === 'openai') {
     console.log('  1. `pnpm preflight`, `pnpm preflight:blank-machine`, and `discoclaw doctor` stay config-only; they do not prove the OpenAI key.');
     console.log('  2. Start discoclaw and confirm `!status` (or the startup credential report) shows `openai-key: ok`.');
