@@ -139,10 +139,16 @@ Requirement: choose models that reliably support structured JSON output and func
 |----------|---------|-------------|
 | `OPENROUTER_API_KEY` | — | OpenRouter API key |
 | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter base URL |
-| `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4.6` | Default model via OpenRouter |
-| `OPENROUTER_PROVIDER_PREFERENCES` | — | Optional JSON string forwarded as OpenRouter's request `provider` object |
+| `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4.6` | Default model for the OpenRouter adapter; this is also the shipped OpenRouter `capable` fallback |
+| `OPENROUTER_PROVIDER_PREFERENCES` | — | Optional JSON string parsed and forwarded as OpenRouter's request `provider` object by the shared OpenAI-compatible adapter; ignored for non-OpenRouter runtimes |
 
-Treat `OPENROUTER_API_KEY` as config presence only until the running instance proves it can see that key. The shipped live proof surface today is `!status` or the startup credential report showing `openrouter-key: ok` for the active OpenRouter path. For source checkouts, the audited support boundary is broader but still narrow: `pnpm preflight*` can prove setup/bootstrap prerequisites, and repo smoke-path validation is the only shipped workload-proof surface for OpenRouter-backed routes. For npm-managed installs, `discoclaw doctor` remains config-only and must not be described as workload proof. Same requirement applies when routing through OpenRouter: model reliability for JSON/tool-call output is required. DiscoClaw ships OpenRouter tier defaults of `fast → openai/gpt-5-mini`, `capable → anthropic/claude-sonnet-4.6`, and `deep → anthropic/claude-opus-4.6`; override them with `DISCOCLAW_TIER_OPENROUTER_<TIER>` only when you need different routing.
+Keep these OpenRouter surfaces separate:
+- Config/bootstrap presence: `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, optional `OPENROUTER_PROVIDER_PREFERENCES`, `.env` inspection, `discoclaw doctor`, `!doctor`, and source-checkout `pnpm preflight*` only prove written config or local prerequisites.
+- Live credential proof: the shipped runtime-visible proof is `!status` or the startup credential report showing `openrouter-key: ok` for the active OpenRouter path.
+- Source-checkout workload proof: repo smoke-path validation is the only shipped workload-proof surface for OpenRouter-backed routes.
+- Optional transport capability: `OPENROUTER_PROVIDER_PREFERENCES` support exists in the shared OpenAI-compatible adapter and only forwards OpenRouter's `provider` object; it does not broaden the proof boundary above.
+
+For npm-managed installs, `discoclaw doctor` remains config-only and must not be described as workload proof. Same requirement applies when routing through OpenRouter: model reliability for JSON/tool-call output is required. DiscoClaw ships OpenRouter tier defaults of `fast → openai/gpt-5-mini`, `capable → anthropic/claude-sonnet-4.6`, and `deep → anthropic/claude-opus-4.6`; override them with `DISCOCLAW_TIER_OPENROUTER_<TIER>` only when you need different exact-string tier routing.
 
 ### OpenRouter env-key parity checklist
 
@@ -207,8 +213,8 @@ Use `DISCOCLAW_TIER_<RUNTIME>_<TIER>` env vars to replace the built-in tier-to-m
 |-------|-------|-------|
 | Pattern | `DISCOCLAW_TIER_<RUNTIME>_<TIER>` | `<RUNTIME>` is the runtime ID in uppercase (for example `OPENAI`, `OPENROUTER`, `GEMINI`, `CODEX`, `CLAUDE_CODE`); `<TIER>` is `FAST`, `CAPABLE`, or `DEEP` |
 | Example | `DISCOCLAW_TIER_OPENAI_CAPABLE=gpt-5.4` | Maps the `capable` tier for that runtime to a concrete model string |
-| OpenRouter note | `DISCOCLAW_TIER_OPENROUTER_FAST/CAPABLE/DEEP` | Optional overrides for the shipped OpenRouter defaults; even one unique entry is enough for exact-string reverse-mapping for fast/voice runtime auto-switching |
-| Default behavior | Built-in tier map from `src/runtime/model-tiers.ts` | If no override is set, DiscoClaw uses the repo's shipped defaults for every built-in runtime, including OpenRouter |
+| OpenRouter note | `DISCOCLAW_TIER_OPENROUTER_FAST/CAPABLE/DEEP` | Optional exact-string overrides for the shipped OpenRouter defaults `openai/gpt-5-mini`, `anthropic/claude-sonnet-4.6`, and `anthropic/claude-opus-4.6`; even one unique effective tier entry is enough for exact-string reverse-mapping for fast/voice runtime auto-switching |
+| Default behavior | Built-in tier map from `src/runtime/model-tiers.ts` | If no override is set, DiscoClaw uses the repo's shipped defaults for every built-in runtime, including OpenRouter; `OPENROUTER_MODEL` separately defaults the adapter itself to `anthropic/claude-sonnet-4.6` |
 | Full workflow | [docs/runtime-switching.md](runtime-switching.md) | See the canonical operator guide for install-mode detection, switch verification, platform-appropriate log checks, OpenRouter tier defaults and overrides, restart behavior, rollback, and safe switching steps |
 
 ## Memory

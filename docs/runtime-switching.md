@@ -137,24 +137,23 @@ Built-in tier maps shipped in code:
 
 ## OpenRouter tier defaults and overrides
 
-Example:
+DiscoClaw already ships an OpenRouter tier map. With no env overrides set, OpenRouter resolves:
+- `fast` to `openai/gpt-5-mini`
+- `capable` to `anthropic/claude-sonnet-4.6`
+- `deep` to `anthropic/claude-opus-4.6`
 
-```bash
-DISCOCLAW_TIER_OPENROUTER_FAST=openai/gpt-5-mini
-DISCOCLAW_TIER_OPENROUTER_CAPABLE=anthropic/claude-sonnet-4.6
-DISCOCLAW_TIER_OPENROUTER_DEEP=anthropic/claude-opus-4.6
-```
+`OPENROUTER_MODEL` separately defaults the OpenRouter adapter itself to `anthropic/claude-sonnet-4.6`, so a role that follows the adapter default starts from the same concrete string as the shipped `capable` tier.
 
-At startup, DiscoClaw reads any `DISCOCLAW_TIER_<RUNTIME>_{FAST,CAPABLE,DEEP}` env vars and overlays them onto the shipped defaults. For `OPENROUTER`, the built-in defaults are `fast → openai/gpt-5-mini`, `capable → anthropic/claude-sonnet-4.6`, and `deep → anthropic/claude-opus-4.6`. Set only the tiers you want to change. Each defined tier becomes usable for OpenRouter tier resolution, and even a single unique entry is enough for exact-string reverse-mapping in fast/voice runtime auto-switching. Examples:
-- Set `DISCOCLAW_TIER_OPENROUTER_CAPABLE=anthropic/claude-sonnet-4.6` if you want `!models set chat capable` while already on OpenRouter.
-- Set `DISCOCLAW_TIER_OPENROUTER_FAST=openai/gpt-5-mini` if you want `!models set fast openai/gpt-5-mini` to auto-switch to OpenRouter.
+If you set `DISCOCLAW_TIER_OPENROUTER_FAST`, `DISCOCLAW_TIER_OPENROUTER_CAPABLE`, or `DISCOCLAW_TIER_OPENROUTER_DEEP`, that exact string replaces only that tier entry in the effective OpenRouter tier map. Override precedence is simple: tier lookup uses the env override when present and otherwise falls back to the shipped built-in value. `OPENROUTER_MODEL` does not rewrite the tier map; only `DISCOCLAW_TIER_OPENROUTER_<TIER>` does.
+
+Set only the tiers you intentionally want to change. Even a single unique effective tier entry is enough for exact-string reverse-mapping in fast/voice runtime auto-switching.
 
 Exact-match rules:
 - `openai/gpt-5-mini` matches `openai/gpt-5-mini`
 - `gpt-5-mini` does not match `openai/gpt-5-mini`
 - `fast` does not match anything because it is a tier name, not a concrete model string
 
-Even without overrides, `PRIMARY_RUNTIME=openrouter` and `OPENROUTER_MODEL` work against the shipped OpenRouter tier map. Keep the support claim narrow: source checkouts still need repo smoke-path validation for the exact OpenRouter-backed workload under test, while npm-managed installs should stop at post-start evidence such as `openrouter-key: ok`.
+Even without overrides, `PRIMARY_RUNTIME=openrouter` and the default `OPENROUTER_MODEL` work against the shipped OpenRouter tier map. Keep the support claim narrow: source checkouts still need repo smoke-path validation for the exact OpenRouter-backed workload under test, while npm-managed installs should stop at post-start evidence such as `openrouter-key: ok`.
 
 ## Where each kind of change persists
 
@@ -267,7 +266,7 @@ Preferred path: use `!models set fast <model>`, not `DISCOCLAW_FAST_RUNTIME`.
 
 Fast runtime auto-switching only happens when the concrete model string exactly matches another runtime's tier map entry and that ownership is unique. That means:
 - `!models set fast gemini-2.5-flash` can auto-switch to Gemini
-- `!models set fast openai/gpt-5-mini` can auto-switch to OpenRouter only if `DISCOCLAW_TIER_OPENROUTER_FAST=openai/gpt-5-mini`
+- `!models set fast openai/gpt-5-mini` can auto-switch to OpenRouter because that exact string is already the shipped OpenRouter `fast` tier, or because you overrode `DISCOCLAW_TIER_OPENROUTER_FAST` to that same exact string
 - `!models set fast gpt-5.4` does not auto-switch because that model ID is shared by `openai` and `codex`
 - `!models set fast fast` changes the model tier but does not identify another provider
 
