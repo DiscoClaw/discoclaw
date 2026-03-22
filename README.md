@@ -79,7 +79,7 @@ Full setup guide: [docs/voice.md](docs/voice.md)
 
 ## How it works
 
-DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with `gemini-api`, `gemini-cli`, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). `gemini` remains a compatibility alias for `gemini-api`. The OpenAI-compatible and OpenRouter adapters can expose optional tool use when `OPENAI_COMPAT_TOOLS_ENABLED=1` is set, but OpenRouter support claims stop at the narrower audited boundary described below. The current Gemini CLI path is intentionally narrower: `gemini-cli` advertises only `streaming_text`, so DiscoClaw's runtime capability filtering strips tool calls automatically for that runtime. It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
+DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with `gemini-api`, `gemini-cli`, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). For 1.0, `Claude CLI` on a source checkout is the blessed default path, and `Codex CLI` on a source checkout is the explicitly supported secondary path; see [docs/audit/provider-auth-1.0-matrix.md](docs/audit/provider-auth-1.0-matrix.md) for the full consolidated matrix. `gemini` remains a compatibility alias for `gemini-api`. The OpenAI-compatible and OpenRouter adapters can expose optional tool use when `OPENAI_COMPAT_TOOLS_ENABLED=1` is set, but OpenRouter support claims stop at the narrower audited boundary described below. The current Gemini CLI path is intentionally narrower: `gemini-cli` advertises only `streaming_text`, so DiscoClaw's runtime capability filtering strips tool calls automatically for that runtime. It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
 
 1. Checks the user allowlist (fail-closed — empty list means respond to nobody)
 2. Assembles context: per-channel rules, conversation history, rolling summary, and durable memory
@@ -200,11 +200,13 @@ For source checkouts, repo-local managed browser storage is supported only at th
   - **Codex CLI** on your `PATH` — check with `codex --version` (binary presence only; session auth is a separate proof gate), or
   - **OpenAI-compatible API key** via `OPENAI_API_KEY` (config presence only; live auth is a separate proof gate), or
   - **OpenRouter API key** via `OPENROUTER_API_KEY` (config presence only until `!status` or the startup credential report shows `openrouter-key: ok`)
-- Runtime-specific access for your chosen provider (Anthropic plan/API credits for Claude, Google API access for `gemini-api`, Google account access for `gemini-cli`, OpenAI access for Codex/OpenAI models)
+- Runtime-specific access for your chosen provider (Anthropic access for Claude CLI, Google API access for `gemini-api`, Google account access for `gemini-cli`, OpenAI access for Codex/OpenAI models)
 
-Current setup wizards (`discoclaw init` and `pnpm setup`) still reflect the legacy Gemini flow and may refer to plain `gemini` until the follow-up setup slice lands. In this release, treat that legacy name as the compatibility alias for `gemini-api`.
+1.0 provider/auth policy: `Claude CLI` on a source checkout is the blessed default path, and `Codex CLI` on a source checkout is the explicitly supported secondary path. For every current provider/auth path, including `openai`, `openrouter`, `gemini-api`, `gemini-cli`, and direct Anthropic, use the consolidated verdicts in [docs/audit/provider-auth-1.0-matrix.md](docs/audit/provider-auth-1.0-matrix.md) rather than inferring readiness from setup/config alone.
 
-For Codex and OpenAI paths, treat binary/key presence as readiness prerequisites only. The install-mode-specific support claims live in the [Codex source-checkout audit](docs/audit/codex-blank-machine-readiness.md) and [Codex npm-managed audit](docs/audit/codex-npm-managed-path.md). For OpenRouter, the shipped support claim is narrower: [docs/audit/openrouter-api-key-support-boundary.md](docs/audit/openrouter-api-key-support-boundary.md) documents only the runtime-visible env-key proof boundary, with source-checkout workload evidence limited to the repo smoke path.
+`discoclaw init` currently scaffolds Claude, Codex, OpenAI, OpenRouter, and the limited `gemini-cli` path. If you want the API-backed Gemini path instead, set `PRIMARY_RUNTIME=gemini-api` and `GEMINI_API_KEY` manually.
+
+For Codex and OpenAI paths, treat binary/key presence as readiness prerequisites only. The install-mode-specific support claims live in the [provider/auth 1.0 matrix](docs/audit/provider-auth-1.0-matrix.md), [Codex source-checkout audit](docs/audit/codex-blank-machine-readiness.md), and [Codex npm-managed audit](docs/audit/codex-npm-managed-path.md). For OpenRouter, the shipped support claim is narrower: [docs/audit/openrouter-api-key-support-boundary.md](docs/audit/openrouter-api-key-support-boundary.md) documents only the runtime-visible env-key proof boundary, with source-checkout workload evidence limited to the repo smoke path.
 
 **Contributors (from source):**
 - Everything above, plus **pnpm** — enable via Corepack (`corepack enable`) or install separately
@@ -265,6 +267,7 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
 ### Operations
 
 - [Configuration reference](docs/configuration.md) — all environment variables indexed by category
+- [Provider/auth 1.0 matrix](docs/audit/provider-auth-1.0-matrix.md) — blessed default path, supported secondary path, and the current `SUPPORTED FOR 1.0` / `PARTIAL` / `OUT OF SCOPE` verdicts for every implied provider/auth path
 - [Claude source-checkout audit](docs/audit/claude-blank-machine-readiness.md) — current 1.0 verdict for the repo-owned `pnpm preflight*` + `pnpm claude:auth-smoke` path
 - [Claude npm-managed audit](docs/audit/claude-npm-managed-path.md) — current 1.0 verdict for `npm install -g discoclaw`, `discoclaw init`, and the daemon/runtime-path gap
 - [Codex source-checkout audit](docs/audit/codex-blank-machine-readiness.md) — current 1.0 verdict for the repo-owned `pnpm preflight*` path plus the separate Codex/OpenAI proof gates
