@@ -232,14 +232,17 @@ describe('setup: wizard copy contract', () => {
 
   it('only shows the manual Claude smoke steps after automated preflight passes', () => {
     expect(setupSource).toContain('Automated checks passed. Claude auth still needs a manual smoke test.');
-    expect(setupSource).toContain('Before logging in, run `pnpm claude:auth-smoke`.');
-    expect(setupSource).toContain('On a fresh machine, the expected result is `Claude CLI appears installed but not authenticated.`');
+    expect(setupSource).toContain('From a shell or account with no active Claude session, run `pnpm claude:auth-smoke` before logging in.');
+    expect(setupSource).toContain('The first-login stranger-path result should be `Claude CLI appears installed but not authenticated.`');
+    expect(setupSource).toContain('If this shell/account is already authenticated, record that limitation and leave the first-login stranger gate open.');
     expect(setupSource).toContain('Log in with `claude`.');
     expect(setupSource).toContain('Repeat `pnpm claude:auth-smoke`.');
     expect(setupSource).toContain('After login, the expected result is `Claude CLI answered the minimal prompt.`');
     expect(setupSource).toContain('Fix the preflight issues above.');
     expect(setupSource).toContain('Re-run `pnpm preflight:blank-machine` until the automated checks pass.');
     expect(setupSource).toContain('Only after that should you run `pnpm claude:auth-smoke` for the manual Claude auth check.');
+    expect(setupSource).not.toContain('Before logging in, run `pnpm claude:auth-smoke`.');
+    expect(setupSource).not.toContain('On a fresh machine, the expected result is `Claude CLI appears installed but not authenticated.`');
     expect(setupSource).not.toContain('claude -p -- "Reply with OK"');
   });
 
