@@ -144,14 +144,35 @@ describe('doctor output contract', () => {
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain('This source-checkout preflight only reports config/bootstrap prerequisites Discoclaw can verify locally today.');
       expect(result.output).toContain('It does not prove provider auth, live runtime credential probes, or end-to-end workload success.');
+      expect(result.output).toContain('Separate proof gates only cover the session and install context they actually exercise; reused authenticated shells cannot close first-login stranger-path claims.');
       expect(result.output).toContain(`This \`pnpm preflight*\` surface is source-checkout evidence only. For npm/global installs, use \`discoclaw doctor\` and the install-mode guidance in ${CONFIGURATION_DOC}.`);
-      expect(result.output).toContain('Claude source auth is a separate proof gate: run `pnpm claude:auth-smoke` after this check.');
+      expect(result.output).toContain('Claude source auth is a separate proof gate: run `pnpm claude:auth-smoke` from a shell or account with no active Claude session before logging in.');
       expect(result.output).toContain(`This command does not auto-run Claude auth validation; follow the pre-login and post-login validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
+      expect(result.output).toContain('If this shell or account is already authenticated, record that limitation and leave the first-login stranger gate open.');
       expect(result.output).toContain('All automated checks passed.');
-      expect(result.output).toContain(`Next proof gate: run \`pnpm claude:auth-smoke\` for the source-checkout Claude auth check. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
+      expect(result.output).toContain(`Next proof gate: from a shell or account with no active Claude session, run \`pnpm claude:auth-smoke\` before login, then rerun it after \`claude\` login. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
       expect(result.output).not.toContain('Discoclaw Claude auth smoke');
       expect(result.output).not.toContain('Running claude -p -- "Reply with OK"');
       expect(result.output).not.toContain('All checks passed.');
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('keeps the Claude next-step wording narrow when automated checks fail', async () => {
+    const fixture = makeDoctorFixture({
+      fileEnv: {
+        DISCORD_TOKEN: '',
+      },
+    });
+
+    try {
+      const result = await runDoctorForTest(fixture.env, fixture.cwd);
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain('Claude source auth is a separate proof gate: run `pnpm claude:auth-smoke` from a shell or account with no active Claude session before logging in.');
+      expect(result.output).toContain('If this shell or account is already authenticated, record that limitation and leave the first-login stranger gate open.');
+      expect(result.output).toContain(`After fixing the failures, from a shell or account with no active Claude session run \`pnpm claude:auth-smoke\` before login, then rerun it after \`claude\` login. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`);
     } finally {
       fixture.cleanup();
     }
@@ -286,7 +307,8 @@ describe('doctor output contract', () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain('Blank-machine mode is active: ignoring inherited shell env and reading only the current .env values.');
-      expect(result.output).toContain('Claude source auth is a separate proof gate: run `pnpm claude:auth-smoke` after this check.');
+      expect(result.output).toContain('Claude source auth is a separate proof gate: run `pnpm claude:auth-smoke` from a shell or account with no active Claude session before logging in.');
+      expect(result.output).toContain('If this shell or account is already authenticated, record that limitation and leave the first-login stranger gate open.');
       expect(result.output).not.toContain('Codex CLI session auth is a separate proof gate');
       expect(result.output).not.toContain('OpenAI runtime auth is a separate proof gate');
       expect(result.output).not.toContain('OpenRouter runtime proof is a separate gate');

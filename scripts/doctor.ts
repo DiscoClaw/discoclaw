@@ -114,11 +114,12 @@ function buildRuntimeProofGates(env: NodeJS.ProcessEnv): RuntimeProofGate[] {
   if (neededRuntimes.has('claude')) {
     gates.push({
       introLines: [
-        'Claude source auth is a separate proof gate: run `pnpm claude:auth-smoke` after this check.',
+        'Claude source auth is a separate proof gate: run `pnpm claude:auth-smoke` from a shell or account with no active Claude session before logging in.',
         `This command does not auto-run Claude auth validation; follow the pre-login and post-login validation in ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`,
+        'If this shell or account is already authenticated, record that limitation and leave the first-login stranger gate open.',
       ],
-      successLine: `Next proof gate: run \`pnpm claude:auth-smoke\` for the source-checkout Claude auth check. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`,
-      failureLine: `After fixing the failures, run \`pnpm claude:auth-smoke\` for the source-checkout Claude auth check. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`,
+      successLine: `Next proof gate: from a shell or account with no active Claude session, run \`pnpm claude:auth-smoke\` before login, then rerun it after \`claude\` login. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`,
+      failureLine: `After fixing the failures, from a shell or account with no active Claude session run \`pnpm claude:auth-smoke\` before login, then rerun it after \`claude\` login. See ${CLAUDE_BLANK_MACHINE_AUDIT_DOC}.`,
     });
   }
 
@@ -205,6 +206,7 @@ function loadEnvFile(
 function emitDoctorContractNotes(log: DoctorReporter, blankMachine: boolean, env: NodeJS.ProcessEnv) {
   log.info('This source-checkout preflight only reports config/bootstrap prerequisites Discoclaw can verify locally today.');
   log.info('It does not prove provider auth, live runtime credential probes, or end-to-end workload success.');
+  log.info('Separate proof gates only cover the session and install context they actually exercise; reused authenticated shells cannot close first-login stranger-path claims.');
   if (blankMachine) {
     log.info('Blank-machine mode is active: ignoring inherited shell env and reading only the current .env values.');
   }
