@@ -42,6 +42,11 @@ export type RunClaudeAuthSmokeOptions = {
   deps?: ClaudeAuthSmokeDeps;
 };
 
+const FIRST_LOGIN_GATE_GUIDANCE =
+  'This only closes the first-login stranger gate if you also captured the expected pre-login unauthenticated run from a shell/account with no active Claude session.';
+const FIRST_LOGIN_LIMITATION_GUIDANCE =
+  'If this shell/account was already logged in, record that limitation and leave the first-login stranger gate open.';
+
 function previewText(value: string, maxLen = 160): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
   if (!normalized) return '';
@@ -97,6 +102,7 @@ async function defaultRunClaudeFn(
     const result = await execa(bin, args, {
       cwd: opts.cwd,
       env: opts.env,
+      stdin: 'ignore',
       reject: false,
       timeout: opts.timeoutMs,
     });
@@ -164,6 +170,7 @@ export async function runClaudeAuthSmoke(options: RunClaudeAuthSmokeOptions = {}
   log('\nDiscoclaw Claude auth smoke\n');
   log(`  ℹ Running ${claudeBin} -p -- ${JSON.stringify(CLAUDE_AUTH_SMOKE_PROMPT)}`);
   log('  ℹ This only checks whether Claude can answer one minimal prompt from this repo.');
+  log(`  ℹ ${FIRST_LOGIN_GATE_GUIDANCE}`);
 
   const result = await runClaudeFn(claudeBin, ['-p', '--', CLAUDE_AUTH_SMOKE_PROMPT], {
     cwd,
@@ -171,16 +178,19 @@ export async function runClaudeAuthSmoke(options: RunClaudeAuthSmokeOptions = {}
     timeoutMs: CLAUDE_AUTH_SMOKE_TIMEOUT_MS,
   });
   const status = classifyClaudeAuthSmokeResult(result, claudeBin);
+  const stdoutPreview = previewText(result.stdout);
   const combinedPreview = previewText(`${result.stdout}\n${result.stderr}\n${result.shortMessage ?? ''}`);
 
   switch (status) {
     case 'authenticated': {
       log('  ✓ Claude CLI answered the minimal prompt.');
-      if (combinedPreview) log(`    → Output preview: ${combinedPreview}`);
+      log(`    → ${FIRST_LOGIN_LIMITATION_GUIDANCE}`);
+      if (stdoutPreview) log(`    → Output preview: ${stdoutPreview}`);
       return 0;
     }
     case 'unauthenticated': {
       log('  ✗ Claude CLI appears installed but not authenticated.');
+      log('    → This is the expected pre-login result for the first-login stranger-path check.');
       log(`    → Run \`${claudeBin}\` to complete login, then rerun this command.`);
       if (combinedPreview) log(`    → CLI output: ${combinedPreview}`);
       return 1;
