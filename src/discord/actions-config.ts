@@ -3,6 +3,15 @@ import type { DiscordActionResult } from './actions.js';
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { RuntimeRegistry } from '../runtime/registry.js';
 import { resolveModel, findRuntimeForModel, resolveReasoningEffort } from '../runtime/model-tiers.js';
+import {
+  canonicalizeRuntimePathName,
+  getRuntimePathDefinition,
+  getRuntimePlacementDefinition,
+  isRuntimeNameSupportedInPlacement,
+  parseRuntimeNameForPlacement,
+  type RuntimePathCanonicalName,
+  type RuntimePathPlacement,
+} from '../runtime/runtime-path-contract.js';
 import type { ImagegenContext } from './actions-imagegen.js';
 import { resolveDefaultModel, resolveProvider } from './actions-imagegen.js';
 
@@ -56,9 +65,9 @@ export type ConfigContext = {
   voiceRuntimeName?: string;
   /** Human-readable name of the fast-tier runtime (read-only display). */
   fastRuntimeName?: string;
-  /** Callback to persist a model override to the overrides file. Wired in index.ts. */
+  /** Callback to persist a model override to models.json. Wired in index.ts. */
   persistOverride?: (role: ModelRole, model: string) => void;
-  /** Callback to clear model overrides from the overrides file. Pass undefined role to clear all. Wired in index.ts. */
+  /** Callback to clear model overrides from models.json. Pass undefined role to clear all. Wired in index.ts. */
   clearOverride?: (role?: ModelRole) => void;
   /** Callback to persist the voice runtime name to overrides. */
   persistVoiceRuntime?: (runtimeName: string) => void;
@@ -70,7 +79,7 @@ export type ConfigContext = {
   clearFastRuntime?: () => void;
   /** Env-default model string for each role, used by modelReset to revert live state. */
   envDefaults?: Partial<Record<ModelRole, string>>;
-  /** Tracks which roles have active overrides (loaded from the overrides file). */
+  /** Tracks which roles have active models.json overrides. */
   overrideSources?: Partial<Record<ModelRole, boolean>>;
 };
 
@@ -114,36 +123,71 @@ const ROLE_DESCRIPTIONS: Record<ModelRole, string> = {
 };
 
 function canonicalizeRuntimeSwitchName(name: string): string {
-  const normalized = name.trim().toLowerCase();
-  if (normalized === 'claude_code') return 'claude';
-  if (normalized === 'gemini') return 'gemini-api';
-  return normalized;
+  return canonicalizeRuntimePathName(name) ?? name.trim().toLowerCase();
 }
 
-function isGeminiRuntimeSelection(name: string): boolean {
-  const normalized = name.trim().toLowerCase();
-  return normalized === 'gemini' || normalized === 'gemini-api' || normalized === 'gemini-cli';
+function describeRuntimePlacement(placement: RuntimePathPlacement): string {
+  switch (placement) {
+    case 'live:chat':
+      return 'the chat role';
+    case 'live:voice':
+      return 'the voice role';
+    case 'runtime-overrides:fastRuntime':
+      return 'the fast runtime override';
+    case 'runtime-overrides:voiceRuntime':
+      return 'the voice runtime override';
+    default:
+      return placement;
+  }
 }
+
+function formatUnsupportedRuntimeSelection(
+  runtimeName: RuntimePathCanonicalName,
+  placement: RuntimePathPlacement,
+): string {
+  if (
+    isRuntimeNameSupportedInPlacement(runtimeName, 'live:voice')
+    && !isRuntimeNameSupportedInPlacement(runtimeName, 'live:chat')
+    && placement === 'live:chat'
+  ) {
+    return `Runtime "${runtimeName}" is voice-only; use it with the voice role`;
+  }
+
+  const supported = getRuntimePlacementDefinition(placement).supportedRuntimeNames.join(', ');
+  return `Runtime "${runtimeName}" is not supported for ${describeRuntimePlacement(placement)}. Supported runtime names: ${supported}`;
+}
+
+type RuntimeSwitchResolution =
+  | { kind: 'switch'; runtime: RuntimeAdapter; runtimeName: RuntimePathCanonicalName }
+  | { kind: 'error'; error: string }
+  | { kind: 'none' };
 
 function resolveRuntimeSwitch(
   runtimeRegistry: RuntimeRegistry | undefined,
   name: string,
-): { runtime: RuntimeAdapter; runtimeName: string } | undefined {
-  if (!runtimeRegistry) return undefined;
+  placement: RuntimePathPlacement,
+): RuntimeSwitchResolution {
+  const canonicalName = canonicalizeRuntimePathName(name);
+  if (!canonicalName) return { kind: 'none' };
 
-  const canonicalName = canonicalizeRuntimeSwitchName(name);
-  const lookupNames = [canonicalName];
-  if (canonicalName === 'claude') lookupNames.push('claude_code');
-  if (canonicalName === 'gemini-api') lookupNames.push('gemini');
+  const placementName = parseRuntimeNameForPlacement(name, placement);
+  if (!placementName) {
+    return { kind: 'error', error: formatUnsupportedRuntimeSelection(canonicalName, placement) };
+  }
 
-  for (const lookupName of lookupNames) {
-    const runtime = runtimeRegistry.get(lookupName);
+  const definition = getRuntimePathDefinition(placementName);
+  if (!definition) {
+    return { kind: 'error', error: `Runtime "${placementName}" is not configured in the registry` };
+  }
+
+  for (const registryKey of definition.registryKeys) {
+    const runtime = runtimeRegistry?.get(registryKey);
     if (runtime) {
-      return { runtime, runtimeName: canonicalName };
+      return { kind: 'switch', runtime, runtimeName: definition.canonicalName };
     }
   }
 
-  return undefined;
+  return { kind: 'error', error: `Runtime "${placementName}" is not configured in the registry` };
 }
 
 // ---------------------------------------------------------------------------
@@ -179,8 +223,8 @@ export function executeConfigAction(
       switch (action.role) {
         case 'chat': {
           // Check if the model string is actually a runtime name.
-          const runtimeSwitch = resolveRuntimeSwitch(configCtx.runtimeRegistry, model);
-          if (runtimeSwitch) {
+          const runtimeSwitch = resolveRuntimeSwitch(configCtx.runtimeRegistry, model, 'live:chat');
+          if (runtimeSwitch.kind === 'switch') {
             skipPersist = true; // Don't persist runtime swaps; persisting the runtime name as a model string would break on reload.
             // Swap runtime across all invocation paths.
             const { runtime: newRuntime, runtimeName } = runtimeSwitch;
@@ -204,8 +248,8 @@ export function executeConfigAction(
             if (bp.deferOpts) bp.deferOpts.runtime = newRuntime;
             changes.push(`runtime → ${runtimeName}`);
             if (runtimeModel) changes.push(`chat → ${runtimeModel} (adapter default)`);
-          } else if (isGeminiRuntimeSelection(model)) {
-            return { ok: false, error: `Runtime "${canonicalizeRuntimeSwitchName(model)}" is not configured in the registry` };
+          } else if (runtimeSwitch.kind === 'error') {
+            return { ok: false, error: runtimeSwitch.error };
           } else {
             bp.runtimeModel = model;
             if (bp.cronCtx?.executorCtx) bp.cronCtx.executorCtx.model = model;
@@ -302,8 +346,8 @@ export function executeConfigAction(
         case 'voice':
           if (bp.voiceModelCtx) {
             // Check if the model string is actually a runtime name.
-            const runtimeSwitch = resolveRuntimeSwitch(configCtx.runtimeRegistry, model);
-            if (runtimeSwitch) {
+            const runtimeSwitch = resolveRuntimeSwitch(configCtx.runtimeRegistry, model, 'live:voice');
+            if (runtimeSwitch.kind === 'switch') {
               skipPersist = true;
               const { runtime: voiceNewRuntime, runtimeName } = runtimeSwitch;
               const voiceRuntimeModel = voiceNewRuntime.defaultModel ?? '';
@@ -314,8 +358,8 @@ export function executeConfigAction(
               configCtx.persistVoiceRuntime?.(runtimeName);
               changes.push(`voice runtime → ${runtimeName}`);
               if (voiceRuntimeModel) changes.push(`voice → ${voiceRuntimeModel} (adapter default)`);
-            } else if (isGeminiRuntimeSelection(model)) {
-              return { ok: false, error: `Runtime "${canonicalizeRuntimeSwitchName(model)}" is not configured in the registry` };
+            } else if (runtimeSwitch.kind === 'error') {
+              return { ok: false, error: runtimeSwitch.error };
             } else {
               bp.voiceModelCtx.model = model;
               changes.push(`voice → ${model}`);
@@ -367,9 +411,9 @@ export function executeConfigAction(
 
       if (!skipPersist) {
         configCtx.persistOverride?.(action.role, model);
-      }
-      if (configCtx.overrideSources) {
-        configCtx.overrideSources[action.role] = true;
+        if (configCtx.overrideSources) {
+          configCtx.overrideSources[action.role] = true;
+        }
       }
 
       const resolveRid = action.role === 'voice' && bp.voiceModelCtx?.runtime
@@ -636,7 +680,7 @@ export function configActionsPromptSection(): string {
 <discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
 \`\`\`
 - \`role\` (required): One of \`chat\`, \`plan-run\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`, \`imagegen\`.
-- \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`gemini-api\`, \`gemini-cli\`; legacy \`gemini\` maps to \`gemini-api\` for \`chat\` and \`voice\` runtime swaps), or \`default\` (for cron-exec only, to revert to the startup default for that role). For the \`voice\` role, setting a model name that belongs to a different provider's tier map (e.g. \`sonnet\` while voice is on Gemini) will auto-switch the voice runtime to match.
+- \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`openai\`, \`gemini-api\`, \`gemini-cli\`, \`codex\`, \`claude\`; legacy \`gemini\` maps to \`gemini-api\`; \`anthropic\` is voice-only), or \`default\` (for cron-exec only, to revert to the startup default for that role). For the \`voice\` role, setting a model name that belongs to a different provider's tier map (e.g. \`sonnet\` while voice is on Gemini) will auto-switch the voice runtime to match.
 
 **Roles:**
 | Role | What it controls |
@@ -649,10 +693,13 @@ export function configActionsPromptSection(): string {
 | \`summary\` | Rolling summaries only (overrides fast) |
 | \`cron\` | Cron auto-tagging and model classification (overrides fast) |
 | \`cron-exec\` | Default model for cron job execution; per-job overrides (via \`cronUpdate\`) take priority |
-| \`voice\` | Voice channel AI responses |
+| \`voice\` | Voice channel AI responses (runtime overlay persists in \`runtime-overrides.json\`) |
 | \`imagegen\` | Default model for image generation |
 
-Changes are **persisted** to \`models.json\` and survive restart. Use \`!models reset\` to clear overrides and revert to defaults.
+Persistence semantics:
+- Model-role overrides persist in \`models.json\` and survive restart.
+- Fast and voice runtime overlays persist in \`runtime-overrides.json\`.
+- Chat runtime swaps are live-only memory changes; they reset on restart or another explicit runtime switch.
 
 **modelReset** — Revert model(s) to defaults and clear the override file entry:
 \`\`\`
@@ -660,6 +707,9 @@ Changes are **persisted** to \`models.json\` and survive restart. Use \`!models 
 <discord-action>{\"type\":\"modelReset\",\"role\":\"chat\"}</discord-action>
 \`\`\`
 - Omit \`role\` to reset all roles.
+- \`!models reset fast\` also clears the persisted fast runtime overlay.
+- \`!models reset voice\` also clears the persisted voice runtime overlay.
+- \`!models reset chat\` resets the chat model override, but live chat runtime swaps remain live-only and clear on restart or another explicit runtime switch.
 
 **Cron model priority:** per-job override (cronUpdate) > AI-classified model > cron-exec default > chat fallback.
 Set \`cron-exec\` to \`default\` to clear the override and revert to the startup default for that role.`;
