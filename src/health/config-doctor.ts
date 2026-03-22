@@ -5,6 +5,14 @@ import type { ModelConfig, ModelRole } from '../model-config.js';
 import { DEFAULTS as MODEL_DEFAULTS, saveModelConfig } from '../model-config.js';
 import type { RuntimeOverrides } from '../runtime-overrides.js';
 import { clearOverrides } from '../runtime-overrides.js';
+import {
+  canonicalizeRuntimePathName,
+  getRuntimePlacementDefinition,
+  getRuntimeProviderSecretEnvKey,
+  parseRuntimeNameForPlacement,
+  type RuntimePathCanonicalName,
+  type RuntimePathPlacement,
+} from '../runtime/runtime-path-contract.js';
 import { inspectWorkspaceBootstrapWarningsSync } from '../workspace-bootstrap.js';
 
 export type DoctorSeverity = 'info' | 'warn' | 'error';
@@ -79,7 +87,16 @@ export type DoctorContext = {
   envDefaults: ModelConfig;
 };
 
-export const KNOWN_RUNTIMES = new Set(['claude', 'openai', 'openrouter', 'gemini', 'codex', 'anthropic']);
+export const KNOWN_RUNTIMES = new Set([
+  'anthropic',
+  'claude',
+  'codex',
+  'gemini',
+  'gemini-api',
+  'gemini-cli',
+  'openai',
+  'openrouter',
+]);
 const KNOWN_RUNTIME_OVERRIDE_KEYS = new Set(['ttsVoice', 'voiceRuntime', 'fastRuntime']);
 
 const DEPRECATED_ENV_VARS: Record<
@@ -115,10 +132,18 @@ function trimValue(value: string | undefined): string | undefined {
 }
 
 function normalizeRuntimeName(value: string | undefined): string | undefined {
-  const trimmed = trimValue(value);
-  if (!trimmed) return undefined;
-  const normalized = trimmed.toLowerCase();
-  return normalized === 'claude_code' ? 'claude' : normalized;
+  return canonicalizeRuntimePathName(value);
+}
+
+function parseRuntimePlacementValue(
+  value: string | undefined,
+  placement: RuntimePathPlacement,
+): RuntimePathCanonicalName | undefined {
+  return parseRuntimeNameForPlacement(value, placement);
+}
+
+function renderSupportedRuntimeNames(placement: RuntimePathPlacement): string {
+  return getRuntimePlacementDefinition(placement).supportedRuntimeNames.join(', ');
 }
 
 function parseBoolean(value: string | undefined, defaultValue: boolean): boolean {
@@ -259,13 +284,13 @@ function buildEnvDefaults(env: EnvMap): ModelConfig {
 }
 
 function defaultFastRuntime(env: EnvMap): string {
-  const fastRuntime = normalizeRuntimeName(env.DISCOCLAW_FAST_RUNTIME);
-  if (fastRuntime && KNOWN_RUNTIMES.has(fastRuntime)) return fastRuntime;
-  return normalizeRuntimeName(env.PRIMARY_RUNTIME) ?? 'claude';
+  const fastRuntime = parseRuntimePlacementValue(env.DISCOCLAW_FAST_RUNTIME, 'startup:DISCOCLAW_FAST_RUNTIME');
+  if (fastRuntime) return fastRuntime;
+  return parseRuntimePlacementValue(env.PRIMARY_RUNTIME, 'startup:PRIMARY_RUNTIME') ?? 'claude';
 }
 
 function defaultVoiceRuntime(env: EnvMap): string {
-  const primaryRuntime = normalizeRuntimeName(env.PRIMARY_RUNTIME) ?? 'claude';
+  const primaryRuntime = parseRuntimePlacementValue(env.PRIMARY_RUNTIME, 'startup:PRIMARY_RUNTIME') ?? 'claude';
   const voiceEnabled = parseBoolean(env.DISCOCLAW_VOICE_ENABLED, false);
   if (voiceEnabled && trimValue(env.ANTHROPIC_API_KEY)) {
     return 'anthropic';
@@ -274,16 +299,7 @@ function defaultVoiceRuntime(env: EnvMap): string {
 }
 
 function runtimeSecret(runtime: string | undefined): string | undefined {
-  switch (runtime) {
-    case 'openai':
-      return 'OPENAI_API_KEY';
-    case 'openrouter':
-      return 'OPENROUTER_API_KEY';
-    case 'anthropic':
-      return 'ANTHROPIC_API_KEY';
-    default:
-      return undefined;
-  }
+  return getRuntimeProviderSecretEnvKey(runtime);
 }
 
 function hasSecret(env: EnvMap, key: string): boolean {
@@ -376,13 +392,13 @@ export function detectNpmManagedRuntimeSupportBoundary(ctx: DoctorContext): Doct
   if (ctx.installMode !== 'npm-managed') return [];
 
   const configuredRuntimes = new Set([
-    normalizeRuntimeName(ctx.env.PRIMARY_RUNTIME),
-    normalizeRuntimeName(ctx.env.DISCOCLAW_FAST_RUNTIME),
-    normalizeRuntimeName(ctx.env.FORGE_DRAFTER_RUNTIME),
-    normalizeRuntimeName(ctx.env.FORGE_AUDITOR_RUNTIME),
-    normalizeRuntimeName(ctx.runtimeOverrides.fastRuntime),
-    normalizeRuntimeName(ctx.runtimeOverrides.voiceRuntime),
-  ].filter((value): value is string => value !== undefined));
+    parseRuntimePlacementValue(ctx.env.PRIMARY_RUNTIME, 'startup:PRIMARY_RUNTIME'),
+    parseRuntimePlacementValue(ctx.env.DISCOCLAW_FAST_RUNTIME, 'startup:DISCOCLAW_FAST_RUNTIME'),
+    parseRuntimePlacementValue(ctx.env.FORGE_DRAFTER_RUNTIME, 'startup:FORGE_DRAFTER_RUNTIME'),
+    parseRuntimePlacementValue(ctx.env.FORGE_AUDITOR_RUNTIME, 'startup:FORGE_AUDITOR_RUNTIME'),
+    parseRuntimePlacementValue(ctx.runtimeOverrides.fastRuntime, 'runtime-overrides:fastRuntime'),
+    parseRuntimePlacementValue(ctx.runtimeOverrides.voiceRuntime, 'runtime-overrides:voiceRuntime'),
+  ].filter((value): value is RuntimePathCanonicalName => value !== undefined));
 
   const proofGates: string[] = [];
   const recommendations: string[] = [];
@@ -457,6 +473,44 @@ export function detectDeprecatedEnvVars(ctx: DoctorContext): DoctorFinding[] {
   return findings;
 }
 
+export function detectUnsupportedRuntimePlacements(ctx: DoctorContext): DoctorFinding[] {
+  const findings: DoctorFinding[] = [];
+  const runtimeTargets: Array<{ label: string; rawValue: string | undefined; placement: RuntimePathPlacement }> = [
+    { label: 'PRIMARY_RUNTIME', rawValue: ctx.env.PRIMARY_RUNTIME, placement: 'startup:PRIMARY_RUNTIME' },
+    { label: 'DISCOCLAW_FAST_RUNTIME', rawValue: ctx.env.DISCOCLAW_FAST_RUNTIME, placement: 'startup:DISCOCLAW_FAST_RUNTIME' },
+    { label: 'FORGE_DRAFTER_RUNTIME', rawValue: ctx.env.FORGE_DRAFTER_RUNTIME, placement: 'startup:FORGE_DRAFTER_RUNTIME' },
+    { label: 'FORGE_AUDITOR_RUNTIME', rawValue: ctx.env.FORGE_AUDITOR_RUNTIME, placement: 'startup:FORGE_AUDITOR_RUNTIME' },
+    { label: 'runtime-overrides.fastRuntime', rawValue: ctx.runtimeOverrides.fastRuntime, placement: 'runtime-overrides:fastRuntime' },
+    { label: 'runtime-overrides.voiceRuntime', rawValue: ctx.runtimeOverrides.voiceRuntime, placement: 'runtime-overrides:voiceRuntime' },
+  ];
+
+  for (const target of runtimeTargets) {
+    const rawValue = trimValue(target.rawValue);
+    if (!rawValue) continue;
+    const canonicalName = canonicalizeRuntimePathName(rawValue);
+    if (!canonicalName) continue;
+    if (parseRuntimePlacementValue(rawValue, target.placement)) continue;
+
+    const supportedRuntimeNames = renderSupportedRuntimeNames(target.placement);
+    const message = canonicalName === 'anthropic'
+      ? `${target.label}="${rawValue}" uses the voice-only runtime "anthropic", which is not supported in this placement.`
+      : `${target.label}="${rawValue}" resolves to "${canonicalName}", but that runtime is not supported in this placement.`;
+    const recommendation = target.placement.startsWith('runtime-overrides:')
+      ? `Remove ${target.label} or change it to one of: ${supportedRuntimeNames}.`
+      : `Change ${target.label} to one of: ${supportedRuntimeNames}.`;
+
+    findings.push({
+      id: `unsupported-runtime-placement:${target.label}`,
+      severity: 'warn',
+      message,
+      recommendation,
+      autoFixable: false,
+    });
+  }
+
+  return findings;
+}
+
 export function detectWorkspaceBootstrapWarnings(ctx: DoctorContext): DoctorFinding[] {
   return inspectWorkspaceBootstrapWarningsSync(ctx.workspaceCwd).map((warning) => {
     const markerNote = warning.matchedMarkers?.length
@@ -491,8 +545,8 @@ export function detectConflictingOverrides(ctx: DoctorContext): DoctorFinding[] 
     });
   }
 
-  const fastRuntimeEnv = normalizeRuntimeName(ctx.env.DISCOCLAW_FAST_RUNTIME);
-  const fastRuntimeFile = normalizeRuntimeName(ctx.runtimeOverrides.fastRuntime);
+  const fastRuntimeEnv = parseRuntimePlacementValue(ctx.env.DISCOCLAW_FAST_RUNTIME, 'startup:DISCOCLAW_FAST_RUNTIME');
+  const fastRuntimeFile = parseRuntimePlacementValue(ctx.runtimeOverrides.fastRuntime, 'runtime-overrides:fastRuntime');
   if (fastRuntimeEnv && fastRuntimeFile && fastRuntimeEnv !== fastRuntimeFile) {
     findings.push({
       id: 'conflicting-runtime-override:fastRuntime',
@@ -547,15 +601,10 @@ export function detectStaleRuntimeAndModelOverrides(ctx: DoctorContext): DoctorF
 
   const fastRuntime = normalizeRuntimeName(ctx.runtimeOverrides.fastRuntime);
   if (fastRuntime) {
-    if (!KNOWN_RUNTIMES.has(fastRuntime)) {
-      findings.push({
-        id: 'stale-runtime-override:fastRuntime',
-        severity: 'warn',
-        message: `runtime-overrides.json has fastRuntime="${ctx.runtimeOverrides.fastRuntime}", which is not a known runtime.`,
-        recommendation: 'Remove the stale fastRuntime override.',
-        autoFixable: true,
-      });
-    } else if (fastRuntime === defaultFastRuntime(ctx.env)) {
+    if (
+      parseRuntimePlacementValue(ctx.runtimeOverrides.fastRuntime, 'runtime-overrides:fastRuntime')
+      && fastRuntime === defaultFastRuntime(ctx.env)
+    ) {
       findings.push({
         id: 'stale-runtime-override:fastRuntime',
         severity: 'warn',
@@ -564,19 +613,23 @@ export function detectStaleRuntimeAndModelOverrides(ctx: DoctorContext): DoctorF
         autoFixable: true,
       });
     }
+  } else if (trimValue(ctx.runtimeOverrides.fastRuntime)) {
+    findings.push({
+      id: 'stale-runtime-override:fastRuntime',
+      severity: 'warn',
+      message:
+        `runtime-overrides.json has fastRuntime="${ctx.runtimeOverrides.fastRuntime}", which is not a supported runtime path name for fastRuntime. Supported names: ${renderSupportedRuntimeNames('runtime-overrides:fastRuntime')}.`,
+      recommendation: 'Remove the stale fastRuntime override.',
+      autoFixable: true,
+    });
   }
 
   const voiceRuntime = normalizeRuntimeName(ctx.runtimeOverrides.voiceRuntime);
   if (voiceRuntime) {
-    if (!KNOWN_RUNTIMES.has(voiceRuntime)) {
-      findings.push({
-        id: 'stale-runtime-override:voiceRuntime',
-        severity: 'warn',
-        message: `runtime-overrides.json has voiceRuntime="${ctx.runtimeOverrides.voiceRuntime}", which is not a known runtime.`,
-        recommendation: 'Remove the stale voiceRuntime override.',
-        autoFixable: true,
-      });
-    } else if (voiceRuntime === defaultVoiceRuntime(ctx.env)) {
+    if (
+      parseRuntimePlacementValue(ctx.runtimeOverrides.voiceRuntime, 'runtime-overrides:voiceRuntime')
+      && voiceRuntime === defaultVoiceRuntime(ctx.env)
+    ) {
       findings.push({
         id: 'stale-runtime-override:voiceRuntime',
         severity: 'warn',
@@ -585,6 +638,15 @@ export function detectStaleRuntimeAndModelOverrides(ctx: DoctorContext): DoctorF
         autoFixable: true,
       });
     }
+  } else if (trimValue(ctx.runtimeOverrides.voiceRuntime)) {
+    findings.push({
+      id: 'stale-runtime-override:voiceRuntime',
+      severity: 'warn',
+      message:
+        `runtime-overrides.json has voiceRuntime="${ctx.runtimeOverrides.voiceRuntime}", which is not a supported runtime path name for voiceRuntime. Supported names: ${renderSupportedRuntimeNames('runtime-overrides:voiceRuntime')}.`,
+      recommendation: 'Remove the stale voiceRuntime override.',
+      autoFixable: true,
+    });
   }
 
   return findings;
@@ -594,8 +656,8 @@ export function detectInvalidPersistedModelAssignments(ctx: DoctorContext): Doct
   const findings: DoctorFinding[] = [];
 
   for (const [role, storedValue] of Object.entries(ctx.models) as Array<[ModelRole, string]>) {
-    const runtimeName = normalizeRuntimeName(storedValue);
-    if (!runtimeName || !KNOWN_RUNTIMES.has(runtimeName)) continue;
+    const runtimeName = canonicalizeRuntimePathName(storedValue);
+    if (!runtimeName) continue;
 
     if (role === 'chat') {
       findings.push({
@@ -634,12 +696,12 @@ export function detectInvalidPersistedModelAssignments(ctx: DoctorContext): Doct
 export function detectMissingSecrets(ctx: DoctorContext): DoctorFinding[] {
   const findings: DoctorFinding[] = [];
   const runtimeTargets: Array<{ label: string; runtime: string | undefined }> = [
-    { label: 'PRIMARY_RUNTIME', runtime: normalizeRuntimeName(ctx.env.PRIMARY_RUNTIME) },
-    { label: 'DISCOCLAW_FAST_RUNTIME', runtime: normalizeRuntimeName(ctx.env.DISCOCLAW_FAST_RUNTIME) },
-    { label: 'FORGE_DRAFTER_RUNTIME', runtime: normalizeRuntimeName(ctx.env.FORGE_DRAFTER_RUNTIME) },
-    { label: 'FORGE_AUDITOR_RUNTIME', runtime: normalizeRuntimeName(ctx.env.FORGE_AUDITOR_RUNTIME) },
-    { label: 'runtime-overrides.fastRuntime', runtime: normalizeRuntimeName(ctx.runtimeOverrides.fastRuntime) },
-    { label: 'runtime-overrides.voiceRuntime', runtime: normalizeRuntimeName(ctx.runtimeOverrides.voiceRuntime) },
+    { label: 'PRIMARY_RUNTIME', runtime: parseRuntimePlacementValue(ctx.env.PRIMARY_RUNTIME, 'startup:PRIMARY_RUNTIME') },
+    { label: 'DISCOCLAW_FAST_RUNTIME', runtime: parseRuntimePlacementValue(ctx.env.DISCOCLAW_FAST_RUNTIME, 'startup:DISCOCLAW_FAST_RUNTIME') },
+    { label: 'FORGE_DRAFTER_RUNTIME', runtime: parseRuntimePlacementValue(ctx.env.FORGE_DRAFTER_RUNTIME, 'startup:FORGE_DRAFTER_RUNTIME') },
+    { label: 'FORGE_AUDITOR_RUNTIME', runtime: parseRuntimePlacementValue(ctx.env.FORGE_AUDITOR_RUNTIME, 'startup:FORGE_AUDITOR_RUNTIME') },
+    { label: 'runtime-overrides.fastRuntime', runtime: parseRuntimePlacementValue(ctx.runtimeOverrides.fastRuntime, 'runtime-overrides:fastRuntime') },
+    { label: 'runtime-overrides.voiceRuntime', runtime: parseRuntimePlacementValue(ctx.runtimeOverrides.voiceRuntime, 'runtime-overrides:voiceRuntime') },
   ];
 
   for (const target of runtimeTargets) {
@@ -739,6 +801,7 @@ export async function inspect(opts: InspectOptions = {}): Promise<DoctorReport> 
     ...detectNpmManagedRuntimeSupportBoundary(ctx),
     ...detectWorkspaceBootstrapWarnings(ctx),
     ...detectDeprecatedEnvVars(ctx),
+    ...detectUnsupportedRuntimePlacements(ctx),
     ...detectConflictingOverrides(ctx),
     ...detectStaleRuntimeAndModelOverrides(ctx),
     ...detectInvalidPersistedModelAssignments(ctx),

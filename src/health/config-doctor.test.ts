@@ -11,6 +11,7 @@ import {
   detectInstallDrift,
   detectMissingSecrets,
   detectNpmManagedRuntimeSupportBoundary,
+  detectUnsupportedRuntimePlacements,
   detectWorkspaceBootstrapWarnings,
   detectStaleRuntimeAndModelOverrides,
   inspect,
@@ -251,6 +252,49 @@ describe('detectStaleRuntimeAndModelOverrides', () => {
       'stale-runtime-override:fastRuntime',
     ]);
   });
+
+  it('flags invalid persisted runtime names in runtime-overrides.json against the canonical contract', async () => {
+    const cwd = await makeTempInstall('doctor-stale-invalid-runtime-names');
+    await writeEnv(cwd, [
+      'PRIMARY_RUNTIME=claude',
+    ]);
+    await writeJson(path.join(cwd, 'data', 'runtime-overrides.json'), {
+      fastRuntime: 'not-a-runtime',
+      voiceRuntime: 'still-not-a-runtime',
+    });
+
+    const ctx = await loadDoctorContext({ cwd });
+    const findings = detectStaleRuntimeAndModelOverrides(ctx);
+
+    expect(findings.map((finding) => finding.id)).toEqual([
+      'stale-runtime-override:fastRuntime',
+      'stale-runtime-override:voiceRuntime',
+    ]);
+    expect(findings[0]?.message).toContain('Supported names: claude, codex, gemini-api, gemini-cli, openai, openrouter');
+    expect(findings[1]?.message).toContain('Supported names: claude, codex, gemini-api, gemini-cli, openai, openrouter, anthropic');
+  });
+});
+
+describe('detectUnsupportedRuntimePlacements', () => {
+  it('flags canonical runtimes that are only valid in different placements', async () => {
+    const cwd = await makeTempInstall('doctor-unsupported-runtime-placements');
+    await writeEnv(cwd, [
+      'PRIMARY_RUNTIME=anthropic',
+    ]);
+    await writeJson(path.join(cwd, 'data', 'runtime-overrides.json'), {
+      fastRuntime: 'anthropic',
+      voiceRuntime: 'anthropic',
+    });
+
+    const ctx = await loadDoctorContext({ cwd });
+    const findings = detectUnsupportedRuntimePlacements(ctx);
+
+    expect(findings.map((finding) => finding.id)).toEqual([
+      'unsupported-runtime-placement:PRIMARY_RUNTIME',
+      'unsupported-runtime-placement:runtime-overrides.fastRuntime',
+    ]);
+    expect(findings.every((finding) => finding.message.includes('voice-only runtime "anthropic"'))).toBe(true);
+  });
 });
 
 describe('detectMissingSecrets', () => {
@@ -283,19 +327,40 @@ describe('detectMissingSecrets', () => {
     ]);
     expect(findings.every((finding) => finding.severity === 'error')).toBe(true);
   });
+
+  it('maps gemini-api to GEMINI_API_KEY, accepts gemini-cli without a secret, and canonicalizes the legacy gemini alias', async () => {
+    const cwd = await makeTempInstall('doctor-missing-secrets-gemini');
+    await writeEnv(cwd, [
+      'PRIMARY_RUNTIME=gemini-api',
+      'DISCOCLAW_FAST_RUNTIME=gemini',
+      'FORGE_DRAFTER_RUNTIME=gemini-cli',
+    ]);
+
+    const ctx = await loadDoctorContext({ cwd });
+    const findings = detectMissingSecrets(ctx);
+
+    expect(findings.map((finding) => finding.id)).toEqual([
+      'missing-secret:PRIMARY_RUNTIME:GEMINI_API_KEY',
+      'missing-secret:DISCOCLAW_FAST_RUNTIME:GEMINI_API_KEY',
+    ]);
+    expect(findings.some((finding) => finding.message.includes('gemini-cli'))).toBe(false);
+    expect(findings[0]?.message).toContain('PRIMARY_RUNTIME selects gemini-api');
+    expect(findings[1]?.message).toContain('DISCOCLAW_FAST_RUNTIME selects gemini-api');
+  });
 });
 
 describe('detectInvalidPersistedModelAssignments', () => {
-  it('flags runtime names that were written into models.json model slots', async () => {
+  it('flags canonical and aliased runtime names that were written into models.json model slots', async () => {
     const cwd = await makeTempInstall('doctor-invalid-model-assignments');
     await writeEnv(cwd, [
       'PRIMARY_RUNTIME=claude',
       'DISCOCLAW_VOICE_ENABLED=1',
     ]);
     await writeJson(path.join(cwd, 'data', 'models.json'), {
-      chat: 'openrouter',
-      voice: 'anthropic',
-      fast: 'claude',
+      chat: 'gemini-api',
+      voice: 'gemini',
+      fast: 'gemini-cli',
+      summary: 'anthropic',
     });
 
     const ctx = await loadDoctorContext({ cwd });
@@ -305,6 +370,7 @@ describe('detectInvalidPersistedModelAssignments', () => {
       'invalid-model-assignment:chat',
       'invalid-model-assignment:voice',
       'invalid-model-assignment:fast',
+      'invalid-model-assignment:summary',
     ]);
     expect(findings.every((finding) => finding.autoFixable === false)).toBe(true);
   });
