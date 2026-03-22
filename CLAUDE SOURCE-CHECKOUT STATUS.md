@@ -1,4 +1,4 @@
-# SUPPORTED FOR 1.0
+# Claude Source-Checkout Status
 
 Date: 2026-03-22
 Checkout under review: `846a5b032d169a7c67403914294c954ca96238ab`
@@ -6,11 +6,11 @@ Scope: evidence-backed closeout memo for DiscoClaw's blessed Claude source-check
 
 ## Current Call
 
-Status: `SUPPORTED FOR 1.0` for the narrowed fresh-clone Claude source-checkout path
+Status: `PARTIAL` for the Claude source-checkout path
 
 First-login stranger gate: `OPEN`
 
-What that support claim means today:
+What that status means today:
 
 - a fresh clone can install and run the repo-owned Claude source-checkout helpers
 - an isolated no-session Claude shell still returns the expected pre-login unauthenticated result
@@ -48,7 +48,7 @@ That means this memo proves the fresh-clone install path and the Claude auth beh
 
 ## Audit Call
 
-- Supported today: `fresh-clone post-login path proven`
+- Current support-safe claim: `fresh-clone post-login path proven`
 - Still open: `first-login stranger gate`
 - Do not claim that a fresh clone alone proves an unauthenticated Claude shell
 - Do not close the first-login gate until the same no-session shell or account records:

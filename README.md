@@ -79,7 +79,7 @@ Full setup guide: [docs/voice.md](docs/voice.md)
 
 ## How it works
 
-DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with `gemini-api`, `gemini-cli`, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). For 1.0, `Claude CLI` on a source checkout is the blessed default path, and `Codex CLI` on a source checkout is the explicitly supported secondary path; see [docs/audit/provider-auth-1.0-matrix.md](docs/audit/provider-auth-1.0-matrix.md) for the full consolidated matrix. `gemini` remains a compatibility alias for `gemini-api`. The OpenAI-compatible and OpenRouter adapters can expose optional tool use when `OPENAI_COMPAT_TOOLS_ENABLED=1` is set, but OpenRouter support claims stop at the narrower audited boundary described below. The current Gemini CLI path is intentionally narrower: `gemini-cli` advertises only `streaming_text`, so DiscoClaw's runtime capability filtering strips tool calls automatically for that runtime. It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
+DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with `gemini-api`, `gemini-cli`, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). For 1.0, `Claude CLI` on a source checkout is still the intended default path, but its current audited verdict is `PARTIAL` until the same-shell first-login proof is captured; `Codex CLI` on a source checkout is the explicitly supported secondary path. See [docs/audit/provider-auth-1.0-matrix.md](docs/audit/provider-auth-1.0-matrix.md) for the full consolidated matrix. `gemini` remains a compatibility alias for `gemini-api`. The OpenAI-compatible and OpenRouter adapters can expose optional tool use when `OPENAI_COMPAT_TOOLS_ENABLED=1` is set, but OpenRouter support claims stop at the narrower audited boundary described below. The current Gemini CLI path is intentionally narrower: `gemini-cli` advertises only `streaming_text`, so DiscoClaw's runtime capability filtering strips tool calls automatically for that runtime. It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
 
 1. Checks the user allowlist (fail-closed — empty list means respond to nobody)
 2. Assembles context: per-channel rules, conversation history, rolling summary, and durable memory
@@ -202,7 +202,7 @@ For source checkouts, repo-local managed browser storage is supported only at th
   - **OpenRouter API key** via `OPENROUTER_API_KEY` (config presence only until `!status` or the startup credential report shows `openrouter-key: ok`)
 - Runtime-specific access for your chosen provider (Anthropic access for Claude CLI, Google API access for `gemini-api`, Google account access for `gemini-cli`, OpenAI access for Codex/OpenAI models)
 
-1.0 provider/auth policy: `Claude CLI` on a source checkout is the blessed default path, and `Codex CLI` on a source checkout is the explicitly supported secondary path. For every current provider/auth path, including `openai`, `openrouter`, `gemini-api`, `gemini-cli`, and direct Anthropic, use the consolidated verdicts in [docs/audit/provider-auth-1.0-matrix.md](docs/audit/provider-auth-1.0-matrix.md) rather than inferring readiness from setup/config alone.
+1.0 provider/auth policy: `Claude CLI` on a source checkout remains the intended default path, but its current audited status is `PARTIAL` until the same-shell first-login proof is captured; `Codex CLI` on a source checkout is the explicitly supported secondary path. For every current provider/auth path, including `openai`, `openrouter`, `gemini-api`, `gemini-cli`, and direct Anthropic, use the consolidated verdicts in [docs/audit/provider-auth-1.0-matrix.md](docs/audit/provider-auth-1.0-matrix.md) rather than inferring readiness from setup/config alone.
 
 `discoclaw init` currently scaffolds Claude, Codex, OpenAI, OpenRouter, and the limited `gemini-cli` path. If you want the API-backed Gemini path instead, set `PRIMARY_RUNTIME=gemini-api` and `GEMINI_API_KEY` manually.
 
@@ -267,8 +267,8 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
 ### Operations
 
 - [Configuration reference](docs/configuration.md) — all environment variables indexed by category
-- [Provider/auth 1.0 matrix](docs/audit/provider-auth-1.0-matrix.md) — blessed default path, supported secondary path, and the current `SUPPORTED FOR 1.0` / `PARTIAL` / `OUT OF SCOPE` verdicts for every implied provider/auth path
-- [SUPPORTED FOR 1.0](SUPPORTED%20FOR%201.0) — current closeout memo for the blessed Claude source-checkout path, including what the latest throwaway-checkout rerun did and did not prove
+- [Provider/auth 1.0 matrix](docs/audit/provider-auth-1.0-matrix.md) — intended default path, supported secondary path, and the current `SUPPORTED FOR 1.0` / `PARTIAL` / `OUT OF SCOPE` verdicts for every implied provider/auth path
+- [Claude source-checkout status](CLAUDE%20SOURCE-CHECKOUT%20STATUS.md) — current closeout memo for the Claude source-checkout path, including what the latest throwaway-checkout rerun did and did not prove
 - [Claude source-checkout audit](docs/audit/claude-blank-machine-readiness.md) — current 1.0 verdict for the repo-owned `pnpm preflight*` + `pnpm claude:auth-smoke` path
 - [Claude npm-managed audit](docs/audit/claude-npm-managed-path.md) — current 1.0 verdict for `npm install -g discoclaw`, `discoclaw init`, and the daemon/runtime-path gap
 - [Codex source-checkout audit](docs/audit/codex-blank-machine-readiness.md) — current 1.0 verdict for the repo-owned `pnpm preflight*` path plus the separate Codex/OpenAI proof gates
@@ -347,7 +347,7 @@ If `PRIMARY_RUNTIME=claude`, run the `pnpm preflight:blank-machine` config/boots
 
 ### Claude runtime validation
 
-Source-checkout 1.0 support status: `SUPPORTED FOR 1.0` for the narrowed repo-owned Claude path. The current closeout memo is [SUPPORTED FOR 1.0](SUPPORTED%20FOR%201.0), and the deeper audit record remains [docs/audit/claude-blank-machine-readiness.md](docs/audit/claude-blank-machine-readiness.md). That claim is intentionally narrower than "fresh clone proves first-login auth": a fresh clone alone does not prove unauthenticated-shell behavior when the host session was already logged into Claude.
+Source-checkout 1.0 support status: `PARTIAL` for the repo-owned Claude path until the same no-session shell or account records the pre-login unauthenticated result, interactive `claude` login, and post-login `pnpm claude:auth-smoke` rerun. The current closeout memo is [Claude source-checkout status](CLAUDE%20SOURCE-CHECKOUT%20STATUS.md), and the deeper audit record remains [docs/audit/claude-blank-machine-readiness.md](docs/audit/claude-blank-machine-readiness.md). Until that same-shell proof exists, the only support-safe claim is `fresh-clone post-login path proven`.
 
 Npm-managed 1.0 audit verdict: `NOT YET SUPPORT-CLAIMABLE`. The installed CLI now has a shell-level Claude check, but the daemon path still is not claimable because `discoclaw install-daemon` hardcodes `/usr/bin/node` plus a fixed service `PATH`, and `discoclaw init` does not persist `CLAUDE_BIN`. See [docs/audit/claude-npm-managed-path.md](docs/audit/claude-npm-managed-path.md).
 
