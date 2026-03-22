@@ -8,6 +8,11 @@ import type { CliAdapterStrategy, CliInvokeContext, UniversalCliOpts } from '../
 /** Max chars for error messages exposed outside the adapter. Prevents prompt leaks. */
 const MAX_ERROR_LENGTH = 200;
 
+export const GEMINI_CLI_CAPABILITIES = ['streaming_text'] as const satisfies readonly RuntimeCapability[];
+
+export const GEMINI_CLI_CONTRACT_NOTE =
+  'Gemini CLI is DiscoClaw\'s limited Gemini runtime. It advertises only streaming_text, so resolveEffectiveTools() and filterToolsByCapabilities() strip unsupported tools before a Gemini CLI turn is invoked.';
+
 function sanitizeGeminiError(raw: string): string {
   if (!raw) return 'gemini failed (no details)';
   const lines = raw
@@ -28,7 +33,8 @@ export function createGeminiStrategy(defaultModel: string): CliAdapterStrategy {
     id: 'gemini',
     binaryDefault: 'gemini',
     defaultModel,
-    capabilities: ['streaming_text'] satisfies readonly RuntimeCapability[],
+    // Keep Gemini CLI intentionally narrow until broader transport readiness lands.
+    capabilities: GEMINI_CLI_CAPABILITIES,
 
     getOutputMode(_ctx: CliInvokeContext, _opts: UniversalCliOpts): 'text' | 'jsonl' {
       return 'text';
