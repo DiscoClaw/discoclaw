@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { parseConfig } from './config.js';
 import {
+  buildOpenRouterRuntimeOptions,
   collectActiveProviders,
   registerRuntimeWithGlobalPolicies,
   resolveFastRuntime,
@@ -277,6 +278,46 @@ describe('resolveFastRuntime', () => {
       log: { info: () => undefined, warn: () => undefined },
     });
     expect(resolved).toBe(primary);
+  });
+});
+
+describe('buildOpenRouterRuntimeOptions', () => {
+  it('carries parsed provider preferences into the shared OpenRouter runtime config', () => {
+    const { config } = parseConfig(configEnv({
+      OPENROUTER_API_KEY: 'sk-or-test',
+      OPENROUTER_PROVIDER_PREFERENCES: JSON.stringify({
+        order: ['anthropic'],
+        allow_fallbacks: false,
+        requireParameters: true,
+      }),
+      OPENAI_COMPAT_TOOLS_ENABLED: '1',
+    }));
+
+    const opts = buildOpenRouterRuntimeOptions(config, { debug: () => undefined });
+
+    expect(opts).toMatchObject({
+      id: 'openrouter',
+      apiKey: 'sk-or-test',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      defaultModel: 'anthropic/claude-sonnet-4.6',
+      providerPreferences: {
+        order: ['anthropic'],
+        allowFallbacks: false,
+        requireParameters: true,
+      },
+      enableTools: true,
+      enableHybridPipeline: false,
+    });
+  });
+
+  it('uses the shipped OpenRouter defaults when env overrides are unset', () => {
+    const { config } = parseConfig(configEnv({ OPENROUTER_API_KEY: 'sk-or-test' }));
+
+    const opts = buildOpenRouterRuntimeOptions(config);
+
+    expect(opts.baseUrl).toBe('https://openrouter.ai/api/v1');
+    expect(opts.defaultModel).toBe('anthropic/claude-sonnet-4.6');
+    expect(opts.providerPreferences).toBeUndefined();
   });
 });
 

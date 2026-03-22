@@ -8,6 +8,7 @@ type CommonOpts = {
   id?: RuntimeId;
   baseUrl: string;
   defaultModel: string;
+  providerPreferences?: Readonly<Record<string, unknown>>;
   enableTools?: boolean;
   enableHybridPipeline?: boolean;
   log?: { debug(...args: unknown[]): void };
@@ -94,6 +95,13 @@ function withBearerAuthorization(
   return nextHeaders;
 }
 
+function buildProviderPayload(opts: OpenAICompatOpts): { provider?: Readonly<Record<string, unknown>> } {
+  if (opts.id !== 'openrouter' || opts.providerPreferences === undefined) {
+    return {};
+  }
+  return { provider: opts.providerPreferences };
+}
+
 export async function fetchWithOpenAIBearerAuth(opts: {
   url: string;
   auth: OpenAIBearerAuth;
@@ -151,6 +159,7 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
             ? { max_completion_tokens: params.maxTokens }
             : { max_tokens: params.maxTokens })
           : {};
+        const providerField = buildProviderPayload(opts);
 
         // Determine whether to enter the tool loop
         const toolsRequested = opts.enableTools && params.tools && params.tools.length > 0;
@@ -198,6 +207,7 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
                 stream: false,
                 tools: toolSchemas,
                 ...tokenField,
+                ...providerField,
               });
 
               const response = await fetchWithOpenAIBearerAuth({
@@ -307,6 +317,7 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
               messages: streamMessages,
               stream: true,
               ...tokenField,
+              ...providerField,
             });
 
             let accumulated = '';

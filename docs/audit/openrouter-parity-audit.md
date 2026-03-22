@@ -1,7 +1,7 @@
 # OpenRouter Parity Audit
 
 Date: 2026-03-21
-Scope: first `ws-1285` slice for auditable OpenRouter-backed workloads. This audit is broader than the env-key memo, but it still stops at what the current runtime, doctor surfaces, and repo-owned smoke path can prove today.
+Scope: phase 1 of 2 for `ws-1286`: the shipped OpenRouter runtime-default slice for auditable OpenRouter-backed workloads. This audit is broader than the env-key memo, but it still stops at what the current runtime, doctor surfaces, and repo-owned smoke path can prove today.
 
 ## 1.0 Verdict
 
@@ -12,7 +12,8 @@ Reason:
 - DiscoClaw ships a real OpenRouter runtime registration path through the shared OpenAI-compatible adapter and a live credential probe that reports `openrouter-key: ok` only after a successful `GET /models` request.
 - Source checkouts can prove more than npm-managed installs because the repo contains the dedicated OpenRouter workload smoke harness in `src/runtime/openrouter-smoke.test.ts`, while the published npm package does not ship that harness in `package.json.files`.
 - The doctor/init surfaces now align with that narrower boundary: they stop at config/bootstrap or post-start env-key visibility and do not claim broader OpenRouter workload, tool, or install-mode parity.
-- Built-in OpenRouter tier defaults and model recommendations are still intentionally deferred. The runtime can route to explicit OpenRouter models today, but this slice does not audit or recommend a default `fast` / `capable` / `deep` map.
+- The runtime now ships concrete OpenRouter routing defaults: built-in tier values of `fast=openai/gpt-5-mini`, `capable=anthropic/claude-sonnet-4.6`, and `deep=anthropic/claude-opus-4.6`, plus the matching default `OPENROUTER_MODEL=anthropic/claude-sonnet-4.6`.
+- The shared adapter/config path also supports OpenRouter-only `provider` payload forwarding through `OPENROUTER_PROVIDER_PREFERENCES`, but this slice does not seed a default provider-preferences object and does not stretch that transport support into blanket workload or install-mode parity claims.
 
 ## Exact Support Boundary By Install Mode
 
@@ -77,11 +78,16 @@ The shared doctor boundary now lines up with the auditable evidence:
 
 That wording is intentional and should remain aligned with this audit. If a future change makes doctor or init claim more than config/bootstrap or post-start env-key visibility, it must land the new proof surface first.
 
-## Explicit Deferrals For Follow-up Plans
+## Shipped Runtime Defaults And Remaining Deferrals
 
-This first `ws-1285` slice does **not** claim the following:
+This `ws-1286` phase now ships the following runtime-side defaults and transport behavior:
 
-- built-in OpenRouter tier defaults for `DISCOCLAW_TIER_OPENROUTER_FAST`, `DISCOCLAW_TIER_OPENROUTER_CAPABLE`, or `DISCOCLAW_TIER_OPENROUTER_DEEP`
+- `src/runtime/model-tiers.ts` ships built-in OpenRouter tier defaults: `fast=openai/gpt-5-mini`, `capable=anthropic/claude-sonnet-4.6`, and `deep=anthropic/claude-opus-4.6`.
+- `src/config.ts` and `src/cli/init-wizard.ts` share the same default `OPENROUTER_MODEL=anthropic/claude-sonnet-4.6`, so config, runtime registration, and shipped examples stay aligned.
+- `src/config.ts`, `src/index.runtime.ts`, and `src/runtime/openai-compat.ts` support parsing and forwarding `OPENROUTER_PROVIDER_PREFERENCES` only for OpenRouter requests. That is transport support only; no seeded default `provider` object ships in this slice.
+
+This slice still does **not** claim the following:
+
 - curated OpenRouter model recommendations for chat, fast-tier, forge, or action workloads
 - npm-managed OpenRouter workload parity
 - npm-managed OpenRouter workload proof or any broader one-command install-mode workload helper
@@ -89,7 +95,8 @@ This first `ws-1285` slice does **not** claim the following:
 
 The code backs that deferral today:
 
-- `src/runtime/model-tiers.ts` ships built-in tier maps for `claude_code`, `gemini`, `openai`, and `codex`, but not for `openrouter`.
-- `src/config.ts` and `src/cli/init-wizard.ts` still provide a default `OPENROUTER_MODEL`, but that is a routing default, not an audited recommendation.
+- `src/runtime/model-tiers.ts` ships the concrete OpenRouter tier map, but those defaults are still routing defaults, not audited workload recommendations.
+- `src/config.ts` and `src/cli/init-wizard.ts` keep the OpenRouter adapter default aligned with that shipped `capable` value.
+- `src/runtime/openai-compat.ts` forwards OpenRouter `provider` preferences only when explicitly configured, and no repo-owned default object is shipped yet.
 
-Treat later plans as the place to decide default OpenRouter tier maps, preferred models, and stronger npm-managed parity claims. This audit only records the narrower proof boundary that the current runtime can actually support.
+Treat later plans as the place to decide stronger workload-specific recommendations and stronger npm-managed parity claims. This audit only records the narrower proof boundary that the current runtime can actually support.

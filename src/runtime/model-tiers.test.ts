@@ -4,6 +4,7 @@ import {
   findRuntimeForModel,
   initTierOverrides,
   isModelTier,
+  listKnownModelValues,
   remapCrossRuntimeTierModel,
   resolveModel,
   resolveReasoningEffort,
@@ -49,6 +50,20 @@ describe('resolveModel', () => {
 
     it('resolves deep → gpt-5.4-pro', () => {
       expect(resolveModel('deep', 'openai')).toBe('gpt-5.4-pro');
+    });
+  });
+
+  describe('openrouter runtime', () => {
+    it('resolves fast → openai/gpt-5-mini', () => {
+      expect(resolveModel('fast', 'openrouter')).toBe('openai/gpt-5-mini');
+    });
+
+    it('resolves capable → anthropic/claude-sonnet-4.6', () => {
+      expect(resolveModel('capable', 'openrouter')).toBe('anthropic/claude-sonnet-4.6');
+    });
+
+    it('resolves deep → anthropic/claude-opus-4.6', () => {
+      expect(resolveModel('deep', 'openrouter')).toBe('anthropic/claude-opus-4.6');
     });
   });
 
@@ -99,6 +114,22 @@ describe('resolveModel', () => {
     it('passes through empty string', () => {
       expect(resolveModel('', 'claude_code')).toBe('');
     });
+  });
+});
+
+describe('listKnownModelValues', () => {
+  afterEach(() => {
+    initTierOverrides({});
+  });
+
+  it('includes the shipped openrouter defaults', () => {
+    expect(listKnownModelValues()).toEqual(
+      expect.arrayContaining([
+        'openai/gpt-5-mini',
+        'anthropic/claude-sonnet-4.6',
+        'anthropic/claude-opus-4.6',
+      ]),
+    );
   });
 });
 
@@ -203,6 +234,12 @@ describe('findRuntimeForModel', () => {
     expect(findRuntimeForModel('openai/gpt-5-mini')).toBe('openrouter');
   });
 
+  it('returns openrouter for shipped provider-prefixed tier defaults', () => {
+    expect(findRuntimeForModel('openai/gpt-5-mini')).toBe('openrouter');
+    expect(findRuntimeForModel('anthropic/claude-sonnet-4.6')).toBe('openrouter');
+    expect(findRuntimeForModel('anthropic/claude-opus-4.6')).toBe('openrouter');
+  });
+
   it('returns undefined when an env override makes ownership ambiguous', () => {
     initTierOverrides({ DISCOCLAW_TIER_OPENROUTER_FAST: 'gpt-5-mini' });
     expect(findRuntimeForModel('gpt-5-mini')).toBeUndefined();
@@ -219,9 +256,8 @@ describe('findRuntimeForModel', () => {
     expect(findRuntimeForModel('claude-haiku-4-5-20251001')).toBe('claude_code');
   });
 
-  it('infers openrouter ownership for provider-prefixed model identifiers', () => {
+  it('infers openrouter ownership for non-tier provider-prefixed model identifiers', () => {
     expect(findRuntimeForModel('anthropic/claude-sonnet-4')).toBe('openrouter');
-    expect(findRuntimeForModel('openai/gpt-5-mini')).toBe('openrouter');
   });
 
   it('infers openai ownership for openai-only model families outside the tier map', () => {
@@ -249,6 +285,15 @@ describe('remapCrossRuntimeTierModel', () => {
       sourceTier: 'fast',
       targetRuntimeId: 'codex',
       model: 'gpt-5.1-codex-mini',
+    });
+  });
+
+  it('maps openrouter fast-tier defaults onto openai fast-tier defaults', () => {
+    expect(remapCrossRuntimeTierModel('openai/gpt-5-mini', 'openai')).toEqual({
+      sourceRuntimeId: 'openrouter',
+      sourceTier: 'fast',
+      targetRuntimeId: 'openai',
+      model: 'gpt-5-mini',
     });
   });
 

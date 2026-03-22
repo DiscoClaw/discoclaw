@@ -457,6 +457,57 @@ describe('OpenAI-compat runtime adapter', () => {
     expect(rt.id).toBe('openrouter');
   });
 
+  it('adds provider preferences only for configured OpenRouter streaming requests', async () => {
+    const providerPreferences = {
+      order: ['anthropic'],
+      allowFallbacks: false,
+      requireParameters: true,
+    };
+
+    const openRouterFetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      return Promise.resolve(makeSSEResponse(['data: [DONE]']));
+    });
+    globalThis.fetch = openRouterFetch;
+
+    const openRouterRuntime = createOpenAICompatRuntime({
+      id: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'test-key',
+      defaultModel: 'anthropic/claude-opus-4.6',
+      providerPreferences,
+    });
+
+    await collectEvents(openRouterRuntime.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    const openRouterBody = JSON.parse(openRouterFetch.mock.calls[0][1].body as string);
+    expect(openRouterBody.provider).toEqual(providerPreferences);
+
+    const openAIFetch = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      return Promise.resolve(makeSSEResponse(['data: [DONE]']));
+    });
+    globalThis.fetch = openAIFetch;
+
+    const openAIRuntime = createOpenAICompatRuntime({
+      id: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'gpt-4o',
+    });
+
+    await collectEvents(openAIRuntime.invoke({
+      prompt: 'Hi',
+      model: '',
+      cwd: '/tmp',
+    }));
+
+    const openAIBody = JSON.parse(openAIFetch.mock.calls[0][1].body as string);
+    expect(openAIBody.provider).toBeUndefined();
+  });
+
   // ---------------------------------------------------------------------------
   // maxTokens field routing tests
   // ---------------------------------------------------------------------------
@@ -955,6 +1006,71 @@ describe('OpenAI-compat tool loop', () => {
         enableHybridPipeline: true,
       }),
     );
+  });
+
+  it('adds provider preferences only for configured OpenRouter tool-loop requests', async () => {
+    const providerPreferences = {
+      order: ['openai'],
+      allowFallbacks: false,
+      only: ['openai'],
+    };
+
+    const openRouterFetch = vi.fn()
+      .mockResolvedValueOnce(makeToolCallResponse([
+        { id: 'call_1', name: 'read_file', arguments: JSON.stringify({ file_path: '/tmp/test.txt' }) },
+      ]))
+      .mockResolvedValueOnce(makeTextResponse('Done.'));
+    globalThis.fetch = openRouterFetch;
+
+    vi.mocked(executeToolCall).mockResolvedValue({ result: 'ok', ok: true });
+
+    const openRouterRuntime = createOpenAICompatRuntime({
+      id: 'openrouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKey: 'test-key',
+      defaultModel: 'anthropic/claude-opus-4.6',
+      enableTools: true,
+      providerPreferences,
+    });
+
+    await collectEvents(openRouterRuntime.invoke({
+      prompt: 'Read',
+      model: '',
+      cwd: '/tmp',
+      tools: ['Read'],
+    }));
+
+    const openRouterBody1 = JSON.parse(openRouterFetch.mock.calls[0][1].body as string);
+    expect(openRouterBody1.provider).toEqual(providerPreferences);
+    const openRouterBody2 = JSON.parse(openRouterFetch.mock.calls[1][1].body as string);
+    expect(openRouterBody2.provider).toEqual(providerPreferences);
+
+    const openAIFetch = vi.fn()
+      .mockResolvedValueOnce(makeToolCallResponse([
+        { id: 'call_2', name: 'read_file', arguments: JSON.stringify({ file_path: '/tmp/test.txt' }) },
+      ]))
+      .mockResolvedValueOnce(makeTextResponse('Done.'));
+    globalThis.fetch = openAIFetch;
+
+    const openAIRuntime = createOpenAICompatRuntime({
+      id: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'test-key',
+      defaultModel: 'gpt-4o',
+      enableTools: true,
+    });
+
+    await collectEvents(openAIRuntime.invoke({
+      prompt: 'Read',
+      model: '',
+      cwd: '/tmp',
+      tools: ['Read'],
+    }));
+
+    const openAIBody1 = JSON.parse(openAIFetch.mock.calls[0][1].body as string);
+    expect(openAIBody1.provider).toBeUndefined();
+    const openAIBody2 = JSON.parse(openAIFetch.mock.calls[1][1].body as string);
+    expect(openAIBody2.provider).toBeUndefined();
   });
 
   it('rejects a non-allowlisted tool call deterministically in tool-loop mode', async () => {

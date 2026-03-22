@@ -20,7 +20,7 @@ import path from 'node:path';
 import type { ActionCategoryFlags } from '../discord/actions.js';
 import { parseDiscordActions } from '../discord/actions.js';
 import { validateSmokeResponse, type SmokeResult } from './model-smoke-helpers.js';
-import { initTierOverrides, resolveModel } from './model-tiers.js';
+import { initTierOverrides, OPENROUTER_DEFAULT_MODEL, resolveModel } from './model-tiers.js';
 import { createOpenAICompatRuntime } from './openai-compat.js';
 import type { EngineEvent, RuntimeAdapter } from './types.js';
 
@@ -67,7 +67,7 @@ function parseSmokeTierEnv(envVarName: string): string[] {
 function buildOpenRouterSmokeRuntime(env: NodeJS.ProcessEnv = process.env): OpenRouterSmokeState {
   const apiKey = env.OPENROUTER_API_KEY?.trim() || '';
   const baseUrl = env.OPENROUTER_BASE_URL?.trim() || 'https://openrouter.ai/api/v1';
-  const defaultModel = env.OPENROUTER_MODEL?.trim() || 'anthropic/claude-sonnet-4-20250514';
+  const defaultModel = env.OPENROUTER_MODEL?.trim() || OPENROUTER_DEFAULT_MODEL;
   const enableTools = env.OPENAI_COMPAT_TOOLS_ENABLED === '1';
   const runtime = createOpenAICompatRuntime({
     id: 'openrouter',
