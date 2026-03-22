@@ -120,6 +120,11 @@ function canonicalizeRuntimeSwitchName(name: string): string {
   return normalized;
 }
 
+function isGeminiRuntimeSelection(name: string): boolean {
+  const normalized = name.trim().toLowerCase();
+  return normalized === 'gemini' || normalized === 'gemini-api' || normalized === 'gemini-cli';
+}
+
 function resolveRuntimeSwitch(
   runtimeRegistry: RuntimeRegistry | undefined,
   name: string,
@@ -199,6 +204,8 @@ export function executeConfigAction(
             if (bp.deferOpts) bp.deferOpts.runtime = newRuntime;
             changes.push(`runtime → ${runtimeName}`);
             if (runtimeModel) changes.push(`chat → ${runtimeModel} (adapter default)`);
+          } else if (isGeminiRuntimeSelection(model)) {
+            return { ok: false, error: `Runtime "${canonicalizeRuntimeSwitchName(model)}" is not configured in the registry` };
           } else {
             bp.runtimeModel = model;
             if (bp.cronCtx?.executorCtx) bp.cronCtx.executorCtx.model = model;
@@ -307,6 +314,8 @@ export function executeConfigAction(
               configCtx.persistVoiceRuntime?.(runtimeName);
               changes.push(`voice runtime → ${runtimeName}`);
               if (voiceRuntimeModel) changes.push(`voice → ${voiceRuntimeModel} (adapter default)`);
+            } else if (isGeminiRuntimeSelection(model)) {
+              return { ok: false, error: `Runtime "${canonicalizeRuntimeSwitchName(model)}" is not configured in the registry` };
             } else {
               bp.voiceModelCtx.model = model;
               changes.push(`voice → ${model}`);

@@ -572,6 +572,19 @@ describe('modelSet runtime swap', () => {
     expect(show.summary).not.toContain('**runtime**: `gemini`');
   });
 
+  it('errors instead of storing gemini alias as a plain chat model when the runtime is unavailable', () => {
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'gemini' }, ctx);
+    expect(result).toEqual({
+      ok: false,
+      error: 'Runtime "gemini-api" is not configured in the registry',
+    });
+    expect(ctx.botParams.runtime).toBe(stubRuntime);
+    expect(ctx.runtime).toBe(stubRuntime);
+    expect(ctx.botParams.runtimeModel).toBe('capable');
+  });
+
   it('keeps gemini-cli as an explicit runtime selection', () => {
     const ctx = makeCtx();
     ctx.runtimeRegistry = makeRegistry(['gemini-cli', geminiCliRuntime]);
@@ -748,6 +761,19 @@ describe('modelSet voice runtime swap', () => {
     expect(ctx.voiceRuntimeName).toBe('gemini-api');
     expect(result.summary).toContain('voice runtime → gemini-api');
     expect(result.summary).toContain('adapter default');
+  });
+
+  it('errors instead of storing gemini alias as a plain voice model when the runtime is unavailable', () => {
+    const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
+    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'gemini' }, ctx);
+    expect(result).toEqual({
+      ok: false,
+      error: 'Runtime "gemini-api" is not configured in the registry',
+    });
+    expect(ctx.botParams.voiceModelCtx!.runtime).toBeUndefined();
+    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBeUndefined();
+    expect(ctx.botParams.voiceModelCtx!.model).toBe('fast');
   });
 
   it('does not swap runtime for a plain model name', () => {
