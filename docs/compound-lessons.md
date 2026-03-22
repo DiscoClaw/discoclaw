@@ -144,11 +144,11 @@ Source: task/chat context - `cronCreate` was present in the per-turn Discord act
 Applied: docs/compound-lessons.md
 Status: active
 
-### 2026-03-15 - Derive prompt text from runtime-resolved config, not static literals
+### 2026-03-15 - Derive operator-facing runtime/model surfaces from the shared runtime contract
 Tags: #prompting #workflow #runtime
-Lesson: When generated action documentation or prompt sections describe runtime defaults (e.g. the default image-generation model), derive that text from the same runtime-resolved config that the execution path uses. Static literals in prompt text will drift after `!models set` overrides, env changes, or provider fallbacks, causing the AI to explicitly force a stale model name instead of omitting the field and letting the runtime default take effect.
-Source: task/chat context - `imagegenActionsPromptSection()` emitted static model guidance while `resolveDefaultModel()` and `!models set imagegen` used runtime config, causing the AI to hard-code `gpt-image-1` even when a different default was configured
-Applied: (PR implementing runtime-resolved imagegen default in prompt section and `!models set imagegen` persistence)
+Lesson: When operator-facing surfaces describe runtime names, defaults, persistence, or reset behavior, derive that text from the same runtime-resolved config and shared runtime-path contract that startup parsing and live switching enforce. `!models`, prompt sections, doctor/docs, and similar surfaces must render canonical runtime names, accepted aliases, supported placements, and persistence semantics from that shared source instead of static literals or hand-maintained tables; otherwise they drift into invalid names, imply nonexistent overlays such as `chatRuntime`, or erase intentional differences such as `anthropic` being voice-only.
+Source: task/chat context - `imagegenActionsPromptSection()` previously emitted static model guidance while `resolveDefaultModel()` and `!models set imagegen` used runtime config, and later runtime-path work exposed the same drift pattern across startup parsing, `!models`, doctor/docs, and operator guidance; dedup search on 2026-03-21 against the existing readiness-boundary lesson and this runtime-resolved-config lesson concluded this was a refinement of the existing runtime-resolved-config pattern rather than a distinct new lesson; before-merge promotion decision for this change: updated existing lesson
+Applied: `src/runtime/runtime-path-contract.ts`, `src/discord/models-command.ts`, `src/discord/actions-config.ts`, `src/health/config-doctor.ts`, `docs/configuration.md`, `docs/runtime-switching.md`, `docs/compound-lessons.md`
 Status: active
 
 ### 2026-03-16 - Never interpolate untrusted identifiers into URL path segments without strict validation

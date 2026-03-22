@@ -4,6 +4,7 @@ Canonical operator guide for switching an existing DiscoClaw instance between su
 
 Use this page when you need to answer:
 - Which `.env` is authoritative for this instance?
+- Which runtime names are canonical, and where is each one actually supported?
 - What does `!models` change live, and what survives restart?
 - How do I move between `claude`, `gemini-api`, `gemini-cli`, `codex`, `openai`, and `openrouter`?
 - How do `DISCOCLAW_TIER_OPENROUTER_FAST`, `DISCOCLAW_TIER_OPENROUTER_CAPABLE`, and `DISCOCLAW_TIER_OPENROUTER_DEEP` work?
@@ -19,12 +20,14 @@ Linux `systemd --user` is the primary path below. macOS `launchd` differences ar
 | Change the default adapter for the whole instance | `.env` (`PRIMARY_RUNTIME`) | Yes | Yes |
 | Change a role's model override | `!models set <role> <tier-or-model>` | No | Yes |
 | Make voice stay on a different adapter | `!models set voice <runtime>` | No | Yes |
+| Move fast-tier work onto another adapter | `!models set fast <exact-model>` | No | Yes, if the model uniquely auto-switches `fastRuntime` |
 | Change OpenRouter tier routing | `.env` `DISCOCLAW_TIER_OPENROUTER_<TIER>` | Yes | Yes |
 | Revert roles to this instance's startup defaults | `!models reset` | No | Yes |
 
 Important: `!models reset` means "reset to this instance's startup defaults as resolved at boot from `.env` plus built-in fallbacks". It does not mean "reset to repo defaults".
+Important: if chat is currently live-swapped to another runtime, `!models reset` or `!models reset chat` resets the chat model/default but does not switch the active chat runtime back immediately. There is no persisted `chatRuntime` overlay to clear; restart or switch chat again.
 
-## Supported adapters
+## Canonical runtime names
 
 | Adapter name | Startup via `PRIMARY_RUNTIME` | Requirement |
 | --- | --- | --- |
@@ -35,6 +38,8 @@ Important: `!models reset` means "reset to this instance's startup defaults as r
 | `openai` | yes | Install-mode-specific OpenAI proof gate, not `OPENAI_API_KEY` presence alone |
 | `openrouter` | yes | Shipped env-key path plus live `openrouter-key: ok` proof; not key presence alone |
 | `anthropic` | no | Voice-only direct API runtime; not a valid `PRIMARY_RUNTIME` |
+
+Use these canonical names in operator-facing docs, prompts, and commands. `gemini` is accepted only as a compatibility alias and normalizes to the canonical name `gemini-api`.
 
 For Gemini, keep the runtime paths explicit:
 - `gemini-api` is the API-backed Gemini runtime. `PRIMARY_RUNTIME=gemini` and `!models set <chat|voice> gemini` both normalize to `gemini-api` for compatibility.
@@ -57,6 +62,23 @@ For `openrouter`, the current shipped boundary is narrower:
 - Treat `!models set chat openrouter`, `PRIMARY_RUNTIME=openrouter`, `.env` key presence, and npm-managed `discoclaw doctor` as routing/config evidence only until that proof appears.
 
 For `openai` and `openrouter`, set `OPENAI_COMPAT_TOOLS_ENABLED=1` if you expect full tool use. In logs, the Claude adapter runtime ID is `claude_code` even though the user-facing adapter name is `claude`.
+
+## Runtime-path contract
+
+The operator-facing contract is placement-specific. Supported runtime names, persistence, and reset behavior intentionally differ by placement:
+
+| Placement | Operator path | Supported canonical runtime names | Persistence | Reset behavior |
+| --- | --- | --- | --- | --- |
+| Startup default | `.env` `PRIMARY_RUNTIME` | `claude`, `codex`, `gemini-api`, `gemini-cli`, `openai`, `openrouter` | `.env` | Edit `.env`, then restart |
+| Live chat runtime swap | `!models set chat <runtime>` | `claude`, `codex`, `gemini-api`, `gemini-cli`, `openai`, `openrouter` | Memory only | Restart or another explicit chat runtime switch |
+| Persisted fast runtime overlay | `!models set fast <model>` when an exact model string uniquely reverse-maps to another runtime | `claude`, `codex`, `gemini-api`, `gemini-cli`, `openai`, `openrouter` | `runtime-overrides.json` (`fastRuntime`) | `!models reset fast` or `!models reset` |
+| Persisted voice runtime overlay | `!models set voice <runtime>` or voice auto-switch from an exact cross-provider model string | `anthropic`, `claude`, `codex`, `gemini-api`, `gemini-cli`, `openai`, `openrouter` | `runtime-overrides.json` (`voiceRuntime`) | `!models reset voice` or `!models reset` |
+
+Contract notes:
+- `gemini` is accepted anywhere `gemini-api` is supported, but operator-facing output should prefer the canonical name `gemini-api`.
+- `anthropic` is valid only for voice placement. It is intentionally voice-only and is never a valid `PRIMARY_RUNTIME` or `!models set chat <runtime>` target.
+- There is no persisted `chatRuntime` overlay in `runtime-overrides.json`. Chat runtime swaps are intentionally live-only.
+- `voiceRuntime` and `fastRuntime` are the only persisted runtime-path overlays today.
 
 ## Find the authoritative instance first
 
@@ -105,17 +127,19 @@ Prefer `!restart logs` for service logs. On Linux, `journalctl --user -u discocl
 
 Do not print the full `.env` into Discord, terminal transcripts, or audit logs unless you already redacted secrets. If `DISCOCLAW_DATA_DIR` is defined only inside `.env`, read it from the filtered output first and substitute the real path manually. A missing `runtime-overrides.json` file is normal.
 
-## The three layers of runtime/model state
+## The four layers of runtime/model state
 
 | Layer | What it controls | Where it lives | How it changes |
 | --- | --- | --- | --- |
 | Built-in defaults | Repo-shipped role defaults and tier maps | Code (`src/model-config.ts`, `src/runtime/model-tiers.ts`) | Only when the software version changes |
 | Startup defaults for this instance | What DiscoClaw boots with before live overrides | `.env` plus built-in fallbacks | Edit `.env`, then restart |
-| Persistent live overrides | Role/model/runtime changes made after startup | `models.json` and `runtime-overrides.json` | `!models ...` and runtime auto-switches |
+| Persistent live overrides | Role model overrides plus persisted fast/voice runtime overlays | `models.json` and `runtime-overrides.json` | `!models ...` and fast/voice runtime auto-switches |
+| Live-only chat runtime swap | Temporary main-runtime adapter changes after startup | Memory only | `!models set chat <runtime>`, then restart or switch chat again |
 
 Keep the files separate:
 - `models.json` stores model strings per role.
 - `runtime-overrides.json` stores runtime-only overlays such as `voiceRuntime`, `fastRuntime`, and `ttsVoice`.
+- There is no `chatRuntime` key because chat runtime swaps do not persist.
 
 On first run, `models.json` is scaffolded from the startup defaults that instance booted with.
 
@@ -173,9 +197,9 @@ Even without overrides, `PRIMARY_RUNTIME=openrouter` and the default `OPENROUTER
 | Adapter default model | `.env` `OPENAI_MODEL`, `OPENROUTER_MODEL`, `GEMINI_MODEL`, `CODEX_MODEL` | `GEMINI_MODEL` applies to both `gemini-api` and `gemini-cli`; used when a role follows the adapter default |
 | Tier map for a runtime | `.env` `DISCOCLAW_TIER_<RUNTIME>_<TIER>` | Restart required |
 | Per-role model override | `models.json` | Written by `!models set <role> <tier-or-model>` |
-| Persistent fast runtime override | `runtime-overrides.json` | Written when fast auto-switches to another runtime |
-| Persistent voice runtime override | `runtime-overrides.json` | Written by `!models set voice <runtime>` or by voice auto-switch |
-| Temporary main-runtime swap | live memory only | Written by `!models set chat <runtime>`; lost on restart |
+| Persistent fast runtime override | `runtime-overrides.json` (`fastRuntime`) | Written when fast auto-switches to another runtime from an exact uniquely owned model string |
+| Persistent voice runtime override | `runtime-overrides.json` (`voiceRuntime`) | Written by `!models set voice <runtime>` or by voice auto-switch |
+| Temporary main-runtime swap | Memory only | Written by `!models set chat <runtime>`; lost on restart because there is no persisted `chatRuntime` overlay |
 
 Legacy note: `DISCOCLAW_FAST_RUNTIME` is deprecated. Prefer `!models set fast <model>`, which updates `models.json` and can persist `fastRuntime` in `runtime-overrides.json` when the model string uniquely identifies one runtime. Shared IDs such as `gpt-5.4` fail closed and do not auto-switch. Keep `DISCOCLAW_FAST_RUNTIME` only for startup compatibility; `!models reset` does not clear it because reset does not edit `.env`.
 
@@ -183,15 +207,15 @@ Legacy note: `DISCOCLAW_FAST_RUNTIME` is deprecated. Prefer `!models set fast <m
 
 | Role | `!models set` persistence | Runtime behavior |
 | --- | --- | --- |
-| `chat` | Tier/model values persist to `models.json` | `!models set chat <runtime>` swaps the main runtime live, resets chat to that adapter default, keeps plan/deferred-run/cron-exec on the main runtime adapter, and does not write the runtime name to disk |
-| `fast` | Persists the model value to `models.json` | Concrete model strings can auto-switch the fast runtime and write `fastRuntime` |
+| `chat` | Tier/model values persist to `models.json`; runtime-name swaps do not | `!models set chat <runtime>` swaps the main runtime live, resets chat to that adapter default, keeps plan/deferred-run/cron-exec on the main runtime adapter, and does not write any `chatRuntime` key to disk |
+| `fast` | Persists the model value to `models.json` | Concrete exact-match model strings can auto-switch the fast runtime and write canonical runtime names to `fastRuntime` |
 | `plan-run` | Persists the model value to `models.json` | Used by `!plan run`, `!plan run-one`, `!plan run-phase`, and `planRun`. It has its own startup default (`DISCOCLAW_PLAN_RUN_MODEL`, default `capable`) and does not inherit the `chat` role's current model string |
 | `summary` | Persists to `models.json` | Uses the fast runtime; model strings do not auto-switch runtimes |
 | `cron` | Persists to `models.json` | Uses the fast runtime; model strings do not auto-switch runtimes |
 | `cron-exec` | Persists to `models.json` unless you use `default` | Follows chat runtime unless overridden by cron-specific config; model strings do not auto-switch runtimes |
 | `forge-drafter` | Persists to `models.json` | Follows chat runtime unless env says otherwise; model strings do not auto-switch runtimes |
 | `forge-auditor` | Persists to `models.json` | Follows chat runtime unless env says otherwise; model strings do not auto-switch runtimes |
-| `voice` | Persists the model to `models.json` | `!models set voice <runtime>` or a concrete cross-provider model can write `voiceRuntime` |
+| `voice` | Tier/model values persist to `models.json`; runtime-name swaps persist only in `runtime-overrides.json` | `!models set voice <runtime>` or a concrete cross-provider model can write canonical runtime names to `voiceRuntime`; `anthropic` is supported here only |
 
 Only `fast` and `voice` auto-switch runtimes from concrete model ownership. For `chat`, only an explicit runtime name such as `openrouter` changes the runtime; plain model strings stay on the current runtime. `plan-run`, `summary`, `cron`, `cron-exec`, `forge-drafter`, and `forge-auditor` also keep their current runtime and can therefore be left pointing at a model string that the active runtime cannot serve.
 
@@ -199,7 +223,7 @@ Important reset semantics:
 - `!models reset` writes startup-default model strings back into `models.json`.
 - `!models reset` clears `fastRuntime` and `voiceRuntime` overlays from `runtime-overrides.json`.
 - `!models reset` does not remove legacy env vars such as `DISCOCLAW_FAST_RUNTIME`.
-- `!models reset chat` resets the chat model string, but it does not undo a live chat adapter swap until you restart or switch chat again.
+- `!models reset chat` resets the chat model string, but it does not undo a live chat adapter swap until you restart or switch chat again because there is no persisted `chatRuntime` overlay to clear.
 
 If you ran `!models set chat openrouter`, the active runtime row can stay on OpenRouter even after `!models reset chat`. Restart if you want the startup adapter back immediately.
 

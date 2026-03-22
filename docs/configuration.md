@@ -34,9 +34,21 @@ For npm-managed daemon installs, readiness is currently constrained by service e
 
 ## Model Configuration
 
-Model assignments are configured in `models.json` under the data dir (`$DISCOCLAW_DATA_DIR/models.json`; default `./data/models.json` in a source checkout). Each role (`chat`, `fast`, `plan-run`, `voice`, forge roles, cron roles, etc.) stores a model string only. Runtime-only overlays such as `voiceRuntime` and `fastRuntime` persist separately in `runtime-overrides.json`. See `src/model-config.ts` and `src/runtime-overrides.ts` for the loading logic.
+Model/runtime state is intentionally split across three storage modes:
 
-On first run, `models.json` is scaffolded from the instance startup defaults. `!models set ...` updates it at runtime. `!models reset` writes the startup-default model strings back into `models.json` and clears matching fast/voice runtime overlays from `runtime-overrides.json`. The `plan-run` role is independent from `chat` and starts from `DISCOCLAW_PLAN_RUN_MODEL` (default `capable`) rather than the live chat model.
+- `models.json` stores persisted model strings per role (`chat`, `fast`, `plan-run`, `voice`, forge roles, cron roles, etc.).
+- `runtime-overrides.json` stores persisted runtime-only overlays such as `fastRuntime` and `voiceRuntime` (plus non-model keys such as `ttsVoice`).
+- Live chat runtime swaps stay in memory only. `!models set chat <runtime>` changes the active chat runtime immediately, but there is no persisted `chatRuntime` overlay.
+
+On first run, `models.json` is scaffolded from the instance startup defaults. After that:
+
+- `!models set <role> <tier-or-model>` persists the role's model string in `models.json`.
+- `!models set voice <runtime>` persists the voice runtime overlay in `runtime-overrides.json`.
+- `!models set fast <model>` can persist `fastRuntime` in `runtime-overrides.json` when the exact model string uniquely reverse-maps to another runtime.
+- `!models set chat <runtime>` is live-only and resets on restart or another explicit runtime switch.
+- `!models reset` writes the startup-default model strings back into `models.json` and clears persisted fast/voice runtime overlays from `runtime-overrides.json`, but it does not create or restore any persisted chat runtime overlay.
+
+The `plan-run` role is independent from `chat` and starts from `DISCOCLAW_PLAN_RUN_MODEL` (default `capable`) rather than the live chat model/runtime. For the full runtime-path matrix covering canonical runtime names, supported placements, persistence, and reset behavior, see [docs/runtime-switching.md](runtime-switching.md).
 
 Legacy env vars `RUNTIME_MODEL`, `DISCOCLAW_PLAN_RUN_MODEL`, and `DISCOCLAW_FAST_MODEL` are still read as startup fallbacks when `models.json` is missing or incomplete, but new deployments should use `models.json` exclusively.
 
