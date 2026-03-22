@@ -8,6 +8,7 @@ import {
   getRuntimePathDefinition,
   getRuntimePlacementDefinition,
   isRuntimeNameSupportedInPlacement,
+  listCanonicalRuntimeNames,
   parseRuntimeNameForPlacement,
   type RuntimePathCanonicalName,
   type RuntimePathPlacement,
@@ -155,6 +156,24 @@ function formatUnsupportedRuntimeSelection(
 
   const supported = getRuntimePlacementDefinition(placement).supportedRuntimeNames.join(', ');
   return `Runtime "${runtimeName}" is not supported for ${describeRuntimePlacement(placement)}. Supported runtime names: ${supported}`;
+}
+
+function formatPromptRuntimeNames(placement: RuntimePathPlacement): string {
+  return listCanonicalRuntimeNames(placement).map((name) => `\`${name}\``).join(', ');
+}
+
+function formatPromptCompatibilityAliases(): string {
+  const aliases = listCanonicalRuntimeNames('live:voice')
+    .flatMap((name) => (getRuntimePathDefinition(name)?.acceptedAliases ?? []).filter((alias) => alias !== name))
+    .filter((alias, index, values) => values.indexOf(alias) === index);
+
+  return aliases.map((alias) => `\`${alias}\``).join(', ');
+}
+
+function formatPromptRoleDescriptions(): string {
+  return Object.entries(ROLE_DESCRIPTIONS)
+    .map(([role, description]) => `- \`${role}\` | ${description}`)
+    .join('\n');
 }
 
 type RuntimeSwitchResolution =
@@ -661,6 +680,13 @@ export function executeConfigAction(
 // ---------------------------------------------------------------------------
 
 export function configActionsPromptSection(): string {
+  const chatRuntimeNames = formatPromptRuntimeNames('live:chat');
+  const voiceOnlyRuntimeNames = listCanonicalRuntimeNames('live:voice')
+    .filter((name) => !isRuntimeNameSupportedInPlacement(name, 'live:chat'))
+    .map((name) => `\`${name}\``)
+    .join(', ');
+  const compatibilityAliases = formatPromptCompatibilityAliases();
+
   return `### Model Configuration
 
 **modelShow** — Show current model assignments for all roles:
@@ -680,28 +706,17 @@ export function configActionsPromptSection(): string {
 <discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
 \`\`\`
 - \`role\` (required): One of \`chat\`, \`plan-run\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`, \`imagegen\`.
-- \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (\`openrouter\`, \`openai\`, \`gemini-api\`, \`gemini-cli\`, \`codex\`, \`claude\`; legacy \`gemini\` maps to \`gemini-api\`; \`anthropic\` is voice-only), or \`default\` (for cron-exec only, to revert to the startup default for that role). For the \`voice\` role, setting a model name that belongs to a different provider's tier map (e.g. \`sonnet\` while voice is on Gemini) will auto-switch the voice runtime to match.
+- \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (${chatRuntimeNames}; compatibility aliases ${compatibilityAliases} normalize to canonical names; voice-only runtime: ${voiceOnlyRuntimeNames}), or \`default\` (for cron-exec only, to revert to the startup default for that role). For the \`voice\` role, setting a model name that belongs to a different provider's tier map (e.g. \`sonnet\` while voice is on Gemini) will auto-switch the voice runtime to match.
 
 **Roles:**
-| Role | What it controls |
-|------|-----------------|
-| \`chat\` | Discord messages, deferred runs, forge fallback |
-| \`plan-run\` | Plan phase execution |
-| \`fast\` | All small/fast tasks (summary, cron auto-tag, tasks auto-tag) |
-| \`forge-drafter\` | Forge plan drafting/revision |
-| \`forge-auditor\` | Forge plan auditing |
-| \`summary\` | Rolling summaries only (overrides fast) |
-| \`cron\` | Cron auto-tagging and model classification (overrides fast) |
-| \`cron-exec\` | Default model for cron job execution; per-job overrides (via \`cronUpdate\`) take priority |
-| \`voice\` | Voice channel AI responses (runtime overlay persists in \`runtime-overrides.json\`) |
-| \`imagegen\` | Default model for image generation |
+${formatPromptRoleDescriptions()}
 
 Persistence semantics:
 - Model-role overrides persist in \`models.json\` and survive restart.
 - Fast and voice runtime overlays persist in \`runtime-overrides.json\`.
 - Chat runtime swaps are live-only memory changes; they reset on restart or another explicit runtime switch.
 
-**modelReset** — Revert model(s) to defaults and clear the override file entry:
+**modelReset** — Revert model(s) to startup defaults. Role resets write startup defaults back to \`models.json\`; fast/voice resets also clear persisted runtime overlays:
 \`\`\`
 <discord-action>{\"type\":\"modelReset\"}</discord-action>
 <discord-action>{\"type\":\"modelReset\",\"role\":\"chat\"}</discord-action>

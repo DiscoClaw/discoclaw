@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { parseRuntimeNameForPlacement } from './runtime/runtime-path-contract.js';
 
 export type RuntimeOverrides = {
   ttsVoice?: string;
@@ -9,6 +10,33 @@ export type RuntimeOverrides = {
 
 const OVERRIDES_FILENAME = 'runtime-overrides.json';
 const KNOWN_OVERRIDE_KEYS = ['ttsVoice', 'voiceRuntime', 'fastRuntime'] as const;
+
+export function normalizeRuntimeOverrides(
+  overrides: RuntimeOverrides,
+): { overrides: RuntimeOverrides; changed: boolean } {
+  const next: RuntimeOverrides = { ...overrides };
+  let changed = false;
+
+  const normalizedVoiceRuntime = parseRuntimeNameForPlacement(
+    overrides.voiceRuntime,
+    'runtime-overrides:voiceRuntime',
+  );
+  if (normalizedVoiceRuntime && normalizedVoiceRuntime !== overrides.voiceRuntime) {
+    next.voiceRuntime = normalizedVoiceRuntime;
+    changed = true;
+  }
+
+  const normalizedFastRuntime = parseRuntimeNameForPlacement(
+    overrides.fastRuntime,
+    'runtime-overrides:fastRuntime',
+  );
+  if (normalizedFastRuntime && normalizedFastRuntime !== overrides.fastRuntime) {
+    next.fastRuntime = normalizedFastRuntime;
+    changed = true;
+  }
+
+  return { overrides: next, changed };
+}
 
 /**
  * Resolve the path to the runtime-overrides.json file.

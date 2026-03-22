@@ -1067,6 +1067,12 @@ describe('configActionsPromptSection', () => {
     expect(section).toContain('models.json');
     expect(section).toContain('runtime-overrides.json');
     expect(section).toContain('Chat runtime swaps are live-only memory changes');
+    expect(section).toContain('`gemini-api`');
+    expect(section).toContain('`gemini-cli`');
+    expect(section).toContain('`anthropic`');
+    expect(section).toContain('compatibility aliases');
+    expect(section).toContain('write startup defaults back to `models.json`');
     expect(section).not.toContain('Changes are **persisted** to `models.json` and survive restart.');
+    expect(section).not.toContain('clear the override file entry');
   });
 });
