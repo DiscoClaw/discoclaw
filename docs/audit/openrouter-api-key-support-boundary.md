@@ -31,7 +31,7 @@ This verdict does **not** mean "OpenRouter is fully parity-complete everywhere."
 | Authoritative `.env`, `PRIMARY_RUNTIME=openrouter`, `!models set chat openrouter`, or similar routing config | Config/routing intent only. These can show that OpenRouter is selected or selectable, but they do not prove the running process can see the key. | `PARTIAL` |
 | `discoclaw init`, `pnpm preflight*`, `discoclaw doctor`, `!doctor` | Setup/bootstrap evidence only for this path. These surfaces may confirm the key is configured or expected, but they are not runtime proof. | `PARTIAL` |
 | `!status` or startup credential report showing `openrouter-key: ok` | Live proof for the shipped env-key slice. This is the current auditable readiness signal for both source-checkout and npm-managed installs because it comes from the running instance under test. | `PASS` |
-| Broader OpenRouter parity claims (tool reliability, workload suitability, tier defaults, model recommendations, one-command install readiness, or all-path equivalence) | Not support-claimable from the current shipped proof. | `DEFERRED` |
+| Broader OpenRouter parity claims (tool reliability, workload suitability, curated workload recommendations, one-command install readiness, or all-path equivalence) | Not support-claimable from the current shipped proof. | `DEFERRED` |
 
 ## Evidence That Counts
 

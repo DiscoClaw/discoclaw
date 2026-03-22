@@ -167,12 +167,12 @@ describe('setup: .env content generation', () => {
       PRIMARY_RUNTIME: 'openrouter',
       OPENROUTER_API_KEY: 'sk-or-test',
       OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
-      OPENROUTER_MODEL: 'openai/gpt-5-mini',
+      OPENROUTER_MODEL: 'anthropic/claude-sonnet-4.6',
     });
     expect(content).toContain('PRIMARY_RUNTIME=openrouter');
     expect(content).toContain('OPENROUTER_API_KEY=sk-or-test');
     expect(content).toContain('OPENROUTER_BASE_URL=https://openrouter.ai/api/v1');
-    expect(content).toContain('OPENROUTER_MODEL=openai/gpt-5-mini');
+    expect(content).toContain('OPENROUTER_MODEL=anthropic/claude-sonnet-4.6');
   });
 
   it('includes PRIMARY_RUNTIME and Codex values when provided', () => {
@@ -262,7 +262,7 @@ describe('setup: wizard copy contract', () => {
     expect(setupSource).toContain("'Provider [1-5]: '");
     expect(setupSource).toContain("values.PRIMARY_RUNTIME = 'openrouter';");
     expect(setupSource).toContain("values.OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';");
-    expect(setupSource).toContain("values.OPENROUTER_MODEL = 'openai/gpt-5-mini';");
+    expect(setupSource).toContain("values.OPENROUTER_MODEL = 'anthropic/claude-sonnet-4.6';");
     expect(setupSource).toContain('Run `pnpm preflight:blank-machine` and fix any config issues it reports.');
     expect(setupSource).toContain('Start discoclaw with `pnpm dev` and confirm `!status` (or the startup credential report) shows `openrouter-key: ok` for the active OpenRouter path.');
     expect(setupSource).toContain('Treat that `openrouter-key: ok` signal as proof only for the shipped `OPENROUTER_API_KEY` path, not broader OpenRouter parity.');

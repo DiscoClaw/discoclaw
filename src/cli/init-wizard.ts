@@ -396,7 +396,7 @@ export async function runInitWizard(): Promise<void> {
       'OpenRouter API key: ',
       (val) => (val ? null : 'API key is required'),
     );
-    values.OPENROUTER_MODEL = 'openai/gpt-5-mini';
+    values.OPENROUTER_MODEL = 'anthropic/claude-sonnet-4.6';
   }
 
   values.DISCOCLAW_DISCORD_ACTIONS = '1';

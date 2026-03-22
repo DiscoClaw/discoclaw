@@ -529,9 +529,9 @@ describe('parseConfig', () => {
     expect(config.openrouterApiKey).toBe('sk-or-test');
   });
 
-  it('defaults openrouterModel to "openai/gpt-5-mini"', () => {
+  it('defaults openrouterModel to "anthropic/claude-sonnet-4.6"', () => {
     const { config } = parseConfig(env());
-    expect(config.openrouterModel).toBe('openai/gpt-5-mini');
+    expect(config.openrouterModel).toBe('anthropic/claude-sonnet-4.6');
   });
 
   it('parses OPENROUTER_PROVIDER_PREFERENCES into a validated object', () => {

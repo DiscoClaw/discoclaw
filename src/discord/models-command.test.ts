@@ -172,7 +172,7 @@ describe('handleModelsCommand', () => {
   it('show appends the OpenRouter support-boundary note when OpenRouter is active', () => {
     const spy = vi.spyOn(actionsConfig, 'executeConfigAction').mockReturnValue({
       ok: true,
-      summary: '**runtime**: `openrouter`\n**chat**: `openai/gpt-5-mini`',
+      summary: '**runtime**: `openrouter`\n**chat**: `anthropic/claude-sonnet-4.6`',
     });
     const result = handleModelsCommand(
       { action: 'show' },
@@ -181,7 +181,7 @@ describe('handleModelsCommand', () => {
           ...mockConfigCtx,
           runtime: {
             id: 'openrouter',
-            defaultModel: 'openai/gpt-5-mini',
+            defaultModel: 'anthropic/claude-sonnet-4.6',
           } as any,
           runtimeName: 'openrouter',
         },
@@ -216,7 +216,7 @@ describe('handleModelsCommand', () => {
       ...mockConfigCtx,
       runtime: {
         id: 'openrouter',
-        defaultModel: 'openai/gpt-5-mini',
+        defaultModel: 'anthropic/claude-sonnet-4.6',
       } as any,
       runtimeName: 'openrouter',
     };
@@ -224,7 +224,7 @@ describe('handleModelsCommand', () => {
       openrouterCtx.runtimeName = 'openrouter';
       return {
         ok: true,
-        summary: 'Model updated: runtime → openrouter, chat → openai/gpt-5-mini (adapter default)',
+        summary: 'Model updated: runtime → openrouter, chat → anthropic/claude-sonnet-4.6 (adapter default)',
       };
     });
     const result = handleModelsCommand(

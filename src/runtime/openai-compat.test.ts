@@ -1028,7 +1028,7 @@ describe('OpenAI-compat tool loop', () => {
       id: 'openrouter',
       baseUrl: 'https://openrouter.ai/api/v1',
       apiKey: 'test-key',
-      defaultModel: 'openai/gpt-5-mini',
+      defaultModel: 'anthropic/claude-sonnet-4.6',
       enableTools: true,
       providerPreferences,
     });
