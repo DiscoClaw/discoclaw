@@ -1012,31 +1012,33 @@ log.info(
   'runtime:codex registered',
 );
 
-// Register Gemini runtime — prefer REST API when GEMINI_API_KEY is set (zero startup
-// overhead), fall back to CLI adapter when it's not (uses OAuth or env-based auth).
+// Register Gemini runtimes under explicit names so selection no longer depends on
+// whether GEMINI_API_KEY happened to be present at startup.
 if (cfg.geminiApiKey) {
   const geminiRestRaw = createGeminiRestRuntime({
     apiKey: cfg.geminiApiKey,
     defaultModel: cfg.geminiModel,
     log,
   });
+  registerRuntime('gemini-api', geminiRestRaw);
+  // Keep the legacy alias pointed at the REST adapter for compatibility.
   registerRuntime('gemini', geminiRestRaw);
   log.info(
-    { adapter: 'rest', model: cfg.geminiModel },
-    'runtime:gemini registered (REST API)',
-  );
-} else {
-  const geminiCliRaw = createGeminiCliRuntime({
-    geminiBin: cfg.geminiBin,
-    defaultModel: cfg.geminiModel,
-    log,
-  });
-  registerRuntime('gemini', geminiCliRaw);
-  log.info(
-    { adapter: 'cli', geminiBin: cfg.geminiBin, model: cfg.geminiModel },
-    'runtime:gemini registered (CLI)',
+    { runtimeName: 'gemini-api', adapter: 'rest', model: cfg.geminiModel, legacyAlias: 'gemini' },
+    'runtime:gemini-api registered (REST API)',
   );
 }
+
+const geminiCliRaw = createGeminiCliRuntime({
+  geminiBin: cfg.geminiBin,
+  defaultModel: cfg.geminiModel,
+  log,
+});
+registerRuntime('gemini-cli', geminiCliRaw);
+log.info(
+  { runtimeName: 'gemini-cli', adapter: 'cli', geminiBin: cfg.geminiBin, model: cfg.geminiModel },
+  'runtime:gemini-cli registered (CLI)',
+);
 
 const claudeRequested = primaryRuntimeName === 'claude'
   || fastRuntimeName === 'claude'
