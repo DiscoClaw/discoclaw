@@ -23,7 +23,7 @@ Current model IDs (as of 2026-02-17):
 | Google | Gemini 2.5 Pro | `gemini-2.5-pro` |
 | Google | Gemini 2.5 Flash | `gemini-2.5-flash` |
 
-**OpenRouter model IDs** use provider-namespaced format: `anthropic/claude-sonnet-4`, `openai/gpt-4o`, etc. Always check the OpenRouter model list for current IDs — do not guess.
+**OpenRouter model IDs** use provider-namespaced format: `anthropic/claude-sonnet-4.6`, `openai/gpt-4o`, etc. Always check the OpenRouter model list for current IDs — do not guess.
 
 ## Runtime Adapter Interface
 - The orchestrator consumes a provider-agnostic event stream (`EngineEvent`) from any adapter.
@@ -150,8 +150,14 @@ When both `ANTHROPIC_API_KEY` and `DISCOCLAW_VOICE_ENABLED=1` are set, the start
   |-----|---------|---------|
   | `OPENROUTER_API_KEY` | *(required)* | API key; also gates registration |
   | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | OpenRouter API base URL |
-  | `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4` | Default model (provider-namespaced) |
-- Model naming: OpenRouter uses provider-namespaced IDs — e.g. `anthropic/claude-sonnet-4`, `openai/gpt-4o`, `google/gemini-2.5-pro`. Never use bare model names.
+  | `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4.6` | Default model (provider-namespaced) |
+  | `OPENROUTER_PROVIDER_PREFERENCES` | *(unset)* | Optional JSON string forwarded as OpenRouter's request `provider` object |
+- Model naming: OpenRouter uses provider-namespaced IDs — e.g. `anthropic/claude-sonnet-4.6`, `openai/gpt-4o`, `google/gemini-2.5-pro`. Never use bare model names.
+- Built-in tier map:
+  - `fast` → `openai/gpt-5-mini`
+  - `capable` → `anthropic/claude-sonnet-4.6`
+  - `deep` → `anthropic/claude-opus-4.6`
+  Override with `DISCOCLAW_TIER_OPENROUTER_<TIER>` when needed.
 - Capabilities:
   - `streaming_text` only (unless `OPENAI_COMPAT_TOOLS_ENABLED=1` — see [OpenAI-Compat Tool Use](#openai-compat-tool-use) below)
   - No tool execution (unless `OPENAI_COMPAT_TOOLS_ENABLED=1`)

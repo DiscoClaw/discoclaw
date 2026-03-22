@@ -1,6 +1,8 @@
+import type { DiscoclawConfig } from './config.js';
 import type { RuntimeRegistry } from './runtime/registry.js';
 import { withConcurrencyLimit, type ConcurrencyLimiter } from './runtime/concurrency-limit.js';
 import { withGlobalSupervisor, type GlobalSupervisorLimits } from './runtime/global-supervisor.js';
+import type { OpenAICompatOpts } from './runtime/openai-compat.js';
 import type { RuntimeAdapter } from './runtime/types.js';
 
 type RuntimeLog = {
@@ -129,6 +131,32 @@ export function collectActiveProviders(opts: {
   if (opts.drafterRuntime?.id) activeProviders.add(opts.drafterRuntime.id);
   if (opts.auditorRuntime?.id) activeProviders.add(opts.auditorRuntime.id);
   return activeProviders;
+}
+
+type OpenRouterRuntimeConfig = Pick<
+  DiscoclawConfig,
+  | 'openrouterApiKey'
+  | 'openrouterBaseUrl'
+  | 'openrouterModel'
+  | 'openrouterProviderPreferences'
+  | 'openaiCompatToolsEnabled'
+  | 'openaiCompatHybridPipelineEnabled'
+>;
+
+export function buildOpenRouterRuntimeOptions(
+  cfg: OpenRouterRuntimeConfig,
+  log?: { debug(...args: unknown[]): void },
+): OpenAICompatOpts {
+  return {
+    id: 'openrouter',
+    baseUrl: cfg.openrouterBaseUrl ?? 'https://openrouter.ai/api/v1',
+    apiKey: cfg.openrouterApiKey ?? '',
+    defaultModel: cfg.openrouterModel,
+    providerPreferences: cfg.openrouterProviderPreferences,
+    enableTools: cfg.openaiCompatToolsEnabled,
+    enableHybridPipeline: cfg.openaiCompatHybridPipelineEnabled,
+    log,
+  };
 }
 
 export type WrapRuntimeWithGlobalPoliciesOptions = {

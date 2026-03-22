@@ -19,7 +19,7 @@ Linux `systemd --user` is the primary path below. macOS `launchd` differences ar
 | Change the default adapter for the whole instance | `.env` (`PRIMARY_RUNTIME`) | Yes | Yes |
 | Change a role's model override | `!models set <role> <tier-or-model>` | No | Yes |
 | Make voice stay on a different adapter | `!models set voice <runtime>` | No | Yes |
-| Make fast-tier work route through OpenRouter | `.env` `DISCOCLAW_TIER_OPENROUTER_<TIER>` for the tier you need, then use an exact mapped model string | Yes for the env change | Yes |
+| Change OpenRouter tier routing | `.env` `DISCOCLAW_TIER_OPENROUTER_<TIER>` | Yes | Yes |
 | Revert roles to this instance's startup defaults | `!models reset` | No | Yes |
 
 Important: `!models reset` means "reset to this instance's startup defaults as resolved at boot from `.env` plus built-in fallbacks". It does not mean "reset to repo defaults".
@@ -132,22 +132,21 @@ Built-in tier maps shipped in code:
 | `claude` (`claude_code`) | `haiku` | `claude-opus-4-6` | `claude-opus-4-6` |
 | `gemini` | `gemini-2.5-flash` | `gemini-2.5-pro` | `gemini-2.5-pro` |
 | `openai` | `gpt-5-mini` | `gpt-5.4` | `gpt-5.4-pro` |
+| `openrouter` | `openai/gpt-5-mini` | `anthropic/claude-sonnet-4.6` | `anthropic/claude-opus-4.6` |
 | `codex` | `gpt-5.1-codex-mini` | `gpt-5.4` | `gpt-5.4` |
 
-`openrouter` does not ship with a built-in tier map. If you want `fast`, `capable`, or `deep` to resolve through OpenRouter, define the OpenRouter tier env vars yourself.
-
-## OpenRouter tier overrides
+## OpenRouter tier defaults and overrides
 
 Example:
 
 ```bash
 DISCOCLAW_TIER_OPENROUTER_FAST=openai/gpt-5-mini
-DISCOCLAW_TIER_OPENROUTER_CAPABLE=anthropic/claude-sonnet-4
-DISCOCLAW_TIER_OPENROUTER_DEEP=google/gemini-2.5-pro
+DISCOCLAW_TIER_OPENROUTER_CAPABLE=anthropic/claude-sonnet-4.6
+DISCOCLAW_TIER_OPENROUTER_DEEP=anthropic/claude-opus-4.6
 ```
 
-At startup, DiscoClaw reads any `DISCOCLAW_TIER_<RUNTIME>_{FAST,CAPABLE,DEEP}` env vars. For `OPENROUTER`, set only the tiers you actually need. Each defined tier becomes usable for OpenRouter tier resolution, and even a single unique entry is enough for exact-string reverse-mapping in fast/voice runtime auto-switching. This remains manual operator config in the current audited slice; DiscoClaw still does not ship built-in OpenRouter tier defaults or audited tier recommendations. Examples:
-- Set `DISCOCLAW_TIER_OPENROUTER_CAPABLE=anthropic/claude-sonnet-4` if you want `!models set chat capable` while already on OpenRouter.
+At startup, DiscoClaw reads any `DISCOCLAW_TIER_<RUNTIME>_{FAST,CAPABLE,DEEP}` env vars and overlays them onto the shipped defaults. For `OPENROUTER`, the built-in defaults are `fast → openai/gpt-5-mini`, `capable → anthropic/claude-sonnet-4.6`, and `deep → anthropic/claude-opus-4.6`. Set only the tiers you want to change. Each defined tier becomes usable for OpenRouter tier resolution, and even a single unique entry is enough for exact-string reverse-mapping in fast/voice runtime auto-switching. Examples:
+- Set `DISCOCLAW_TIER_OPENROUTER_CAPABLE=anthropic/claude-sonnet-4.6` if you want `!models set chat capable` while already on OpenRouter.
 - Set `DISCOCLAW_TIER_OPENROUTER_FAST=openai/gpt-5-mini` if you want `!models set fast openai/gpt-5-mini` to auto-switch to OpenRouter.
 
 Exact-match rules:
@@ -155,9 +154,7 @@ Exact-match rules:
 - `gpt-5-mini` does not match `openai/gpt-5-mini`
 - `fast` does not match anything because it is a tier name, not a concrete model string
 
-Without the relevant tier vars, `PRIMARY_RUNTIME=openrouter` and `OPENROUTER_MODEL` still work, but OpenRouter only participates in tier resolution or fast/voice auto-switching for the specific tiers you defined. Keep the support claim narrow: source checkouts can pair this manual config with repo smoke-path validation for the exact OpenRouter-backed workload under test, while npm-managed installs should stop at post-start evidence such as `openrouter-key: ok`.
-
-This guide intentionally does not recommend default OpenRouter tier mappings or preferred models yet. Tier defaults and model recommendations are deferred to a later plan; for now, define only the exact `DISCOCLAW_TIER_OPENROUTER_<TIER>` entries you need for your current instance and do not infer broader parity from that manual setup.
+Even without overrides, `PRIMARY_RUNTIME=openrouter` and `OPENROUTER_MODEL` work against the shipped OpenRouter tier map. Keep the support claim narrow: source checkouts still need repo smoke-path validation for the exact OpenRouter-backed workload under test, while npm-managed installs should stop at post-start evidence such as `openrouter-key: ok`.
 
 ## Where each kind of change persists
 
@@ -229,7 +226,7 @@ Use this when the default adapter should remain changed after restart.
 2. Record the current `!models` output and the `.env` keys you are about to change.
 3. Edit `.env` and set `PRIMARY_RUNTIME` to one of `claude`, `gemini`, `codex`, `openai`, or `openrouter`.
 4. Set or verify the adapter-specific default model env var if you care about adapter-default behavior: `GEMINI_MODEL`, `CODEX_MODEL`, `OPENAI_MODEL`, or `OPENROUTER_MODEL`.
-5. If the target is OpenRouter tier switching, set the specific `DISCOCLAW_TIER_OPENROUTER_<TIER>` vars you actually need.
+5. If the target is OpenRouter tier switching, inspect or set the specific `DISCOCLAW_TIER_OPENROUTER_<TIER>` vars you want to override from the shipped defaults.
 6. Clear role overrides that should stop fighting the new startup defaults, usually with `!models reset chat`, `!models reset fast`, `!models reset plan-run`, `!models reset summary`, `!models reset cron`, `!models reset cron-exec`, `!models reset voice`, `!models reset forge-drafter`, and `!models reset forge-auditor`.
 7. Restart the service.
 8. Verify with `!models` and logs.
@@ -253,7 +250,7 @@ Expected result in `!models`: the `runtime` row changes to the new adapter, the 
 ```text
 !models set chat capable
 !models set chat gpt-5.4
-!models set chat anthropic/claude-sonnet-4
+!models set chat anthropic/claude-sonnet-4.6
 ```
 
 Tier names resolve against the current chat runtime's tier map. Concrete model strings are stored as-is in `models.json`. They do not auto-switch chat to another provider: `!models set chat gpt-5-mini` keeps the current chat runtime and only changes the stored model string.
@@ -324,7 +321,7 @@ Good signs:
 - `runtime` changed after a live chat runtime switch
 - `voice` shows `[runtime: gemini]` or similar when intentionally separated
 - `summary`, `cron-auto-tag`, or `tasks-auto-tag` show `[runtime: ...]` when fast runtime moved
-- the displayed model is a concrete model or a tier resolution like ``capable → anthropic/claude-sonnet-4``
+- the displayed model is a concrete model or a tier resolution like ``capable → anthropic/claude-sonnet-4.6``
 
 Bad signs:
 - `runtime` stayed on the old adapter when you expected a chat runtime swap

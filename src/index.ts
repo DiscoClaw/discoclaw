@@ -118,6 +118,7 @@ import { migrateLegacyTaskDataFile, resolveTaskDataPath } from './tasks/path-def
 import { resolveCronTagBootstrapForumId, resolveSessionStorePath } from './index.paths.js';
 import { resolveReactionPromptStoreFilePath } from './discord/reaction-prompt-store.js';
 import {
+  buildOpenRouterRuntimeOptions,
   collectActiveProviders,
   logRuntimeDebugConfig,
   registerRuntimeWithGlobalPolicies,
@@ -972,18 +973,14 @@ if (cfg.openaiApiKey) {
 }
 
 if (cfg.openrouterApiKey) {
-  const openrouterRuntimeRaw = createOpenAICompatRuntime({
-    id: 'openrouter',
-    baseUrl: cfg.openrouterBaseUrl ?? 'https://openrouter.ai/api/v1',
-    apiKey: cfg.openrouterApiKey,
-    defaultModel: cfg.openrouterModel,
-    enableTools: cfg.openaiCompatToolsEnabled,
-    enableHybridPipeline: cfg.openaiCompatHybridPipelineEnabled,
-    log,
-  });
+  const openrouterRuntimeRaw = createOpenAICompatRuntime(buildOpenRouterRuntimeOptions(cfg, log));
   registerRuntime('openrouter', openrouterRuntimeRaw);
   log.info(
-    { baseUrl: cfg.openrouterBaseUrl ?? 'https://openrouter.ai/api/v1', model: cfg.openrouterModel },
+    {
+      baseUrl: cfg.openrouterBaseUrl ?? 'https://openrouter.ai/api/v1',
+      model: cfg.openrouterModel,
+      providerPreferences: cfg.openrouterProviderPreferences,
+    },
     'runtime:openrouter registered',
   );
 }

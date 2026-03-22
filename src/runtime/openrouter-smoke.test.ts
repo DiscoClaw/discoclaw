@@ -67,7 +67,7 @@ function parseSmokeTierEnv(envVarName: string): string[] {
 function buildOpenRouterSmokeRuntime(env: NodeJS.ProcessEnv = process.env): OpenRouterSmokeState {
   const apiKey = env.OPENROUTER_API_KEY?.trim() || '';
   const baseUrl = env.OPENROUTER_BASE_URL?.trim() || 'https://openrouter.ai/api/v1';
-  const defaultModel = env.OPENROUTER_MODEL?.trim() || 'anthropic/claude-sonnet-4-20250514';
+  const defaultModel = env.OPENROUTER_MODEL?.trim() || 'anthropic/claude-sonnet-4.6';
   const enableTools = env.OPENAI_COMPAT_TOOLS_ENABLED === '1';
   const runtime = createOpenAICompatRuntime({
     id: 'openrouter',

@@ -40,7 +40,7 @@ type RuntimeOwnerHint = {
 
 const runtimeOwnerHints: ReadonlyArray<RuntimeOwnerHint> = [
   // OpenRouter models are typically provider-prefixed (for example:
-  // `anthropic/claude-sonnet-4` or `openai/gpt-5-mini`).
+  // `anthropic/claude-sonnet-4.6` or `openai/gpt-5-mini`).
   {
     runtimeId: 'openrouter',
     matches(model: string) {

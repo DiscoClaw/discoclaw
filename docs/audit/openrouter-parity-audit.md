@@ -12,7 +12,7 @@ Reason:
 - DiscoClaw ships a real OpenRouter runtime registration path through the shared OpenAI-compatible adapter and a live credential probe that reports `openrouter-key: ok` only after a successful `GET /models` request.
 - Source checkouts can prove more than npm-managed installs because the repo contains the dedicated OpenRouter workload smoke harness in `src/runtime/openrouter-smoke.test.ts`, while the published npm package does not ship that harness in `package.json.files`.
 - The doctor/init surfaces now align with that narrower boundary: they stop at config/bootstrap or post-start env-key visibility and do not claim broader OpenRouter workload, tool, or install-mode parity.
-- Built-in OpenRouter tier defaults and model recommendations are still intentionally deferred. The runtime can route to explicit OpenRouter models today, but this slice does not audit or recommend a default `fast` / `capable` / `deep` map.
+- The runtime now ships built-in OpenRouter tier defaults and a concrete default `OPENROUTER_MODEL`, but this audit still does not stretch those defaults into blanket workload or install-mode parity claims.
 
 ## Exact Support Boundary By Install Mode
 
@@ -81,7 +81,6 @@ That wording is intentional and should remain aligned with this audit. If a futu
 
 This first `ws-1285` slice does **not** claim the following:
 
-- built-in OpenRouter tier defaults for `DISCOCLAW_TIER_OPENROUTER_FAST`, `DISCOCLAW_TIER_OPENROUTER_CAPABLE`, or `DISCOCLAW_TIER_OPENROUTER_DEEP`
 - curated OpenRouter model recommendations for chat, fast-tier, forge, or action workloads
 - npm-managed OpenRouter workload parity
 - npm-managed OpenRouter workload proof or any broader one-command install-mode workload helper
@@ -89,7 +88,7 @@ This first `ws-1285` slice does **not** claim the following:
 
 The code backs that deferral today:
 
-- `src/runtime/model-tiers.ts` ships built-in tier maps for `claude_code`, `gemini`, `openai`, and `codex`, but not for `openrouter`.
-- `src/config.ts` and `src/cli/init-wizard.ts` still provide a default `OPENROUTER_MODEL`, but that is a routing default, not an audited recommendation.
+- `src/runtime/model-tiers.ts` now ships built-in tier maps for `openrouter` as well as the other built-in runtimes, but those defaults are still routing defaults, not audited workload recommendations.
+- `src/config.ts` and `src/cli/init-wizard.ts` provide the same default `OPENROUTER_MODEL` so config, runtime registration, and shipped examples stay aligned.
 
-Treat later plans as the place to decide default OpenRouter tier maps, preferred models, and stronger npm-managed parity claims. This audit only records the narrower proof boundary that the current runtime can actually support.
+Treat later plans as the place to decide stronger workload-specific recommendations and stronger npm-managed parity claims. This audit only records the narrower proof boundary that the current runtime can actually support.
