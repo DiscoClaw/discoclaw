@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { isAllowlisted, parseAllowBotIds, parseAllowChannelIds, parseAllowUserIds } from './discord/allowlist.js';
 import { parseDashboardTrustedHosts } from './dashboard/options.js';
+import { OPENROUTER_DEFAULT_MODEL } from './runtime/model-tiers.js';
 
 export const KNOWN_TOOLS = new Set([
   'Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'Pipeline', 'Step',
@@ -967,7 +968,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
   const openrouterApiKey = parseTrimmedString(env, 'OPENROUTER_API_KEY');
   const openrouterBaseUrl = parseTrimmedString(env, 'OPENROUTER_BASE_URL');
-  const openrouterModel = parseTrimmedString(env, 'OPENROUTER_MODEL') ?? 'anthropic/claude-opus-4.6';
+  const openrouterModel = parseTrimmedString(env, 'OPENROUTER_MODEL') ?? OPENROUTER_DEFAULT_MODEL;
   const openrouterProviderPreferences = parseOpenRouterProviderPreferences(env, 'OPENROUTER_PROVIDER_PREFERENCES');
   if (primaryRuntime === 'openrouter' && !openrouterApiKey) {
     warnings.push('PRIMARY_RUNTIME=openrouter but OPENROUTER_API_KEY is not set; startup will fail unless another runtime is selected.');

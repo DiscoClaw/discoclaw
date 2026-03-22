@@ -143,7 +143,7 @@ describe('init wizard helpers', () => {
         PRIMARY_RUNTIME: 'openrouter',
         OPENROUTER_API_KEY: 'sk-or-test-key',
         OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
-        OPENROUTER_MODEL: 'anthropic/claude-opus-4.6',
+        OPENROUTER_MODEL: 'anthropic/claude-sonnet-4.6',
       },
       new Date('2026-02-22T00:00:00.000Z'),
     );
@@ -151,7 +151,7 @@ describe('init wizard helpers', () => {
     expect(content).toContain('PRIMARY_RUNTIME=openrouter');
     expect(content).toContain('OPENROUTER_API_KEY=sk-or-test-key');
     expect(content).toContain('OPENROUTER_BASE_URL=https://openrouter.ai/api/v1');
-    expect(content).toContain('OPENROUTER_MODEL=anthropic/claude-opus-4.6');
+    expect(content).toContain('OPENROUTER_MODEL=anthropic/claude-sonnet-4.6');
     expect(content).toContain('# AUTO-DETECTED');
     expect(content).toContain('DISCOCLAW_TASKS_FORUM=1000000000000000002');
     expect(content).toContain('DISCOCLAW_CRON_FORUM=1000000000000000003');
@@ -414,7 +414,7 @@ describe('runInitWizard', () => {
     const newEnv = fs.readFileSync(path.join(tmpDir, '.env'), 'utf8');
     expect(newEnv).toContain('PRIMARY_RUNTIME=openrouter');
     expect(newEnv).toContain('OPENROUTER_API_KEY=sk-or-test-key');
-    expect(newEnv).toContain('OPENROUTER_MODEL=anthropic/claude-opus-4.6');
+    expect(newEnv).toContain('OPENROUTER_MODEL=anthropic/claude-sonnet-4.6');
     expect(newEnv).toContain('DISCOCLAW_DISCORD_ACTIONS=1');
     expect(newEnv).toContain(`DISCOCLAW_DATA_DIR=${path.join(tmpDir, 'data')}`);
     expect(logSpy).toHaveBeenCalledWith(

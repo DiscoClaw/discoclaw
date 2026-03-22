@@ -181,7 +181,7 @@ describe('handleModelsCommand', () => {
           ...mockConfigCtx,
           runtime: {
             id: 'openrouter',
-            defaultModel: 'anthropic/claude-opus-4.6',
+            defaultModel: 'anthropic/claude-sonnet-4.6',
           } as any,
           runtimeName: 'openrouter',
         },
@@ -216,7 +216,7 @@ describe('handleModelsCommand', () => {
       ...mockConfigCtx,
       runtime: {
         id: 'openrouter',
-        defaultModel: 'anthropic/claude-opus-4.6',
+        defaultModel: 'anthropic/claude-sonnet-4.6',
       } as any,
       runtimeName: 'openrouter',
     };
@@ -224,7 +224,7 @@ describe('handleModelsCommand', () => {
       openrouterCtx.runtimeName = 'openrouter';
       return {
         ok: true,
-        summary: 'Model updated: runtime → openrouter, chat → anthropic/claude-opus-4.6 (adapter default)',
+        summary: 'Model updated: runtime → openrouter, chat → anthropic/claude-sonnet-4.6 (adapter default)',
       };
     });
     const result = handleModelsCommand(

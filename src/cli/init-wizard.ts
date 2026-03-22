@@ -10,6 +10,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { OPENROUTER_DEFAULT_MODEL } from '../runtime/model-tiers.js';
 import { validateDiscordToken, validateSnowflake, validateSnowflakes } from '../validate.js';
 import { ensureWorkspaceBootstrapFiles } from '../workspace-bootstrap.js';
 
@@ -396,7 +397,7 @@ export async function runInitWizard(): Promise<void> {
       'OpenRouter API key: ',
       (val) => (val ? null : 'API key is required'),
     );
-    values.OPENROUTER_MODEL = 'anthropic/claude-opus-4.6';
+    values.OPENROUTER_MODEL = OPENROUTER_DEFAULT_MODEL;
   }
 
   values.DISCOCLAW_DISCORD_ACTIONS = '1';

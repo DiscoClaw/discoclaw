@@ -11,6 +11,14 @@ export function isModelTier(s: string): s is ModelTier {
   return tiers.has(s);
 }
 
+export const OPENROUTER_TIER_DEFAULTS: Readonly<Record<ModelTier, string>> = {
+  fast: 'openai/gpt-5-mini',
+  capable: 'anthropic/claude-sonnet-4.6',
+  deep: 'anthropic/claude-opus-4.6',
+};
+
+export const OPENROUTER_DEFAULT_MODEL = OPENROUTER_TIER_DEFAULTS.capable;
+
 /**
  * Maps tier × runtime to a concrete model string.
  * Empty string = adapter-default sentinel (adapter uses its own defaultModel).
@@ -19,11 +27,7 @@ const defaults: Record<string, Record<ModelTier, string>> = {
   claude_code: { fast: 'haiku', capable: 'claude-opus-4-6', deep: 'claude-opus-4-6' },
   gemini: { fast: 'gemini-2.5-flash', capable: 'gemini-2.5-pro', deep: 'gemini-2.5-pro' },
   openai: { fast: 'gpt-5-mini', capable: 'gpt-5.4', deep: 'gpt-5.4-pro' },
-  openrouter: {
-    fast: 'openai/gpt-5-mini',
-    capable: 'anthropic/claude-sonnet-4.6',
-    deep: 'anthropic/claude-opus-4.6',
-  },
+  openrouter: { ...OPENROUTER_TIER_DEFAULTS },
   codex: { fast: 'gpt-5.1-codex-mini', capable: 'gpt-5.4', deep: 'gpt-5.4' },
 };
 
