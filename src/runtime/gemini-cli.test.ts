@@ -320,18 +320,22 @@ describe('Gemini CLI runtime adapter', () => {
     expect(execaOpts.stdin).toBe('pipe');
   });
 
-  it('runtime has correct id and capabilities', () => {
+  it('runtime advertises only the limited Gemini CLI capability contract', () => {
     const rt = createGeminiCliRuntime({
       geminiBin: 'gemini',
       defaultModel: 'gemini-2.5-pro',
     });
 
     expect(rt.id).toBe('gemini');
-    expect(rt.capabilities.has('streaming_text')).toBe(true);
-    // Phase 1: no sessions, no fs tools, no exec tools declared.
+    expect([...rt.capabilities]).toEqual(['streaming_text']);
+    expect(rt.groundedCapabilities).toBeUndefined();
     expect(rt.capabilities.has('sessions')).toBe(false);
-    expect(rt.capabilities.has('tools_fs')).toBe(false);
+    expect(rt.capabilities.has('workspace_instructions')).toBe(false);
     expect(rt.capabilities.has('tools_exec')).toBe(false);
+    expect(rt.capabilities.has('tools_fs')).toBe(false);
+    expect(rt.capabilities.has('tools_web')).toBe(false);
+    expect(rt.capabilities.has('mcp')).toBe(false);
+    expect(rt.capabilities.has('multi_turn')).toBe(false);
   });
 
   it('shutdown cleanup: killActiveGeminiSubprocesses kills tracked processes', async () => {

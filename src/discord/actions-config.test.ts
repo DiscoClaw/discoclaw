@@ -32,6 +32,13 @@ const geminiRuntime: RuntimeAdapter = {
   async *invoke() { /* no-op */ },
 };
 
+const geminiCliRuntime: RuntimeAdapter = {
+  id: 'gemini',
+  capabilities: new Set(),
+  defaultModel: 'gemini-2.5-flash',
+  async *invoke() { /* no-op */ },
+};
+
 function makeRegistry(...entries: [string, RuntimeAdapter][]): RuntimeRegistry {
   const reg = new RuntimeRegistry();
   for (const [name, adapter] of entries) {
@@ -530,6 +537,71 @@ describe('modelSet runtime swap', () => {
     expect(result.summary).toContain('adapter default');
   });
 
+  it('canonicalizes gemini-api runtime selection in modelSet and modelShow', () => {
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['gemini-api', geminiRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'gemini-api' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(ctx.botParams.runtime).toBe(geminiRuntime);
+    expect(ctx.runtime).toBe(geminiRuntime);
+    expect(ctx.runtimeName).toBe('gemini-api');
+    expect(result.summary).toContain('runtime → gemini-api');
+
+    const show = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(show.ok).toBe(true);
+    if (!show.ok) return;
+    expect(show.summary).toContain('**runtime**: `gemini-api`');
+  });
+
+  it('maps the legacy gemini alias to gemini-api for runtime switching', () => {
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'gemini' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(ctx.botParams.runtime).toBe(geminiRuntime);
+    expect(ctx.runtime).toBe(geminiRuntime);
+    expect(ctx.runtimeName).toBe('gemini-api');
+    expect(result.summary).toContain('runtime → gemini-api');
+
+    const show = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(show.ok).toBe(true);
+    if (!show.ok) return;
+    expect(show.summary).toContain('**runtime**: `gemini-api`');
+    expect(show.summary).not.toContain('**runtime**: `gemini`');
+  });
+
+  it('errors instead of storing gemini alias as a plain chat model when the runtime is unavailable', () => {
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'gemini' }, ctx);
+    expect(result).toEqual({
+      ok: false,
+      error: 'Runtime "gemini-api" is not configured in the registry',
+    });
+    expect(ctx.botParams.runtime).toBe(stubRuntime);
+    expect(ctx.runtime).toBe(stubRuntime);
+    expect(ctx.botParams.runtimeModel).toBe('capable');
+  });
+
+  it('keeps gemini-cli as an explicit runtime selection', () => {
+    const ctx = makeCtx();
+    ctx.runtimeRegistry = makeRegistry(['gemini-cli', geminiCliRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'gemini-cli' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(ctx.botParams.runtime).toBe(geminiCliRuntime);
+    expect(ctx.runtime).toBe(geminiCliRuntime);
+    expect(ctx.runtimeName).toBe('gemini-cli');
+    expect(result.summary).toContain('runtime → gemini-cli');
+
+    const show = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(show.ok).toBe(true);
+    if (!show.ok) return;
+    expect(show.summary).toContain('**runtime**: `gemini-cli`');
+  });
+
   it('does not swap runtime for a plain model name like opus', () => {
     const ctx = makeCtx();
     ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
@@ -677,18 +749,31 @@ describe('modelShow runtime line', () => {
 // ---------------------------------------------------------------------------
 
 describe('modelSet voice runtime swap', () => {
-  it('swaps voiceModelCtx.runtime and sets adapter default model', () => {
+  it('canonicalizes the legacy gemini alias for voice runtime swaps', () => {
     const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
     ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime]);
     const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'gemini' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(ctx.botParams.voiceModelCtx!.runtime).toBe(geminiRuntime);
-    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('gemini');
+    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('gemini-api');
     expect(ctx.botParams.voiceModelCtx!.model).toBe('gemini-2.5-flash');
-    expect(ctx.voiceRuntimeName).toBe('gemini');
-    expect(result.summary).toContain('voice runtime → gemini');
+    expect(ctx.voiceRuntimeName).toBe('gemini-api');
+    expect(result.summary).toContain('voice runtime → gemini-api');
     expect(result.summary).toContain('adapter default');
+  });
+
+  it('errors instead of storing gemini alias as a plain voice model when the runtime is unavailable', () => {
+    const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
+    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'gemini' }, ctx);
+    expect(result).toEqual({
+      ok: false,
+      error: 'Runtime "gemini-api" is not configured in the registry',
+    });
+    expect(ctx.botParams.voiceModelCtx!.runtime).toBeUndefined();
+    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBeUndefined();
+    expect(ctx.botParams.voiceModelCtx!.model).toBe('fast');
   });
 
   it('does not swap runtime for a plain model name', () => {
@@ -706,7 +791,7 @@ describe('modelSet voice runtime swap', () => {
       voiceModelCtx: {
         model: 'gemini-2.5-flash',
         runtime: geminiRuntime,
-        runtimeName: 'gemini',
+        runtimeName: 'gemini-api',
       },
     });
     ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime], ['claude', stubRuntime]);
@@ -729,7 +814,7 @@ describe('modelSet voice runtime swap', () => {
     const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'gemini' }, ctx);
     expect(result.ok).toBe(true);
     expect(persistOverrideCalled).toBe(false);
-    expect(persistVoiceRuntimeName).toBe('gemini');
+    expect(persistVoiceRuntimeName).toBe('gemini-api');
   });
 
   it('chat runtime swap does not affect voiceModelCtx.runtime', () => {
@@ -744,13 +829,13 @@ describe('modelSet voice runtime swap', () => {
     expect(ctx.botParams.voiceModelCtx!.model).toBe('fast');
   });
 
-  it('case-insensitive matching — Gemini matches gemini', () => {
+  it('case-insensitive matching keeps the canonical gemini-api voice runtime name', () => {
     const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
     ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime]);
     const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'Gemini' }, ctx);
     expect(result.ok).toBe(true);
     expect(ctx.botParams.voiceModelCtx!.runtime).toBe(geminiRuntime);
-    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('gemini');
+    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('gemini-api');
   });
 });
 
@@ -760,8 +845,8 @@ describe('modelSet voice runtime swap', () => {
 
 describe('modelReset voice runtime', () => {
   it('clears voiceModelCtx.runtime and runtimeName back to undefined', () => {
-    const ctx = makeCtx({ voiceModelCtx: { model: 'gemini-2.5-flash', runtime: geminiRuntime, runtimeName: 'gemini' } });
-    ctx.voiceRuntimeName = 'gemini';
+    const ctx = makeCtx({ voiceModelCtx: { model: 'gemini-2.5-flash', runtime: geminiRuntime, runtimeName: 'gemini-api' } });
+    ctx.voiceRuntimeName = 'gemini-api';
     ctx.envDefaults = { voice: 'fast' };
     let clearVoiceRuntimeCalled = false;
     ctx.clearVoiceRuntime = () => { clearVoiceRuntimeCalled = true; };
@@ -780,7 +865,19 @@ describe('modelReset voice runtime', () => {
 // ---------------------------------------------------------------------------
 
 describe('modelShow voice runtime display', () => {
-  it('displays voice runtime name when it differs from chat', () => {
+  it('displays the canonical voice runtime name when it differs from chat', () => {
+    const ctx = makeCtx({ voiceModelCtx: { model: 'gemini-2.5-flash', runtime: geminiRuntime, runtimeName: 'gemini-api' } });
+    ctx.voiceRuntimeName = 'gemini-api';
+    const result = executeConfigAction({ type: 'modelShow' }, ctx);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const lines = result.summary.split('\n');
+    const voiceLine = lines.find(l => l.includes('**voice**'));
+    expect(voiceLine).toContain('[runtime: gemini-api]');
+    expect(voiceLine).toContain('gemini-2.5-flash');
+  });
+
+  it('canonicalizes a legacy gemini voice runtime name in modelShow output', () => {
     const ctx = makeCtx({ voiceModelCtx: { model: 'gemini-2.5-flash', runtime: geminiRuntime, runtimeName: 'gemini' } });
     ctx.voiceRuntimeName = 'gemini';
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
@@ -788,8 +885,8 @@ describe('modelShow voice runtime display', () => {
     if (!result.ok) return;
     const lines = result.summary.split('\n');
     const voiceLine = lines.find(l => l.includes('**voice**'));
-    expect(voiceLine).toContain('[runtime: gemini]');
-    expect(voiceLine).toContain('gemini-2.5-flash');
+    expect(voiceLine).toContain('[runtime: gemini-api]');
+    expect(voiceLine).not.toContain('[runtime: gemini]');
   });
 
   it('does not annotate voice runtime when it matches chat', () => {
@@ -805,8 +902,8 @@ describe('modelShow voice runtime display', () => {
 
   it('resolves tier names against voice runtime ID, not chat runtime', () => {
     // Voice on gemini with tier 'capable' should resolve to gemini-2.5-pro, not claude_code's capable
-    const ctx = makeCtx({ voiceModelCtx: { model: 'capable', runtime: geminiRuntime, runtimeName: 'gemini' } });
-    ctx.voiceRuntimeName = 'gemini';
+    const ctx = makeCtx({ voiceModelCtx: { model: 'capable', runtime: geminiRuntime, runtimeName: 'gemini-api' } });
+    ctx.voiceRuntimeName = 'gemini-api';
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;

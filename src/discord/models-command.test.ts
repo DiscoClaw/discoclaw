@@ -256,6 +256,12 @@ describe('handleModelsCommand', () => {
     expect(result).toContain('chat');
     expect(result).toContain('forge-drafter');
     expect(result).toContain('!models set chat sonnet');
+    expect(result).toContain('!models set chat gemini-api');
+    expect(result).toContain('!models set voice gemini-api');
+    expect(result).toContain('!models set voice gemini-cli');
+    expect(result).toContain('compatibility alias for `gemini-api`');
+    expect(result).toContain('only advertises `streaming_text`');
+    expect(result).toContain('filtering out tools the runtime does not advertise');
   });
 
   it('help documents the OpenRouter env-key path and verification boundary', () => {

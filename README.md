@@ -79,7 +79,7 @@ Full setup guide: [docs/voice.md](docs/voice.md)
 
 ## How it works
 
-DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with Gemini, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). The OpenAI-compatible and OpenRouter adapters can expose optional tool use when `OPENAI_COMPAT_TOOLS_ENABLED=1` is set, but OpenRouter support claims stop at the narrower audited boundary described below. It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
+DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with `gemini-api`, `gemini-cli`, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). `gemini` remains a compatibility alias for `gemini-api`. The OpenAI-compatible and OpenRouter adapters can expose optional tool use when `OPENAI_COMPAT_TOOLS_ENABLED=1` is set, but OpenRouter support claims stop at the narrower audited boundary described below. The current Gemini CLI path is intentionally narrower: `gemini-cli` advertises only `streaming_text`, so DiscoClaw's runtime capability filtering strips tool calls automatically for that runtime. It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
 
 1. Checks the user allowlist (fail-closed — empty list means respond to nobody)
 2. Assembles context: per-channel rules, conversation history, rolling summary, and durable memory
@@ -140,7 +140,7 @@ For the full operator guide to install-mode detection, persistent adapter switch
 - `!models set voice sonnet` — use a specific model for voice
 - `!models reset` — clear all overrides and revert to startup defaults
 
-Setting `chat` to a runtime name (`openrouter`, `openai`, `gemini`, `codex`, `claude`) live-switches the main runtime path until restart; setting `voice` to a runtime name switches only voice. Exact model-string runtime auto-switching is only implemented for `fast` and `voice`.
+Setting `chat` to a runtime name (`openrouter`, `openai`, `gemini-api`, `gemini-cli`, `gemini`, `codex`, `claude`) live-switches the main runtime path until restart; setting `voice` to a runtime name switches only voice. `gemini` remains a compatibility alias for `gemini-api`. Exact model-string runtime auto-switching is only implemented for `fast` and `voice`.
 
 ## Secret Management
 
@@ -195,11 +195,14 @@ For source checkouts, repo-local managed browser storage is supported only at th
 - **Node.js >=20** — check with `node --version`
 - One primary runtime:
   - **Claude CLI** on your `PATH` — check with `claude --version` (see [Claude CLI docs](https://docs.anthropic.com/en/docs/claude-code) to install), or
-  - **Gemini CLI** on your `PATH` — check with `gemini --version`, or
+  - **Gemini API** via `PRIMARY_RUNTIME=gemini-api` (or the compatibility alias `gemini`) plus `GEMINI_API_KEY`, or
+  - **Gemini CLI** via `PRIMARY_RUNTIME=gemini-cli` with `gemini --version` working on your `PATH`, or
   - **Codex CLI** on your `PATH` — check with `codex --version` (binary presence only; session auth is a separate proof gate), or
   - **OpenAI-compatible API key** via `OPENAI_API_KEY` (config presence only; live auth is a separate proof gate), or
   - **OpenRouter API key** via `OPENROUTER_API_KEY` (config presence only until `!status` or the startup credential report shows `openrouter-key: ok`)
-- Runtime-specific access for your chosen provider (Anthropic plan/API credits for Claude, Google account for Gemini, OpenAI access for Codex/OpenAI models)
+- Runtime-specific access for your chosen provider (Anthropic plan/API credits for Claude, Google API access for `gemini-api`, Google account access for `gemini-cli`, OpenAI access for Codex/OpenAI models)
+
+Current setup wizards (`discoclaw init` and `pnpm setup`) still reflect the legacy Gemini flow and may refer to plain `gemini` until the follow-up setup slice lands. In this release, treat that legacy name as the compatibility alias for `gemini-api`.
 
 For Codex and OpenAI paths, treat binary/key presence as readiness prerequisites only. The install-mode-specific support claims live in the [Codex source-checkout audit](docs/audit/codex-blank-machine-readiness.md) and [Codex npm-managed audit](docs/audit/codex-npm-managed-path.md). For OpenRouter, the shipped support claim is narrower: [docs/audit/openrouter-api-key-support-boundary.md](docs/audit/openrouter-api-key-support-boundary.md) documents only the runtime-visible env-key proof boundary, with source-checkout workload evidence limited to the repo smoke path.
 
