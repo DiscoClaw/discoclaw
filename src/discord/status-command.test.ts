@@ -152,6 +152,13 @@ describe('renderStatusReport', () => {
     expect(out).toContain('API: discord-token: ok, openai-key: skip');
   });
 
+  it('renders the Claude auth boundary as a manual gate', () => {
+    const out = renderStatusReport(makeSnapshot());
+    expect(out).toContain(
+      'Claude auth: unverified by !status (manual gate; verify from a shell/account with no active Claude session)',
+    );
+  });
+
   it('renders explicit OpenRouter proof row for an active runtime path', () => {
     const snap = makeSnapshot({
       apiChecks: [
