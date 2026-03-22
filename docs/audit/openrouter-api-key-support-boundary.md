@@ -1,13 +1,13 @@
 # OpenRouter API Key Support Boundary
 
 Date: 2026-03-21
-Scope: the first auditable DiscoClaw slice for the shipped `OPENROUTER_API_KEY` path, limited to what the product can prove today through its existing readiness surfaces.
+Scope: phase 1 of 2 for `ws-1286`, limited to what the product can prove today for the shipped `OPENROUTER_API_KEY` path through its existing readiness surfaces.
 
 This memo intentionally stays narrow. Use it for the credential-only question:
 
 - can the running DiscoClaw instance see the configured `OPENROUTER_API_KEY` path and complete the shipped `GET /models` probe?
 
-For the broader first-slice parity boundary, including install-mode differences, the repo smoke evidence path for source checkouts, the enforcement behind read-only-tool claims, and the remaining workload-recommendation follow-up work, use the companion [OpenRouter Parity Audit](openrouter-parity-audit.md).
+For the broader current parity boundary, including install-mode differences, the repo smoke evidence path for source checkouts, the enforcement behind read-only-tool claims, the shipped OpenRouter runtime defaults, and the remaining workload-recommendation follow-up work, use the companion [OpenRouter Parity Audit](openrouter-parity-audit.md).
 
 ## 1.0 Verdict
 
@@ -16,6 +16,7 @@ Verdict: `PASS` for the narrowed `OPENROUTER_API_KEY` support slice only.
 Reason:
 
 - DiscoClaw already ships an OpenRouter runtime registration path backed by `OPENROUTER_API_KEY`.
+- The runtime-default slice already ships concrete OpenRouter routing defaults: `OPENROUTER_MODEL=anthropic/claude-sonnet-4.6` and built-in tier values of `fast=openai/gpt-5-mini`, `capable=anthropic/claude-sonnet-4.6`, and `deep=anthropic/claude-opus-4.6`.
 - The shipped credential probe for that path is explicit: `GET /models` against the configured OpenRouter base URL.
 - The proof is operator-visible in shipped readiness surfaces: `!status` and the startup credential report expose `openrouter-key: ok`.
 - Current setup and doctor guidance can now stay support-boundary-safe by treating key presence as config only until that live proof appears.
@@ -54,6 +55,7 @@ When those conditions are met, the support-safe claim is:
 The following are useful troubleshooting inputs, but they are **not** enough to claim shipped OpenRouter readiness on their own:
 
 - `OPENROUTER_API_KEY` being present in `.env`
+- the shipped `OPENROUTER_MODEL` default or built-in OpenRouter tier defaults being present in config/routing state
 - `discoclaw init` completing successfully
 - `pnpm preflight`, `pnpm preflight:blank-machine`, `discoclaw doctor`, or `!doctor` reporting clean config
 - `PRIMARY_RUNTIME=openrouter` or `!models set chat openrouter` showing intended routing
@@ -83,4 +85,4 @@ This audit exists because summary/setup docs had previously compressed too many 
 
 Those docs should now be read as summary surfaces only. This file is the durable reference for what the shipped `OPENROUTER_API_KEY` path can actually support-claim today, what evidence counts, and where the boundary stops.
 
-For anything broader than that env-key proof, do not extend this memo by implication. Hand off to [OpenRouter Parity Audit](openrouter-parity-audit.md), which is the authoritative audit for the wider `ws-1285` install-mode and workload boundary in this first slice.
+For anything broader than that env-key proof, do not extend this memo by implication. Hand off to [OpenRouter Parity Audit](openrouter-parity-audit.md), which is the authoritative audit for the wider `ws-1286` install-mode, runtime-default, and workload boundary in this phase.
