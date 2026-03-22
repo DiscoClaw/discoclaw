@@ -973,7 +973,14 @@ if (cfg.openaiApiKey) {
 }
 
 if (cfg.openrouterApiKey) {
-  const openrouterRuntimeRaw = createOpenAICompatRuntime(buildOpenRouterRuntimeOptions(cfg, log));
+  const openrouterRuntimeOptions = buildOpenRouterRuntimeOptions(
+    { ...cfg, openrouterProviderPreferences: undefined },
+    log,
+  );
+  const openrouterRuntimeRaw = createOpenAICompatRuntime({
+    ...openrouterRuntimeOptions,
+    providerPreferences: cfg.openrouterProviderPreferences,
+  });
   registerRuntime('openrouter', openrouterRuntimeRaw);
   log.info(
     {
