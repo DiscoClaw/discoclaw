@@ -198,6 +198,14 @@ function formatMcpLine(data: Pick<BootReportData, 'mcpStatus' | 'mcpWarnings'>):
   return `MCP · ${label}`;
 }
 
+function hasCredentialAuthProbe(data: Pick<BootReportData, 'credentialHealth'>): boolean {
+  return (data.credentialHealth ?? []).some(({ name }) => /(^|[-_])(auth|session)([-_]|$)/i.test(name));
+}
+
+function formatCredentialLabel(data: Pick<BootReportData, 'credentialHealth'>): string {
+  return hasCredentialAuthProbe(data) ? 'Credentials' : 'Credentials (startup probes only)';
+}
+
 export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): StatusPoster {
   const name = opts?.botDisplayName ?? 'Discoclaw';
   const log = opts?.log;
@@ -329,7 +337,7 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       }
 
       if (data.credentialReport) {
-        lines.push(`Credentials · ${data.credentialReport}`);
+        lines.push(`${formatCredentialLabel(data)} · ${data.credentialReport}`);
       }
 
       if (data.credentialHealth && data.credentialHealth.length > 0) {
