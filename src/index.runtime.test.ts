@@ -299,7 +299,7 @@ describe('buildOpenRouterRuntimeOptions', () => {
       id: 'openrouter',
       apiKey: 'sk-or-test',
       baseUrl: 'https://openrouter.ai/api/v1',
-      defaultModel: 'anthropic/claude-sonnet-4.6',
+      defaultModel: 'openai/gpt-5-mini',
       providerPreferences: {
         order: ['anthropic'],
         allowFallbacks: false,
@@ -316,7 +316,7 @@ describe('buildOpenRouterRuntimeOptions', () => {
     const opts = buildOpenRouterRuntimeOptions(config);
 
     expect(opts.baseUrl).toBe('https://openrouter.ai/api/v1');
-    expect(opts.defaultModel).toBe('anthropic/claude-sonnet-4.6');
+    expect(opts.defaultModel).toBe('openai/gpt-5-mini');
     expect(opts.providerPreferences).toBeUndefined();
   });
 });

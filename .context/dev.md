@@ -194,7 +194,7 @@ Two setup paths:
 | `OPENAI_MODEL` | `gpt-4o` | Default model for the OpenAI adapter |
 | `OPENROUTER_API_KEY` | *(empty)* | OpenRouter API key; required when `PRIMARY_RUNTIME=openrouter` |
 | `OPENROUTER_BASE_URL` | *(empty — OpenRouter default)* | OpenRouter API base URL override |
-| `OPENROUTER_MODEL` | `anthropic/claude-sonnet-4.6` | Default model for the OpenRouter adapter |
+| `OPENROUTER_MODEL` | `openai/gpt-5-mini` | Default model for the OpenRouter adapter |
 | `OPENROUTER_PROVIDER_PREFERENCES` | *(empty)* | Optional JSON string forwarded as OpenRouter's request `provider` object |
 | `GEMINI_BIN` | `gemini` | Path/name of the Gemini CLI binary |
 | `GEMINI_MODEL` | `gemini-2.5-pro` | Default model for the Gemini adapter |

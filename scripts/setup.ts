@@ -182,7 +182,7 @@ if (providerChoice === '1') {
     (val) => (val ? null : 'API key is required'),
   );
   values.OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
-  values.OPENROUTER_MODEL = 'anthropic/claude-sonnet-4-20250514';
+  values.OPENROUTER_MODEL = 'openai/gpt-5-mini';
 }
 
 // --- Recommended values ---

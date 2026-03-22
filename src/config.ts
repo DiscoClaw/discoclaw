@@ -967,7 +967,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
   const openrouterApiKey = parseTrimmedString(env, 'OPENROUTER_API_KEY');
   const openrouterBaseUrl = parseTrimmedString(env, 'OPENROUTER_BASE_URL');
-  const openrouterModel = parseTrimmedString(env, 'OPENROUTER_MODEL') ?? 'anthropic/claude-sonnet-4.6';
+  const openrouterModel = parseTrimmedString(env, 'OPENROUTER_MODEL') ?? 'openai/gpt-5-mini';
   const openrouterProviderPreferences = parseOpenRouterProviderPreferences(env, 'OPENROUTER_PROVIDER_PREFERENCES');
   if (primaryRuntime === 'openrouter' && !openrouterApiKey) {
     warnings.push('PRIMARY_RUNTIME=openrouter but OPENROUTER_API_KEY is not set; startup will fail unless another runtime is selected.');
