@@ -1,76 +1,74 @@
 # Claude Blank-Machine Readiness Audit
 
-Date: 2026-03-20
-Scope: what the source-checkout preflight surface owned by `scripts/doctor.ts` can actually prove for a first-time Claude operator on this repo today.
+Date: 2026-03-22
+Scope: what `pnpm preflight:blank-machine` plus `pnpm claude:auth-smoke` can honestly claim today for the blessed Claude source-checkout path
 
-## 1.0 Verdict
+## Current Verdict
 
-Verdict: `PASS` for the repo-owned source-checkout Claude readiness path.
+Verdict: `PASS` for fresh-clone post-login source-checkout readiness
+
+First-login stranger path release gate: `OPEN`
 
 Reason:
 
-- the automated doctor can verify local prerequisites such as Node, pnpm, Claude CLI presence/version, Discord env formatting, and the forum bootstrap path
-- the repo now ships `pnpm claude:auth-smoke` as the Claude auth-aware smoke check for this source path
-- Claude login still happens interactively, but the pre-login and post-login validation step is now a checked-in repo command instead of a handwritten raw prompt
+- the real `/tmp/discoclaw-test` run showed that the repo-owned source-checkout path can pass preflight from a throwaway clone once clone-local config drift is removed
+- the repo-owned auth smoke correctly classified an isolated no-session Claude shell as unauthenticated
+- the same fresh clone returned the expected authenticated `OK` result from the host's normal logged-in Claude shell
+- the isolated no-session shell was not taken through interactive `claude` login and then rerun, so this evidence does not close the full first-login stranger gate
 
-## Automated Contract
+## What The Automated Surface Can Honestly Prove
 
-`pnpm preflight:blank-machine` and the underlying `scripts/doctor.ts` source-checkout flow should only claim the prerequisites they can verify directly:
+`pnpm preflight:blank-machine` remains a config/bootstrap proof gate only. It can verify:
 
 - local binaries and versions
-- required env presence and basic formatting
-- Discord forum bootstrap eligibility through explicit forum IDs, persisted scaffold state, or `DISCORD_GUILD_ID`
-- shared config-doctor findings
+- required env presence and formatting
+- forum/bootstrap eligibility
+- config-doctor findings that are visible from the repo and clone-local `.env`
 
-They should not claim that Claude is ready end-to-end just because the CLI binary exists.
+The real `/tmp/discoclaw-test` run also showed the practical limit of that claim:
 
-`pnpm claude:auth-smoke` is the separate Claude auth validator for this path. It runs one minimal Claude prompt from the repo and classifies the result as:
+- preflight failed first on `RUNTIME_MODEL is deprecated and still configured`
+- after removing that clone-local legacy key, preflight passed cleanly
 
-- authenticated
-- unauthenticated
-- missing CLI
-- other Claude smoke failure
+That is honest behavior for a config/bootstrap checker. It is not Claude auth proof.
 
-## Manual Validation Path
+## What The Claude Smoke Can Honestly Prove
 
-### Pre-login
+`pnpm claude:auth-smoke` is the separate repo-owned Claude proof gate for this install mode. It can prove only the session context it actually runs in:
 
-1. Run:
-   ```bash
-   pnpm preflight:blank-machine
-   ```
-2. Confirm the automated checks pass.
-3. Confirm the output explicitly says Claude auth validation is separate and points you to `pnpm claude:auth-smoke`.
-4. Run:
-   ```bash
-   pnpm claude:auth-smoke
-   ```
-5. Confirm the expected pre-login result includes:
-   ```text
-   Claude CLI appears installed but not authenticated.
-   ```
+- from an isolated no-session Claude home, it proved `unauthenticated`
+- from the host's normal logged-in Claude shell, it proved `authenticated`
 
-### Login gate
+That means the combined claim is intentionally narrow:
 
-1. Complete Claude CLI authentication interactively on the machine.
-2. If the CLI reports expired or missing auth, re-authenticate before continuing.
+- passing `pnpm preflight:blank-machine` plus a passing `pnpm claude:auth-smoke` in an already-logged-in shell proves the fresh-clone post-login path
+- it does **not** prove the first-login stranger path by itself
+- the first-login stranger gate closes only when the same no-session shell or account records the expected pre-login failure, completes interactive `claude` login, and then records the post-login success rerun
 
-### Post-login
+## Tightened 1.0 Closeout Checklist
 
-1. Re-run:
-   ```bash
-   pnpm claude:auth-smoke
-   ```
-2. Confirm the expected post-login result includes:
-   ```text
-   Claude CLI answered the minimal prompt.
-   ```
-3. Treat that authenticated smoke result, together with a passing `pnpm preflight:blank-machine`, as the current 1.0 readiness check for this source path.
+Use this checklist for the Claude source-checkout 1.0 signoff:
 
-## Follow-up Gap
+1. Create a throwaway clone in `/tmp` and run `pnpm install --frozen-lockfile`.
+2. Supply a real clone-local `.env` and isolate repo-owned state with throwaway `DISCOCLAW_DATA_DIR` and `WORKSPACE_CWD` paths.
+3. Force `PRIMARY_RUNTIME=claude` if the source env came from a different provider path.
+4. Run `pnpm preflight:blank-machine`.
+5. If preflight fails, record the exact config drift or missing prerequisite. Do not silently treat that failure as Claude-auth evidence.
+6. Run `pnpm claude:auth-smoke` from a shell or account with no active Claude session.
+7. Confirm the expected pre-login result contains `Claude CLI appears installed but not authenticated.`
+8. Complete interactive `claude` login in that same shell or account.
+9. Rerun `pnpm claude:auth-smoke` in that same shell or account.
+10. Confirm the expected post-login result contains `Claude CLI answered the minimal prompt.`
+11. Only after steps 6 through 10 happen in the same no-session shell or account may the release closeout mark the first-login stranger gate closed.
+12. If step 10 is captured only from an already-logged-in shell, downgrade the claim to `fresh-clone post-login path only` and leave the first-login stranger gate open.
 
-This is now `PASS` for the current source-checkout contract, but it is still not a single-command fully automated Claude login proof. The remaining gap to that higher bar is an integrated flow that can distinguish:
+## Observed 2026-03-22 Evidence
 
-- Claude CLI missing
-- Claude CLI installed but not authenticated
-- Claude CLI authenticated and able to answer a minimal prompt
+The real throwaway run produced these anchor points:
+
+- `pnpm preflight:blank-machine` initially failed with `RUNTIME_MODEL is deprecated and still configured.`
+- after removing `RUNTIME_MODEL` from the clone-local `.env`, `pnpm preflight:blank-machine` returned `All automated checks passed.`
+- `HOME=/tmp/discoclaw-test-home ... pnpm claude:auth-smoke` returned `Claude CLI appears installed but not authenticated.` with `Not logged in · Please run /login`
+- `pnpm claude:auth-smoke` from the host's normal shell returned `Claude CLI answered the minimal prompt.` with `Output preview: OK`
+
+That is enough to support the current fresh-clone post-login claim. It is not enough to say the first-login stranger path is fully closed.
