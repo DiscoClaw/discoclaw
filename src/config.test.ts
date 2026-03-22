@@ -529,9 +529,45 @@ describe('parseConfig', () => {
     expect(config.openrouterApiKey).toBe('sk-or-test');
   });
 
-  it('defaults openrouterModel to "anthropic/claude-sonnet-4-20250514"', () => {
+  it('defaults openrouterModel to "anthropic/claude-sonnet-4.6"', () => {
     const { config } = parseConfig(env());
-    expect(config.openrouterModel).toBe('anthropic/claude-sonnet-4-20250514');
+    expect(config.openrouterModel).toBe('anthropic/claude-sonnet-4.6');
+  });
+
+  it('parses OPENROUTER_PROVIDER_PREFERENCES into a validated object', () => {
+    const { config } = parseConfig(env({
+      OPENROUTER_PROVIDER_PREFERENCES: JSON.stringify({
+        allow_fallbacks: false,
+        requireParameters: true,
+        order: ['anthropic', 'deepinfra/turbo'],
+        sort: { by: 'throughput', partition: 'none' },
+        preferred_max_latency: { p90: 3 },
+        max_price: { prompt: 1, completion: 2 },
+        zdr: true,
+      }),
+    }));
+
+    expect(config.openrouterProviderPreferences).toEqual({
+      allowFallbacks: false,
+      requireParameters: true,
+      order: ['anthropic', 'deepinfra/turbo'],
+      sort: { by: 'throughput', partition: 'none' },
+      preferredMaxLatency: { p90: 3 },
+      maxPrice: { prompt: 1, completion: 2 },
+      zdr: true,
+    });
+  });
+
+  it('throws when OPENROUTER_PROVIDER_PREFERENCES is malformed JSON', () => {
+    expect(() => parseConfig(env({
+      OPENROUTER_PROVIDER_PREFERENCES: '{"allow_fallbacks": false',
+    }))).toThrow(/OPENROUTER_PROVIDER_PREFERENCES must be valid JSON/);
+  });
+
+  it('throws when OPENROUTER_PROVIDER_PREFERENCES has invalid structured input', () => {
+    expect(() => parseConfig(env({
+      OPENROUTER_PROVIDER_PREFERENCES: JSON.stringify({ order: 'anthropic' }),
+    }))).toThrow(/OPENROUTER_PROVIDER_PREFERENCES\.order must be an array of non-empty strings/);
   });
 
   it('warns when PRIMARY_RUNTIME=openrouter without OPENROUTER_API_KEY', () => {

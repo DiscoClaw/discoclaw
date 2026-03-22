@@ -18,6 +18,30 @@ type ParseResult = {
   infos: string[];
 };
 
+type OpenRouterProviderPercentiles = Partial<Record<'p50' | 'p75' | 'p90' | 'p99', number>>;
+type OpenRouterProviderSortMetric = 'price' | 'throughput' | 'latency';
+type OpenRouterProviderSort = OpenRouterProviderSortMetric | {
+  by: OpenRouterProviderSortMetric;
+  partition?: 'model' | 'none';
+};
+type OpenRouterProviderMaxPrice = Partial<Record<'prompt' | 'completion' | 'image' | 'request', number>>;
+
+export type OpenRouterProviderPreferences = {
+  order?: string[];
+  allowFallbacks?: boolean;
+  requireParameters?: boolean;
+  dataCollection?: 'allow' | 'deny';
+  zdr?: boolean;
+  enforceDistillableText?: boolean;
+  only?: string[];
+  ignore?: string[];
+  quantizations?: string[];
+  sort?: OpenRouterProviderSort;
+  preferredMinThroughput?: number | OpenRouterProviderPercentiles;
+  preferredMaxLatency?: number | OpenRouterProviderPercentiles;
+  maxPrice?: OpenRouterProviderMaxPrice;
+};
+
 export type DiscoclawConfig = {
   token: string;
   allowUserIds: Set<string>;
@@ -148,6 +172,7 @@ export type DiscoclawConfig = {
   openrouterApiKey?: string;
   openrouterBaseUrl?: string;
   openrouterModel: string;
+  openrouterProviderPreferences?: OpenRouterProviderPreferences;
 
   // Gemini adapter config
   geminiApiKey?: string;
@@ -436,6 +461,229 @@ function parseRuntimeTools(env: NodeJS.ProcessEnv, warnings: string[]): string[]
   return filteredTools;
 }
 
+function parseOpenRouterProviderPreferences(
+  env: NodeJS.ProcessEnv,
+  name: string,
+): OpenRouterProviderPreferences | undefined {
+  const raw = parseTrimmedString(env, name);
+  if (!raw) return undefined;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    const detail = error instanceof Error ? `: ${error.message}` : '';
+    throw new Error(`${name} must be valid JSON${detail}`);
+  }
+
+  const ensureObject = (value: unknown, path: string): Record<string, unknown> => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new Error(`${path} must be a JSON object`);
+    }
+    return value as Record<string, unknown>;
+  };
+
+  const ensureBoolean = (value: unknown, path: string): boolean => {
+    if (typeof value !== 'boolean') {
+      throw new Error(`${path} must be a boolean`);
+    }
+    return value;
+  };
+
+  const ensureEnum = <T extends string>(value: unknown, path: string, allowed: readonly T[]): T => {
+    if (typeof value !== 'string' || !allowed.includes(value as T)) {
+      throw new Error(`${path} must be one of ${allowed.join('|')}`);
+    }
+    return value as T;
+  };
+
+  const ensureNonNegativeNumber = (value: unknown, path: string): number => {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      throw new Error(`${path} must be a non-negative number`);
+    }
+    return value;
+  };
+
+  const ensureStringArray = (value: unknown, path: string): string[] => {
+    if (!Array.isArray(value)) {
+      throw new Error(`${path} must be an array of non-empty strings`);
+    }
+    return value.map((entry, index) => {
+      if (typeof entry !== 'string') {
+        throw new Error(`${path}[${index}] must be a non-empty string`);
+      }
+      const trimmed = entry.trim();
+      if (!trimmed) {
+        throw new Error(`${path}[${index}] must be a non-empty string`);
+      }
+      return trimmed;
+    });
+  };
+
+  const pickAliasedValue = (
+    input: Record<string, unknown>,
+    path: string,
+    aliases: readonly string[],
+  ): unknown => {
+    const present = aliases.filter((alias) => Object.hasOwn(input, alias));
+    if (present.length > 1) {
+      throw new Error(`${path} must not specify multiple aliases (${present.join(', ')})`);
+    }
+    return present.length === 1 ? input[present[0]] : undefined;
+  };
+
+  const ensurePercentiles = (value: unknown, path: string): number | OpenRouterProviderPercentiles => {
+    if (typeof value === 'number') return ensureNonNegativeNumber(value, path);
+
+    const objectValue = ensureObject(value, path);
+    const allowedKeys = new Set(['p50', 'p75', 'p90', 'p99']);
+    for (const key of Object.keys(objectValue)) {
+      if (!allowedKeys.has(key)) {
+        throw new Error(`${path} includes unsupported key "${key}"`);
+      }
+    }
+
+    const result: OpenRouterProviderPercentiles = {};
+    let found = false;
+    for (const key of ['p50', 'p75', 'p90', 'p99'] as const) {
+      if (objectValue[key] === undefined) continue;
+      result[key] = ensureNonNegativeNumber(objectValue[key], `${path}.${key}`);
+      found = true;
+    }
+    if (!found) {
+      throw new Error(`${path} must include at least one percentile key`);
+    }
+    return result;
+  };
+
+  const objectValue = ensureObject(parsed, name);
+  const allowedKeys = new Set([
+    'order',
+    'allowFallbacks',
+    'allow_fallbacks',
+    'requireParameters',
+    'require_parameters',
+    'dataCollection',
+    'data_collection',
+    'zdr',
+    'enforceDistillableText',
+    'enforce_distillable_text',
+    'only',
+    'ignore',
+    'quantizations',
+    'sort',
+    'preferredMinThroughput',
+    'preferred_min_throughput',
+    'preferredMaxLatency',
+    'preferred_max_latency',
+    'maxPrice',
+    'max_price',
+  ]);
+  for (const key of Object.keys(objectValue)) {
+    if (!allowedKeys.has(key)) {
+      throw new Error(`${name} includes unsupported key "${key}"`);
+    }
+  }
+
+  const order = pickAliasedValue(objectValue, `${name}.order`, ['order']);
+  const allowFallbacks = pickAliasedValue(objectValue, `${name}.allowFallbacks`, ['allowFallbacks', 'allow_fallbacks']);
+  const requireParameters = pickAliasedValue(objectValue, `${name}.requireParameters`, ['requireParameters', 'require_parameters']);
+  const dataCollection = pickAliasedValue(objectValue, `${name}.dataCollection`, ['dataCollection', 'data_collection']);
+  const zdr = pickAliasedValue(objectValue, `${name}.zdr`, ['zdr']);
+  const enforceDistillableText = pickAliasedValue(
+    objectValue,
+    `${name}.enforceDistillableText`,
+    ['enforceDistillableText', 'enforce_distillable_text'],
+  );
+  const only = pickAliasedValue(objectValue, `${name}.only`, ['only']);
+  const ignore = pickAliasedValue(objectValue, `${name}.ignore`, ['ignore']);
+  const quantizations = pickAliasedValue(objectValue, `${name}.quantizations`, ['quantizations']);
+  const sort = pickAliasedValue(objectValue, `${name}.sort`, ['sort']);
+  const preferredMinThroughput = pickAliasedValue(
+    objectValue,
+    `${name}.preferredMinThroughput`,
+    ['preferredMinThroughput', 'preferred_min_throughput'],
+  );
+  const preferredMaxLatency = pickAliasedValue(
+    objectValue,
+    `${name}.preferredMaxLatency`,
+    ['preferredMaxLatency', 'preferred_max_latency'],
+  );
+  const maxPrice = pickAliasedValue(objectValue, `${name}.maxPrice`, ['maxPrice', 'max_price']);
+
+  const result: OpenRouterProviderPreferences = {};
+  if (order !== undefined) result.order = ensureStringArray(order, `${name}.order`);
+  if (allowFallbacks !== undefined) result.allowFallbacks = ensureBoolean(allowFallbacks, `${name}.allowFallbacks`);
+  if (requireParameters !== undefined) result.requireParameters = ensureBoolean(requireParameters, `${name}.requireParameters`);
+  if (dataCollection !== undefined) {
+    result.dataCollection = ensureEnum(dataCollection, `${name}.dataCollection`, ['allow', 'deny'] as const);
+  }
+  if (zdr !== undefined) result.zdr = ensureBoolean(zdr, `${name}.zdr`);
+  if (enforceDistillableText !== undefined) {
+    result.enforceDistillableText = ensureBoolean(
+      enforceDistillableText,
+      `${name}.enforceDistillableText`,
+    );
+  }
+  if (only !== undefined) result.only = ensureStringArray(only, `${name}.only`);
+  if (ignore !== undefined) result.ignore = ensureStringArray(ignore, `${name}.ignore`);
+  if (quantizations !== undefined) result.quantizations = ensureStringArray(quantizations, `${name}.quantizations`);
+  if (sort !== undefined) {
+    if (typeof sort === 'string') {
+      result.sort = ensureEnum(sort, `${name}.sort`, ['price', 'throughput', 'latency'] as const);
+    } else {
+      const sortObject = ensureObject(sort, `${name}.sort`);
+      const sortAllowedKeys = new Set(['by', 'partition']);
+      for (const key of Object.keys(sortObject)) {
+        if (!sortAllowedKeys.has(key)) {
+          throw new Error(`${name}.sort includes unsupported key "${key}"`);
+        }
+      }
+      result.sort = {
+        by: ensureEnum(sortObject.by, `${name}.sort.by`, ['price', 'throughput', 'latency'] as const),
+        ...(sortObject.partition === undefined
+          ? {}
+          : { partition: ensureEnum(sortObject.partition, `${name}.sort.partition`, ['model', 'none'] as const) }),
+      };
+    }
+  }
+  if (preferredMinThroughput !== undefined) {
+    result.preferredMinThroughput = ensurePercentiles(
+      preferredMinThroughput,
+      `${name}.preferredMinThroughput`,
+    );
+  }
+  if (preferredMaxLatency !== undefined) {
+    result.preferredMaxLatency = ensurePercentiles(
+      preferredMaxLatency,
+      `${name}.preferredMaxLatency`,
+    );
+  }
+  if (maxPrice !== undefined) {
+    const maxPriceObject = ensureObject(maxPrice, `${name}.maxPrice`);
+    const priceAllowedKeys = new Set(['prompt', 'completion', 'image', 'request']);
+    for (const key of Object.keys(maxPriceObject)) {
+      if (!priceAllowedKeys.has(key)) {
+        throw new Error(`${name}.maxPrice includes unsupported key "${key}"`);
+      }
+    }
+    const normalized: OpenRouterProviderMaxPrice = {};
+    for (const key of ['prompt', 'completion', 'image', 'request'] as const) {
+      if (maxPriceObject[key] === undefined) continue;
+      normalized[key] = ensureNonNegativeNumber(maxPriceObject[key], `${name}.maxPrice.${key}`);
+    }
+    if (Object.keys(normalized).length === 0) {
+      throw new Error(`${name}.maxPrice must include at least one pricing key`);
+    }
+    result.maxPrice = normalized;
+  }
+
+  if (Object.keys(result).length === 0) {
+    throw new Error(`${name} must include at least one supported preference`);
+  }
+  return result;
+}
+
 export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const warnings: string[] = [];
   const infos: string[] = [];
@@ -719,7 +967,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
   const openrouterApiKey = parseTrimmedString(env, 'OPENROUTER_API_KEY');
   const openrouterBaseUrl = parseTrimmedString(env, 'OPENROUTER_BASE_URL');
-  const openrouterModel = parseTrimmedString(env, 'OPENROUTER_MODEL') ?? 'anthropic/claude-sonnet-4-20250514';
+  const openrouterModel = parseTrimmedString(env, 'OPENROUTER_MODEL') ?? 'anthropic/claude-sonnet-4.6';
+  const openrouterProviderPreferences = parseOpenRouterProviderPreferences(env, 'OPENROUTER_PROVIDER_PREFERENCES');
   if (primaryRuntime === 'openrouter' && !openrouterApiKey) {
     warnings.push('PRIMARY_RUNTIME=openrouter but OPENROUTER_API_KEY is not set; startup will fail unless another runtime is selected.');
   }
@@ -909,6 +1158,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openrouterApiKey,
       openrouterBaseUrl,
       openrouterModel,
+      openrouterProviderPreferences,
 
       geminiApiKey: parseTrimmedString(env, 'GEMINI_API_KEY'),
       geminiBin: parseTrimmedString(env, 'GEMINI_BIN') ?? 'gemini',
