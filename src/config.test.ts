@@ -137,6 +137,21 @@ describe('parseConfig', () => {
     expect(config.fastRuntime).toBe('claude');
   });
 
+  it('parses PRIMARY_RUNTIME=gemini-api explicitly', () => {
+    const { config } = parseConfig(env({ PRIMARY_RUNTIME: 'gemini-api', GEMINI_API_KEY: 'gemini-key' }));
+    expect(config.primaryRuntime).toBe('gemini-api');
+  });
+
+  it('parses DISCOCLAW_FAST_RUNTIME=gemini-cli explicitly', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_FAST_RUNTIME: 'gemini-cli' }));
+    expect(config.fastRuntime).toBe('gemini-cli');
+  });
+
+  it('normalizes PRIMARY_RUNTIME=gemini to the legacy gemini-api alias', () => {
+    const { config } = parseConfig(env({ PRIMARY_RUNTIME: 'gemini', GEMINI_API_KEY: 'gemini-key' }));
+    expect(config.primaryRuntime).toBe('gemini-api');
+  });
+
   it('warns when PRIMARY_RUNTIME=openai without OPENAI_API_KEY', () => {
     const { warnings } = parseConfig(env({ PRIMARY_RUNTIME: 'openai', OPENAI_API_KEY: undefined }));
     expect(warnings.some((w) => w.includes('PRIMARY_RUNTIME=openai'))).toBe(true);
@@ -847,9 +862,9 @@ describe('parseConfig', () => {
     expect(config.geminiModel).toBe('gemini-2.0-flash');
   });
 
-  it('does not warn when PRIMARY_RUNTIME=gemini (no preflight-checkable auth)', () => {
-    const { warnings } = parseConfig(env({ PRIMARY_RUNTIME: 'gemini' }));
-    expect(warnings.some((w) => w.includes('gemini'))).toBe(false);
+  it('warns when PRIMARY_RUNTIME=gemini-api without GEMINI_API_KEY', () => {
+    const { warnings } = parseConfig(env({ PRIMARY_RUNTIME: 'gemini-api', GEMINI_API_KEY: undefined }));
+    expect(warnings.some((w) => w.includes('PRIMARY_RUNTIME=gemini-api'))).toBe(true);
   });
 
   // --- Codex dangerous bypass ---
