@@ -26,6 +26,57 @@
 - **`release.yml`** — triggers on `main` push. Tags HEAD if the version is new.
 - **`publish.yml`** — does the actual build/test/publish. Triggered by a tag push matching `v*`.
 
+## Claude 1.0 Release Rehearsal (Blessed Source Checkout)
+
+The authoritative rehearsal for the blessed Claude source-checkout path is the repo-owned harness:
+
+```bash
+pnpm release:rehearsal
+```
+
+That harness lives in `scripts/release-rehearsal.ts` and owns one exact contract:
+
+1. Refuse to run unless the current tree is a real source checkout, `<repoRoot>/.env` exists, and that repo-local `.env` resolves `PRIMARY_RUNTIME=claude`.
+2. Run this command sequence in order against that same checkout:
+   - `pnpm preflight:blank-machine`
+   - `pnpm claude:auth-smoke`
+   - `pnpm discord:smoke-test`
+   - `pnpm build`
+   - `pnpm dev`
+3. Hold the live Discord verification points as manual checkpoints for message handling, task sync, cron execution, and restart/recovery.
+4. Tear the rehearsal back down to a reusable baseline and treat any leftover rehearsal artifact as a blocked verdict, not a soft warning.
+5. Write a durable closeout in `docs/release-audit/claude-release-rehearsal-<slug>.json` and `.md`.
+
+### Why each restriction is true
+
+- **Repo-local config source is enforced, not implied.** `scripts/release-rehearsal.ts` refuses to run without `<repoRoot>/.env`, parses that file directly, and blocks if `PRIMARY_RUNTIME` is anything other than `claude`. The first command in the contract is `pnpm preflight:blank-machine`, which routes through `scripts/doctor.ts` and the shared config-doctor path specifically to validate the checkout's own `.env` instead of inheriting your normal shell environment.
+- **Claude auth is a separate gate.** `pnpm claude:auth-smoke` runs `scripts/claude-auth-smoke.ts`, so the rehearsal does not collapse config/bootstrap success into Claude-session success.
+- **Discord bootstrap is a separate gate.** `pnpm discord:smoke-test` runs `scripts/discord-smoke-test.mjs` before the live runtime comes up, so Discord login and basic guild/forum reachability fail fast before the interactive rehearsal steps.
+- **Manual chat checkpoints stay manual.** The live message path in `src/discord/message-coordinator.ts` only serves allowlisted requesters, and Discord does not give the harness a way to impersonate that allowlisted sender for a real end-to-end message turn. The rehearsal therefore pauses for an operator-confirmed TTY checkpoint instead of faking the chat leg.
+- **Task sync verification is tied to the real task owners.** The rehearsal task check exercises the canonical sync path in `src/tasks/task-sync-engine.ts`, while `src/tasks/sync-coordinator.ts` remains the concurrency/coalescing owner for repeated sync triggers.
+- **Cron mutation remains unavailable during the rehearsal.** In `src/index.ts`, the cron executor context is created with `cronActionFlags.crons = false` and `cronActionFlags.archive = false` before `executeCronJob()` in `src/cron/executor.ts` is invoked, so the rehearsal can verify cron execution without allowing cron-emitted action blocks to mutate cron state or archive channels.
+- **Restart/recovery verification is tied to the real recovery owners.** `src/discord/long-run-watchdog.ts` owns persisted long-run recovery/final-post behavior, and `src/health/startup-healing.ts` owns startup healing of stale runtime state. The rehearsal restart step is checking those real boundaries, not a separate fake harness path.
+
+### Isolation, namespace, and teardown
+
+- **Local persistence is isolated by rehearsal-only child-process overrides.** `scripts/release-rehearsal.ts` launches child commands with temporary `DISCOCLAW_DATA_DIR`, `WORKSPACE_CWD`, `GROUPS_DIR`, `BEADS_DIR`, and a rehearsal-only `DISCOCLAW_TASKS_PREFIX`, so the local task/cron/workspace stores do not share state with the operator's normal environment.
+- **Live Discord artifacts are namespaced.** The harness generates a unique rehearsal slug and uses it in the rehearsal task title and cron name, so live Discord-visible artifacts can be identified and swept deterministically.
+- **Teardown is part of the verdict.** Cleanup closes rehearsal tasks, runs the task-sync path to archive related task threads, archives rehearsal cron threads, and checks the canonical cron record state. If any task, task thread, cron thread, or cron record remains unresolved, `scripts/release-rehearsal.ts` records that leftover and finishes `blocked`.
+
+### Manual fallback
+
+If you need to diagnose a failing step outside the harness, use the same blessed order manually:
+
+```bash
+pnpm preflight:blank-machine
+pnpm claude:auth-smoke
+pnpm discord:smoke-test
+pnpm build
+pnpm dev
+```
+
+Treat that as debugging only. The authoritative release-rehearsal artifact is still the closeout written by `pnpm release:rehearsal`, because that path is the only one that also enforces the repo-local config source, child-process isolation, teardown sweep, blocked-on-leftovers verdict, and durable closeout contract in one run.
+
 ## Manual release (if needed)
 
 Push a tag manually and `publish.yml` will fire directly:
