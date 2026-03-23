@@ -4,6 +4,9 @@ All notable changes to DiscoClaw are documented here.
 
 ## [Unreleased]
 
+### Changed
+- Added the stable `pnpm release:rehearsal` source-checkout entrypoint for the blessed Claude 1.0 rehearsal path; the runtime/harness fixes for the earlier ready-boundary and cleanup-path failures are now in repo, and final 1.0 release-readiness is pending one successful authoritative closeout artifact from a live repo-local `.env` rehearsal run, as tracked in [CLAUDE SOURCE-CHECKOUT STATUS.md](CLAUDE%20SOURCE-CHECKOUT%20STATUS.md).
+
 ### Removed
 - Codex app-server native transport path (`CODEX_APP_SERVER_URL` / `CODEX_APP_SERVER_NATIVE` env vars) — Codex now uses `codex exec` exclusively
 - Mid-turn steering / interrupt mechanism and two-stage Codex draft flow

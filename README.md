@@ -237,7 +237,7 @@ DiscoClaw assumes reliable structured output for several runtime paths (for exam
    - **Save Changes**, then open the install link, pick your server, and authorize
 6. In Discord, enable **Developer Mode** (User Settings -> Advanced), then copy IDs and set:
    - `DISCORD_ALLOW_USER_IDS=<your user id>` (required; fail-closed if empty)
-   - `DISCORD_GUILD_ID=<server id>` (recommended; required for auto-creating forum channels)
+   - `DISCORD_GUILD_ID=<server id>` (required for `pnpm release:rehearsal`; also required for auto-creating forum channels)
 
 Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
 
@@ -316,7 +316,7 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
 
 If you are validating runtime auth, keep the install mode and auth method separate:
 
-- Claude: global installs use the npm-managed path (`discoclaw init` guidance plus `discoclaw claude auth-smoke`), while source checkouts use `pnpm preflight*` plus `pnpm claude:auth-smoke`.
+- Claude: global installs use the npm-managed path (`discoclaw init` guidance plus `discoclaw claude auth-smoke`), while source checkouts use `pnpm release:rehearsal` for the blessed full-path rehearsal or collect the same gates manually in order with `pnpm preflight:blank-machine`, `pnpm claude:auth-smoke`, `pnpm discord:smoke-test -- --guild-id <repo-local DISCORD_GUILD_ID>`, and `pnpm build`.
 - Codex from source: `pnpm preflight*` is config-only; prove the Codex session separately with `codex exec ...`, and prove any OpenAI fast/alternate path separately with `OPENAI_SMOKE_TEST_TIERS=... pnpm test`.
 - Codex from npm/global install: `discoclaw doctor` is config-only and no shipped `discoclaw codex auth-smoke` exists yet; use the same-shell `codex exec --skip-git-repo-check -- "Reply with OK"` login check, then confirm `openai-key: ok` separately if you enabled an OpenAI fast/alternate path.
 
@@ -336,6 +336,7 @@ pnpm preflight:blank-machine
 pnpm claude:auth-smoke  # if PRIMARY_RUNTIME=claude, before login, from a shell/account with no active Claude session
 claude                  # if PRIMARY_RUNTIME=claude, complete login in that same shell/account
 pnpm claude:auth-smoke  # if PRIMARY_RUNTIME=claude, rerun after login in that same shell/account
+pnpm release:rehearsal  # blessed Claude 1.0 source-checkout rehearsal; requires repo-local .env with PRIMARY_RUNTIME=claude
 codex exec -m gpt-5.4 --skip-git-repo-check --ephemeral -s read-only -- "Reply with OK"  # if PRIMARY_RUNTIME=codex
 OPENAI_SMOKE_TEST_TIERS=fast pnpm test  # if any source-checkout path routes through OpenAI
 pnpm build && pnpm dev
@@ -343,7 +344,9 @@ pnpm build && pnpm dev
 
 Fresh clone is not enough evidence by itself for the Claude stranger path. A source checkout still needs a real clone-local `.env`, and the first-login claim only closes when the pre-login failure, interactive `claude` login, and post-login `pnpm claude:auth-smoke` rerun all happen in the same shell/account with no active Claude session. If the host shell was already logged into Claude, the passing smoke proves only the fresh-clone post-login path. When you want stranger-run evidence from a machine with existing DiscoClaw state, isolate `DISCOCLAW_DATA_DIR`, `WORKSPACE_CWD`, `GROUPS_DIR`, and `BEADS_DIR` to throwaway paths before you claim anything about the clone.
 
-If `PRIMARY_RUNTIME=claude`, run the `pnpm preflight:blank-machine` config/bootstrap check first, then capture the separate Claude auth evidence in the order shown above before `pnpm dev`. If `PRIMARY_RUNTIME=codex`, treat `pnpm preflight:blank-machine` as config/bootstrap evidence only, then capture separate Codex session-auth evidence with the `codex exec ...` prompt. If any source-checkout route uses OpenAI, capture separate `OPENAI_API_KEY` evidence with `OPENAI_SMOKE_TEST_TIERS=... pnpm test`.
+`pnpm release:rehearsal` is the blessed source-checkout entrypoint for the full Claude 1.0 operational rehearsal. Its source of truth is the checkout's own `.env`: the harness reads the repo-local file, requires `PRIMARY_RUNTIME=claude`, strips repo-local persistence/config path overrides that would escape the rehearsal temp root, and then applies explicit child-process overrides for `DISCOCLAW_DATA_DIR`, `WORKSPACE_CWD`, `GROUPS_DIR`, `BEADS_DIR`, and the rehearsal task prefix. The live operator loop it holds includes the first reply, a same-conversation follow-up reply, task sync, cron execution, and restart/recovery. Fresh-clone and first-login stranger evidence are established separately by the fresh-clone QA and auth-smoke path above; the rehearsal harness accepts checkout provenance as operator context when supplied, but it does not try to prove or gate on that provenance in code.
+
+If `PRIMARY_RUNTIME=claude`, run `pnpm preflight:blank-machine`, capture the separate Claude auth evidence in the order shown above, then run `pnpm discord:smoke-test -- --guild-id <repo-local DISCORD_GUILD_ID>` and `pnpm build` before `pnpm dev`, or run the full `pnpm release:rehearsal` harness once the repo-local `.env` is ready. If `PRIMARY_RUNTIME=codex`, treat `pnpm preflight:blank-machine` as config/bootstrap evidence only, then capture separate Codex session-auth evidence with the `codex exec ...` prompt. If any source-checkout route uses OpenAI, capture separate `OPENAI_API_KEY` evidence with `OPENAI_SMOKE_TEST_TIERS=... pnpm test`.
 
 ### Claude runtime validation
 
@@ -381,7 +384,12 @@ Npm-managed 1.0 audit verdict: `NOT YET SUPPORT-CLAIMABLE`. The installed CLI no
    ```
    Confirm it returns `Claude CLI answered the minimal prompt.`
 8. If step 7 was captured only from an already-logged-in shell or account, record that limitation and downgrade the claim to `fresh-clone post-login path only`.
-9. Start DiscoClaw after the source-checkout gates pass:
+9. For the full blessed source-checkout path, run the rehearsal harness and record whether the checkout was throwaway or reused:
+   ```bash
+   pnpm release:rehearsal
+   ```
+   The harness enforces the repo-local `.env` plus explicit child-process isolation overrides, writes a closeout under `docs/release-audit/`, and treats unresolved rehearsal-owned cleanup as a blocked verdict.
+10. Start DiscoClaw after the source-checkout gates pass:
    ```bash
    pnpm build && pnpm dev
    ```
@@ -495,6 +503,7 @@ pnpm preflight:blank-machine         # same check, but ignore inherited shell en
 pnpm preflight:online  # adds live Discord login/intents validation
 pnpm preflight:blank-machine:online  # blank-machine check plus live Discord login/intents validation
 pnpm claude:auth-smoke # Claude CLI login/auth smoke check
+pnpm release:rehearsal # full Claude source-checkout release rehearsal
 pnpm dev        # start dev mode
 pnpm build      # compile TypeScript
 pnpm test       # run tests

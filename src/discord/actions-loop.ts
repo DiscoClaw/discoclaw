@@ -41,6 +41,7 @@ import { resolveModel } from '../runtime/model-tiers.js';
 import type { StatusPoster } from './status-channel.js';
 import { IMAGEGEN_ACTION_TYPES } from './actions-imagegen.js';
 import { appendOutsideFence } from './output-utils.js';
+import { buildPlanForgeAvailabilityNote } from './plan-forge-availability.js';
 
 export type LoopCreateActionRequest = {
   type: 'loopCreate';
@@ -152,6 +153,10 @@ export type LoopRunnerState = {
   allowChannelIds?: Set<string>;
   runtimeModel: string;
   enableHybridPipeline?: boolean;
+  discordActionsForge?: boolean;
+  discordActionsPlan?: boolean;
+  planCommandsEnabled?: boolean;
+  forgeCommandsEnabled?: boolean;
   taskCtx?: TaskContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
@@ -452,6 +457,14 @@ async function buildLoopPrompt(
   } catch (err) {
     opts.log?.warn({ flow: 'loop', channelId: channel.id, err }, 'loop:resolve effective tools failed');
   }
+
+  const planForgeAvailabilityNote = buildPlanForgeAvailabilityNote({
+    planCommandsEnabled: opts.state.planCommandsEnabled !== false,
+    forgeCommandsEnabled: opts.state.forgeCommandsEnabled !== false,
+    planActionsEnabled: Boolean(opts.state.discordActionsPlan),
+    forgeActionsEnabled: Boolean(opts.state.discordActionsForge),
+  });
+  if (planForgeAvailabilityNote) noteLines.push(`Runtime capability note: ${planForgeAvailabilityNote}`);
 
   return buildScheduledSelfInvocationPrompt({
     inlinedContext: inlinedContext.text,

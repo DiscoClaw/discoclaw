@@ -39,6 +39,7 @@ import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 import { globalMetrics } from '../observability/metrics.js';
 import type { StatusPoster } from './status-channel.js';
+import { buildPlanForgeAvailabilityNote } from './plan-forge-availability.js';
 
 type ThreadChannelShape = {
   isThread?: () => boolean;
@@ -67,6 +68,8 @@ type DeferredRunnerState = {
   discordActionsVoice?: boolean;
   discordActionsSpawn?: boolean;
   discordActionsArchive?: boolean;
+  planCommandsEnabled?: boolean;
+  forgeCommandsEnabled?: boolean;
   taskCtx?: TaskContext;
   cronCtx?: CronContext;
   forgeCtx?: ForgeContext;
@@ -302,6 +305,14 @@ export function configureDeferredScheduler(
     } catch (err) {
       opts.log?.warn({ flow: 'defer', channelId: channel.id, err }, 'defer:resolve effective tools failed');
     }
+
+    const planForgeAvailabilityNote = buildPlanForgeAvailabilityNote({
+      planCommandsEnabled: opts.state.planCommandsEnabled !== false,
+      forgeCommandsEnabled: opts.state.forgeCommandsEnabled !== false,
+      planActionsEnabled: Boolean(opts.state.discordActionsPlan),
+      forgeActionsEnabled: Boolean(opts.state.discordActionsForge),
+    });
+    if (planForgeAvailabilityNote) noteLines.push(`Runtime capability note: ${planForgeAvailabilityNote}`);
 
     const prompt = buildScheduledSelfInvocationPrompt({
       inlinedContext: inlinedContext.text,

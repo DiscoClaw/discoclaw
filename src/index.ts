@@ -1,5 +1,5 @@
-import 'dotenv/config';
 import pino from 'pino';
+import dotenv from 'dotenv';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -154,6 +154,90 @@ const bootStartMs = Date.now();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
+const repoEnvPath = path.join(projectRoot, '.env');
+const cwdEnvPath = path.join(process.cwd(), '.env');
+const inheritedEnvSnapshot = new Map(Object.entries(process.env));
+const PRESERVE_INHERITED_ENV_KEYS = [
+  'BEADS_DIR',
+  'CLAUDE_DEBUG_FILE',
+  'COLD_STORAGE_DB_PATH',
+  'DISCOCLAW_CANVAS_ARTIFACT_DIR',
+  'DISCOCLAW_CANVAS_EXPORT_DIR',
+  'DISCOCLAW_CONTENT_DIR',
+  'DISCOCLAW_CRON_STATS_DIR',
+  'DISCOCLAW_DATA_DIR',
+  'DISCOCLAW_DURABLE_DATA_DIR',
+  'DISCOCLAW_SHORTTERM_DATA_DIR',
+  'DISCOCLAW_SUMMARY_ARCHIVE_DIR',
+  'DISCOCLAW_SUMMARY_DATA_DIR',
+  'DISCOCLAW_STARTUP_READY_FILE',
+  'DISCOCLAW_TASKS_PATH',
+  'DISCOCLAW_TASKS_PREFIX',
+  'DISCOCLAW_TASKS_TAG_MAP',
+  'DISCOCLAW_WEBHOOK_CONFIG',
+  'GROUPS_DIR',
+  'WORKSPACE_CWD',
+] as const;
+const repoEnvResult = dotenv.config({ path: repoEnvPath, override: true });
+if (repoEnvResult.error) {
+  const errorCode = typeof (repoEnvResult.error as NodeJS.ErrnoException).code === 'string'
+    ? (repoEnvResult.error as NodeJS.ErrnoException).code
+    : undefined;
+  log.warn({ envPath: repoEnvPath, errorCode }, 'startup:repo-local .env not loaded');
+} else {
+  log.info({ envPath: repoEnvPath }, 'startup:loaded repo-local .env');
+  const preservedInheritedKeys = PRESERVE_INHERITED_ENV_KEYS
+    .filter((key) => {
+      const inheritedValue = inheritedEnvSnapshot.get(key);
+      if (typeof inheritedValue !== 'string' || inheritedValue.length === 0) {
+        return false;
+      }
+      process.env[key] = inheritedValue;
+      return repoEnvResult.parsed?.[key] !== inheritedValue;
+    })
+    .sort();
+  const overriddenInheritedKeys = Object.entries(repoEnvResult.parsed ?? {})
+    .filter(([key, value]) => {
+      if (preservedInheritedKeys.includes(key as (typeof PRESERVE_INHERITED_ENV_KEYS)[number])) {
+        return false;
+      }
+      const inheritedValue = inheritedEnvSnapshot.get(key);
+      return typeof inheritedValue === 'string' && inheritedValue !== value;
+    })
+    .map(([key]) => key)
+    .sort();
+  if (preservedInheritedKeys.length > 0) {
+    log.info(
+      {
+        envPath: repoEnvPath,
+        preservedKeys: preservedInheritedKeys,
+        preservedKeyCount: preservedInheritedKeys.length,
+      },
+      'startup:preserved explicit inherited env overrides for runtime path/debug keys',
+    );
+  }
+  if (overriddenInheritedKeys.length > 0) {
+    log.warn(
+      {
+        envPath: repoEnvPath,
+        overriddenKeys: overriddenInheritedKeys,
+        overriddenKeyCount: overriddenInheritedKeys.length,
+      },
+      'startup:repo-local .env overrode inherited environment values',
+    );
+  }
+}
+if (cwdEnvPath !== repoEnvPath) {
+  try {
+    await fs.access(cwdEnvPath);
+    log.warn(
+      { cwdEnvPath, repoEnvPath, cwd: process.cwd() },
+      'startup:ignoring cwd-local .env in favor of repo-local .env',
+    );
+  } catch {
+    // No separate cwd-local .env was present.
+  }
+}
 
 let parsedConfig;
 try {
@@ -1593,6 +1677,20 @@ try {
 botStatus = status;
 longRunWatchdogClientRef = client;
 if (deferOpts) deferOpts.status = botStatus;
+log.info('Discord runtime ready');
+const startupReadyFile = process.env.DISCOCLAW_STARTUP_READY_FILE?.trim();
+if (startupReadyFile) {
+  try {
+    await fs.mkdir(path.dirname(startupReadyFile), { recursive: true });
+    await fs.writeFile(
+      startupReadyFile,
+      `${JSON.stringify({ status: 'ready', at: new Date().toISOString(), pid: process.pid })}\n`,
+      'utf8',
+    );
+  } catch (err) {
+    log.warn({ err, startupReadyFile }, 'startup:failed to write ready sentinel');
+  }
+}
 
 canvasCtx.discordClientId = cfg.discordClientId || client.application?.id || undefined;
 if (cfg.canvasEnabled) {

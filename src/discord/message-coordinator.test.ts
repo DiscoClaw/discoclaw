@@ -274,6 +274,46 @@ describe('guild-chat prompt assembly — capability-refusal grounding', () => {
     );
   });
 
+  it('adds an explicit prompt note when plan and forge are disabled', async () => {
+    const runtime = makeCaptureRuntime();
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply, {
+      content: 'Make a plan to refactor the webhook handler',
+    });
+    const params = makeParams(runtime, {
+      planCommandsEnabled: false,
+      forgeCommandsEnabled: false,
+    });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(runtime.prompt).toContain('Runtime capability notes:');
+    expect(runtime.prompt).toContain('Plan workflows are disabled for this instance.');
+    expect(runtime.prompt).toContain('Forge workflows are disabled for this instance.');
+    expect(runtime.prompt).toContain('respond in normal chat with an outline or next steps');
+  });
+
+  it('warns when automatic plan routing is disabled but !plan remains available', async () => {
+    const runtime = makeCaptureRuntime();
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply, {
+      content: 'Make a plan to refactor the webhook handler',
+    });
+    const params = makeParams(runtime, {
+      planCommandsEnabled: true,
+      discordActionsPlan: false,
+    });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(runtime.prompt).toContain('Automatic plan routing is disabled for this instance.');
+    expect(runtime.prompt).toContain('only use the plan workflow when the user explicitly issues `!plan`');
+  });
+
   it('omits the capability-refusal grounding rule when actions are disabled', async () => {
     const runtime = makeCaptureRuntime();
     const reply = makeReply();
@@ -312,6 +352,62 @@ describe('guild-chat prompt assembly — capability-refusal grounding', () => {
     const selectionArgs = buildTiered.mock.calls.at(-1)?.[2];
     expect(selectionArgs?.userText).toContain('Make an interactive chart from this dataset');
     expect(selectionArgs?.userText).toContain('report.csv');
+  });
+});
+
+describe('guild-chat prompt assembly — release rehearsal artifact contract', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetAbortRegistry();
+    resetInflightReplies();
+  });
+
+  it('preserves exact quoted rehearsal artifact names in the runtime prompt', async () => {
+    const runtime = makeCaptureRuntime();
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply, {
+      content:
+        'Create one rehearsal task titled `Release rehearsal rr-20260322-183045-slug task` through the live Discord path.\n' +
+        'Create one rehearsal cron named `Release rehearsal rr-20260322-183045-slug cron` through the live Discord path.',
+    });
+    const params = makeParams(runtime);
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(runtime.prompt).toContain('Artifact contract:');
+    expect(runtime.prompt).toContain(
+      '- If you create a task, set its title to exactly "Release rehearsal rr-20260322-183045-slug task".',
+    );
+    expect(runtime.prompt).toContain(
+      '- If you create a cron, set its name to exactly "Release rehearsal rr-20260322-183045-slug cron".',
+    );
+    expect(runtime.prompt).toContain(
+      '- Preserve these rehearsal slug literals verbatim: "rr-20260322-183045-slug".',
+    );
+  });
+
+  it('preserves exact unquoted rehearsal artifact names in the runtime prompt', async () => {
+    const runtime = makeCaptureRuntime();
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply, {
+      content:
+        'Create one rehearsal task titled Release rehearsal rr-20260322-183045-slug task through the live Discord path.\n' +
+        'Create one rehearsal cron named Release rehearsal rr-20260322-183045-slug cron through the live Discord path.',
+    });
+    const params = makeParams(runtime);
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(runtime.prompt).toContain(
+      '- If you create a task, set its title to exactly "Release rehearsal rr-20260322-183045-slug task".',
+    );
+    expect(runtime.prompt).toContain(
+      '- If you create a cron, set its name to exactly "Release rehearsal rr-20260322-183045-slug cron".',
+    );
   });
 });
 
