@@ -2683,12 +2683,47 @@ describe('🛑 per-message abort intercept', () => {
       await handler(makeStopReaction() as any, mockUser() as any);
 
       expect(tryAbortSpy).toHaveBeenCalledOnce();
-      expect(tryAbortSpy).toHaveBeenCalledWith('msg-1');
+      expect(tryAbortSpy).toHaveBeenCalledWith('msg-1', { cause: 'reaction-stop' });
       expect(getOrchestratorSpy).toHaveBeenCalledOnce();
       expect(queue.run).not.toHaveBeenCalled();
     } finally {
       tryAbortSpy.mockRestore();
       isActiveSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+    }
+  });
+
+  it('keeps the stop summary as the only visible artifact owned by this handler', async () => {
+    const stopSnapshot = {
+      messageId: 'msg-1',
+      channelId: 'ch-1',
+      userMessage: 'Need a long answer',
+      partialResponse: 'Working on it',
+      activityLabel: 'Thinking',
+      sessionKey: 'discord:guild-1:ch-1',
+      elapsedMs: 1_500,
+    };
+    const tryAbortSpy = vi.spyOn(abortRegistry, 'tryAbort').mockReturnValue(true);
+    const isActiveSpy = vi.spyOn(abortRegistry, 'isActivelyStreaming').mockReturnValue(true);
+    const snapshotSpy = vi.spyOn(abortRegistry, 'snapshotAbort').mockReturnValue(stopSnapshot);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(null);
+    try {
+      const params = makeParams();
+      const queue = mockQueue();
+      const reaction = makeStopReaction();
+      const handler = createReactionAddHandler(params, queue);
+
+      await handler(reaction as any, mockUser() as any);
+
+      expect(tryAbortSpy).toHaveBeenCalledWith('msg-1', { cause: 'reaction-stop' });
+      expect(reaction.message.channel.send).toHaveBeenCalledOnce();
+      expect(reaction.message.reply).not.toHaveBeenCalled();
+      expect(reaction.message._replyObj.edit).not.toHaveBeenCalled();
+      expect(queue.run).not.toHaveBeenCalled();
+    } finally {
+      tryAbortSpy.mockRestore();
+      isActiveSpy.mockRestore();
+      snapshotSpy.mockRestore();
       getOrchestratorSpy.mockRestore();
     }
   });

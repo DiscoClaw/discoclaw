@@ -59,6 +59,8 @@ const STREAM_STALL_PROGRESS_UPDATE_MS = 30_000;
 const STREAMING_EDIT_TIMEOUT_MS = 4_000;
 const STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD = 3;
 const STREAMING_EDIT_TIMEOUT_COOLDOWN_MS = 10_000;
+const REACTION_STOP_ABORT_CAUSE = 'reaction-stop';
+
 async function waitForEditOrTimeout(editOp: Promise<unknown>, timeoutMs: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const completed = await Promise.race<boolean>([
@@ -230,7 +232,10 @@ function createReactionHandler(
         // Snapshot metadata before aborting so we capture live streaming state.
         const stopSnap = snapshotAbort(reaction.message.id);
         const wasActive = isActivelyStreaming(reaction.message.id);
-        tryAbort(reaction.message.id);
+        (tryAbort as (messageId: string, opts?: { cause?: string }) => boolean)(
+          reaction.message.id,
+          { cause: REACTION_STOP_ABORT_CAUSE },
+        );
         if (wasActive) metrics.increment('discord.reaction.abort');
         const orch = getActiveOrchestrator();
         const forgeCancelled = Boolean(orch?.isRunning && getActiveForgeChannelId() === reaction.message.channelId);
