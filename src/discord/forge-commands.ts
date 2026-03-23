@@ -2002,7 +2002,7 @@ export class ForgeOrchestrator {
           await onProgress(
             withForgeIcon(
               FORGE_PROGRESS_ICON.success,
-              `Forge complete. Plan ${planId} ready for review (${roundLabel}, ${elapsed}s)${warningSuffix}`,
+              `Forge complete. Plan ${planId} reviewed (${roundLabel}, ${elapsed}s)${warningSuffix}`,
             ),
             { force: true },
           );

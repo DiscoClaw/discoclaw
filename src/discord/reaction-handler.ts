@@ -15,7 +15,12 @@ import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } f
 import { shouldTriggerFollowUp, actionDedupeKey, isDuplicateAction, buildActionHistorySummary } from './action-categories.js';
 import type { ActionHistoryEntry } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
-import { tryAbort, isActivelyStreaming, snapshotAbort } from './abort-registry.js';
+import {
+  REACTION_STOP_ABORT_CAUSE,
+  tryAbort,
+  isActivelyStreaming,
+  snapshotAbort,
+} from './abort-registry.js';
 import { buildStopSummary } from './stop-summary.js';
 import { getActiveOrchestrator, getActiveForgeChannelId } from './forge-plan-registry.js';
 import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools, buildPromptPreamble, buildOpenTasksSection, buildPromptSectionEstimates } from './prompt-common.js';
@@ -230,7 +235,13 @@ function createReactionHandler(
         // Snapshot metadata before aborting so we capture live streaming state.
         const stopSnap = snapshotAbort(reaction.message.id);
         const wasActive = isActivelyStreaming(reaction.message.id);
-        tryAbort(reaction.message.id);
+        (tryAbort as (messageId: string, opts?: { cause?: string }) => boolean)(
+          reaction.message.id,
+          { cause: REACTION_STOP_ABORT_CAUSE },
+        );
+        if (wasActive) {
+          await params.longRunWatchdog?.markExplicitStop?.(reaction.message.id).catch(() => {});
+        }
         if (wasActive) metrics.increment('discord.reaction.abort');
         const orch = getActiveOrchestrator();
         const forgeCancelled = Boolean(orch?.isRunning && getActiveForgeChannelId() === reaction.message.channelId);

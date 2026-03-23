@@ -365,7 +365,7 @@ Forge plan-018: Draft round 1/5 still running (45s elapsed)
 Forge plan-018: Draft round 1/5 complete (74s). Starting Audit round 1/5...
 Forge plan-018: Audit round 1/5 still running (38s elapsed)
 Forge plan-018: Audit round 1/5 complete (61s). Starting Revision after round 1/5...
-Forge complete. Plan plan-018 ready for review (2 rounds, 87s)
+Forge complete. Plan plan-018 reviewed (2 rounds, 87s)
 ```
 
 **Single terminal post behavior (command path):** `!forge` heartbeats cover starts/transitions/periodic elapsed updates only. Terminal outcomes (`complete`, `cancelled`, `error`, `CAP_REACHED`) are emitted once in the final forge status post/edit.

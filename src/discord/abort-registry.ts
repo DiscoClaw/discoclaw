@@ -3,8 +3,15 @@
 // on recently-finished messages are silently consumed rather than forwarded.
 
 const COOLDOWN_MS = 15_000;
+export const COMMAND_STOP_ABORT_CAUSE = 'command-stop';
+export const REACTION_STOP_ABORT_CAUSE = 'reaction-stop';
 
-const active = new Map<string, AbortController>();
+type ActiveAbortState = {
+  controller: AbortController;
+  abortCause: string | null;
+};
+
+const active = new Map<string, ActiveAbortState>();
 const cooldown = new Set<string>();
 
 // ---------------------------------------------------------------------------
@@ -33,6 +40,23 @@ export type AbortSnapshot = {
 };
 
 const metaStore = new Map<string, AbortMeta>();
+
+function recordAbortCause(state: ActiveAbortState, cause?: string): string | null {
+  if (state.abortCause == null && typeof cause === 'string' && cause.length > 0) {
+    state.abortCause = cause;
+  }
+  return state.abortCause;
+}
+
+function abortState(state: ActiveAbortState, cause?: string): void {
+  const explicitCause = recordAbortCause(state, cause);
+  if (state.controller.signal.aborted) return;
+  if (explicitCause != null) {
+    state.controller.abort(explicitCause);
+    return;
+  }
+  state.controller.abort();
+}
 
 /** Attach metadata to an active abort entry for stop summary generation. */
 export function setAbortMeta(messageId: string, m: AbortMeta): void {
@@ -69,6 +93,20 @@ export function snapshotAllAborts(): AbortSnapshot[] {
   return snapshots;
 }
 
+/** Read the explicit abort cause for an active stream, if one has been recorded. */
+export function getAbortCause(messageId: string): string | null {
+  return active.get(messageId)?.abortCause ?? null;
+}
+
+/** Alias for getAbortCause() to keep coordinator-side reads intention-revealing. */
+export function readAbortCause(messageId: string): string | null {
+  return getAbortCause(messageId);
+}
+
+export function isExplicitStopAbortCause(cause: string | null | undefined): boolean {
+  return cause === COMMAND_STOP_ABORT_CAUSE || cause === REACTION_STOP_ABORT_CAUSE;
+}
+
 // ---------------------------------------------------------------------------
 // Core abort registry
 // ---------------------------------------------------------------------------
@@ -83,7 +121,7 @@ export function snapshotAllAborts(): AbortSnapshot[] {
  */
 export function registerAbort(messageId: string): { signal: AbortSignal; dispose: () => void } {
   const controller = new AbortController();
-  active.set(messageId, controller);
+  active.set(messageId, { controller, abortCause: null });
 
   function dispose() {
     active.delete(messageId);
@@ -103,10 +141,10 @@ export function registerAbort(messageId: string): { signal: AbortSignal; dispose
  * - `true` (no-op) if the message is in the cooldown window (already finished).
  * - `false` if the message ID is unknown — caller should let the reaction through.
  */
-export function tryAbort(messageId: string): boolean {
-  const controller = active.get(messageId);
-  if (controller) {
-    controller.abort();
+export function tryAbort(messageId: string, opts?: { cause?: string }): boolean {
+  const state = active.get(messageId);
+  if (state) {
+    abortState(state, opts?.cause);
     return true;
   }
   if (cooldown.has(messageId)) {
@@ -131,12 +169,12 @@ export function isActivelyStreaming(messageId: string): boolean {
  * (in its finally block) handles cleanup and cooldown the same way as a
  * single-message abort via `tryAbort`.
  */
-export function tryAbortAll(): number {
-  const controllers = [...active.values()];
-  for (const controller of controllers) {
-    controller.abort();
+export function tryAbortAll(opts?: { cause?: string }): number {
+  const states = [...active.values()];
+  for (const state of states) {
+    abortState(state, opts?.cause);
   }
-  return controllers.length;
+  return states.length;
 }
 
 /** Clear all state. Only for use in tests. */

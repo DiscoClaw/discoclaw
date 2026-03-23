@@ -77,7 +77,15 @@ import { ToolAwareQueue } from './tool-aware-queue.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, setStopReaction, isShuttingDown, markChannelPending } from './inflight-replies.js';
-import { registerAbort, tryAbortAll, setAbortMeta, snapshotAllAborts } from './abort-registry.js';
+import {
+  COMMAND_STOP_ABORT_CAUSE,
+  isExplicitStopAbortCause,
+  readAbortCause,
+  registerAbort,
+  tryAbortAll,
+  setAbortMeta,
+  snapshotAllAborts,
+} from './abort-registry.js';
 import { buildStopSummary } from './stop-summary.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, closeFenceIfOpen, formatRuntimePreviewSignal } from './output-utils.js';
 import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, buildOpenTasksSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble, buildPromptSectionEstimates } from './prompt-common.js';
@@ -453,7 +461,7 @@ export type BotParams = {
   completionNotifyEnabled?: boolean;
   completionNotifyThresholdMs?: number;
   /** Optional lifecycle watchdog for long-running Discord operations. */
-  longRunWatchdog?: Pick<LongRunWatchdog, 'start' | 'complete' | 'stageRecovery' | 'startupSweep'>;
+  longRunWatchdog?: Pick<LongRunWatchdog, 'start' | 'complete' | 'stageRecovery' | 'startupSweep' | 'markExplicitStop'>;
   /** Optional override for watchdog still-running check-in delay. */
   longRunStillRunningDelayMs?: number;
   serviceName?: string;
@@ -482,12 +490,14 @@ export type StatusRef = { current: StatusPoster | null };
 const turnCounters = new Map<string, number>();
 const summaryWorkQueue = new KeyedQueue();
 const latestSummarySequence = new Map<string, number>();
+const explicitStopReplyIds = new Set<string>();
 const CONFIG_DOCTOR_SCOPE_NOTE =
   'Config doctor checks config drift and missing secrets only. It does not verify Claude login/auth. Use `discoclaw claude auth-smoke` on the host for the shipped Claude auth check.';
 
 export function _resetMessageCoordinatorStateForTests(): void {
   turnCounters.clear();
   latestSummarySequence.clear();
+  explicitStopReplyIds.clear();
 }
 
 function appendConfigDoctorScopeNote(report: string): string {
@@ -604,7 +614,7 @@ function errorMessage(err: unknown): string {
 }
 
 type LongRunOutcome = 'succeeded' | 'failed';
-type LongRunWatchdogLike = Pick<LongRunWatchdog, 'start' | 'complete' | 'stageRecovery' | 'startupSweep'>;
+type LongRunWatchdogLike = Pick<LongRunWatchdog, 'start' | 'complete' | 'stageRecovery' | 'startupSweep' | 'markExplicitStop'>;
 type FollowUpTerminalState = 'completed' | 'failed' | 'completed after delay';
 type PendingActionFollowUp = {
   token: string;
@@ -724,10 +734,12 @@ async function stageWatchdogRecovery(opts: {
   watchdog?: LongRunWatchdogLike;
   runId: string | null;
   text: string | null;
+  allowEmptyText?: boolean;
   log?: LoggerLike;
   flow: string;
 }): Promise<boolean> {
-  if (!opts.watchdog || !opts.runId || !opts.text) return true;
+  if (!opts.watchdog || !opts.runId) return true;
+  if (opts.text === null && !opts.allowEmptyText) return true;
   if (typeof opts.watchdog.stageRecovery !== 'function') {
     opts.log?.warn({ runId: opts.runId }, `${opts.flow}: watchdog recovery staging unavailable`);
     return false;
@@ -741,6 +753,21 @@ async function stageWatchdogRecovery(opts: {
     return true;
   } catch (err) {
     opts.log?.warn({ err, runId: opts.runId }, `${opts.flow}: watchdog recovery stage failed`);
+    return false;
+  }
+}
+
+async function markWatchdogExplicitStop(opts: {
+  watchdog?: LongRunWatchdogLike;
+  messageId: string;
+  log?: LoggerLike;
+  flow: string;
+}): Promise<boolean> {
+  if (!opts.watchdog || typeof opts.watchdog.markExplicitStop !== 'function') return false;
+  try {
+    return Boolean(await opts.watchdog.markExplicitStop(opts.messageId));
+  } catch (err) {
+    opts.log?.warn({ err, messageId: opts.messageId }, `${opts.flow}: watchdog explicit-stop mark failed`);
     return false;
   }
 }
@@ -1171,7 +1198,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
       if (!isBotMessage && String(msg.content ?? '').trim().toLowerCase() === '!stop') {
         // Snapshot active stream metadata before aborting so the summary captures live state.
         const snapshots = snapshotAllAborts();
-        const aborted = tryAbortAll();
+        for (const snapshot of snapshots) {
+          explicitStopReplyIds.add(snapshot.messageId);
+        }
+        await Promise.all(snapshots.map((snapshot) => markWatchdogExplicitStop({
+          watchdog: params.longRunWatchdog,
+          messageId: snapshot.messageId,
+          log: params.log,
+          flow: 'message',
+        })));
+        const aborted = tryAbortAll({ cause: COMMAND_STOP_ABORT_CAUSE });
         const orch = getActiveOrchestrator();
         const forgeRunning = Boolean(orch?.isRunning);
         if (forgeRunning && orch) orch.requestCancel('!stop');
@@ -1913,8 +1949,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         let primaryWatchdogRunId: string | null = null;
         let primaryWatchdogOutcome: LongRunOutcome = 'succeeded';
         let primaryRecoveryReady = false;
+        let primaryRecoveryStaged = false;
         let primaryDeliveryConfirmed = false;
         let deliveryConfirmed = false;
+        let explicitStopAbortSeen = false;
+        const wasExplicitlyStopped = (): boolean => {
+          if (reply == null) return false;
+          return explicitStopReplyIds.has(reply.id) || isExplicitStopAbortCause(readAbortCause(reply.id));
+        };
         try {
           // Handle !memory commands before session creation or the "..." placeholder.
           if (!isBotMessage && params.memoryCommandsEnabled) {
@@ -4089,10 +4131,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                       invokeHadError = true;
                       invokeErrorMessage = evt.message;
                       taq.handleEvent(evt);
-                      finalText = abortSignal.aborted
-                        ? '*(Response aborted.)*'
-                        : mapRuntimeErrorToUserMessage(evt.message);
-                      await maybeEdit(true);
+                      const explicitStopAbort = abortSignal.aborted && wasExplicitlyStopped();
+                      explicitStopAbortSeen ||= explicitStopAbort;
+                      if (!explicitStopAbort) {
+                        finalText = abortSignal.aborted
+                          ? '*(Response aborted.)*'
+                          : mapRuntimeErrorToUserMessage(evt.message);
+                        await maybeEdit(true);
+                      }
                       if (!abortSignal.aborted) {
                         // eslint-disable-next-line @typescript-eslint/no-floating-promises
                         statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
@@ -4116,10 +4162,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                     } else if (evt.type === 'error') {
                       invokeHadError = true;
                       invokeErrorMessage = evt.message;
-                      finalText = abortSignal.aborted
-                        ? '*(Response aborted.)*'
-                        : mapRuntimeErrorToUserMessage(evt.message);
-                      await maybeEdit(true);
+                      const explicitStopAbort = abortSignal.aborted && wasExplicitlyStopped();
+                      explicitStopAbortSeen ||= explicitStopAbort;
+                      if (!explicitStopAbort) {
+                        finalText = abortSignal.aborted
+                          ? '*(Response aborted.)*'
+                          : mapRuntimeErrorToUserMessage(evt.message);
+                        await maybeEdit(true);
+                      }
                       if (!abortSignal.aborted) {
                         // eslint-disable-next-line @typescript-eslint/no-floating-promises
                         statusRef?.current?.runtimeError({ sessionKey, channelName: channelCtx.channelName }, evt.message);
@@ -4483,6 +4533,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
               pendingFollowUp = nextFollowUp;
               const finalReplyPrefix = currentFollowUpToken ? followUpPlaceholderLines.join('\n') : null;
+              const explicitStopAbort = abortSignal.aborted && wasExplicitlyStopped();
+              explicitStopAbortSeen ||= explicitStopAbort;
+              if (explicitStopAbort) {
+                primaryWatchdogOutcome = 'failed';
+                break;
+              }
               const recoveryBodyText = processedText.trim()
                 ? processedText
                 : (collectedImages.length > 0
@@ -4515,6 +4571,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
 
               primaryRecoveryReady = true;
+              primaryRecoveryStaged = recoveryText !== null;
+
+              if (abortSignal.aborted && wasExplicitlyStopped()) {
+                explicitStopAbortSeen = true;
+                primaryWatchdogOutcome = 'failed';
+                break;
+              }
 
               if (!isShuttingDown()) {
                 try {
@@ -4574,7 +4637,19 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             // block runs dispose(). Setting replyFinalized = true on success prevents
             // the finally's safety-net delete from removing the error message.
             try {
-              if (reply && !isShuttingDown()) {
+              if (abortSignal.aborted && wasExplicitlyStopped() && primaryRecoveryStaged) {
+                explicitStopAbortSeen = true;
+                await stageWatchdogRecovery({
+                  watchdog: longRunWatchdog,
+                  runId: primaryWatchdogRunId,
+                  text: null,
+                  allowEmptyText: true,
+                  log: params.log,
+                  flow: 'message',
+                });
+                primaryRecoveryStaged = false;
+              }
+              if (reply && !isShuttingDown() && !(abortSignal.aborted && wasExplicitlyStopped())) {
                 await reply.edit({
                   content: abortSignal.aborted
                     ? '*(Response aborted.)*'
@@ -4595,6 +4670,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (!replyFinalized && !preserveVisibleReply && reply && !isShuttingDown()) {
               try { await reply.delete(); } catch { /* best-effort */ }
             }
+            explicitStopAbortSeen ||= abortSignal.aborted && wasExplicitlyStopped();
             abortDispose();
             // Best-effort: remove the 🛑 reaction added at stream start.
             // Skipped when the eager removal (before action execution) already succeeded.
@@ -4747,6 +4823,21 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             // Ignore secondary errors writing to Discord.
           }
         } finally {
+          if (
+            abortSignal?.aborted
+            && primaryRecoveryStaged
+            && (explicitStopAbortSeen || (reply != null && explicitStopReplyIds.has(reply.id)))
+          ) {
+            await stageWatchdogRecovery({
+              watchdog: longRunWatchdog,
+              runId: primaryWatchdogRunId,
+              text: null,
+              allowEmptyText: true,
+              log: params.log,
+              flow: 'message',
+            });
+            primaryRecoveryStaged = false;
+          }
           const outcome: LongRunOutcome = (primaryWatchdogOutcome === 'failed'
             || abortSignal?.aborted
             || (isShuttingDown() && !primaryRecoveryReady))
@@ -4760,6 +4851,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             log: params.log,
             flow: 'message',
           });
+          if (reply) {
+            explicitStopReplyIds.delete(reply.id);
+          }
           disposePendingChannel();
         }
       });

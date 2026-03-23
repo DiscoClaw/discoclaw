@@ -40,8 +40,11 @@ import {
   buildDiscordActionFollowUpLifecycleLine,
   isDiscordActionFollowUpRun,
 } from './discord/long-run-watchdog.js';
-import { buildLongRunFinalNotice, postLongRunWatchdogNoticeToChannel } from './discord/long-run-watchdog-notice.js';
-import { NO_MENTIONS } from './discord/allowed-mentions.js';
+import {
+  buildLongRunFinalNotice,
+  postLongRunChatCompletionToChannel,
+  postLongRunWatchdogNoticeToChannel,
+} from './discord/long-run-watchdog-notice.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
 import { CronScheduler } from './cron/scheduler.js';
 import { executeCronJob } from './cron/executor.js';
@@ -581,7 +584,21 @@ const longRunStartupSweepReplyStats = {
 };
 let longRunWatchdogClientRef: Awaited<ReturnType<typeof startDiscordBot>>['client'] | null = null;
 
-async function postLongRunWatchdogNotice(run: Pick<LongRunWatchdogRun, 'runId' | 'channelId' | 'messageId'>, content: string): Promise<void> {
+type LongRunWatchdogNoticeChannel = {
+  send: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>;
+  messages?: {
+    fetch?: (id: string) => Promise<unknown>;
+  };
+};
+
+async function postLongRunWatchdogChannelNotice(
+  run: Pick<LongRunWatchdogRun, 'channelId' | 'messageId'>,
+  content: string,
+  postNotice: (
+    channel: LongRunWatchdogNoticeChannel,
+    args: { messageId: string; content: string; botUserId?: string },
+  ) => Promise<unknown>,
+): Promise<void> {
   const clientRef = longRunWatchdogClientRef;
   if (!clientRef) {
     throw new Error('Discord client unavailable');
@@ -598,17 +615,15 @@ async function postLongRunWatchdogNotice(run: Pick<LongRunWatchdogRun, 'runId' |
     throw new Error(`watchdog channel is not sendable (${run.channelId})`);
   }
 
-  const channelLike = channel as {
-    send: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>;
-    messages?: {
-      fetch?: (id: string) => Promise<unknown>;
-    };
-  };
-  await postLongRunWatchdogNoticeToChannel(channelLike, {
+  await postNotice(channel as LongRunWatchdogNoticeChannel, {
     messageId: run.messageId,
     content,
     botUserId: clientRef.user?.id ?? undefined,
   });
+}
+
+async function postLongRunWatchdogNotice(run: Pick<LongRunWatchdogRun, 'runId' | 'channelId' | 'messageId'>, content: string): Promise<void> {
+  await postLongRunWatchdogChannelNotice(run, content, postLongRunWatchdogNoticeToChannel);
 }
 
 async function postDiscordActionFollowUpLifecycleNotice(
@@ -622,46 +637,6 @@ async function postDiscordActionFollowUpLifecycleNotice(
     run,
     buildDiscordActionFollowUpLifecycleLine(run.correlationToken, state),
   );
-}
-
-/**
- * Reply-only delivery for chat message completion notices.
- * Reuses the channel-fetch pattern from postLongRunWatchdogNotice but always
- * replies to the source message (the bot's answer), falling back to
- * channel.send() if the message is gone. This avoids the edit-first path
- * in postLongRunWatchdogNoticeToChannel which would overwrite the answer.
- */
-async function postChatCompletionReply(
-  run: Pick<LongRunWatchdogRun, 'channelId' | 'messageId'>,
-  content: string,
-): Promise<void> {
-  const clientRef = longRunWatchdogClientRef;
-  if (!clientRef) {
-    throw new Error('Discord client unavailable');
-  }
-
-  const channel = clientRef.channels.cache.get(run.channelId)
-    ?? await clientRef.channels.fetch(run.channelId).catch(() => null);
-  if (!channel || !channel.isTextBased()) {
-    throw new Error(`watchdog channel unavailable (${run.channelId})`);
-  }
-
-  const channelSend = (channel as { send?: unknown }).send;
-  if (typeof channelSend !== 'function') {
-    throw new Error(`watchdog channel is not sendable (${run.channelId})`);
-  }
-
-  const fetchMessage = (channel as { messages?: { fetch?: (id: string) => Promise<unknown> } }).messages?.fetch;
-  if (typeof fetchMessage === 'function') {
-    const source = await fetchMessage.call((channel as any).messages, run.messageId).catch(() => null);
-    if (source && typeof (source as any).reply === 'function') {
-      await (source as any).reply({ content, allowedMentions: NO_MENTIONS });
-      return;
-    }
-  }
-
-  await (channelSend as (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>)
-    .call(channel, { content, allowedMentions: NO_MENTIONS });
 }
 
 const messageCoordinatorWatchdog = completionNotifyEnabled
@@ -698,14 +673,16 @@ const messageCoordinatorWatchdog = completionNotifyEnabled
             longRunStartupSweepReplyStats.genericFallbacks += 1;
           }
         }
-        // Chat message runs: reply to the bot's answer instead of editing it.
+        // Chat message runs use the shared notice helper so transient interruption
+        // markers can be replaced in place and older/non-editable sources still
+        // fall back to reply/send delivery.
         const content = buildLongRunFinalNotice({
           completion: run.completion,
           completionDetail: run.completionDetail,
           recoveryText: hasRecoveryText ? recoveryText : null,
           source: meta.source,
         });
-        await postChatCompletionReply(run, content);
+        await postLongRunWatchdogChannelNotice(run, content, postLongRunChatCompletionToChannel);
       },
       log,
     });
@@ -719,6 +696,7 @@ const messageCoordinatorWatchdog = completionNotifyEnabled
       }),
       complete: watchdog.complete.bind(watchdog),
       stageRecovery: watchdog.stageRecovery.bind(watchdog),
+      markExplicitStop: watchdog.markExplicitStop.bind(watchdog),
       // Startup sweep is intentionally run after Discord connect from index.ts.
       startupSweep: async () => ({ ...emptyLongRunSweepResult }),
     };

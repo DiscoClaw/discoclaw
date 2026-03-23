@@ -4,6 +4,7 @@ import { sanitizeErrorMessage } from './status-channel.js';
 
 type WatchdogNoticeMessage = {
   author?: { id?: string | null } | null;
+  content?: string | null;
   editable?: boolean;
   edit?: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>;
   reply?: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>;
@@ -16,6 +17,14 @@ type WatchdogNoticeChannel = {
   };
 };
 
+type WatchdogNoticeDelivery = 'edited' | 'replied' | 'sent';
+
+const TRANSIENT_CHAT_COMPLETION_PLACEHOLDERS = new Set<string>([
+  '*(Interrupted — bot is restarting.)*',
+  '*(Interrupted — bot was restarted.)*',
+  '*(Response aborted.)*',
+]);
+
 function asWatchdogNoticeMessage(value: unknown): WatchdogNoticeMessage | null {
   return typeof value === 'object' && value !== null
     ? value as WatchdogNoticeMessage
@@ -27,6 +36,32 @@ function canEditSourceMessage(message: WatchdogNoticeMessage | null, botUserId?:
   if (typeof message.editable === 'boolean') return message.editable;
   const authorId = message.author?.id;
   return typeof authorId === 'string' && authorId.length > 0 && authorId === botUserId;
+}
+
+function isTransientChatCompletionPlaceholder(content: string | null | undefined): boolean {
+  const normalized = normalizeWatchdogNoticeText(content);
+  return normalized != null && TRANSIENT_CHAT_COMPLETION_PLACEHOLDERS.has(normalized);
+}
+
+function canReplaceTransientChatCompletionPlaceholder(
+  message: WatchdogNoticeMessage | null,
+  botUserId?: string,
+): boolean {
+  if (!message || !canEditSourceMessage(message, botUserId)) return false;
+  if (!isTransientChatCompletionPlaceholder(message.content)) return false;
+  if (typeof botUserId !== 'string' || botUserId.length === 0) return true;
+  return message.author?.id === botUserId;
+}
+
+async function fetchWatchdogNoticeSource(
+  channel: WatchdogNoticeChannel,
+  messageId: string,
+): Promise<WatchdogNoticeMessage | null> {
+  const fetchMessage = channel.messages?.fetch;
+  if (typeof fetchMessage !== 'function') return null;
+  return asWatchdogNoticeMessage(
+    await fetchMessage.call(channel.messages, messageId).catch(() => null),
+  );
 }
 
 export function buildLongRunFinalNotice(args: {
@@ -80,20 +115,37 @@ export async function postLongRunWatchdogNoticeToChannel(
     content: string;
     botUserId?: string;
   },
-): Promise<'edited' | 'replied' | 'sent'> {
-  const fetchMessage = channel.messages?.fetch;
-  if (typeof fetchMessage === 'function') {
-    const source = asWatchdogNoticeMessage(
-      await fetchMessage.call(channel.messages, args.messageId).catch(() => null),
-    );
-    if (canEditSourceMessage(source, args.botUserId)) {
-      await source!.edit!({ content: args.content, allowedMentions: NO_MENTIONS });
-      return 'edited';
-    }
-    if (source && typeof source.reply === 'function') {
-      await source.reply({ content: args.content, allowedMentions: NO_MENTIONS });
-      return 'replied';
-    }
+): Promise<WatchdogNoticeDelivery> {
+  const source = await fetchWatchdogNoticeSource(channel, args.messageId);
+  if (canEditSourceMessage(source, args.botUserId)) {
+    await source!.edit!({ content: args.content, allowedMentions: NO_MENTIONS });
+    return 'edited';
+  }
+  if (source && typeof source.reply === 'function') {
+    await source.reply({ content: args.content, allowedMentions: NO_MENTIONS });
+    return 'replied';
+  }
+
+  await channel.send({ content: args.content, allowedMentions: NO_MENTIONS });
+  return 'sent';
+}
+
+export async function postLongRunChatCompletionToChannel(
+  channel: WatchdogNoticeChannel,
+  args: {
+    messageId: string;
+    content: string;
+    botUserId?: string;
+  },
+): Promise<WatchdogNoticeDelivery> {
+  const source = await fetchWatchdogNoticeSource(channel, args.messageId);
+  if (canReplaceTransientChatCompletionPlaceholder(source, args.botUserId)) {
+    await source!.edit!({ content: args.content, allowedMentions: NO_MENTIONS });
+    return 'edited';
+  }
+  if (source && typeof source.reply === 'function') {
+    await source.reply({ content: args.content, allowedMentions: NO_MENTIONS });
+    return 'replied';
   }
 
   await channel.send({ content: args.content, allowedMentions: NO_MENTIONS });
