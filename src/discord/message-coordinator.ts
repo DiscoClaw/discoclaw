@@ -199,6 +199,95 @@ function summarizeTraceValue(value: unknown, maxChars = 160): string | undefined
   return summarizeTraceText(String(value), maxChars);
 }
 
+const RELEASE_REHEARSAL_SLUG_RE = /\brr-\d{8}-\d{6}-[a-z0-9]+\b/gi;
+const QUOTED_VALUE_PATTERN = "(?:`([^`\\n]+)`|\"([^\"\\n]+)\"|'([^'\\n]+)')";
+
+function extractQuotedMatch(match: RegExpExecArray): string | null {
+  const value = match[1] ?? match[2] ?? match[3] ?? '';
+  const trimmed = value.trim();
+  return trimmed || null;
+}
+
+function uniqueNonEmpty(values: Iterable<string>): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    if (seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    unique.push(trimmed);
+  }
+  return unique;
+}
+
+function extractNamedArtifactValues(
+  text: string,
+  artifactType: 'task' | 'cron',
+  fieldHints: readonly string[],
+): string[] {
+  const matches: string[] = [];
+  const fieldAlternation = fieldHints.join('|');
+  const patterns = [
+    new RegExp(
+      String.raw`\b${artifactType}\b[^\n]{0,160}?\b(?:${fieldAlternation})\b\s+(?:is\s+)?${QUOTED_VALUE_PATTERN}`,
+      'gi',
+    ),
+    new RegExp(
+      String.raw`\b(?:create|make|add|set up|register|schedule)\b[^\n]{0,160}?\b${artifactType}\b[^\n]{0,160}?\b(?:${fieldAlternation})\b\s+(?:is\s+)?${QUOTED_VALUE_PATTERN}`,
+      'gi',
+    ),
+  ];
+
+  for (const pattern of patterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      const value = extractQuotedMatch(match);
+      if (value) matches.push(value);
+    }
+  }
+
+  return uniqueNonEmpty(matches);
+}
+
+function buildArtifactContractPromptSection(msgs: CoordinatorMessage[]): string {
+  const combinedText = msgs
+    .map((msg) => String(msg.content ?? '').trim())
+    .filter((text) => text.length > 0)
+    .join('\n\n');
+  if (!combinedText) return '';
+
+  const taskTitles = extractNamedArtifactValues(combinedText, 'task', ['title', 'titled', 'named', 'called']);
+  const cronNames = extractNamedArtifactValues(combinedText, 'cron', ['name', 'named', 'called', 'titled']);
+  const rehearsalSlugs = uniqueNonEmpty(
+    Array.from(combinedText.matchAll(RELEASE_REHEARSAL_SLUG_RE), (match) => match[0] ?? ''),
+  );
+
+  if (taskTitles.length === 0 && cronNames.length === 0 && rehearsalSlugs.length === 0) {
+    return '';
+  }
+
+  const lines = [
+    'Artifact contract:',
+    '- Treat any explicit task title, cron name, and rehearsal slug from the user as exact literals, not suggestions.',
+  ];
+
+  for (const title of taskTitles) {
+    lines.push(`- If you create a task, set its title to exactly ${JSON.stringify(title)}.`);
+  }
+
+  for (const name of cronNames) {
+    lines.push(`- If you create a cron, set its name to exactly ${JSON.stringify(name)}.`);
+  }
+
+  if (rehearsalSlugs.length > 0) {
+    lines.push(`- Preserve these rehearsal slug literals verbatim: ${rehearsalSlugs.map(slug => JSON.stringify(slug)).join(', ')}.`);
+    lines.push('- Do not invent additional rehearsal tasks or crons beyond the specific artifacts the user asked for.');
+  }
+
+  return lines.join('\n');
+}
+
 export type BotParams = {
   token: string;
   allowUserIds: Set<string>;
@@ -1787,6 +1876,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         const activeMsg = batch[batch.length - 1];
         const isBatch = batch.length > 1;
         userTextForActionSelection = buildActionSelectionUserText(batch);
+        const artifactContractSection = buildArtifactContractPromptSection(batch);
         actionFlags.canvas = !isBotMessage && !isDm && shouldCanvasPromptBeSurfaced(params.canvasCtx, userTextForActionSelection);
         const disposePendingChannel = markChannelPending(msg.channelId);
 
@@ -3273,6 +3363,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               'says otherwise.';
           }
 
+          if (artifactContractSection) {
+            prompt += `\n\n---\n${artifactContractSection}`;
+          }
+
           const promptSectionEstimates = buildPromptSectionEstimates({
             contextSections: inlinedContext.sections,
             channelContextPath: channelCtx.contextPath,
@@ -4313,6 +4407,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 const historySummary = buildActionHistorySummary(actionHistory);
                 if (historySummary) {
                   followUpParts.push(historySummary);
+                }
+
+                if (artifactContractSection) {
+                  followUpParts.push(`[Artifact contract]\n${artifactContractSection}`);
                 }
 
                 followUpParts.push(
