@@ -40,8 +40,11 @@ import {
   buildDiscordActionFollowUpLifecycleLine,
   isDiscordActionFollowUpRun,
 } from './discord/long-run-watchdog.js';
-import { buildLongRunFinalNotice, postLongRunWatchdogNoticeToChannel } from './discord/long-run-watchdog-notice.js';
-import { NO_MENTIONS } from './discord/allowed-mentions.js';
+import {
+  buildLongRunFinalNotice,
+  postLongRunChatCompletionToChannel,
+  postLongRunWatchdogNoticeToChannel,
+} from './discord/long-run-watchdog-notice.js';
 import { acquirePidLock, releasePidLock } from './pidlock.js';
 import { CronScheduler } from './cron/scheduler.js';
 import { executeCronJob } from './cron/executor.js';
@@ -624,13 +627,6 @@ async function postDiscordActionFollowUpLifecycleNotice(
   );
 }
 
-/**
- * Reply-only delivery for chat message completion notices.
- * Reuses the channel-fetch pattern from postLongRunWatchdogNotice but always
- * replies to the source message (the bot's answer), falling back to
- * channel.send() if the message is gone. This avoids the edit-first path
- * in postLongRunWatchdogNoticeToChannel which would overwrite the answer.
- */
 async function postChatCompletionReply(
   run: Pick<LongRunWatchdogRun, 'channelId' | 'messageId'>,
   content: string,
@@ -651,17 +647,16 @@ async function postChatCompletionReply(
     throw new Error(`watchdog channel is not sendable (${run.channelId})`);
   }
 
-  const fetchMessage = (channel as { messages?: { fetch?: (id: string) => Promise<unknown> } }).messages?.fetch;
-  if (typeof fetchMessage === 'function') {
-    const source = await fetchMessage.call((channel as any).messages, run.messageId).catch(() => null);
-    if (source && typeof (source as any).reply === 'function') {
-      await (source as any).reply({ content, allowedMentions: NO_MENTIONS });
-      return;
-    }
-  }
-
-  await (channelSend as (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>)
-    .call(channel, { content, allowedMentions: NO_MENTIONS });
+  await postLongRunChatCompletionToChannel(channel as {
+    send: (opts: { content: string; allowedMentions?: unknown }) => Promise<unknown>;
+    messages?: {
+      fetch?: (id: string) => Promise<unknown>;
+    };
+  }, {
+    messageId: run.messageId,
+    content,
+    botUserId: clientRef.user?.id ?? undefined,
+  });
 }
 
 const messageCoordinatorWatchdog = completionNotifyEnabled

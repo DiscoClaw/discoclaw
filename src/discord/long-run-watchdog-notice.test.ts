@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildLongRunFinalNotice,
   buildLongRunStagingFailureNotice,
+  postLongRunChatCompletionToChannel,
   postLongRunWatchdogNoticeToChannel,
 } from './long-run-watchdog-notice.js';
 
@@ -132,6 +133,151 @@ describe('postLongRunWatchdogNoticeToChannel', () => {
     expect(result).toBe('sent');
     expect(channel.send).toHaveBeenCalledWith({
       content: 'Run ended with errors.',
+      allowedMentions: { parse: [] },
+    });
+  });
+});
+
+describe('postLongRunChatCompletionToChannel', () => {
+  it('edits a transient restart placeholder in place during recovery', async () => {
+    const source = {
+      author: { id: 'bot-1' },
+      content: '*(Interrupted — bot is restarting.)*',
+      editable: true,
+      edit: vi.fn(async () => {}),
+      reply: vi.fn(async () => {}),
+    };
+    const channel = {
+      send: vi.fn(async () => {}),
+      messages: {
+        fetch: vi.fn(async () => source),
+      },
+    };
+
+    const result = await postLongRunChatCompletionToChannel(channel, {
+      messageId: 'msg-1',
+      content: 'Recovered answer text.',
+      botUserId: 'bot-1',
+    });
+
+    expect(result).toBe('edited');
+    expect(source.edit).toHaveBeenCalledWith({
+      content: 'Recovered answer text.',
+      allowedMentions: { parse: [] },
+    });
+    expect(source.reply).not.toHaveBeenCalled();
+    expect(channel.send).not.toHaveBeenCalled();
+  });
+
+  it('edits an aborted-response placeholder in place during recovery', async () => {
+    const source = {
+      author: { id: 'bot-1' },
+      content: '*(Response aborted.)*',
+      editable: true,
+      edit: vi.fn(async () => {}),
+      reply: vi.fn(async () => {}),
+    };
+    const channel = {
+      send: vi.fn(async () => {}),
+      messages: {
+        fetch: vi.fn(async () => source),
+      },
+    };
+
+    const result = await postLongRunChatCompletionToChannel(channel, {
+      messageId: 'msg-1',
+      content: 'Recovered after restart.',
+      botUserId: 'bot-1',
+    });
+
+    expect(result).toBe('edited');
+    expect(source.edit).toHaveBeenCalledWith({
+      content: 'Recovered after restart.',
+      allowedMentions: { parse: [] },
+    });
+    expect(source.reply).not.toHaveBeenCalled();
+    expect(channel.send).not.toHaveBeenCalled();
+  });
+
+  it('replies instead of editing when the source message is a normal completed answer', async () => {
+    const source = {
+      author: { id: 'bot-1' },
+      content: 'Normal completed answer.',
+      editable: true,
+      edit: vi.fn(async () => {}),
+      reply: vi.fn(async () => {}),
+    };
+    const channel = {
+      send: vi.fn(async () => {}),
+      messages: {
+        fetch: vi.fn(async () => source),
+      },
+    };
+
+    const result = await postLongRunChatCompletionToChannel(channel, {
+      messageId: 'msg-1',
+      content: 'Recovered summary.',
+      botUserId: 'bot-1',
+    });
+
+    expect(result).toBe('replied');
+    expect(source.edit).not.toHaveBeenCalled();
+    expect(source.reply).toHaveBeenCalledWith({
+      content: 'Recovered summary.',
+      allowedMentions: { parse: [] },
+    });
+    expect(channel.send).not.toHaveBeenCalled();
+  });
+
+  it('replies when the transient placeholder is no longer editable', async () => {
+    const source = {
+      author: { id: 'bot-1' },
+      content: '*(Interrupted — bot was restarted.)*',
+      editable: false,
+      edit: vi.fn(async () => {}),
+      reply: vi.fn(async () => {}),
+    };
+    const channel = {
+      send: vi.fn(async () => {}),
+      messages: {
+        fetch: vi.fn(async () => source),
+      },
+    };
+
+    const result = await postLongRunChatCompletionToChannel(channel, {
+      messageId: 'msg-1',
+      content: 'Recovered answer text.',
+      botUserId: 'bot-1',
+    });
+
+    expect(result).toBe('replied');
+    expect(source.edit).not.toHaveBeenCalled();
+    expect(source.reply).toHaveBeenCalledWith({
+      content: 'Recovered answer text.',
+      allowedMentions: { parse: [] },
+    });
+    expect(channel.send).not.toHaveBeenCalled();
+  });
+
+  it('falls back to sending in-channel when the source message cannot be fetched', async () => {
+    const channel = {
+      send: vi.fn(async () => {}),
+      messages: {
+        fetch: vi.fn(async () => {
+          throw new Error('missing');
+        }),
+      },
+    };
+
+    const result = await postLongRunChatCompletionToChannel(channel, {
+      messageId: 'msg-1',
+      content: 'Recovered answer text.',
+      botUserId: 'bot-1',
+    });
+
+    expect(result).toBe('sent');
+    expect(channel.send).toHaveBeenCalledWith({
+      content: 'Recovered answer text.',
       allowedMentions: { parse: [] },
     });
   });
