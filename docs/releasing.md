@@ -28,7 +28,7 @@
 
 ## Claude 1.0 Release Rehearsal (Blessed Source Checkout)
 
-The authoritative rehearsal for the blessed Claude source-checkout path is the repo-owned harness:
+The repo-owned harness is the authoritative operational rehearsal for the blessed Claude source-checkout path:
 
 ```bash
 pnpm release:rehearsal
@@ -36,32 +36,37 @@ pnpm release:rehearsal
 
 That harness lives in `scripts/release-rehearsal.ts` and owns one exact contract:
 
-1. Refuse to run unless the current tree is a real source checkout, `<repoRoot>/.env` exists, and that repo-local `.env` resolves `PRIMARY_RUNTIME=claude`.
+1. Refuse to run unless the current tree is a real source checkout, `<repoRoot>/.env` exists, and that repo-local `.env` resolves both `PRIMARY_RUNTIME=claude` and a concrete `DISCORD_GUILD_ID`.
 2. Run this command sequence in order against that same checkout:
    - `pnpm preflight:blank-machine`
    - `pnpm claude:auth-smoke`
-   - `pnpm discord:smoke-test`
+   - `pnpm discord:smoke-test -- --guild-id <repo-local DISCORD_GUILD_ID>`
    - `pnpm build`
    - `pnpm dev`
-3. Hold the live Discord verification points as manual checkpoints for message handling, task sync, cron execution, and restart/recovery.
-4. Tear the rehearsal back down to a reusable baseline and treat any leftover rehearsal artifact as a blocked verdict, not a soft warning.
-5. Write a durable closeout in `docs/release-audit/claude-release-rehearsal-<slug>.json` and `.md`.
+3. Hold the live Discord verification points as manual checkpoints for the first reply, same-conversation follow-up reply, task sync, cron execution, and restart/recovery.
+4. Tear the rehearsal-owned task, cron, and local-temp artifacts back down to a reusable baseline and treat any unresolved owned artifact as a blocked verdict, not a soft warning.
+5. Write a durable closeout in `docs/release-audit/claude-release-rehearsal-<slug>.json` and `.md`, including checkout provenance when the operator supplied it for context.
+
+Fresh-clone / stranger-path proof stays outside this harness as a separate evidence track. Inside the rehearsal itself, checkout provenance may be recorded as operator context and repo-local secret hygiene stays an operator concern, but they do not become extra runtime gates beyond the real git-checkout boundary, repo-owned source markers, repo-local `.env`, `PRIMARY_RUNTIME=claude`, the command sequence above, the required manual checkpoints, and the blocked-on-leftovers teardown verdict.
 
 ### Why each restriction is true
 
-- **Repo-local config source is enforced, not implied.** `scripts/release-rehearsal.ts` refuses to run without `<repoRoot>/.env`, parses that file directly, and blocks if `PRIMARY_RUNTIME` is anything other than `claude`. The first command in the contract is `pnpm preflight:blank-machine`, which routes through `scripts/doctor.ts` and the shared config-doctor path specifically to validate the checkout's own `.env` instead of inheriting your normal shell environment.
+- **Repo-local config source is enforced, not implied.** `scripts/release-rehearsal.ts` refuses to run without `<repoRoot>/.env`, parses that file directly, blocks unless that file explicitly sets `PRIMARY_RUNTIME=claude` and `DISCORD_GUILD_ID`, and builds each child-process env from a small execution/auth shell baseline plus that repo-local file after stripping repo-local persistence/config path overrides that would escape the rehearsal temp root, then applies the rehearsal-only isolation overrides. The first command in the contract is `pnpm preflight:blank-machine`, which routes through `scripts/doctor.ts` and the shared config-doctor path specifically to validate the checkout's own `.env` instead of inheriting your normal shell environment.
+- **The source-checkout boundary is a real git checkout, not just copied files.** `scripts/release-rehearsal.ts` requires both the repo-owned marker files and checkout-local `.git` metadata, so an extracted archive or copied folder without git checkout state does not satisfy the gate.
+- **Repo-local `.env` means the operator-managed config file in the checkout being rehearsed.** The harness validates that file as the source of truth for the run and requires it to set `PRIMARY_RUNTIME=claude` and `DISCORD_GUILD_ID`. Secret hygiene for that file is a normal local-operator concern, not a separate rehearsal gate, and the file itself should not be copied into durable release evidence.
+- **Checkout provenance is context, not a new runtime gate.** `scripts/release-rehearsal.ts` accepts optional operator-recorded `throwaway-clone` or `reused-checkout` provenance and writes that value into the durable closeout when supplied, but it does not change the runtime restrictions or child-process env from that answer. Fresh-clone evidence remains a separate proof track rather than a second readiness gate inside this harness.
 - **Claude auth is a separate gate.** `pnpm claude:auth-smoke` runs `scripts/claude-auth-smoke.ts`, so the rehearsal does not collapse config/bootstrap success into Claude-session success.
-- **Discord bootstrap is a separate gate.** `pnpm discord:smoke-test` runs `scripts/discord-smoke-test.mjs` before the live runtime comes up, so Discord login and basic guild/forum reachability fail fast before the interactive rehearsal steps.
-- **Manual chat checkpoints stay manual.** The live message path in `src/discord/message-coordinator.ts` only serves allowlisted requesters, and Discord does not give the harness a way to impersonate that allowlisted sender for a real end-to-end message turn. The rehearsal therefore pauses for an operator-confirmed TTY checkpoint instead of faking the chat leg.
+- **Discord bootstrap is a separate gate.** `pnpm discord:smoke-test -- --guild-id <repo-local DISCORD_GUILD_ID>` runs `scripts/discord-smoke-test.mjs` before the live runtime comes up, so Discord login and basic guild/forum reachability fail fast against the same pinned guild the rehearsal will later clean up. After that, the harness waits for the runtime to log `Discord runtime ready`, which is emitted immediately after the Discord login/bootstrap path resolves and before post-connect startup checks or dashboard startup, so late non-essential startup work does not block the live checkpoints.
+- **Manual chat checkpoints stay manual.** The live message path in `src/discord/message-coordinator.ts` only serves allowlisted requesters, and Discord does not give the harness a way to impersonate that allowlisted sender for a real end-to-end message turn. The rehearsal therefore pauses for operator-confirmed TTY checkpoints for the first reply, the same-conversation follow-up reply, and the post-restart reply instead of faking the chat leg, and any skipped required live checkpoint blocks the verdict.
 - **Task sync verification is tied to the real task owners.** The rehearsal task check exercises the canonical sync path in `src/tasks/task-sync-engine.ts`, while `src/tasks/sync-coordinator.ts` remains the concurrency/coalescing owner for repeated sync triggers.
 - **Cron mutation remains unavailable during the rehearsal.** In `src/index.ts`, the cron executor context is created with `cronActionFlags.crons = false` and `cronActionFlags.archive = false` before `executeCronJob()` in `src/cron/executor.ts` is invoked, so the rehearsal can verify cron execution without allowing cron-emitted action blocks to mutate cron state or archive channels.
 - **Restart/recovery verification is tied to the real recovery owners.** `src/discord/long-run-watchdog.ts` owns persisted long-run recovery/final-post behavior, and `src/health/startup-healing.ts` owns startup healing of stale runtime state. The rehearsal restart step is checking those real boundaries, not a separate fake harness path.
 
 ### Isolation, namespace, and teardown
 
-- **Local persistence is isolated by rehearsal-only child-process overrides.** `scripts/release-rehearsal.ts` launches child commands with temporary `DISCOCLAW_DATA_DIR`, `WORKSPACE_CWD`, `GROUPS_DIR`, `BEADS_DIR`, and a rehearsal-only `DISCOCLAW_TASKS_PREFIX`, so the local task/cron/workspace stores do not share state with the operator's normal environment.
+- **Local persistence is isolated by rehearsal-only child-process overrides.** `scripts/release-rehearsal.ts` launches child commands with temporary `DISCOCLAW_DATA_DIR`, `WORKSPACE_CWD`, `GROUPS_DIR`, `BEADS_DIR`, and a rehearsal-only `DISCOCLAW_TASKS_PREFIX`, and it strips repo-local persistence/config path overrides such as task tag-map or webhook config paths before launch, so the local task/cron/workspace stores do not share state with the operator's normal environment.
 - **Live Discord artifacts are namespaced.** The harness generates a unique rehearsal slug and uses it in the rehearsal task title and cron name, so live Discord-visible artifacts can be identified and swept deterministically.
-- **Teardown is part of the verdict.** Cleanup closes rehearsal tasks, runs the task-sync path to archive related task threads, archives rehearsal cron threads, and checks the canonical cron record state. If any task, task thread, cron thread, or cron record remains unresolved, `scripts/release-rehearsal.ts` records that leftover and finishes `blocked`.
+- **Teardown is part of the verdict.** Cleanup closes rehearsal tasks, runs the task-sync path to archive related task threads, archives rehearsal cron threads, persists `disabled: true` into the canonical cron records for those archived rehearsal threads, checks that canonical state, and removes the per-run local temp root. Those rehearsal-owned artifacts are the hard blocked-on-leftovers boundary. Manual message-handling and restart/recovery chat artifacts remain an operator checklist item: when those checkpoints were exercised, record whether they were cleaned up or confined to a disposable location, but do not treat checkout provenance or general local-secret hygiene as extra machine-enforced teardown gates.
 
 ### Manual fallback
 
@@ -70,12 +75,12 @@ If you need to diagnose a failing step outside the harness, use the same blessed
 ```bash
 pnpm preflight:blank-machine
 pnpm claude:auth-smoke
-pnpm discord:smoke-test
+pnpm discord:smoke-test -- --guild-id <repo-local DISCORD_GUILD_ID>
 pnpm build
 pnpm dev
 ```
 
-Treat that as debugging only. The authoritative release-rehearsal artifact is still the closeout written by `pnpm release:rehearsal`, because that path is the only one that also enforces the repo-local config source, child-process isolation, teardown sweep, blocked-on-leftovers verdict, and durable closeout contract in one run.
+Treat that as debugging only. The authoritative release-rehearsal artifact is still the closeout written by `pnpm release:rehearsal`, because that path is the only one that also enforces the repo-local config source, child-process isolation, required live-checkpoint gating, teardown of rehearsal-owned artifacts, optional checkout-provenance capture for context, and durable closeout contract in one run.
 
 ## Manual release (if needed)
 
