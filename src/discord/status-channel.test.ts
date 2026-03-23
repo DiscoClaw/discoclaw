@@ -358,6 +358,22 @@ describe('bootReport', () => {
     expect(msg.indexOf('Dashboard · http://127.0.0.1:9401/')).toBeLessThan(msg.indexOf('Model · (default)'));
   });
 
+  it('includes instance identity when service metadata is provided', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({
+      ...baseData,
+      serviceName: 'discoclaw',
+      launchMode: 'systemd',
+      workspaceLabel: 'discoclaw-data/workspace',
+      processId: 2816959,
+    });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Instance · discoclaw · systemd · discoclaw-data/workspace · pid 2816959');
+    expect(msg.indexOf('Instance · discoclaw · systemd · discoclaw-data/workspace · pid 2816959'))
+      .toBeLessThan(msg.indexOf('Model · (default)'));
+  });
+
   it('includes Dashboard failure line when dashboardError is provided', async () => {
     const ch = mockChannel();
     const poster = createStatusPoster(ch);
@@ -382,6 +398,14 @@ describe('bootReport', () => {
     await poster.bootReport!({ ...baseData });
     const msg = sentContent(ch);
     expect(msg).not.toContain('Dashboard ·');
+  });
+
+  it('omits instance identity when service metadata is absent', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({ ...baseData });
+    const msg = sentContent(ch);
+    expect(msg).not.toContain('Instance ·');
   });
 
   it('includes cold in Memory line when memoryColdOn is true with chunk count', async () => {
