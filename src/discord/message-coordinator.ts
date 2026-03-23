@@ -221,6 +221,10 @@ function uniqueNonEmpty(values: Iterable<string>): string[] {
   return unique;
 }
 
+function containsReleaseRehearsalSlug(text: string): boolean {
+  return Array.from(text.matchAll(RELEASE_REHEARSAL_SLUG_RE)).length > 0;
+}
+
 function extractNamedArtifactValues(
   text: string,
   artifactType: 'task' | 'cron',
@@ -228,7 +232,7 @@ function extractNamedArtifactValues(
 ): string[] {
   const matches: string[] = [];
   const fieldAlternation = fieldHints.join('|');
-  const patterns = [
+  const quotedPatterns = [
     new RegExp(
       String.raw`\b${artifactType}\b[^\n]{0,160}?\b(?:${fieldAlternation})\b\s+(?:is\s+)?${QUOTED_VALUE_PATTERN}`,
       'gi',
@@ -239,11 +243,34 @@ function extractNamedArtifactValues(
     ),
   ];
 
-  for (const pattern of patterns) {
+  for (const pattern of quotedPatterns) {
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(text)) !== null) {
       const value = extractQuotedMatch(match);
       if (value) matches.push(value);
+    }
+  }
+
+  const unquotedPatterns = [
+    new RegExp(
+      String.raw`\b${artifactType}\b[^\n]{0,160}?\b(?:${fieldAlternation})\b\s+(?:is\s+)?([^\n]{1,200}?)` +
+      String.raw`(?=(?:\s+(?:through|via)\s+the\s+live\s+discord\s+path\b|[.!?;]|$))`,
+      'gi',
+    ),
+    new RegExp(
+      String.raw`\b(?:create|make|add|set up|register|schedule)\b[^\n]{0,160}?\b${artifactType}\b[^\n]{0,160}?\b(?:${fieldAlternation})\b\s+(?:is\s+)?([^\n]{1,200}?)` +
+      String.raw`(?=(?:\s+(?:through|via)\s+the\s+live\s+discord\s+path\b|[.!?;]|$))`,
+      'gi',
+    ),
+  ];
+
+  for (const pattern of unquotedPatterns) {
+    let match: RegExpExecArray | null;
+    while ((match = pattern.exec(text)) !== null) {
+      const rawValue = typeof match[1] === 'string' ? match[1].trim() : '';
+      if (!rawValue) continue;
+      if (!containsReleaseRehearsalSlug(rawValue)) continue;
+      matches.push(rawValue.replace(/\s+/g, ' ').trim());
     }
   }
 
