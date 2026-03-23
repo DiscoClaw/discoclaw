@@ -6,11 +6,15 @@
  * Also tests image input precedence across direct, reply-reference, and
  * history sources.
  */
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineEvent, ImageData } from '../runtime/types.js';
 import { MAX_IMAGES_PER_INVOCATION } from '../runtime/types.js';
 import { _resetForTest as resetAbortRegistry } from './abort-registry.js';
 import { _resetForTest as resetInflightReplies, drainInFlightReplies } from './inflight-replies.js';
+import { LongRunWatchdog } from './long-run-watchdog.js';
 import type { AttachmentLike } from './image-download.js';
 
 // ---------------------------------------------------------------------------
@@ -220,7 +224,8 @@ function makeReply() {
 }
 
 async function makeHandler(params: any, queue: any) {
-  const { createMessageCreateHandler } = await import('./message-coordinator.js');
+  const { _resetMessageCoordinatorStateForTests, createMessageCreateHandler } = await import('./message-coordinator.js');
+  _resetMessageCoordinatorStateForTests();
   return createMessageCreateHandler(params, queue);
 }
 
@@ -1116,6 +1121,86 @@ describe('message finalization recovery staging', () => {
     expect(reply.delete).not.toHaveBeenCalled();
     expect(metrics.increment).toHaveBeenCalledWith('discord.message.completed_without_visible_output');
     expect(metrics.increment).toHaveBeenCalledWith('discord.message.finalization_loss');
+  });
+
+  it('clears staged recovery on explicit stop without posting a second aborted placeholder or restart repost', async () => {
+    const order: string[] = [];
+    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'discoclaw-watchdog-'));
+    const dataFilePath = path.join(tmpDir, 'watchdog.json');
+    const postFinal = vi.fn(async (_run?: unknown) => undefined);
+    let handlerPromise: Promise<void> | null = null;
+    let stopIssued = false;
+    let handler: ((msg: any) => Promise<void>) | null = null;
+    let stopMsg: ReturnType<typeof makeGuildMessage> | null = null;
+
+    const runtime = {
+      id: 'test',
+      capabilities: new Set<string>(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_final', text: 'Recovered final summary.' };
+        yield { type: 'done' };
+      },
+    };
+    const stopReply = makeReply();
+    const reply = {
+      id: 'reply-1',
+      edit: vi.fn(async (opts: { content: string }) => {
+        order.push(`edit:${opts.content}`);
+        if (opts.content === 'Recovered final summary.' && !stopIssued) {
+          stopIssued = true;
+          stopMsg = makeGuildMessage(stopReply, {
+            id: 'm-stop',
+            content: '!stop',
+            channelId: 'ch-1',
+            guildId: 'guild-1',
+            guild: { id: 'guild-1' },
+          });
+          await handler?.(stopMsg as any);
+          throw new Error('edit interrupted after explicit stop');
+        }
+      }),
+      delete: vi.fn(async () => {
+        order.push('delete');
+      }),
+      react: vi.fn(async () => ({ remove: vi.fn(async () => undefined) })),
+    };
+    const msg = makeGuildMessage(reply);
+    const watchdog = new LongRunWatchdog({
+      dataFilePath,
+      postStillRunning: vi.fn(async () => undefined),
+      postFinal: vi.fn(async (run) => {
+        order.push(`postFinal:${run.recoveryText ?? ''}`);
+        await postFinal(run);
+      }),
+    });
+    const params = makeParams(runtime, { longRunWatchdog: watchdog });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+
+    try {
+      handler = await makeHandler(params, queue);
+      handlerPromise = handler(msg as any);
+      await handlerPromise;
+      await watchdog._waitForIdleForTest();
+
+      expect(reply.edit.mock.calls.some((call) => call[0]?.content === '*(Response aborted.)*')).toBe(false);
+      expect(reply.delete).toHaveBeenCalledTimes(1);
+      expect(stopMsg).not.toBeNull();
+      expect(vi.mocked(stopMsg!.reply).mock.calls[0]?.[0]?.content).toContain('Aborted 1 active stream.');
+
+      const [run] = await watchdog.listRuns();
+      expect(run).toBeDefined();
+      expect(run?.recoveryText).toBeNull();
+
+      await watchdog.startupSweep();
+      await watchdog._waitForIdleForTest();
+
+      expect(postFinal).not.toHaveBeenCalled();
+      expect(order).not.toContain('postFinal:Recovered final summary.');
+    } finally {
+      watchdog.dispose();
+      await fs.rm(tmpDir, { recursive: true, force: true });
+      await handlerPromise;
+    }
   });
 
   it('keeps a staged successful completion recoverable when shutdown begins before final Discord delivery', async () => {

@@ -1348,6 +1348,9 @@ describe('ForgeOrchestrator', () => {
     expect(result.error).toBeUndefined();
     expect(progress.some((p) => p.includes('Draft complete'))).toBe(true);
     expect(progress.some((p) => p.includes('Forge complete'))).toBe(true);
+    const completeMsg = progress.find((p) => p.includes('Forge complete'));
+    expect(completeMsg).toContain('reviewed');
+    expect(completeMsg).not.toContain('ready for review');
     expect(result.planSummary).toBeDefined();
     expect(result.planSummary).toContain('plan-001');
   });

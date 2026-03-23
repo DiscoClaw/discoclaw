@@ -63,7 +63,7 @@ Full regeneration remains available and resets all phase statuses to `pending`. 
 
 **`!plan`** manages structured implementation plans — markdown files in `workspace/plans/` that track an idea from draft through approval, phase decomposition, and implementation.
 
-**`!forge`** automates plan creation by orchestrating AI agents in a draft → audit → revise loop, producing a reviewed plan ready for human approval.
+**`!forge`** automates plan creation by orchestrating AI agents in a draft → audit → revise loop, producing a reviewed plan and then handing off to either auto-implementation or manual approval, depending on the gates.
 
 Prompt-shaping note: across runtimes, forge is more reliable when open-ended research and final strict-output artifact writing are treated as separate steps. Use bounded discovery inputs where possible, and avoid asking a single turn to both roam the repo and emit the final durable plan unless that adapter has already proven it can do that shape reliably.
 
