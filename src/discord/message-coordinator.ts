@@ -77,7 +77,15 @@ import { ToolAwareQueue } from './tool-aware-queue.js';
 import { createStreamingProgress } from './streaming-progress.js';
 import { NO_MENTIONS } from './allowed-mentions.js';
 import { registerInFlightReply, setStopReaction, isShuttingDown, markChannelPending } from './inflight-replies.js';
-import { registerAbort, tryAbortAll, setAbortMeta, snapshotAllAborts } from './abort-registry.js';
+import {
+  COMMAND_STOP_ABORT_CAUSE,
+  isExplicitStopAbortCause,
+  readAbortCause,
+  registerAbort,
+  tryAbortAll,
+  setAbortMeta,
+  snapshotAllAborts,
+} from './abort-registry.js';
 import { buildStopSummary } from './stop-summary.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, closeFenceIfOpen, formatRuntimePreviewSignal } from './output-utils.js';
 import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, buildOpenTasksSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble, buildPromptSectionEstimates } from './prompt-common.js';
@@ -453,7 +461,7 @@ export type BotParams = {
   completionNotifyEnabled?: boolean;
   completionNotifyThresholdMs?: number;
   /** Optional lifecycle watchdog for long-running Discord operations. */
-  longRunWatchdog?: Pick<LongRunWatchdog, 'start' | 'complete' | 'stageRecovery' | 'startupSweep'>;
+  longRunWatchdog?: Pick<LongRunWatchdog, 'start' | 'complete' | 'stageRecovery' | 'startupSweep' | 'markExplicitStop'>;
   /** Optional override for watchdog still-running check-in delay. */
   longRunStillRunningDelayMs?: number;
   serviceName?: string;
@@ -606,7 +614,7 @@ function errorMessage(err: unknown): string {
 }
 
 type LongRunOutcome = 'succeeded' | 'failed';
-type LongRunWatchdogLike = Pick<LongRunWatchdog, 'start' | 'complete' | 'stageRecovery' | 'startupSweep'>;
+type LongRunWatchdogLike = Pick<LongRunWatchdog, 'start' | 'complete' | 'stageRecovery' | 'startupSweep' | 'markExplicitStop'>;
 type FollowUpTerminalState = 'completed' | 'failed' | 'completed after delay';
 type PendingActionFollowUp = {
   token: string;
@@ -745,6 +753,21 @@ async function stageWatchdogRecovery(opts: {
     return true;
   } catch (err) {
     opts.log?.warn({ err, runId: opts.runId }, `${opts.flow}: watchdog recovery stage failed`);
+    return false;
+  }
+}
+
+async function markWatchdogExplicitStop(opts: {
+  watchdog?: LongRunWatchdogLike;
+  messageId: string;
+  log?: LoggerLike;
+  flow: string;
+}): Promise<boolean> {
+  if (!opts.watchdog || typeof opts.watchdog.markExplicitStop !== 'function') return false;
+  try {
+    return Boolean(await opts.watchdog.markExplicitStop(opts.messageId));
+  } catch (err) {
+    opts.log?.warn({ err, messageId: opts.messageId }, `${opts.flow}: watchdog explicit-stop mark failed`);
     return false;
   }
 }
@@ -1178,7 +1201,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         for (const snapshot of snapshots) {
           explicitStopReplyIds.add(snapshot.messageId);
         }
-        const aborted = tryAbortAll();
+        await Promise.all(snapshots.map((snapshot) => markWatchdogExplicitStop({
+          watchdog: params.longRunWatchdog,
+          messageId: snapshot.messageId,
+          log: params.log,
+          flow: 'message',
+        })));
+        const aborted = tryAbortAll({ cause: COMMAND_STOP_ABORT_CAUSE });
         const orch = getActiveOrchestrator();
         const forgeRunning = Boolean(orch?.isRunning);
         if (forgeRunning && orch) orch.requestCancel('!stop');
@@ -1924,7 +1953,10 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
         let primaryDeliveryConfirmed = false;
         let deliveryConfirmed = false;
         let explicitStopAbortSeen = false;
-        const wasExplicitlyStopped = (): boolean => reply != null && explicitStopReplyIds.has(reply.id);
+        const wasExplicitlyStopped = (): boolean => {
+          if (reply == null) return false;
+          return explicitStopReplyIds.has(reply.id) || isExplicitStopAbortCause(readAbortCause(reply.id));
+        };
         try {
           // Handle !memory commands before session creation or the "..." placeholder.
           if (!isBotMessage && params.memoryCommandsEnabled) {

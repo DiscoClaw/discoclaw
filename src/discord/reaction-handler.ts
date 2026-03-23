@@ -15,7 +15,12 @@ import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } f
 import { shouldTriggerFollowUp, actionDedupeKey, isDuplicateAction, buildActionHistorySummary } from './action-categories.js';
 import type { ActionHistoryEntry } from './action-categories.js';
 import { tryResolveReactionPrompt } from './reaction-prompts.js';
-import { tryAbort, isActivelyStreaming, snapshotAbort } from './abort-registry.js';
+import {
+  REACTION_STOP_ABORT_CAUSE,
+  tryAbort,
+  isActivelyStreaming,
+  snapshotAbort,
+} from './abort-registry.js';
 import { buildStopSummary } from './stop-summary.js';
 import { getActiveOrchestrator, getActiveForgeChannelId } from './forge-plan-registry.js';
 import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildTaskThreadSection, loadWorkspacePaFiles, resolveEffectiveTools, buildPromptPreamble, buildOpenTasksSection, buildPromptSectionEstimates } from './prompt-common.js';
@@ -59,8 +64,6 @@ const STREAM_STALL_PROGRESS_UPDATE_MS = 30_000;
 const STREAMING_EDIT_TIMEOUT_MS = 4_000;
 const STREAMING_EDIT_TIMEOUT_STREAK_THRESHOLD = 3;
 const STREAMING_EDIT_TIMEOUT_COOLDOWN_MS = 10_000;
-const REACTION_STOP_ABORT_CAUSE = 'reaction-stop';
-
 async function waitForEditOrTimeout(editOp: Promise<unknown>, timeoutMs: number): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | null = null;
   const completed = await Promise.race<boolean>([
@@ -236,6 +239,9 @@ function createReactionHandler(
           reaction.message.id,
           { cause: REACTION_STOP_ABORT_CAUSE },
         );
+        if (wasActive) {
+          await params.longRunWatchdog?.markExplicitStop?.(reaction.message.id).catch(() => {});
+        }
         if (wasActive) metrics.increment('discord.reaction.abort');
         const orch = getActiveOrchestrator();
         const forgeCancelled = Boolean(orch?.isRunning && getActiveForgeChannelId() === reaction.message.channelId);

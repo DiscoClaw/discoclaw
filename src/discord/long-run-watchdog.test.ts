@@ -170,6 +170,39 @@ describe('LongRunWatchdog', () => {
     watchdog.dispose();
   });
 
+  it('suppresses reposts after an explicit stop mark even if recovery text was staged', async () => {
+    const filePath = path.join(tmpDir, 'watchdog.json');
+    const postStillRunning = vi.fn(async () => {});
+    const postFinal = vi.fn(async () => {});
+    const watchdog = new LongRunWatchdog({
+      dataFilePath: filePath,
+      postStillRunning,
+      postFinal,
+      stillRunningDelayMs: 10_000,
+    });
+
+    await watchdog.start({
+      runId: 'run-explicit-stop',
+      channelId: 'chan-1',
+      messageId: 'msg-1',
+    });
+    await watchdog.stageRecovery('run-explicit-stop', { text: 'Recovered answer text.' });
+    await watchdog.markExplicitStop('msg-1');
+    await watchdog.complete('run-explicit-stop', { outcome: 'failed' });
+
+    expect(postFinal).toHaveBeenCalledTimes(0);
+    const state = await watchdog.getRun('run-explicit-stop');
+    expect(state?.explicitStop).toBe(true);
+    expect(state?.recoveryText).toBeNull();
+    expect(state?.notifyOnCompletion).toBe(false);
+
+    const sweep = await watchdog.startupSweep();
+    expect(sweep.finalRetried).toBe(0);
+    expect(sweep.finalPosted).toBe(0);
+    expect(sweep.finalFailed).toBe(0);
+    watchdog.dispose();
+  });
+
   it('posts final follow-up when notifyOnCompletion is true and check-in was posted', async () => {
     const filePath = path.join(tmpDir, 'watchdog.json');
     const postStillRunning = vi.fn(async () => {});

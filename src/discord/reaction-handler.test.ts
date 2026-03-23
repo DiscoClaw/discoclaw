@@ -2728,6 +2728,40 @@ describe('🛑 per-message abort intercept', () => {
     }
   });
 
+  it('durably marks the watchdog run for explicit-stop ownership before returning', async () => {
+    const stopSnapshot = {
+      messageId: 'msg-1',
+      channelId: 'ch-1',
+      userMessage: 'Need a long answer',
+      partialResponse: 'Working on it',
+      activityLabel: 'Thinking',
+      sessionKey: 'discord:guild-1:ch-1',
+      elapsedMs: 1_500,
+    };
+    const tryAbortSpy = vi.spyOn(abortRegistry, 'tryAbort').mockReturnValue(true);
+    const isActiveSpy = vi.spyOn(abortRegistry, 'isActivelyStreaming').mockReturnValue(true);
+    const snapshotSpy = vi.spyOn(abortRegistry, 'snapshotAbort').mockReturnValue(stopSnapshot);
+    const getOrchestratorSpy = vi.spyOn(forgePlanRegistry, 'getActiveOrchestrator').mockReturnValue(null);
+    const markExplicitStop = vi.fn(async () => ({ runId: 'run-1' }));
+    try {
+      const params = makeParams({
+        longRunWatchdog: { markExplicitStop } as any,
+      });
+      const queue = mockQueue();
+      const reaction = makeStopReaction();
+      const handler = createReactionAddHandler(params, queue);
+
+      await handler(reaction as any, mockUser() as any);
+
+      expect(markExplicitStop).toHaveBeenCalledWith('msg-1');
+    } finally {
+      tryAbortSpy.mockRestore();
+      isActiveSpy.mockRestore();
+      snapshotSpy.mockRestore();
+      getOrchestratorSpy.mockRestore();
+    }
+  });
+
   it('calls requestCancel on a running forge orchestrator in the same channel', async () => {
     const requestCancelFn = vi.fn();
     const mockOrch = { isRunning: true, requestCancel: requestCancelFn };

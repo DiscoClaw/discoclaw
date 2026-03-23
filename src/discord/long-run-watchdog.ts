@@ -35,6 +35,7 @@ export type LongRunWatchdogRun = {
   checkInDueAt: number;
   checkInPosted: boolean;
   checkInPostedAt: number | null;
+  explicitStop: boolean;
   recoveryText: string | null;
   completion: CompletionKind | null;
   completionDetail: string | null;
@@ -198,6 +199,7 @@ function normalizeRun(runId: string, raw: Record<string, unknown>, now: number):
     checkInDueAt,
     checkInPosted: asBoolean(raw.checkInPosted, false),
     checkInPostedAt: asNullableFiniteNumber(raw.checkInPostedAt),
+    explicitStop: asBoolean(raw.explicitStop, false),
     recoveryText: normalizeRecoveryText(raw.recoveryText),
     completion,
     completionDetail: normalizeCompletionDetail(raw.completionDetail),
@@ -266,6 +268,7 @@ export class LongRunWatchdog {
         checkInDueAt: now + delayMs,
         checkInPosted: false,
         checkInPostedAt: null,
+        explicitStop: false,
         recoveryText: null,
         completion: null,
         completionDetail: null,
@@ -293,7 +296,24 @@ export class LongRunWatchdog {
       const run = this.store.runs[runId];
       if (!run) return;
 
-      run.recoveryText = normalizeRecoveryText(input.text);
+      run.recoveryText = run.explicitStop ? null : normalizeRecoveryText(input.text);
+      run.updatedAt = this.now();
+      await this.persistStore();
+      out = cloneRun(run);
+    });
+    return out;
+  }
+
+  async markExplicitStop(messageId: string): Promise<LongRunWatchdogRun | null> {
+    let out: LongRunWatchdogRun | null = null;
+    await this.enqueue(async () => {
+      await this.ensureLoaded();
+      const run = Object.values(this.store.runs).find((candidate) => candidate.messageId === messageId);
+      if (!run) return;
+
+      run.explicitStop = true;
+      run.notifyOnCompletion = false;
+      run.recoveryText = null;
       run.updatedAt = this.now();
       await this.persistStore();
       out = cloneRun(run);
@@ -574,6 +594,7 @@ export class LongRunWatchdog {
 
   private requiresFinalPost(run: LongRunWatchdogRun): boolean {
     if (run.deliveryConfirmed || run.finalPosted) return false;
+    if (run.explicitStop) return false;
     if (run.runKind === DISCORD_ACTION_FOLLOW_UP_RUN_KIND) {
       return run.completion === 'interrupted';
     }

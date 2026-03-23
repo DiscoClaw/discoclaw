@@ -1132,6 +1132,7 @@ describe('message finalization recovery staging', () => {
     let stopIssued = false;
     let handler: ((msg: any) => Promise<void>) | null = null;
     let stopMsg: ReturnType<typeof makeGuildMessage> | null = null;
+    let explicitStopPersistedBeforeThrow = false;
 
     const runtime = {
       id: 'test',
@@ -1156,6 +1157,8 @@ describe('message finalization recovery staging', () => {
             guild: { id: 'guild-1' },
           });
           await handler?.(stopMsg as any);
+          const [run] = await watchdog.listRuns();
+          explicitStopPersistedBeforeThrow = run?.explicitStop === true;
           throw new Error('edit interrupted after explicit stop');
         }
       }),
@@ -1186,9 +1189,11 @@ describe('message finalization recovery staging', () => {
       expect(reply.delete).toHaveBeenCalledTimes(1);
       expect(stopMsg).not.toBeNull();
       expect(vi.mocked(stopMsg!.reply).mock.calls[0]?.[0]?.content).toContain('Aborted 1 active stream.');
+      expect(explicitStopPersistedBeforeThrow).toBe(true);
 
       const [run] = await watchdog.listRuns();
       expect(run).toBeDefined();
+      expect(run?.explicitStop).toBe(true);
       expect(run?.recoveryText).toBeNull();
 
       await watchdog.startupSweep();
@@ -1201,6 +1206,37 @@ describe('message finalization recovery staging', () => {
       await fs.rm(tmpDir, { recursive: true, force: true });
       await handlerPromise;
     }
+  });
+
+  it('suppresses the aborted placeholder for reaction-stop abort causes', async () => {
+    let registeredReplyId = '';
+    const runtime = {
+      id: 'test',
+      capabilities: new Set<string>(['streaming_text']),
+      async *invoke(): AsyncIterable<EngineEvent> {
+        yield { type: 'text_delta', text: 'Working...' };
+        if (registeredReplyId) {
+          const { tryAbort } = await import('./abort-registry.js');
+          tryAbort(registeredReplyId, { cause: 'reaction-stop' });
+        }
+        yield { type: 'error', message: 'interrupted by reaction stop' };
+      },
+    };
+    const reply = {
+      id: 'reply-1',
+      edit: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+      react: vi.fn(async () => ({ remove: vi.fn(async () => undefined) })),
+    };
+    registeredReplyId = reply.id;
+    const msg = makeGuildMessage(reply);
+    const params = makeParams(runtime);
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(reply.edit.mock.calls.some((call: any[]) => call[0]?.content === '*(Response aborted.)*')).toBe(false);
   });
 
   it('keeps a staged successful completion recoverable when shutdown begins before final Discord delivery', async () => {

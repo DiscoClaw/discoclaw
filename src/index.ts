@@ -696,6 +696,7 @@ const messageCoordinatorWatchdog = completionNotifyEnabled
       }),
       complete: watchdog.complete.bind(watchdog),
       stageRecovery: watchdog.stageRecovery.bind(watchdog),
+      markExplicitStop: watchdog.markExplicitStop.bind(watchdog),
       // Startup sweep is intentionally run after Discord connect from index.ts.
       startupSweep: async () => ({ ...emptyLongRunSweepResult }),
     };

@@ -3,6 +3,8 @@
 // on recently-finished messages are silently consumed rather than forwarded.
 
 const COOLDOWN_MS = 15_000;
+export const COMMAND_STOP_ABORT_CAUSE = 'command-stop';
+export const REACTION_STOP_ABORT_CAUSE = 'reaction-stop';
 
 type ActiveAbortState = {
   controller: AbortController;
@@ -99,6 +101,10 @@ export function getAbortCause(messageId: string): string | null {
 /** Alias for getAbortCause() to keep coordinator-side reads intention-revealing. */
 export function readAbortCause(messageId: string): string | null {
   return getAbortCause(messageId);
+}
+
+export function isExplicitStopAbortCause(cause: string | null | undefined): boolean {
+  return cause === COMMAND_STOP_ABORT_CAUSE || cause === REACTION_STOP_ABORT_CAUSE;
 }
 
 // ---------------------------------------------------------------------------
