@@ -7,6 +7,7 @@ Scope: evidence-backed closeout memo for DiscoClaw's blessed Claude source-check
 ## Current Call
 
 Status: `SUPPORTED FOR 1.0` for the Claude source-checkout path
+Release rehearsal verdict: `BLOCKED`
 
 First-login stranger gate: `CLOSED`
 
@@ -17,6 +18,22 @@ What that status means today:
 - that same isolated no-session Claude home can complete interactive Claude CLI login and pass the post-login `pnpm claude:auth-smoke` rerun
 - the first-login stranger auth gate is now backed by same-shell evidence instead of inference from a separately logged-in shell
 - the broader source-checkout operator loop had already been proven for the fresh-clone post-login path, so the remaining release-gate item was this same-shell auth proof
+
+## Release Rehearsal Result
+
+- Command: `pnpm release:rehearsal`
+- Repo root used: `/home/davidmarsh/code/discoclaw`
+- Checkout provenance recorded in the closeout: reused maintainer checkout, not a throwaway clone
+- Run slug: `rr-20260323-025304-5ae3`
+- Task prefix: `rr0253045ae3`
+- Created Discord artifact names: none created because the harness blocked before live Discord steps; reserved names were `Release rehearsal rr-20260323-025304-5ae3 task` and `Release rehearsal rr-20260323-025304-5ae3 cron`
+- Teardown result: cleanup returned to a clean baseline with zero leftovers, but teardown was not exercised against live Discord artifacts because the run stopped during input validation
+- Final P1 verdict: `BLOCKED`
+- Exact symptom: `Refusing to run because repo-local PRIMARY_RUNTIME=codex.`
+- Exact repro: from `/home/davidmarsh/code/discoclaw`, leave the current repo-local `.env` unchanged and run `pnpm release:rehearsal`; the harness writes `docs/release-audit/claude-release-rehearsal-rr-20260323-025304-5ae3.{json,md}`, records `Validate PRIMARY_RUNTIME: blocked`, and exits with code `1`
+- Durable closeout: `docs/release-audit/claude-release-rehearsal-rr-20260323-025304-5ae3.md`
+
+This path is not `release-ready`. That label remains unavailable until `pnpm release:rehearsal` runs from a throwaway clone whose repo-local `.env` already sets `PRIMARY_RUNTIME=claude`, completes the live Discord checkpoints, and returns from cleanup with a clean baseline.
 
 ## What Actually Happened
 
@@ -55,6 +72,7 @@ That means this memo proves the fresh-clone install path and the Claude auth beh
 ## Audit Call
 
 - Current support-safe claim: `SUPPORTED FOR 1.0` for the repo-owned Claude source-checkout path
+- Current release-rehearsal claim: `BLOCKED` on repo-local runtime selection in the checked-out `.env`, with the throwaway-clone operator precondition also still unfulfilled for this recorded run
 - First-login stranger gate: `CLOSED`
 - Keep the support claim narrow: it is based on a real clone-local `.env`, isolated repo/data paths on the maintainer machine, the expected pre-login failure, interactive Claude CLI login in that same isolated home, and the post-login rerun success
 - Keep the stale-browser callback rejection documented as a sharp edge, but it is not a blocker because a fresh CLI-driven login in the same isolated home succeeded
@@ -71,7 +89,9 @@ That means this memo proves the fresh-clone install path and the Claude auth beh
 8. Run `claude` and complete login in that same shell or account.
 9. Rerun `pnpm claude:auth-smoke` in that same shell or account.
 10. Confirm the expected post-login result contains `Claude CLI answered the minimal prompt.`
-11. Run `pnpm build && pnpm dev`, then confirm a short Discord prompt receives a normal reply.
-12. Restart the running service/process and verify clean startup, one normal post-restart reply, and if applicable either the persisted recovery summary or the generic notice ending with `Recovered after restart.`
-13. Release closeout may mark the first-login stranger gate closed once steps 6 through 10 happen in the same no-session shell or account.
-14. If the passing auth smoke came from an already-logged-in shell or account instead, keep the claim narrowed to `fresh-clone post-login path only`.
+11. Run `pnpm release:rehearsal` from that same checkout once the repo-local `.env` is ready with `PRIMARY_RUNTIME=claude`.
+12. Record in the closeout whether the checkout was a throwaway clone or a reused maintainer checkout; the harness does not prove that precondition for you.
+13. Treat any non-empty cleanup leftovers as a `BLOCKED` verdict even if all earlier live steps passed.
+14. Only call the path `release-ready` when the rehearsal completed the live Discord checkpoints and cleanup returned to a clean baseline.
+15. Release closeout may mark the first-login stranger gate closed once steps 6 through 10 happen in the same no-session shell or account.
+16. If the passing auth smoke came from an already-logged-in shell or account instead, keep the claim narrowed to `fresh-clone post-login path only`.
