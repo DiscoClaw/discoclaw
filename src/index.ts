@@ -1,5 +1,5 @@
-import 'dotenv/config';
 import pino from 'pino';
+import dotenv from 'dotenv';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -154,6 +154,28 @@ const bootStartMs = Date.now();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
+const repoEnvPath = path.join(projectRoot, '.env');
+const cwdEnvPath = path.join(process.cwd(), '.env');
+const repoEnvResult = dotenv.config({ path: repoEnvPath });
+if (repoEnvResult.error) {
+  const errorCode = typeof (repoEnvResult.error as NodeJS.ErrnoException).code === 'string'
+    ? (repoEnvResult.error as NodeJS.ErrnoException).code
+    : undefined;
+  log.warn({ envPath: repoEnvPath, errorCode }, 'startup:repo-local .env not loaded');
+} else {
+  log.info({ envPath: repoEnvPath }, 'startup:loaded repo-local .env');
+}
+if (cwdEnvPath !== repoEnvPath) {
+  try {
+    await fs.access(cwdEnvPath);
+    log.warn(
+      { cwdEnvPath, repoEnvPath, cwd: process.cwd() },
+      'startup:ignoring cwd-local .env in favor of repo-local .env',
+    );
+  } catch {
+    // No separate cwd-local .env was present.
+  }
+}
 
 let parsedConfig;
 try {
