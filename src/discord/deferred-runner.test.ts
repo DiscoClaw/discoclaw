@@ -18,9 +18,10 @@ vi.mock('./prompt-common.js', () => ({
   buildScheduledSelfInvocationPrompt: vi.fn((input: {
     openTasksSection?: string;
     actionsReferenceSection?: string;
+    noteLines?: string[];
     invocationNotice: string;
     userMessage: string;
-  }) => [input.openTasksSection, input.actionsReferenceSection, input.invocationNotice, `User message:\n${input.userMessage}`].filter(Boolean).join('\n\n')),
+  }) => [input.openTasksSection, input.actionsReferenceSection, input.noteLines?.join('\n'), input.invocationNotice, `User message:\n${input.userMessage}`].filter(Boolean).join('\n\n')),
   buildOpenTasksSection: vi.fn(() => ''),
   buildPromptSectionEstimates: vi.fn(() => ({
     sections: {},
@@ -233,6 +234,29 @@ describe('deferred-runner observability', () => {
 
     expect(recordInvokeStart).toHaveBeenCalledWith('defer');
     expect(recordInvokeResult).toHaveBeenCalledWith('defer', expect.any(Number), true);
+  });
+
+  it('injects the plan/forge availability note into deferred prompts', async () => {
+    const opts = makeOpts({
+      state: {
+        ...makeState(),
+        planCommandsEnabled: false,
+        forgeCommandsEnabled: false,
+        discordActionsPlan: false,
+        discordActionsForge: false,
+      },
+    });
+
+    const scheduler = configureDeferredScheduler(opts);
+    scheduler.schedule({ action: makeAction(), context: makeContext() as any });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const promptCommon = await import('./prompt-common.js');
+    const buildPrompt = vi.mocked(promptCommon.buildScheduledSelfInvocationPrompt);
+    const input = buildPrompt.mock.calls.at(-1)?.[0];
+
+    expect(input?.noteLines?.join('\n')).toContain('Plan workflows are disabled for this instance.');
+    expect(input?.noteLines?.join('\n')).toContain('Forge workflows are disabled for this instance.');
   });
 
   it('action results call recordActionResult and status.actionFailed for failures', async () => {

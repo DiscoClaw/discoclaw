@@ -274,6 +274,46 @@ describe('guild-chat prompt assembly — capability-refusal grounding', () => {
     );
   });
 
+  it('adds an explicit prompt note when plan and forge are disabled', async () => {
+    const runtime = makeCaptureRuntime();
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply, {
+      content: 'Make a plan to refactor the webhook handler',
+    });
+    const params = makeParams(runtime, {
+      planCommandsEnabled: false,
+      forgeCommandsEnabled: false,
+    });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(runtime.prompt).toContain('Runtime capability notes:');
+    expect(runtime.prompt).toContain('Plan workflows are disabled for this instance.');
+    expect(runtime.prompt).toContain('Forge workflows are disabled for this instance.');
+    expect(runtime.prompt).toContain('respond in normal chat with an outline or next steps');
+  });
+
+  it('warns when automatic plan routing is disabled but !plan remains available', async () => {
+    const runtime = makeCaptureRuntime();
+    const reply = makeReply();
+    const msg = makeGuildMessage(reply, {
+      content: 'Make a plan to refactor the webhook handler',
+    });
+    const params = makeParams(runtime, {
+      planCommandsEnabled: true,
+      discordActionsPlan: false,
+    });
+    const queue = { run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()) };
+    const handler = await makeHandler(params, queue);
+
+    await handler(msg as any);
+
+    expect(runtime.prompt).toContain('Automatic plan routing is disabled for this instance.');
+    expect(runtime.prompt).toContain('only use the plan workflow when the user explicitly issues `!plan`');
+  });
+
   it('omits the capability-refusal grounding rule when actions are disabled', async () => {
     const runtime = makeCaptureRuntime();
     const reply = makeReply();

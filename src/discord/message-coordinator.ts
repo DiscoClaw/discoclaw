@@ -99,6 +99,7 @@ import { parseHelpCommand, handleHelpCommand } from './help-command.js';
 import { parseVoiceStatusCommand, renderVoiceStatusReport } from './voice-status-command.js';
 import type { VoiceStatusSnapshot } from './voice-status-command.js';
 import { parseVoiceCommand, handleVoiceCommand } from './voice-command.js';
+import { buildPlanForgeAvailabilityNote } from './plan-forge-availability.js';
 import {
   parseDoctorCommand,
   parseHealthCommand,
@@ -3352,6 +3353,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             (replyRef
               ? `---\nReplied-to message:\n${replyRef.section}\n\n`
               : '');
+
+          const planForgeAvailabilityNote = buildPlanForgeAvailabilityNote({
+            planCommandsEnabled: params.planCommandsEnabled !== false,
+            forgeCommandsEnabled: params.forgeCommandsEnabled !== false,
+            planActionsEnabled: Boolean(params.discordActionsPlan),
+            forgeActionsEnabled: Boolean(params.discordActionsForge),
+          });
+          if (planForgeAvailabilityNote) {
+            prompt += `---\nRuntime capability notes:\n${planForgeAvailabilityNote}\n\n`;
+          }
 
           if (isBotMessage) {
             prompt =

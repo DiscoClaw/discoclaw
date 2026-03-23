@@ -25,9 +25,10 @@ vi.mock('./prompt-common.js', () => ({
   buildPromptPreamble: vi.fn(() => ''),
   buildScheduledSelfInvocationPrompt: vi.fn((input: {
     actionsReferenceSection?: string;
+    noteLines?: string[];
     invocationNotice: string;
     userMessage: string;
-  }) => [input.actionsReferenceSection, input.invocationNotice, `User message:\n${input.userMessage}`].filter(Boolean).join('\n\n')),
+  }) => [input.actionsReferenceSection, input.noteLines?.join('\n'), input.invocationNotice, `User message:\n${input.userMessage}`].filter(Boolean).join('\n\n')),
   buildOpenTasksSection: vi.fn(() => ''),
   buildPromptSectionEstimates: vi.fn(() => ({
     sections: {},
@@ -107,6 +108,7 @@ function configureForTick(opts?: {
   allowChannelIds?: Set<string>;
   channel?: ReturnType<typeof makeChannel>;
   runtime?: ReturnType<typeof makeRuntime> | ReturnType<typeof makeThrowingRuntime>;
+  state?: Record<string, unknown>;
 }) {
   const executeDiscordActions = vi.fn(async (..._args: unknown[]) => opts?.executeResults ?? []);
   const buildTieredDiscordActionsPromptSection = vi.fn(() => ({
@@ -125,6 +127,7 @@ function configureForTick(opts?: {
     state: {
       runtimeModel: 'fast',
       allowChannelIds: opts?.allowChannelIds,
+      ...opts?.state,
     },
     runtime: opts?.runtime ?? makeRuntime([
       { type: 'text_final', text: opts?.runtimeText ?? '' } as EngineEvent,
@@ -219,6 +222,33 @@ describe('loop tick policy', () => {
     expect(channel.send).toHaveBeenCalledWith(
       expect.objectContaining({ content: 'Done: Read 5 messages' }),
     );
+  });
+
+  it('injects the plan/forge availability note into loop prompts', async () => {
+    configureForTick({
+      state: {
+        planCommandsEnabled: true,
+        forgeCommandsEnabled: true,
+        discordActionsPlan: false,
+        discordActionsForge: false,
+      },
+    });
+
+    await executeLoopAction({
+      type: 'loopCreate',
+      channel: 'general',
+      intervalSeconds: 5,
+      prompt: 'Make a plan for the next release check',
+      label: 'planner',
+    }, makeContext());
+    await vi.advanceTimersByTimeAsync(5000);
+
+    const promptCommon = await import('./prompt-common.js');
+    const buildPrompt = vi.mocked(promptCommon.buildScheduledSelfInvocationPrompt);
+    const input = buildPrompt.mock.calls.at(-1)?.[0];
+
+    expect(input?.noteLines?.join('\n')).toContain('Automatic plan routing is disabled for this instance.');
+    expect(input?.noteLines?.join('\n')).toContain('Automatic forge routing is disabled for this instance.');
   });
 
   it('rejects loopCreate when the target channel cannot be resolved', async () => {
