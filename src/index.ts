@@ -156,7 +156,8 @@ const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 const repoEnvPath = path.join(projectRoot, '.env');
 const cwdEnvPath = path.join(process.cwd(), '.env');
-const repoEnvResult = dotenv.config({ path: repoEnvPath });
+const inheritedEnvSnapshot = new Map(Object.entries(process.env));
+const repoEnvResult = dotenv.config({ path: repoEnvPath, override: true });
 if (repoEnvResult.error) {
   const errorCode = typeof (repoEnvResult.error as NodeJS.ErrnoException).code === 'string'
     ? (repoEnvResult.error as NodeJS.ErrnoException).code
@@ -164,6 +165,23 @@ if (repoEnvResult.error) {
   log.warn({ envPath: repoEnvPath, errorCode }, 'startup:repo-local .env not loaded');
 } else {
   log.info({ envPath: repoEnvPath }, 'startup:loaded repo-local .env');
+  const overriddenInheritedKeys = Object.entries(repoEnvResult.parsed ?? {})
+    .filter(([key, value]) => {
+      const inheritedValue = inheritedEnvSnapshot.get(key);
+      return typeof inheritedValue === 'string' && inheritedValue !== value;
+    })
+    .map(([key]) => key)
+    .sort();
+  if (overriddenInheritedKeys.length > 0) {
+    log.warn(
+      {
+        envPath: repoEnvPath,
+        overriddenKeys: overriddenInheritedKeys,
+        overriddenKeyCount: overriddenInheritedKeys.length,
+      },
+      'startup:repo-local .env overrode inherited environment values',
+    );
+  }
 }
 if (cwdEnvPath !== repoEnvPath) {
   try {
