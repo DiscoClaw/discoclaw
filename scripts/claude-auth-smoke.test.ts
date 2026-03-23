@@ -40,6 +40,7 @@ describe('claude-auth-smoke', () => {
       exitCode: 0,
       failed: false,
       stdout: 'OK',
+      stderr: 'Warning: no stdin data received in 3s, proceeding without it.',
     }));
 
     const exitCode = await runClaudeAuthSmoke({
@@ -66,7 +67,10 @@ describe('claude-auth-smoke', () => {
       }),
     );
     expect(lines.join('\n')).toContain('Claude CLI answered the minimal prompt.');
+    expect(lines.join('\n')).toContain('This only closes the first-login stranger gate if you also captured the expected pre-login unauthenticated run');
+    expect(lines.join('\n')).toContain('If this shell/account was already logged in, record that limitation');
     expect(lines.join('\n')).toContain('Output preview: OK');
+    expect(lines.join('\n')).not.toContain('no stdin data received');
   });
 
   it('classifies auth/login failures without pretending Claude is ready', async () => {
@@ -88,6 +92,7 @@ describe('claude-auth-smoke', () => {
 
     expect(exitCode).toBe(1);
     expect(lines.join('\n')).toContain('Claude CLI appears installed but not authenticated.');
+    expect(lines.join('\n')).toContain('This is the expected pre-login result for the first-login stranger-path check.');
     expect(lines.join('\n')).toContain('Run `claude` to complete login, then rerun this command.');
   });
 

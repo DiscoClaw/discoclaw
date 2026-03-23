@@ -173,7 +173,7 @@ describe('bootReport', () => {
     const poster = createStatusPoster(ch);
     await poster.bootReport!({ ...baseData, credentialReport: 'discord-token: ok, openai-key: skip' });
     const msg = sentContent(ch);
-    expect(msg).toContain('Credentials · discord-token: ok, openai-key: skip');
+    expect(msg).toContain('Credentials (startup probes only) · discord-token: ok, openai-key: skip');
   });
 
   it('omits Credentials line when credentialReport is absent', async () => {
@@ -192,7 +192,23 @@ describe('bootReport', () => {
       credentialReport: 'discord-token: FAIL (invalid or revoked token (401)), openai-key: skip',
     });
     const msg = sentContent(ch);
-    expect(msg).toContain('Credentials · discord-token: FAIL (invalid or revoked token (401)), openai-key: skip');
+    expect(msg).toContain('Credentials (startup probes only) · discord-token: FAIL (invalid or revoked token (401)), openai-key: skip');
+  });
+
+  it('uses the plain Credentials label when auth or session probes are present', async () => {
+    const ch = mockChannel();
+    const poster = createStatusPoster(ch);
+    await poster.bootReport!({
+      ...baseData,
+      credentialReport: 'discord-token: ok, claude-auth: ok',
+      credentialHealth: [
+        { name: 'discord-token', status: 'pass' },
+        { name: 'claude-auth', status: 'pass' },
+      ],
+    });
+    const msg = sentContent(ch);
+    expect(msg).toContain('Credentials · discord-token: ok, claude-auth: ok');
+    expect(msg).not.toContain('Credentials (startup probes only)');
   });
 
   it('formats Permissions as "ok (tier)" when permissionsStatus is ok', async () => {

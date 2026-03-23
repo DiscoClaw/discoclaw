@@ -382,6 +382,9 @@ export function renderStatusReport(snapshot: StatusSnapshot, botDisplayName = 'D
     .filter((r) => r.name !== 'openrouter-key')
     .map(formatCredentialCheck);
   lines.push(`API: ${apiParts.length > 0 ? apiParts.join(', ') : 'no checks'}`);
+  lines.push(
+    'Claude auth: unverified by !status (manual gate; verify from a shell/account with no active Claude session)',
+  );
 
   // Workspace PA files
   const paAllOk = snapshot.paFiles.length > 0 && snapshot.paFiles.every((f) => f.exists);

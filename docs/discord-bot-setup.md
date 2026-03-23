@@ -124,6 +124,10 @@ Edit `.env`:
 - `DISCORD_CHANNEL_IDS=...` (recommended for servers)
 - `DISCOCLAW_DATA_DIR=...` (optional; defaults workspace/content under this folder)
 
+For the blessed Claude source-checkout validation path, keep one real clone-local `.env` in the checkout you are testing. `pnpm preflight:blank-machine` only reads that checkout's own `.env`; it does not inherit runtime config from your normal shell.
+
+If you are validating from a machine that already has DiscoClaw or Claude state, isolate `DISCOCLAW_DATA_DIR`, `WORKSPACE_CWD`, `GROUPS_DIR`, and `BEADS_DIR` to throwaway paths before you claim fresh-clone or stranger-path evidence. If you copied an existing maintainer `.env` or another provider's config, force `PRIMARY_RUNTIME=claude` before auditing the blessed Claude path.
+
 Run:
 
 ```bash
@@ -186,6 +190,7 @@ Run through this checklist in order. Each step should produce the expected outpu
 3. **Environment file exists:**
    - **Global install:** the `discoclaw init` wizard creates `.env` automatically — nothing to do here.
    - **From source:** `test -f .env && echo "ok" || echo "missing — run: cp .env.example .env"`
+   - **Blessed Claude source-checkout audit:** do not skip this. A fresh clone without a real clone-local `.env` does not satisfy `pnpm preflight:blank-machine`, because that command only reads the checkout's own `.env`.
 
 4. **Install-mode-specific provider proof gate:**
    - Before following a provider-specific path below, read the consolidated [provider/auth 1.0 matrix](audit/provider-auth-1.0-matrix.md). It is the authoritative verdict for which paths are the blessed default, the supported secondary path, and which current paths remain `PARTIAL` or `OUT OF SCOPE`.
@@ -213,12 +218,30 @@ Run through this checklist in order. Each step should produce the expected outpu
      - Start DiscoClaw and confirm `!status` or the startup credential report shows `openrouter-key: ok`.
      - Treat `discoclaw doctor` as config-only and treat that live `openrouter-key: ok` signal as the current proof gate for npm-managed installs.
    - **From source + Claude path:**
+     - Supply a real clone-local `.env` first. `pnpm preflight:blank-machine` ignores inherited shell env and only reads the checkout's own `.env`.
+     - If you are auditing from a machine with existing DiscoClaw or Claude state, isolate `DISCOCLAW_DATA_DIR`, `WORKSPACE_CWD`, `GROUPS_DIR`, and `BEADS_DIR` to throwaway paths before you claim fresh-clone or stranger-path evidence.
+     - If the source `.env` came from another provider path or an older maintainer copy, force `PRIMARY_RUNTIME=claude` before testing this blessed path.
      - Run:
        ```bash
        pnpm preflight:blank-machine
+       ```
+     - If preflight fails, record the exact config issue and fix the clone-local `.env` before continuing. Example from the 2026-03-22 throwaway run: a copied legacy `.env` still had deprecated `RUNTIME_MODEL`, so preflight failed until that clone-local drift was removed.
+     - From a shell or account with no active Claude session, run:
+       ```bash
        pnpm claude:auth-smoke
        ```
+     - Confirm the expected pre-login result contains `Claude CLI appears installed but not authenticated.`
+     - Complete interactive login in that same shell or account:
+       ```bash
+       claude
+       ```
+     - Rerun in that same shell or account:
+       ```bash
+       pnpm claude:auth-smoke
+       ```
+     - Confirm the expected post-login result contains `Claude CLI answered the minimal prompt.`
      - Use the source-checkout readiness contract in [docs/audit/claude-blank-machine-readiness.md](audit/claude-blank-machine-readiness.md).
+     - Only close the first-login stranger gate if the pre-login failure, interactive `claude` login, and post-login rerun all happened in that same no-session shell or account. If the passing smoke came from an already logged-in shell, keep the claim narrowed to `fresh-clone post-login path only`.
    - **From source + Codex path:**
      - Run:
        ```bash

@@ -7,7 +7,7 @@ Scope: authoritative 1.0 consolidation for `ws-1276`, covering the provider/auth
 
 For DiscoClaw 1.0, the operator policy is:
 
-- `Claude CLI` auth on a source checkout is the blessed default path.
+- `Claude CLI` auth on a source checkout is the intended default path and is now `SUPPORTED FOR 1.0` within the narrow proof boundary below.
 - `Codex CLI` on a source checkout is the explicitly supported secondary path.
 - Every other currently shipped provider/auth path is narrower: either `PARTIAL` or `OUT OF SCOPE` until the exact proof surface and support boundary below are satisfied.
 
@@ -17,7 +17,7 @@ This matrix is about the main startup/chat runtime story. The voice-only direct 
 
 | Path | Install mode | 1.0 status | Current support-safe claim | Exact blocker or boundary | Primary evidence |
 | --- | --- | --- | --- | --- | --- |
-| Claude CLI / OAuth | Source checkout | `SUPPORTED FOR 1.0` | Repo-owned Claude path is support-claimable when `pnpm preflight*` stays config-only and `pnpm claude:auth-smoke` passes after interactive Claude login. | Current contract is narrow rather than one-command automated, but no blocker prevents the current source-checkout 1.0 claim. | `docs/audit/claude-blank-machine-readiness.md` |
+| Claude CLI / OAuth | Source checkout | `SUPPORTED FOR 1.0` | Repo-owned Claude path is support-claimable for the audited source-checkout boundary: `pnpm preflight*` stays config-only, the same no-session shell or account records the pre-login unauthenticated result, completes interactive Claude CLI login, and then records the post-login `pnpm claude:auth-smoke` success rerun. | The current claim is still intentionally narrow: it depends on a real clone-local `.env`, isolated repo/data paths when auditing on a maintainer machine, and the documented fresh-login flow. A stale recycled browser tab can reject an old localhost callback; restarting the CLI login flow fixes that sharp edge. | `docs/audit/claude-blank-machine-readiness.md`, `docs/audit/claude-blank-machine-path.md` |
 | Claude CLI / OAuth | npm / global install | `PARTIAL` | Installed shell path is support-safe only up to the current login check (`discoclaw claude auth-smoke` or equivalent raw Claude prompt). | `discoclaw init` does not persist `CLAUDE_BIN`, and daemon installers pin `/usr/bin/node` plus a fixed `PATH`, so shell success does not prove daemon parity, first useful reply, or restart recovery. | `docs/audit/claude-npm-managed-path.md` |
 | Codex CLI | Source checkout | `SUPPORTED FOR 1.0` | Repo-owned Codex path is support-claimable when `pnpm preflight*` stays config-only, the same-shell `codex exec ...` auth check passes after login, and any active OpenAI route separately passes the repo smoke harness. | Current contract is narrow rather than one-command automated, but no blocker prevents the current source-checkout 1.0 claim. | `docs/audit/codex-blank-machine-readiness.md` |
 | Codex CLI | npm / global install | `PARTIAL` | Installed shell path is support-safe only up to the documented same-shell `codex exec ...` login check, plus runtime-visible OpenAI proof if the optional fast/alternate path is enabled. | No shipped `discoclaw codex auth-smoke`; `CODEX_BIN` is not persisted; daemon installers pin `/usr/bin/node` plus a fixed `PATH`; optional OpenAI proof is still post-start only. | `docs/audit/codex-npm-managed-path.md` |
@@ -69,6 +69,6 @@ When docs, setup copy, or health surfaces talk about provider readiness, keep th
 - Do not describe OpenAI-compatible HTTP or OpenRouter as blanket capability guarantees.
 - Do not describe Gemini API and Gemini CLI as one interchangeable "Gemini" path.
 - Do not imply a direct Anthropic chat/main-runtime path exists in 1.0.
-- Keep `Claude CLI` as the blessed 1.0 default path and `Codex CLI` as the explicitly supported secondary path.
+- Keep `Claude CLI` as the intended default path and `Codex CLI` as the explicitly supported secondary path.
 
 This file is the authoritative 1.0 consolidation layer. The narrower audit memos remain the primary evidence for each row above.

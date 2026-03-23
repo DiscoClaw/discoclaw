@@ -252,8 +252,9 @@ if (values.PRIMARY_RUNTIME === 'claude') {
   console.log('\nNext steps:');
   if (preflightPassed) {
     console.log('  Automated checks passed. Claude auth still needs a manual smoke test.');
-    console.log('  1. Before logging in, run `pnpm claude:auth-smoke`.');
-    console.log('     On a fresh machine, the expected result is `Claude CLI appears installed but not authenticated.`');
+    console.log('  1. From a shell or account with no active Claude session, run `pnpm claude:auth-smoke` before logging in.');
+    console.log('     The first-login stranger-path result should be `Claude CLI appears installed but not authenticated.`');
+    console.log('     If this shell/account is already authenticated, record that limitation and leave the first-login stranger gate open.');
     console.log('  2. Log in with `claude`.');
     console.log('  3. Repeat `pnpm claude:auth-smoke`.');
     console.log('     After login, the expected result is `Claude CLI answered the minimal prompt.`');

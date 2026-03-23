@@ -79,7 +79,7 @@ Full setup guide: [docs/voice.md](docs/voice.md)
 
 ## How it works
 
-DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with `gemini-api`, `gemini-cli`, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). For 1.0, `Claude CLI` on a source checkout is the blessed default path, and `Codex CLI` on a source checkout is the explicitly supported secondary path; see [docs/audit/provider-auth-1.0-matrix.md](docs/audit/provider-auth-1.0-matrix.md) for the full consolidated matrix. `gemini` remains a compatibility alias for `gemini-api`. The OpenAI-compatible and OpenRouter adapters can expose optional tool use when `OPENAI_COMPAT_TOOLS_ENABLED=1` is set, but OpenRouter support claims stop at the narrower audited boundary described below. The current Gemini CLI path is intentionally narrower: `gemini-cli` advertises only `streaming_text`, so DiscoClaw's runtime capability filtering strips tool calls automatically for that runtime. It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
+DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with `gemini-api`, `gemini-cli`, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). For 1.0, `Claude CLI` on a source checkout is the explicitly supported default path, and `Codex CLI` on a source checkout is the explicitly supported secondary path. See [docs/audit/provider-auth-1.0-matrix.md](docs/audit/provider-auth-1.0-matrix.md) for the full consolidated matrix. `gemini` remains a compatibility alias for `gemini-api`. The OpenAI-compatible and OpenRouter adapters can expose optional tool use when `OPENAI_COMPAT_TOOLS_ENABLED=1` is set, but OpenRouter support claims stop at the narrower audited boundary described below. The current Gemini CLI path is intentionally narrower: `gemini-cli` advertises only `streaming_text`, so DiscoClaw's runtime capability filtering strips tool calls automatically for that runtime. It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
 
 1. Checks the user allowlist (fail-closed — empty list means respond to nobody)
 2. Assembles context: per-channel rules, conversation history, rolling summary, and durable memory
@@ -202,7 +202,7 @@ For source checkouts, repo-local managed browser storage is supported only at th
   - **OpenRouter API key** via `OPENROUTER_API_KEY` (config presence only until `!status` or the startup credential report shows `openrouter-key: ok`)
 - Runtime-specific access for your chosen provider (Anthropic access for Claude CLI, Google API access for `gemini-api`, Google account access for `gemini-cli`, OpenAI access for Codex/OpenAI models)
 
-1.0 provider/auth policy: `Claude CLI` on a source checkout is the blessed default path, and `Codex CLI` on a source checkout is the explicitly supported secondary path. For every current provider/auth path, including `openai`, `openrouter`, `gemini-api`, `gemini-cli`, and direct Anthropic, use the consolidated verdicts in [docs/audit/provider-auth-1.0-matrix.md](docs/audit/provider-auth-1.0-matrix.md) rather than inferring readiness from setup/config alone.
+1.0 provider/auth policy: `Claude CLI` on a source checkout is the explicitly supported default path, and `Codex CLI` on a source checkout is the explicitly supported secondary path. For every current provider/auth path, including `openai`, `openrouter`, `gemini-api`, `gemini-cli`, and direct Anthropic, use the consolidated verdicts in [docs/audit/provider-auth-1.0-matrix.md](docs/audit/provider-auth-1.0-matrix.md) rather than inferring readiness from setup/config alone.
 
 `discoclaw init` currently scaffolds Claude, Codex, OpenAI, OpenRouter, and the limited `gemini-cli` path. If you want the API-backed Gemini path instead, set `PRIMARY_RUNTIME=gemini-api` and `GEMINI_API_KEY` manually.
 
@@ -267,7 +267,8 @@ Full step-by-step guide: [docs/discord-bot-setup.md](docs/discord-bot-setup.md)
 ### Operations
 
 - [Configuration reference](docs/configuration.md) — all environment variables indexed by category
-- [Provider/auth 1.0 matrix](docs/audit/provider-auth-1.0-matrix.md) — blessed default path, supported secondary path, and the current `SUPPORTED FOR 1.0` / `PARTIAL` / `OUT OF SCOPE` verdicts for every implied provider/auth path
+- [Provider/auth 1.0 matrix](docs/audit/provider-auth-1.0-matrix.md) — intended default path, supported secondary path, and the current `SUPPORTED FOR 1.0` / `PARTIAL` / `OUT OF SCOPE` verdicts for every implied provider/auth path
+- [Claude source-checkout status](CLAUDE%20SOURCE-CHECKOUT%20STATUS.md) — current closeout memo for the Claude source-checkout path, including what the latest throwaway-checkout rerun did and did not prove
 - [Claude source-checkout audit](docs/audit/claude-blank-machine-readiness.md) — current 1.0 verdict for the repo-owned `pnpm preflight*` + `pnpm claude:auth-smoke` path
 - [Claude npm-managed audit](docs/audit/claude-npm-managed-path.md) — current 1.0 verdict for `npm install -g discoclaw`, `discoclaw init`, and the daemon/runtime-path gap
 - [Codex source-checkout audit](docs/audit/codex-blank-machine-readiness.md) — current 1.0 verdict for the repo-owned `pnpm preflight*` path plus the separate Codex/OpenAI proof gates
@@ -325,27 +326,34 @@ Current npm-managed blocker for both Claude and Codex daemon claims: `discoclaw 
 
 ```bash
 git clone <repo-url> && cd discoclaw
-pnpm install
-pnpm run setup        # guided interactive setup
+pnpm install --frozen-lockfile
+pnpm run setup        # guided interactive setup that writes a real clone-local .env
 # Or manually: cp .env.example .env and fill in required vars:
 #   DISCORD_TOKEN
 #   DISCORD_ALLOW_USER_IDS
 # For all ~90 options: cp .env.example.full .env
 pnpm preflight:blank-machine
-pnpm claude:auth-smoke  # if PRIMARY_RUNTIME=claude
+pnpm claude:auth-smoke  # if PRIMARY_RUNTIME=claude, before login, from a shell/account with no active Claude session
+claude                  # if PRIMARY_RUNTIME=claude, complete login in that same shell/account
+pnpm claude:auth-smoke  # if PRIMARY_RUNTIME=claude, rerun after login in that same shell/account
 codex exec -m gpt-5.4 --skip-git-repo-check --ephemeral -s read-only -- "Reply with OK"  # if PRIMARY_RUNTIME=codex
 OPENAI_SMOKE_TEST_TIERS=fast pnpm test  # if any source-checkout path routes through OpenAI
+pnpm build && pnpm dev
 ```
 
-If `PRIMARY_RUNTIME=claude`, run both `pnpm preflight:blank-machine` and `pnpm claude:auth-smoke` before `pnpm dev`. If `PRIMARY_RUNTIME=codex`, treat `pnpm preflight:blank-machine` as config/bootstrap evidence only, then capture separate Codex session-auth evidence with the `codex exec ...` prompt. If any source-checkout route uses OpenAI, capture separate `OPENAI_API_KEY` evidence with `OPENAI_SMOKE_TEST_TIERS=... pnpm test`.
+Fresh clone is not enough evidence by itself for the Claude stranger path. A source checkout still needs a real clone-local `.env`, and the first-login claim only closes when the pre-login failure, interactive `claude` login, and post-login `pnpm claude:auth-smoke` rerun all happen in the same shell/account with no active Claude session. If the host shell was already logged into Claude, the passing smoke proves only the fresh-clone post-login path. When you want stranger-run evidence from a machine with existing DiscoClaw state, isolate `DISCOCLAW_DATA_DIR`, `WORKSPACE_CWD`, `GROUPS_DIR`, and `BEADS_DIR` to throwaway paths before you claim anything about the clone.
+
+If `PRIMARY_RUNTIME=claude`, run the `pnpm preflight:blank-machine` config/bootstrap check first, then capture the separate Claude auth evidence in the order shown above before `pnpm dev`. If `PRIMARY_RUNTIME=codex`, treat `pnpm preflight:blank-machine` as config/bootstrap evidence only, then capture separate Codex session-auth evidence with the `codex exec ...` prompt. If any source-checkout route uses OpenAI, capture separate `OPENAI_API_KEY` evidence with `OPENAI_SMOKE_TEST_TIERS=... pnpm test`.
 
 ### Claude runtime validation
 
-Source-checkout 1.0 audit verdict: `PASS`. That verdict is only for the repo-owned Claude path: `pnpm preflight:blank-machine` / `pnpm preflight` prove the local prerequisites Discoclaw can verify today, and `pnpm claude:auth-smoke` remains the separate Claude login/auth gate. See [docs/audit/claude-blank-machine-readiness.md](docs/audit/claude-blank-machine-readiness.md).
+Source-checkout 1.0 support status: `SUPPORTED FOR 1.0` for the repo-owned Claude path within the audited boundary: the same no-session shell or account recorded the pre-login unauthenticated result, completed interactive Claude CLI login, and then passed the post-login `pnpm claude:auth-smoke` rerun. The current closeout memo is [Claude source-checkout status](CLAUDE%20SOURCE-CHECKOUT%20STATUS.md), and the deeper audit record remains [docs/audit/claude-blank-machine-readiness.md](docs/audit/claude-blank-machine-readiness.md).
 
 Npm-managed 1.0 audit verdict: `NOT YET SUPPORT-CLAIMABLE`. The installed CLI now has a shell-level Claude check, but the daemon path still is not claimable because `discoclaw install-daemon` hardcodes `/usr/bin/node` plus a fixed service `PATH`, and `discoclaw init` does not persist `CLAUDE_BIN`. See [docs/audit/claude-npm-managed-path.md](docs/audit/claude-npm-managed-path.md).
 
-1. Run the automated checks:
+1. Create a throwaway clone, run `pnpm install --frozen-lockfile`, and supply a real clone-local `.env` (`pnpm run setup` or copy from `.env.example` / `.env.example.full`).
+2. If you are validating from a machine that already has DiscoClaw or Claude state, isolate `DISCOCLAW_DATA_DIR`, `WORKSPACE_CWD`, `GROUPS_DIR`, and `BEADS_DIR` to throwaway paths before claiming stranger-run evidence.
+3. Run the automated config/bootstrap check:
    ```bash
    pnpm preflight:blank-machine
    ```
@@ -353,26 +361,27 @@ Npm-managed 1.0 audit verdict: `NOT YET SUPPORT-CLAIMABLE`. The installed CLI no
    ```bash
    pnpm preflight:blank-machine:online
    ```
-2. Treat the result correctly:
+4. Treat the result correctly:
    - `pnpm preflight:blank-machine` proves the local prerequisites against the current `.env` only, ignoring inherited shell env from the host machine.
    - `pnpm preflight:blank-machine:online` adds a live Discord login/gateway-intent check on top of that same blank-machine env boundary.
    - Plain `pnpm preflight` keeps its broader contributor-oriented behavior and can still be useful for checking the current shell environment.
    - Neither command proves Claude login/auth state.
-3. Before logging in, run the required failure check:
+5. From a shell or account with no active Claude session, run the required pre-login failure check:
    ```bash
    pnpm claude:auth-smoke
    ```
-   Confirm it fails with an auth/login error.
-4. Log in interactively:
+   Confirm it returns `Claude CLI appears installed but not authenticated.`
+6. Log in interactively in that same shell or account:
    ```bash
    claude
    ```
-5. Run the happy-path check:
+7. Rerun the happy-path check in that same shell or account:
    ```bash
    pnpm claude:auth-smoke
    ```
-   Confirm it returns normal text instead of an auth/login error.
-6. Start DiscoClaw after both gates pass:
+   Confirm it returns `Claude CLI answered the minimal prompt.`
+8. If step 7 was captured only from an already-logged-in shell or account, record that limitation and downgrade the claim to `fresh-clone post-login path only`.
+9. Start DiscoClaw after the source-checkout gates pass:
    ```bash
    pnpm build && pnpm dev
    ```
@@ -427,6 +436,8 @@ For a local operator console, run `discoclaw dashboard` in the project directory
 
 ### Restart and recovery verification
 
+Treat restart/recovery as a later closeout stage, not as a substitute for the source-checkout auth proof above. Record it only after the throwaway/source-checkout flow has already captured the correct Claude auth evidence and at least one normal reply. A clean restart from an already-authenticated shell does not retroactively prove the first-login stranger path.
+
 If running as a systemd service, restart it:
 
 ```bash
@@ -443,10 +454,11 @@ Then verify the recovery path in order:
    ```bash
    journalctl --user -u discoclaw.service -n 50 --no-pager
    ```
-3. Send a short Discord message and confirm the bot answers normally.
+3. Send a short Discord message and confirm the already-validated runtime path answers normally after restart.
 4. If a long-running reply was interrupted by the restart and `DISCOCLAW_COMPLETION_NOTIFY=1`, confirm startup recovery posts either:
    - the persisted recovery summary text, or
    - a generic completion notice ending with `Recovered after restart.`
+5. Keep this evidence paired with the earlier Claude validation record; restart success does not close the separate first-login stranger gate by itself.
 
 ## Platform support
 

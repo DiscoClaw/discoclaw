@@ -1,98 +1,95 @@
 # Claude Blank-Machine Path Audit
 
-Date: 2026-03-20
-Scope: the stranger-run Claude path on this repo as it exists today, from setup/preflight through first useful Discord flows.
+Date: 2026-03-22
+Checkout under test: `c7ad973562d9c38bc9b6d95d140bf01fd5d1e91f`
+Scope: the actual blessed Claude source-checkout path run from a throwaway clone at `/tmp/discoclaw-test`
 
-## Method
+## Outcome
 
-This audit checks the shipped path a new operator would actually encounter:
+Fresh-clone post-login path: `PASS`
 
-- setup and init copy
-- `pnpm preflight` / doctor copy
-- the required repo-owned unauthenticated Claude smoke step
-- the post-login rerun
-- first reply, follow-up reply, task flow, cron flow, and restart/recovery behavior
+First-login stranger path release gate: `CLOSED`
 
-This is a code-and-test-backed audit, not a destructive host-auth experiment. The repo intentionally records Claude login as a manual validation gate rather than something automated surfaces claim to verify.
+Why:
 
-## 1.0 Verdict
+- the throwaway clone plus isolated repo/data state worked after one clone-local config cleanup
+- `pnpm claude:auth-smoke` produced the expected unauthenticated result from an isolated Claude home with no active session
+- that same isolated no-session Claude home then completed interactive Claude CLI login and the post-login rerun succeeded
+- first reply, follow-up, task flow, cron flow, and restart/recovery were already proven for the fresh-clone post-login path, so the remaining release-gate condition was the same-shell login rerun
 
-Verdict: `PASS`
+## Isolation Preconditions
 
-Reason:
+The run used these exact preconditions:
 
-- the stranger-facing setup, init, preflight, and configuration surfaces now describe the real contract instead of implying full end-to-end Claude readiness
-- the required unauthenticated failure and post-login rerun are explicitly recorded through the shipped `pnpm claude:auth-smoke` command rather than a handwritten raw Claude prompt
-- the first reply, follow-up, task, cron, and restart/recovery paths all have direct code or test coverage in the repo
+- cloned `/home/davidmarsh/code/discoclaw` into `/tmp/discoclaw-test`
+- ran `pnpm install --frozen-lockfile` inside the throwaway clone
+- copied the working `.env` into the clone because secrets are not tracked in git
+- overrode the clone-local `.env` with `PRIMARY_RUNTIME=claude`
+- overrode the clone-local `.env` with `DISCOCLAW_DATA_DIR=/tmp/discoclaw-test-data`
+- overrode the clone-local `.env` with `WORKSPACE_CWD=/tmp/discoclaw-test-data/workspace`
+- overrode the clone-local `.env` with `GROUPS_DIR=/tmp/discoclaw-test-data/workspace/groups`
+- overrode the clone-local `.env` with `BEADS_DIR=/tmp/discoclaw-test-data/workspace/.beads`
+- started with empty isolated data/workspace directories under `/tmp/discoclaw-test-data`
+- ran the pre-login Claude auth step with `HOME=/tmp/discoclaw-test-home`
+- ran the pre-login Claude auth step with `XDG_CONFIG_HOME=/tmp/discoclaw-test-home/.config`
+- ran the pre-login Claude auth step with `XDG_STATE_HOME=/tmp/discoclaw-test-home/.state`
+- ran the pre-login Claude auth step with `XDG_DATA_HOME=/tmp/discoclaw-test-home/.local/share`
 
-Non-goal of this `PASS`:
+This proves a fresh clone plus isolated repo/data state on this host. It is not a claim that the machine had no provider secrets available anywhere outside that clone-local setup.
 
-- it is **not** a claim that the repo can automatically prove Claude login/auth health on a blank machine
+## Observed Run
 
-## Step Audit
+| Step | Exact command | Result | Observed output | What it means |
+| --- | --- | --- | --- | --- |
+| Clone and install | `git clone /home/davidmarsh/code/discoclaw /tmp/discoclaw-test` then `pnpm install --frozen-lockfile` | `PASS` | `Done in 741ms using pnpm v10.28.2` | The repo can be materialized and its source-checkout scripts can run from a throwaway location. |
+| First preflight attempt | `pnpm preflight:blank-machine` | `FAIL` | `Config doctor [warn] RUNTIME_MODEL is deprecated and still configured.` | A copied legacy maintainer `.env` can fail the blessed path before Claude auth is even tested. |
+| Clone-local cleanup | removed `RUNTIME_MODEL` from `/tmp/discoclaw-test/.env` | `PASS` | n/a | This was a throwaway env cleanup only; no tracked repo files changed. |
+| Second preflight attempt | `pnpm preflight:blank-machine` | `PASS` | `All automated checks passed.` | The config/bootstrap surface remained honest once the clone-local config drift was removed. |
+| Pre-login auth smoke | `HOME=/tmp/discoclaw-test-home ... pnpm claude:auth-smoke` | `EXPECTED FAIL` | `Claude CLI appears installed but not authenticated.` and `Not logged in · Please run /login` | The repo-owned smoke correctly classified the isolated no-session Claude shell as unauthenticated. |
+| Interactive same-shell login | `HOME=/tmp/discoclaw-test-home ... claude auth login --console` | `PASS` | `Login successful.` | The isolated no-session Claude home can be taken through interactive login from that same fresh clone. |
+| Post-login same-shell auth smoke | `HOME=/tmp/discoclaw-test-home ... pnpm claude:auth-smoke` | `PASS` | `Claude CLI answered the minimal prompt.` and `Output preview: OK` | The same isolated Claude home now proves the first-login stranger rerun, not just a reused logged-in shell. |
 
-| Step | Current state | Evidence | Blocker classification |
-| --- | --- | --- | --- |
-| Setup / init surfaces | `pnpm run setup` and `discoclaw init` tell the operator that forum channels can auto-create on first connect and that Claude login is manual. | `scripts/setup.ts`, `scripts/setup.test.ts`, `src/cli/init-wizard.ts`, `src/cli/init-wizard.test.ts` | `no-blocker` |
-| Preflight / doctor surfaces | `pnpm preflight:blank-machine` explicitly says it only verifies local prerequisites, allows bootstrap-derived forum IDs, and points Claude operators to a manual auth validation path. | `scripts/doctor.ts`, `scripts/doctor.test.ts`, `scripts/doctor-lib.test.ts`, `docs/configuration.md` | `no-blocker` |
-| Unauthenticated first run | The shipped stranger path now explicitly requires running `pnpm claude:auth-smoke` before login and confirming `Claude CLI appears installed but not authenticated.` That is the correct expected first-run failure. | `package.json`, `scripts/claude-auth-smoke.ts`, `scripts/claude-auth-smoke.test.ts`, `scripts/setup.ts`, `src/cli/init-wizard.ts` | `accepted-manual-gate` |
-| Post-login rerun | The shipped path then requires logging in with `claude`, rerunning `pnpm claude:auth-smoke`, and confirming `Claude CLI answered the minimal prompt.` The repo documents this, but does not auto-run it from preflight. | `package.json`, `scripts/claude-auth-smoke.ts`, `scripts/claude-auth-smoke.test.ts`, `scripts/setup.ts`, `docs/audit/claude-blank-machine-readiness.md` | `accepted-manual-gate` |
-| First reply | Normal message runs start a real watchdog-backed reply lifecycle instead of relying on a generic completion notice, and reply rendering/edit behavior is covered. | `src/discord-followup.test.ts`, `src/discord/output-common.test.ts` | `no-blocker` |
-| Follow-up reply | Query-action follow-ups post an explicit placeholder, keep lifecycle state on that placeholder, and complete with the follow-up result. | `src/discord-followup.test.ts`, `src/discord/message-coordinator.followup-lifecycle.test.ts` | `no-blocker` |
-| Task flow | Tasks resolve from an explicit forum ID or bootstrap-provided system forum ID, and `taskCreate` is covered as a direct action path. | `src/tasks/initialize.ts`, `src/tasks/initialize.test.ts`, `src/tasks/task-action-executor.test.ts`, `docs/tasks.md` | `no-blocker` |
-| Cron flow | Cron prerequisites accept first-connect forum bootstrap, and cron execution is covered from scheduler invoke to posting in the target channel. | `scripts/doctor-lib.test.ts`, `src/cron/executor.test.ts`, `docs/cron.md` | `no-blocker` |
-| Restart / recovery | Long-run recovery persists staged summary text, retries final posting after restart, and marks orphaned running work as interrupted with a final status. | `src/discord/long-run-watchdog.test.ts`, `docs/configuration.md` | `no-blocker` |
+## Hidden Prerequisites The Run Exposed
 
-## Findings
+- A source checkout still needs a real `.env`; a fresh clone alone is not runnable because provider secrets and Discord IDs are not in git.
+- If you reuse an existing maintainer `.env`, force `PRIMARY_RUNTIME=claude` or you may accidentally test another provider path instead of the blessed Claude path.
+- To get a meaningful first-login pre-auth result on a machine that already uses Claude, you need an isolated Claude home/session location; otherwise a reused logged-in shell can skip the stranger-path failure entirely.
+- `pnpm install --frozen-lockfile` is a real prerequisite for the repo-owned source helpers.
 
-### Finding 1: Automated surfaces are no longer misleading about Claude auth
+## Confusing Failures And Sharp Edges
 
-Classification: `no-blocker`
+### 1. `pnpm preflight:blank-machine` failed on legacy config drift before Claude auth
 
-The repo now consistently says the same thing in the three stranger-facing entry points:
+Observed output:
 
-- `pnpm run setup`
-- `discoclaw init`
-- `pnpm preflight:blank-machine` / doctor
+```text
+Config doctor [warn] RUNTIME_MODEL is deprecated and still configured.
+```
 
-Those surfaces no longer claim that Claude is fully ready just because the binary exists. They explicitly stop at what the repo can verify locally and push Claude auth into the repo-owned `pnpm claude:auth-smoke` step.
+This did not come from the throwaway clone itself. It came from reusing a working maintainer `.env` that still carried a deprecated key. That means the current docs are only honest if they keep saying preflight is config/bootstrap proof, not a guaranteed pass on every inherited env file.
 
-### Finding 2: Claude login/auth remains a required human gate, but the smoke path is repo-owned
+### 2. One stale browser-window retry rejected the localhost callback
 
-Classification: `accepted-manual-gate`
+Observed output:
 
-This is still a real dependency, but under the narrowed 1.0 contract it is recorded, not hidden. The required sequence is:
+```text
+Authorization failed
+Redirect URI ...localhost.../callback is not supported by client.
+```
 
-1. Run `pnpm claude:auth-smoke` before login and confirm `Claude CLI appears installed but not authenticated.`
-2. Log in with `claude`.
-3. Repeat `pnpm claude:auth-smoke` and confirm `Claude CLI answered the minimal prompt.`
+This happened on a stale browser-window retry during the isolated login sequence, not on the successful rerun that came directly from the active terminal command. The practical operator rule is: if a recycled browser tab rejects the callback, start a fresh Claude login from the terminal instead of reusing the old window.
 
-That is acceptable for this 1.0 audit because the automated surfaces no longer overclaim beyond that boundary.
+## Must Fix Before 1.0 Closeout
 
-### Finding 3: Post-auth operational paths are repo-proven
+- None for the Claude source-checkout auth gate.
+- Keep the stale-browser callback rejection documented as a sharp edge, but it is not a release blocker now that the same-shell login proof exists.
 
-Classification: `no-blocker`
+## Defer To 1.0.x
 
-After the manual Claude gate, the repo has direct coverage for:
+- Improve migration or operator guidance for inherited legacy `.env` files that still carry `RUNTIME_MODEL`. This throwaway run needed a manual env cleanup, but that came from copied maintainer state rather than the current setup-generated Claude path.
 
-- the first reply path
-- auto-follow-up reply lifecycle
-- task creation / task forum resolution
-- cron execution and posting
-- restart-time long-run recovery
+## Final Audit Call
 
-The remaining risk is not that these paths are undocumented or obviously misleading; it is that the Claude login step itself still depends on a human operator and an external CLI session.
+This `/tmp/discoclaw-test` run proved that DiscoClaw's blessed Claude source-checkout path can be recreated in a throwaway clone, can pass the config/bootstrap doctor once clone-local config drift is removed, can show the expected pre-login unauthenticated Claude result from an isolated session, can complete interactive Claude CLI login in that same isolated home, and can answer the minimal prompt from that same home on the post-login rerun.
 
-## Final 1.0 Decision
-
-`PASS` for the narrowed blank-machine 1.0 contract.
-
-Why it passes:
-
-- strangers are told the truth about what setup and preflight can verify
-- Claude auth is explicitly treated as a manual gate instead of an implied automated success
-- the first useful post-login behaviors are covered in-repo
-
-What would change this from "manual-gate PASS" to "fully automated PASS":
-
-- a single-command automated flow that runs the auth-aware Claude smoke itself instead of requiring the operator to execute `pnpm claude:auth-smoke` around the interactive login step
+That closes the first-login stranger release gate for the repo-owned Claude source-checkout path.
