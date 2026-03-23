@@ -2786,6 +2786,8 @@ const npmLatestVersion = await npmLatestVersionPromise;
 publishBootReport({
   botStatus,
   startupCtx,
+  serviceName: cfg.serviceName,
+  workspaceCwd,
   dashboardUrl,
   dashboardError,
   tasksEnabled,

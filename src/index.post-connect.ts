@@ -35,6 +35,26 @@ type PostConnectStartupOptions = {
   log: LoggerLike;
 };
 
+export function detectBootReportLaunchMode(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): 'systemd' | 'launchd' | 'manual' {
+  if (platform === 'linux' && (env.INVOCATION_ID || env.NOTIFY_SOCKET)) {
+    return 'systemd';
+  }
+  if (platform === 'darwin' && env.LAUNCH_JOB_NAME) {
+    return 'launchd';
+  }
+  return 'manual';
+}
+
+export function formatBootReportWorkspaceLabel(workspaceCwd: string): string {
+  const normalized = path.resolve(workspaceCwd);
+  const base = path.basename(normalized);
+  const parent = path.basename(path.dirname(normalized));
+  return parent && parent !== '.' && parent !== path.sep ? `${parent}/${base}` : base;
+}
+
 export async function runPostConnectStartupChecks(
   opts: PostConnectStartupOptions,
 ): Promise<{ credentialCheckReport: CredentialCheckReport; credentialReport: string }> {
@@ -133,6 +153,8 @@ export function buildActionCategoriesEnabled(opts: {
 export function publishBootReport(opts: {
   botStatus: StatusPoster | null;
   startupCtx: StartupContext;
+  serviceName: string;
+  workspaceCwd: string;
   dashboardUrl?: string;
   dashboardError?: string;
   tasksEnabled: boolean;
@@ -161,6 +183,10 @@ export function publishBootReport(opts: {
   if (!opts.botStatus?.bootReport) return;
   opts.botStatus.bootReport({
     startupType: opts.startupCtx.type,
+    serviceName: opts.serviceName,
+    launchMode: detectBootReportLaunchMode(),
+    workspaceLabel: formatBootReportWorkspaceLabel(opts.workspaceCwd),
+    processId: process.pid,
     shutdownReason: opts.startupCtx.shutdown?.reason,
     shutdownMessage: opts.startupCtx.shutdown?.message,
     shutdownRequestedBy: opts.startupCtx.shutdown?.requestedBy,

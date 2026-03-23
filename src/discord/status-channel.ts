@@ -67,6 +67,10 @@ export type BootReportMcpStatus =
 
 export type BootReportData = {
   startupType: StartupContext['type'];
+  serviceName?: string;
+  launchMode?: 'systemd' | 'launchd' | 'manual';
+  workspaceLabel?: string;
+  processId?: number;
   // Shutdown context fields (present on intentional/graceful-unknown)
   shutdownReason?: string;
   shutdownMessage?: string;
@@ -272,6 +276,15 @@ export function createStatusPoster(channel: Sendable, opts?: StatusPosterOpts): 
       const lines: string[] = ['**Boot Report**'];
       lines.push(`Startup · ${typeLabel[data.startupType]}`);
       if (data.bootDurationMs !== undefined) lines.push(`Boot Time · ${data.bootDurationMs}ms`);
+      const identityParts = [
+        data.serviceName,
+        data.launchMode,
+        data.workspaceLabel,
+        data.processId !== undefined ? `pid ${data.processId}` : undefined,
+      ].filter(Boolean);
+      if (identityParts.length > 0) {
+        lines.push(`Instance · ${identityParts.join(' · ')}`);
+      }
       if (data.dashboardUrl) {
         lines.push(`Dashboard · ${data.dashboardUrl}`);
       } else if (data.dashboardError) {
