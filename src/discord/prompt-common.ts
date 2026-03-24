@@ -123,6 +123,45 @@ export function estimateTokensFromChars(chars: number): number {
   return Math.ceil(chars / 4);
 }
 
+// ---------------------------------------------------------------------------
+// Token telemetry — log actual vs estimated token counts
+// ---------------------------------------------------------------------------
+
+export type TokenTelemetryRecord = {
+  estimatedInputTokens: number;
+  actualInputTokens: number;
+  estimatedOutputTokens?: number;
+  actualOutputTokens?: number;
+  provider: string;
+  model: string;
+  sessionId?: string | null;
+  sectionBreakdown?: Partial<Record<PromptSectionKey, number>>;
+};
+
+/**
+ * Log a structured token telemetry record comparing estimated vs actual
+ * provider-reported token counts. Writes via the provided `info` function.
+ * No-ops when no logger is available.
+ */
+export function recordTokenTelemetry(
+  record: TokenTelemetryRecord,
+  log?: { info(obj: unknown, msg?: string): void },
+): void {
+  if (!log) return;
+  const inputDelta = record.actualInputTokens - record.estimatedInputTokens;
+  const inputDriftPct = record.estimatedInputTokens > 0
+    ? Math.round((inputDelta / record.estimatedInputTokens) * 100)
+    : 0;
+  log.info(
+    {
+      ...record,
+      inputDelta,
+      inputDriftPct,
+    },
+    'token-telemetry',
+  );
+}
+
 export type PromptSectionKey =
   | 'rootPolicy'
   | 'trackedDefaults'

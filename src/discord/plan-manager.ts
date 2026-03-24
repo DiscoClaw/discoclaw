@@ -700,11 +700,12 @@ function extractTopLevelSection(planContent: string, sectionName: string): strin
       const headingMatch = line.match(/^##\s+(.+)$/);
       if (headingMatch) {
         const heading = headingMatch[1]!.trim().toLowerCase();
-        if (!capturing && heading === target) {
+        const matches = heading === target || heading.startsWith(target + ' ');
+        if (matches) {
           capturing = true;
           continue;
         }
-        if (capturing) break;
+        if (capturing) break; // non-matching ## heading ends capture
       }
     }
 
