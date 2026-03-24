@@ -90,7 +90,8 @@ import { parseConfig } from './config.js';
 import { startWebhookServer } from './webhook/server.js';
 import type { WebhookServer } from './webhook/server.js';
 import { startDashboardServer } from './dashboard/server.js';
-import type { DashboardServer as LocalDashboardServer } from './dashboard/server.js';
+import type { DashboardServer as LocalDashboardServer, LiveModelHandler } from './dashboard/server.js';
+import { executeConfigAction } from './discord/actions-config.js';
 import { formatDashboardOperatorUrl, resolveDashboardBindHost } from './dashboard/options.js';
 import { collectLiveSnapshot, fetchGeminiImagegenModels } from './dashboard/snapshot.js';
 import { collectDashboardSnapshot } from './cli/dashboard.js';
@@ -2761,6 +2762,11 @@ if (cfg.dashboardEnabled) {
           pendingRestart: false,
           imagegenCtx: botParams.imagegenCtx,
         }),
+      liveModelHandler: ((role: string, model: string) => {
+        const configCtx = botParams.configCtx;
+        if (!configCtx) return { ok: false as const, error: 'Live model changes are not available (bot not fully initialized).' };
+        return executeConfigAction({ type: 'modelSet', role: role as import('./discord/actions-config.js').ModelRole, model }, configCtx);
+      }) satisfies LiveModelHandler,
     });
     const address = dashboardServer.server.address();
     dashboardUrl = formatDashboardOperatorUrl(

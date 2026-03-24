@@ -55,6 +55,19 @@ type KnownRuntimesType = typeof KNOWN_RUNTIMES;
 
 export type { DashboardSnapshotApiResponse } from './api/snapshot.js';
 
+/**
+ * Result of a live model change applied to the running bot's in-memory state.
+ */
+export type LiveModelResult =
+  | { ok: true; summary: string }
+  | { ok: false; error: string };
+
+/**
+ * Callback that applies a live (in-memory) model change to the running bot.
+ * The role and model mirror the executeConfigAction modelSet interface.
+ */
+export type LiveModelHandler = (role: string, model: string) => LiveModelResult;
+
 export type DashboardServerOptions = {
   port?: number;
   host?: string;
@@ -67,6 +80,7 @@ export type DashboardServerOptions = {
   deps?: Partial<DashboardDeps>;
   restartExecutor?: (cmd: string, args: string[]) => void;
   liveSnapshotProvider?: LiveSnapshotProvider;
+  liveModelHandler?: LiveModelHandler;
 };
 
 export type DashboardServer = {
@@ -119,6 +133,12 @@ export type DashboardModelApiResponse = {
 };
 
 export type DashboardPresetApiResponse = {
+  ok: true;
+  message: string;
+  snapshot: DashboardSnapshot;
+};
+
+export type DashboardLiveModelApiResponse = {
   ok: true;
   message: string;
   snapshot: DashboardSnapshot;
@@ -355,6 +375,7 @@ function withStartupMcpSnapshot<T extends { snapshot: DashboardSnapshot }>(
 function withLiveSnapshot<T extends { snapshot: DashboardSnapshot }>(
   response: T,
   liveSnapshotProvider?: LiveSnapshotProvider,
+  pendingRestartOverride?: boolean,
 ): T {
   if (!liveSnapshotProvider) return response;
   const live = liveSnapshotProvider();
@@ -364,7 +385,9 @@ function withLiveSnapshot<T extends { snapshot: DashboardSnapshot }>(
     ...response,
     snapshot: {
       ...response.snapshot,
-      live,
+      live: pendingRestartOverride !== undefined
+        ? { ...live, pendingRestart: live.pendingRestart || pendingRestartOverride }
+        : live,
     },
   };
 }
@@ -567,6 +590,10 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
       }
     });
   });
+  const liveModelHandler = opts.liveModelHandler;
+
+  // Mutable flag — set when a persisted config change requires a restart to take effect.
+  let pendingRestart = false;
 
   const server = http.createServer(async (req, res) => {
     const method = req.method ?? 'GET';
@@ -594,6 +621,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
               opts.startupMcpWarnings,
             ),
             opts.liveSnapshotProvider,
+            pendingRestart,
           ),
         );
         return;
@@ -624,6 +652,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           return;
         }
         const restart = await buildRestartResponse(inspectOpts, deps, restartExecutor);
+        pendingRestart = false;
         res.once('finish', () => {
           setTimeout(restart.deferred, 25);
         });
@@ -655,6 +684,48 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
               opts.startupMcpWarnings,
             ),
             opts.liveSnapshotProvider,
+            pendingRestart,
+          ),
+        );
+        return;
+      }
+
+      if (pathname === '/api/live-model') {
+        if (method !== 'POST') {
+          respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
+          return;
+        }
+        if (!hasSafeDashboardOrigin(req, trustedHosts)) {
+          respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
+          return;
+        }
+        if (!liveModelHandler) {
+          respondJson(res, 501, { ok: false, message: 'Live model changes are not available (bot not fully initialized).' });
+          return;
+        }
+        const body = await readJsonBody(req);
+        const role = typeof body.role === 'string' ? body.role.trim() : '';
+        const model = typeof body.model === 'string' ? body.model.trim() : '';
+        if (!role) throw new Error('Model role is required.');
+        if (!model) throw new Error('Model value is required.');
+
+        const result = liveModelHandler(role, model);
+        if (!result.ok) {
+          respondJson(res, 400, { ok: false, message: result.error });
+          return;
+        }
+        const snapshot = await collectDashboardSnapshot(inspectOpts, deps);
+        respondJson(
+          res,
+          200,
+          withLiveSnapshot(
+            withStartupMcpSnapshot(
+              { ok: true as const, message: result.summary, snapshot },
+              opts.startupMcpStatus,
+              opts.startupMcpWarnings,
+            ),
+            opts.liveSnapshotProvider,
+            pendingRestart,
           ),
         );
         return;
@@ -670,16 +741,19 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           return;
         }
         const body = await readJsonBody(req);
+        const modelResponse = await buildModelResponse(body, inspectOpts, deps, KNOWN_RUNTIMES);
+        pendingRestart = true;
         respondJson(
           res,
           200,
           withLiveSnapshot(
             withStartupMcpSnapshot(
-              await buildModelResponse(body, inspectOpts, deps, KNOWN_RUNTIMES),
+              modelResponse,
               opts.startupMcpStatus,
               opts.startupMcpWarnings,
             ),
             opts.liveSnapshotProvider,
+            pendingRestart,
           ),
         );
         return;
@@ -695,16 +769,19 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           return;
         }
         const body = await readJsonBody(req);
+        const presetResponse = await buildPresetResponse(body, inspectOpts, deps);
+        pendingRestart = true;
         respondJson(
           res,
           200,
           withLiveSnapshot(
             withStartupMcpSnapshot(
-              await buildPresetResponse(body, inspectOpts, deps),
+              presetResponse,
               opts.startupMcpStatus,
               opts.startupMcpWarnings,
             ),
             opts.liveSnapshotProvider,
+            pendingRestart,
           ),
         );
         return;
