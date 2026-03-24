@@ -13,6 +13,8 @@ export type DurableItem = {
   updatedAt: number;
   hitCount: number;
   lastHitAt: number;
+  /** Optional entity tag for grouping related items (e.g. a person, project, or tool name). */
+  entity?: string;
 };
 
 export type DurableMemoryStore = {
@@ -216,9 +218,11 @@ export function addItem(
   source: DurableItem['source'],
   maxItems: number,
   kind: DurableItem['kind'] = 'fact',
+  entity?: string,
 ): DurableMemoryStore {
   const now = Date.now();
   const id = deriveItemId(kind, text);
+  const normalizedEntity = entity?.trim() || undefined;
 
   const existing = store.items.find((item) => item.id === id && item.status === 'active');
   if (existing) {
@@ -226,6 +230,7 @@ export function addItem(
     existing.text = text;
     existing.source = source;
     existing.updatedAt = now;
+    if (normalizedEntity !== undefined) existing.entity = normalizedEntity;
     store.updatedAt = now;
     compactActiveItems(store);
     return store;
@@ -242,6 +247,7 @@ export function addItem(
     updatedAt: now,
     hitCount: 0,
     lastHitAt: 0,
+    ...(normalizedEntity ? { entity: normalizedEntity } : {}),
   };
   store.items.push(item);
   store.updatedAt = now;
@@ -369,7 +375,8 @@ export function selectItemsForInjection(
 function formatItemLine(item: DurableItem): string {
   const date = new Date(item.updatedAt).toISOString().slice(0, 10);
   const ch = item.source.channelName ? `, #${item.source.channelName}` : '';
-  return `- [${item.kind}] ${item.text} (src: ${item.source.type}${ch}, updated ${date})`;
+  const ent = item.entity ? ` [${item.entity}]` : '';
+  return `- [${item.kind}]${ent} ${item.text} (src: ${item.source.type}${ch}, updated ${date})`;
 }
 
 export function formatDurableSection(items: DurableItem[]): string {
@@ -378,4 +385,74 @@ export function formatDurableSection(items: DurableItem[]): string {
 
 export function getActiveItemCount(store: DurableMemoryStore): number {
   return store.items.filter((item) => item.status === 'active').length;
+}
+
+// ---------------------------------------------------------------------------
+// Entity-aware querying
+// ---------------------------------------------------------------------------
+
+export type EntityGroup = {
+  entity: string;
+  items: DurableItem[];
+};
+
+/**
+ * Group active items by their entity tag. Items without an entity tag are
+ * collected under the key '(untagged)'. Groups are sorted by most-recently
+ * updated item within each group (descending).
+ */
+export function groupItemsByEntity(store: DurableMemoryStore): EntityGroup[] {
+  const activeItems = store.items.filter((item) => item.status === 'active');
+  const groups = new Map<string, DurableItem[]>();
+
+  for (const item of activeItems) {
+    const key = item.entity ?? '(untagged)';
+    const group = groups.get(key);
+    if (group) {
+      group.push(item);
+    } else {
+      groups.set(key, [item]);
+    }
+  }
+
+  return [...groups.entries()]
+    .map(([entity, items]) => ({ entity, items }))
+    .sort((a, b) => {
+      const aMax = Math.max(...a.items.map((i) => i.updatedAt));
+      const bMax = Math.max(...b.items.map((i) => i.updatedAt));
+      return bMax - aMax;
+    });
+}
+
+/**
+ * Query active items by entity name (case-insensitive substring match).
+ * Returns matching items sorted by updatedAt descending.
+ */
+export function queryByEntity(store: DurableMemoryStore, entityQuery: string): DurableItem[] {
+  const needle = entityQuery.toLowerCase().trim();
+  if (!needle) return [];
+
+  return store.items
+    .filter(
+      (item) =>
+        item.status === 'active' &&
+        item.entity != null &&
+        item.entity.toLowerCase().includes(needle),
+    )
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+/**
+ * Format entity groups into a readable display section.
+ */
+export function formatEntityGroupedSection(groups: EntityGroup[]): string {
+  if (groups.length === 0) return '(none)';
+  const lines: string[] = [];
+  for (const group of groups) {
+    lines.push(`**${group.entity}** (${group.items.length})`);
+    for (const item of group.items) {
+      lines.push(`  - [${item.kind}] ${item.text}`);
+    }
+  }
+  return lines.join('\n');
 }
