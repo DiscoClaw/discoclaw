@@ -89,7 +89,7 @@ import {
 } from './abort-registry.js';
 import { buildStopSummary } from './stop-summary.js';
 import { splitDiscord, truncateCodeBlocks, renderDiscordTail, renderActivityTail, formatBoldLabel, thinkingLabel, selectStreamingOutput, stripActionTags, formatElapsed, closeFenceIfOpen, formatRuntimePreviewSignal } from './output-utils.js';
-import { buildContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, buildOpenTasksSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble, buildPromptSectionEstimates } from './prompt-common.js';
+import { buildPreambleContextFiles, inlineContextFilesWithMeta, buildDurableMemorySection, buildShortTermMemorySection, buildTaskThreadSection, buildOpenTasksSection, loadWorkspacePaFiles, loadWorkspaceMemoryFile, loadDailyLogFiles, resolveEffectiveTools, buildPromptPreamble, buildPromptSectionEstimates } from './prompt-common.js';
 import { taskThreadCache } from '../tasks/thread-cache.js';
 import { buildTaskContextSummary } from '../tasks/context-summary.js';
 import { TaskStore } from '../tasks/store.js';
@@ -3269,10 +3269,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             if (memFile) memoryFiles.push(memFile);
             memoryFiles.push(...await loadDailyLogFiles(params.workspaceCwd));
           }
-          const contextFiles = buildContextFiles(
+          // Preamble context files exclude channel context — channel context is
+          // injected as a separate post-preamble section so the preamble prefix
+          // stays byte-identical across channels and follow-up turns, enabling
+          // provider-level prefix caching (~90% cost reduction on cached prefix).
+          const preambleContextFiles = buildPreambleContextFiles(
             [...paFiles, ...memoryFiles],
             params.discordChannelContext,
-            channelCtx.contextPath,
           );
 
           if (params.messageHistoryBudget > 0) {
@@ -3352,9 +3355,15 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           ]);
 
           const inlinedContext = await inlineContextFilesWithMeta(
-            contextFiles,
+            preambleContextFiles,
             { required: new Set(params.discordChannelContext?.paContextFiles ?? []) },
           );
+
+          // Channel context inlined separately — lives in a post-preamble section
+          // so the preamble prefix stays stable for cross-channel and follow-up caching.
+          const channelContextResult = channelCtx.contextPath
+            ? await inlineContextFilesWithMeta([channelCtx.contextPath])
+            : null;
 
           let actionsReferenceSection = '';
           let actionSchemaSelection:
@@ -3372,19 +3381,29 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             params.startupInjection = null;
           }
 
+          // Preamble text computed once and reused on follow-up turns.
+          // The prefix is stable across channels (no channel context) so
+          // provider-level prefix caching applies on every subsequent invocation.
+          const preambleText = buildPromptPreamble(inlinedContext.text, {
+            runtimeId: params.runtime.id,
+            runtimeCapabilities: params.runtime.capabilities,
+            runtimeTools: params.runtimeTools,
+            enableHybridPipeline: params.enableHybridPipeline,
+          });
+
           // Section order exploits primacy bias (front) and recency bias (near end).
-          // Primacy zone: preamble, task context, durable memory.
+          // Primacy zone: preamble, channel context, task context, durable memory.
           // Middle zone (lower signal): short-term memory, open tasks, startup context.
           // Recency zone (high signal): conversation memory, recent conversation, reply reference.
           // Actions reference, permission notes, separator, and user message are appended
           // after this block — actions/notes land in the recency zone before the user message.
           let prompt =
-            buildPromptPreamble(inlinedContext.text, {
-              runtimeId: params.runtime.id,
-              runtimeCapabilities: params.runtime.capabilities,
-              runtimeTools: params.runtimeTools,
-              enableHybridPipeline: params.enableHybridPipeline,
-            }) + '\n\n' +
+            preambleText + '\n\n' +
+            // Channel context injected as first post-preamble section (excluded from
+            // preamble prefix to keep it byte-identical across channels and follow-ups).
+            (channelContextResult?.text
+              ? `---\nChannel context:\n${channelContextResult.text}\n\n`
+              : '') +
             (taskSection
               ? `---\n${taskSection}\n\n`
               : '') +
@@ -3465,7 +3484,9 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           }
 
           const promptSectionEstimates = buildPromptSectionEstimates({
-            contextSections: inlinedContext.sections,
+            contextSections: channelContextResult
+              ? [...inlinedContext.sections, ...channelContextResult.sections]
+              : inlinedContext.sections,
             channelContextPath: channelCtx.contextPath,
             durableSection,
             summarySection,
@@ -4486,8 +4507,21 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   ? `One or more actions failed. If you retry, explicitly tell the user what failed and whether the retry succeeded or failed. Do not announce success before the action confirms it.`
                   : `Continue your analysis based on these results. If you need additional information, you may emit further query actions.`;
 
-                // Build the follow-up prompt with original request context and truncation awareness.
+                // Build follow-up prompt with preamble prefix for provider cache hits.
+                // Channel context and conversation history are excluded — the model
+                // already processed them on the initial turn.
                 const followUpParts: string[] = [];
+
+                // Stable preamble prefix (byte-identical to initial turn → cached at ~90% discount).
+                followUpParts.push(preambleText);
+
+                // High-signal primacy-zone sections carry over to follow-ups.
+                if (taskSection) {
+                  followUpParts.push(`---\n${taskSection}`);
+                }
+                if (durableSection) {
+                  followUpParts.push(`---\nDurable memory (user-specific notes):\n${durableSection}`);
+                }
 
                 // Original request summary so a reset session knows what task it is continuing.
                 const originalRequest = userText.trim();
