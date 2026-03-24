@@ -157,3 +157,107 @@ If `USE_GROUP_DIR_CWD=1`:
 - CWD becomes `groups/<sessionKey>/` for that Discord context.
 - The main workspace (`WORKSPACE_CWD`) is added via `--add-dir` so tools can still read/write it.
 - DiscoClaw bootstraps `groups/<sessionKey>/CLAUDE.md` on first use.
+
+## Known Footguns
+
+- **Thread name + archive in one API call:** Updating a thread's name AND archiving it in a single Discord API PATCH silently drops the archive flag. These must be separate API calls with a short delay between. This bites task sync and cron archive operations.
+- **Bot permissions are role-based, not OAuth scope-based:** "Missing Permissions" errors come from the bot's server role lacking a permission (e.g., Manage Channels), not from the Developer Portal OAuth settings. Fix it in Server Settings → Roles.
+- **DMs bypass `DISCORD_CHANNEL_IDS`:** The channel restriction only applies to guild channels. DMs are always allowed if the user is in the allowlist. This is by design but can surprise operators who expect full channel lockdown.
+- **`DISCORD_REQUIRE_CHANNEL_CONTEXT=1` silently drops messages:** If no context file exists for a channel and auto-indexing hasn't run yet, the bot silently ignores messages in that channel. No error is logged. Run `pnpm sync:discord-context` to pre-create stubs.
+- **Auto-follow-up depth can cause API cost spikes:** With `DISCOCLAW_ACTION_FOLLOWUP_DEPTH=3` (default), a single user message can trigger up to 4 runtime invocations (initial + 3 follow-ups). Each costs API tokens. Set to `1` if cost is a concern.
+- **Reaction handler age gate:** Reactions on messages older than `DISCOCLAW_REACTION_MAX_AGE_HOURS` (default 24) are silently ignored. If users react to old messages expecting a response, increase this value or disable the age gate.
+
+## Common Failure Modes
+
+### Bot responds in some channels but not others
+**Symptom:** Bot works in DMs and some guild channels but silently ignores messages in other channels.
+**Cause (in order of likelihood):**
+1. `DISCORD_CHANNEL_IDS` is set and the channel is not in the list.
+2. `DISCORD_REQUIRE_CHANNEL_CONTEXT=1` and no context file exists for that channel.
+3. The channel is a private thread the bot hasn't been added to.
+**Recovery:**
+```bash
+# Check channel restrictions
+grep DISCORD_CHANNEL_IDS .env
+
+# Check if context files exist for the channel
+ls data/content/discord/channels/
+
+# Regenerate context stubs for all channels
+pnpm sync:discord-context
+
+# For private threads: manually add the bot to the thread in Discord
+```
+
+### Discord action fails with "Missing Permissions"
+**Symptom:** Bot replies with "Action failed: Missing Permissions" when trying to create/edit channels, roles, etc.
+**Cause:** The bot's server role lacks the required Discord permission.
+**Recovery:**
+```bash
+# Common permission requirements by action type:
+# channelCreate/channelEdit/channelDelete → Manage Channels
+# roleAdd/roleRemove → Manage Roles
+# timeout/kick/ban → Moderate Members / Kick Members / Ban Members
+# pinMessage/unpinMessage → Manage Messages
+# bulkDelete → Manage Messages
+# crosspost → Manage Messages (in announcement channels)
+
+# Fix: Server Settings → Roles → [Bot Role] → enable the needed permission
+# The bot role must also be ABOVE the target role in the role hierarchy for role operations
+```
+
+### Action follow-ups produce empty or truncated responses
+**Symptom:** Bot invokes a query action (e.g., `channelList`), gets results, but the follow-up response is empty or cut short.
+**Cause:** Follow-up response was <50 chars and got suppressed by the trivial-response filter, or the follow-up depth limit was reached.
+**Recovery:**
+```bash
+# Check the follow-up depth setting
+grep DISCOCLAW_ACTION_FOLLOWUP_DEPTH .env
+
+# Increase if needed (but be mindful of API cost)
+# DISCOCLAW_ACTION_FOLLOWUP_DEPTH=5
+
+# If the trivial-response filter is the issue, the bot correctly determined
+# no further response was needed. This is usually correct behavior.
+```
+
+### Status channel messages not appearing
+**Symptom:** `DISCOCLAW_STATUS_CHANNEL` is set but no status messages appear.
+**Cause:** Channel name/ID doesn't match any channel the bot can see, or the bot lacks Send Messages permission in that channel.
+**Recovery:**
+```bash
+# Verify the channel ID or name
+grep DISCOCLAW_STATUS_CHANNEL .env
+
+# Use a channel ID (snowflake) instead of a name for reliability
+# Names are matched case-sensitively and can break on rename
+
+# Check bot logs for status channel errors (these are logged but non-fatal)
+journalctl --user -u discoclaw.service --since "5 min ago" --no-pager | grep -i "status"
+```
+
+### Messages split awkwardly across Discord's 2000-char limit
+**Symptom:** Bot replies are split mid-sentence or mid-code-block, producing garbled formatting.
+**Cause:** The chunking algorithm tries to preserve code fences but can't always split cleanly if the response has deeply nested or very long code blocks.
+**Recovery:**
+```bash
+# This is a known limitation of Discord's message size limit.
+# No env var to adjust — the chunking is best-effort.
+# Workaround: ask the bot to produce shorter responses, or
+# use thread replies where each chunk is a separate message.
+```
+
+### Task sync fails — threads out of sync with local store
+**Symptom:** Task forum threads show stale data (wrong status, missing tasks, or duplicate threads).
+**Cause:** A previous sync failed mid-operation, or the bot was offline when task changes occurred.
+**Recovery:**
+```bash
+# Trigger a manual sync via Discord:
+# Ask the bot: "sync tasks"
+
+# Check sync coordinator status in logs
+journalctl --user -u discoclaw.service --since "10 min ago" --no-pager | grep -i "sync\|coordinator"
+
+# If the thread cache is stale, restart the bot (cache is cleared on startup)
+systemctl --user restart discoclaw.service
+```

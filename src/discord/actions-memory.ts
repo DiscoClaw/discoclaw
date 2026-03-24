@@ -7,6 +7,9 @@ import {
   deprecateItems,
   selectItemsForInjection,
   formatDurableSection,
+  groupItemsByEntity,
+  queryByEntity,
+  formatEntityGroupedSection,
   CURRENT_VERSION,
 } from './durable-memory.js';
 import type { DurableMemoryStore, DurableItem } from './durable-memory.js';
@@ -19,14 +22,16 @@ import { loadShortTermMemory, selectEntriesForInjection, formatShortTermSection 
 // ---------------------------------------------------------------------------
 
 export type MemoryActionRequest =
-  | { type: 'memoryRemember'; text: string; kind?: DurableItem['kind'] }
+  | { type: 'memoryRemember'; text: string; kind?: DurableItem['kind']; entity?: string }
   | { type: 'memoryForget'; substring: string }
-  | { type: 'memoryShow' };
+  | { type: 'memoryShow' }
+  | { type: 'memoryQuery'; entity: string };
 
 const MEMORY_TYPE_MAP: Record<MemoryActionRequest['type'], true> = {
   memoryRemember: true,
   memoryForget: true,
   memoryShow: true,
+  memoryQuery: true,
 };
 export const MEMORY_ACTION_TYPES = new Set<string>(Object.keys(MEMORY_TYPE_MAP));
 
@@ -78,9 +83,9 @@ export async function executeMemoryAction(
         if (memCtx.messageId) source.messageId = memCtx.messageId;
         if (memCtx.guildId) source.guildId = memCtx.guildId;
         if (memCtx.channelName) source.channelName = memCtx.channelName;
-        addItem(store, action.text, source, memCtx.durableMaxItems, kind as DurableItem['kind']);
+        addItem(store, action.text, source, memCtx.durableMaxItems, kind as DurableItem['kind'], action.entity);
         await saveDurableMemory(memCtx.durableDataDir, memCtx.userId, store);
-        memCtx.log?.info({ action: 'memoryRemember', userId: memCtx.userId, textLength: action.text.length }, 'memory:action:remember');
+        memCtx.log?.info({ action: 'memoryRemember', userId: memCtx.userId, textLength: action.text.length, entity: action.entity }, 'memory:action:remember');
         return { ok: true as const, summary: `Remembered: "${action.text}"` };
       });
     }
@@ -109,6 +114,12 @@ export async function executeMemoryAction(
         : [];
       const durableText = items.length > 0
         ? formatDurableSection(items)
+        : '(none)';
+
+      // Entity-grouped view
+      const entityGroups = store ? groupItemsByEntity(store) : [];
+      const entityText = entityGroups.length > 0
+        ? formatEntityGroupedSection(entityGroups)
         : '(none)';
 
       let summaryText = '(none)';
@@ -141,7 +152,31 @@ export async function executeMemoryAction(
 
       return {
         ok: true,
-        summary: `**Durable memory:**\n${durableText}\n\n**Rolling summary:**\n${summaryText}\n\n**Short-term memory:**\n${shortTermText}`,
+        summary: `**Durable memory:**\n${durableText}\n\n**By entity:**\n${entityText}\n\n**Rolling summary:**\n${summaryText}\n\n**Short-term memory:**\n${shortTermText}`,
+      };
+    }
+
+    case 'memoryQuery': {
+      if (!action.entity) {
+        return { ok: false, error: 'memoryQuery requires an entity name' };
+      }
+
+      const store = await loadDurableMemory(memCtx.durableDataDir, memCtx.userId);
+      if (!store) {
+        return { ok: true, summary: `No memory items found for entity "${action.entity}"` };
+      }
+
+      const matches = queryByEntity(store, action.entity);
+      if (matches.length === 0) {
+        return { ok: true, summary: `No memory items found for entity "${action.entity}"` };
+      }
+
+      const lines = matches.map(
+        (item) => `- [${item.kind}] ${item.text}${item.entity ? ` (entity: ${item.entity})` : ''}`,
+      );
+      return {
+        ok: true,
+        summary: `**Memory for "${action.entity}"** (${matches.length} items):\n${lines.join('\n')}`,
       };
     }
   }
@@ -163,13 +198,20 @@ async function loadOrCreate(dir: string, userId: string): Promise<DurableMemoryS
 export function memoryActionsPromptSection(): string {
   return `### Memory (Durable User Memory)
 
-**memoryRemember** — \`{"type":"memoryRemember","text":"Prefers Rust over Go","kind":"preference"}\`
+**memoryRemember** — \`{"type":"memoryRemember","text":"Prefers Rust over Go","kind":"preference","entity":"David"}\`
 \`text\` required. \`kind\` optional: fact (default), preference, project, constraint, person, tool, workflow.
+\`entity\` optional: tag the item with an entity name (person, project, tool, etc.) for grouped retrieval.
 
 **memoryForget** — \`{"type":"memoryForget","substring":"Prefers Rust over Go"}\`
 Deprecates items where substring covers >= 60% of text length.
 
 **memoryShow** — \`{"type":"memoryShow"}\`
+Shows all memory sections including entity-grouped view.
 
-Proactively store important user facts/preferences. Memory persists across sessions and restarts.`;
+**memoryQuery** — \`{"type":"memoryQuery","entity":"David"}\`
+\`entity\` required. Returns all items tagged with a matching entity name (case-insensitive substring match).
+Use for "what do I know about X" queries.
+
+Proactively store important user facts/preferences. Memory persists across sessions and restarts.
+When remembering facts about a specific person, project, or tool, include the \`entity\` tag for better retrieval.`;
 }

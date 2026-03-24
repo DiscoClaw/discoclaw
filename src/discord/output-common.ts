@@ -366,6 +366,8 @@ const DISABLED_TYPE_HELP: Record<string, string> = {
     'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MEMORY=1` and `DISCOCLAW_DURABLE_MEMORY_ENABLED=1` in .env.',
   memoryShow:
     'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MEMORY=1` and `DISCOCLAW_DURABLE_MEMORY_ENABLED=1` in .env.',
+  memoryQuery:
+    'To enable: set `DISCOCLAW_DISCORD_ACTIONS_MEMORY=1` and `DISCOCLAW_DURABLE_MEMORY_ENABLED=1` in .env.',
 };
 
 /**

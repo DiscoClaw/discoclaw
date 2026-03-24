@@ -39,7 +39,7 @@ vi.mock('./durable-memory.js', () => ({
     return JSON.parse(JSON.stringify(mockStore));
   }),
   saveDurableMemory: vi.fn(async () => {}),
-  addItem: vi.fn((store: any, text: string, source: any, maxItems: number, kind?: string) => {
+  addItem: vi.fn((store: any, text: string, source: any, maxItems: number, kind?: string, entity?: string) => {
     store.items.push({
       id: `durable-new`,
       kind: kind ?? 'fact',
@@ -49,6 +49,7 @@ vi.mock('./durable-memory.js', () => ({
       source,
       createdAt: Date.now(),
       updatedAt: Date.now(),
+      ...(entity ? { entity } : {}),
     });
     return store;
   }),
@@ -70,6 +71,31 @@ vi.mock('./durable-memory.js', () => ({
   formatDurableSection: vi.fn((items: any[]) => {
     return items.map((i: any) => `- [${i.kind}] ${i.text}`).join('\n');
   }),
+  groupItemsByEntity: vi.fn((store: any) => {
+    const active = store.items.filter((i: any) => i.status === 'active');
+    const groups = new Map<string, any[]>();
+    for (const item of active) {
+      const key = item.entity ?? '(untagged)';
+      const group = groups.get(key);
+      if (group) group.push(item);
+      else groups.set(key, [item]);
+    }
+    return [...groups.entries()].map(([entity, items]) => ({ entity, items }));
+  }),
+  queryByEntity: vi.fn((store: any, entityQuery: string) => {
+    const needle = entityQuery.toLowerCase().trim();
+    return store.items.filter(
+      (i: any) => i.status === 'active' && i.entity && i.entity.toLowerCase().includes(needle),
+    );
+  }),
+  formatEntityGroupedSection: vi.fn((groups: any[]) => {
+    if (groups.length === 0) return '(none)';
+    return groups.map((g: any) =>
+      `**${g.entity}** (${g.items.length})\n` +
+      g.items.map((i: any) => `  - [${i.kind}] ${i.text}`).join('\n'),
+    ).join('\n');
+  }),
+  CURRENT_VERSION: 2,
 }));
 
 vi.mock('./summarizer.js', () => ({
@@ -136,6 +162,7 @@ describe('MEMORY_ACTION_TYPES', () => {
     expect(MEMORY_ACTION_TYPES.has('memoryRemember')).toBe(true);
     expect(MEMORY_ACTION_TYPES.has('memoryForget')).toBe(true);
     expect(MEMORY_ACTION_TYPES.has('memoryShow')).toBe(true);
+    expect(MEMORY_ACTION_TYPES.has('memoryQuery')).toBe(true);
   });
 
   it('does not contain non-memory types', () => {
@@ -180,6 +207,7 @@ describe('executeMemoryAction', () => {
         expect.objectContaining({ type: 'discord' }),
         200,
         'project',
+        undefined,
       );
     });
 
@@ -198,6 +226,7 @@ describe('executeMemoryAction', () => {
         expect.any(Object),
         200,
         'fact',
+        undefined,
       );
     });
 
@@ -222,6 +251,7 @@ describe('executeMemoryAction', () => {
         }),
         200,
         'fact',
+        undefined,
       );
     });
 
@@ -315,7 +345,7 @@ describe('executeMemoryAction', () => {
   });
 
   describe('memoryShow', () => {
-    it('shows durable memory items, rolling summary, and short-term memory', async () => {
+    it('shows durable memory items, entity view, rolling summary, and short-term memory', async () => {
       const result = await executeMemoryAction(
         { type: 'memoryShow' },
         makeCtx(),
@@ -328,6 +358,7 @@ describe('executeMemoryAction', () => {
         expect(result.summary).toContain('Works at Acme Corp');
         expect(result.summary).toContain('[preference]');
         expect(result.summary).toContain('Prefers Rust over Go');
+        expect(result.summary).toContain('**By entity:**');
         expect(result.summary).toContain('**Rolling summary:**');
         expect(result.summary).toContain('User is working on memory observability.');
         expect(result.summary).toContain('**Short-term memory:**');
@@ -453,6 +484,113 @@ describe('executeMemoryAction', () => {
       }
     });
   });
+
+  describe('memoryRemember with entity', () => {
+    it('passes entity to addItem', async () => {
+      const { addItem } = await import('./durable-memory.js');
+
+      await executeMemoryAction(
+        { type: 'memoryRemember', text: 'Retired game designer', kind: 'person', entity: 'David' },
+        makeCtx(),
+        makeMemCtx(),
+      );
+
+      expect(addItem).toHaveBeenCalledWith(
+        expect.any(Object),
+        'Retired game designer',
+        expect.objectContaining({ type: 'discord' }),
+        200,
+        'person',
+        'David',
+      );
+    });
+
+    it('passes undefined entity when not specified', async () => {
+      const { addItem } = await import('./durable-memory.js');
+
+      await executeMemoryAction(
+        { type: 'memoryRemember', text: 'Some fact' },
+        makeCtx(),
+        makeMemCtx(),
+      );
+
+      expect(addItem).toHaveBeenCalledWith(
+        expect.any(Object),
+        'Some fact',
+        expect.any(Object),
+        200,
+        'fact',
+        undefined,
+      );
+    });
+  });
+
+  describe('memoryQuery', () => {
+    it('returns matching items for an entity', async () => {
+      const { loadDurableMemory, queryByEntity } = await import('./durable-memory.js');
+      (loadDurableMemory as any).mockResolvedValueOnce({
+        ...JSON.parse(JSON.stringify(mockStore)),
+        items: [
+          { ...mockStore.items[0], entity: 'Acme', status: 'active' },
+        ],
+      });
+      (queryByEntity as any).mockReturnValueOnce([
+        { ...mockStore.items[0], entity: 'Acme', status: 'active' },
+      ]);
+
+      const result = await executeMemoryAction(
+        { type: 'memoryQuery', entity: 'Acme' },
+        makeCtx(),
+        makeMemCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('Memory for "Acme"');
+        expect(result.summary).toContain('1 items');
+      }
+    });
+
+    it('returns no-match message when entity not found', async () => {
+      const { queryByEntity } = await import('./durable-memory.js');
+      (queryByEntity as any).mockReturnValueOnce([]);
+
+      const result = await executeMemoryAction(
+        { type: 'memoryQuery', entity: 'Nonexistent' },
+        makeCtx(),
+        makeMemCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('No memory items found');
+        expect(result.summary).toContain('Nonexistent');
+      }
+    });
+
+    it('returns no-match when store is null', async () => {
+      const { loadDurableMemory } = await import('./durable-memory.js');
+      (loadDurableMemory as any).mockResolvedValueOnce(null);
+
+      const result = await executeMemoryAction(
+        { type: 'memoryQuery', entity: 'Anything' },
+        makeCtx(),
+        makeMemCtx(),
+      );
+      expect(result.ok).toBe(true);
+      if (result.ok) {
+        expect(result.summary).toContain('No memory items found');
+      }
+    });
+
+    it('fails without entity', async () => {
+      const result = await executeMemoryAction(
+        { type: 'memoryQuery', entity: '' },
+        makeCtx(),
+        makeMemCtx(),
+      );
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toContain('requires an entity');
+    });
+  });
 });
 
 describe('memoryActionsPromptSection', () => {
@@ -461,6 +599,7 @@ describe('memoryActionsPromptSection', () => {
     expect(section).toContain('memoryRemember');
     expect(section).toContain('memoryForget');
     expect(section).toContain('memoryShow');
+    expect(section).toContain('memoryQuery');
   });
 
   it('includes memory guidelines', () => {

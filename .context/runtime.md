@@ -392,3 +392,117 @@ Since Claude can't generate images directly, you need an MCP server that wraps a
 3. **Add workspace instructions** (in `workspace/SOUL.md` or system prompt) telling the bot it can generate images and when to use the tool.
 
 The rest is automatic: the runtime adapter extracts the image blocks, deduplicates them, and the Discord layer attaches them to the reply.
+
+## Known Footguns
+
+- **CLI shorthand ≠ model ID:** `sonnet`, `opus`, `haiku` are Claude CLI shorthands that resolve to the latest version. In `models.json` or env vars, use the full model ID (`claude-sonnet-4-6`) for deterministic behavior. The shorthand may silently change on a CLI update.
+- **`RUNTIME_MODEL` is deprecated:** Use `models.json` for tier-to-model mapping. `RUNTIME_MODEL` is still read for backward compat but `models.json` takes precedence. Setting both causes confusion.
+- **`--` terminator is required:** The Claude CLI invocation uses `-- <prompt>` to separate flags from the prompt argument. Without it, prompts starting with `-` or containing flag-like strings can be misinterpreted by the arg parser.
+- **`CLAUDE_APPEND_SYSTEM_PROMPT` skips workspace files:** When set, the adapter skips loading `workspace/SOUL.md`, `IDENTITY.md`, `USER.md`, `AGENTS.md`, and `TOOLS.md` from disk (assuming they're in the appended prompt). Setting this before first-run also skips `BOOTSTRAP.md` consumption.
+- **OpenRouter model IDs are provider-namespaced:** Using bare model names like `claude-sonnet-4-6` with OpenRouter will fail silently or pick the wrong model. Always use `anthropic/claude-sonnet-4.6` format.
+- **Multi-turn image limitation:** If images arrive on a resumed Codex turn, the adapter resets to a fresh session and loses prior conversation context. The user sees a notification, but the context loss is not recoverable.
+- **Stream stall timeout kills the process:** When `DISCOCLAW_STREAM_STALL_TIMEOUT_MS` fires, the entire CLI subprocess is killed — any in-flight tool execution or file writes are interrupted mid-operation. Set the timeout high enough for long tool runs.
+- **Runtime config in `.env` requires restart:** Changing `RUNTIME_MODEL`, `RUNTIME_TOOLS`, `PRIMARY_RUNTIME`, or any runtime env var in `.env` has no effect until the service is restarted. For systemd: `systemctl --user restart discoclaw.service`. For dev: stop and re-run `pnpm dev`. There is no hot-reload for env vars.
+- **`dist/index.js` is the production entrypoint:** The systemd service runs `node dist/index.js` directly. If `dist/` is stale (files renamed/deleted in `src/` but old `.js` lingers), the runtime may import ghost modules or miss new code. Always `rm -rf dist && pnpm build` before deploy if source structure changed.
+
+## Common Failure Modes
+
+### "spawn claude ENOENT" — CLI binary not found
+**Symptom:** Every message gets an error reply. Logs show `spawn claude ENOENT`.
+**Cause:** Claude CLI is not installed, not on PATH, or `CLAUDE_BIN` points to the wrong path.
+**Recovery:**
+```bash
+# Verify the binary exists and is executable
+which claude
+claude --version
+
+# If using a custom path, check the env
+grep CLAUDE_BIN .env
+
+# For systemd: the service unit sets PATH to %h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+# If claude is installed elsewhere, use an absolute path in .env:
+#   CLAUDE_BIN=/home/user/.local/bin/claude
+
+# Verify what PATH the service actually sees:
+systemctl --user show discoclaw.service | grep -i environment
+```
+
+### Model overloaded — "overloaded_error" or 529 responses
+**Symptom:** Replies fail intermittently with "overloaded" errors. More common with Opus.
+**Cause:** Anthropic API capacity limits.
+**Recovery:**
+```bash
+# Set a fallback model so the bot degrades gracefully
+# In .env:
+RUNTIME_FALLBACK_MODEL=sonnet
+
+# Restart to apply
+systemctl --user restart discoclaw.service
+
+# If repeated overload errors caused crash loops and the service is stuck in "failed":
+systemctl --user reset-failed discoclaw.service
+systemctl --user start discoclaw.service
+```
+
+### Multi-turn process hangs — no response after first message
+**Symptom:** First message in a session works. Follow-up messages get no response and eventually time out.
+**Cause:** Known issue (upstream GitHub issue #3187) where stdin NDJSON delivery can hang.
+**Recovery:**
+```bash
+# The adapter auto-detects hangs and falls back to one-shot mode.
+# If the auto-detection is too slow, reduce the hang timeout:
+# DISCOCLAW_MULTI_TURN_HANG_TIMEOUT_MS=30000
+
+# To disable multi-turn entirely:
+# DISCOCLAW_MULTI_TURN=0
+
+# Restart to apply
+systemctl --user restart discoclaw.service
+```
+
+### Stream stall — bot goes silent mid-response
+**Symptom:** Bot starts responding, then goes silent for minutes. Eventually a stall warning appears in Discord.
+**Cause:** Claude CLI subprocess stopped producing output (waiting on a long tool call, or genuinely hung).
+**Recovery:**
+```bash
+# Check if a tool is running (stalls during tool execution are normal)
+journalctl --user -u discoclaw.service --since "5 min ago" --no-pager | grep -i "tool\|stall"
+
+# Adjust timeouts if tool calls legitimately take a long time:
+# DISCOCLAW_STREAM_STALL_TIMEOUT_MS=300000
+# DISCOCLAW_STREAM_STALL_WARNING_MS=150000
+
+# If genuinely hung, the stall timeout will kill the process and the error
+# is reported to Discord. No manual intervention needed.
+```
+
+### Wrong model used — response quality or cost is unexpected
+**Symptom:** Responses seem lower quality than expected, or API costs spike.
+**Cause:** Tier-to-model mapping resolves differently than expected (env var, `models.json`, or runtime override disagree).
+**Recovery:**
+```bash
+# Dump the resolved runtime config
+DISCOCLAW_DEBUG_RUNTIME=1 pnpm dev
+# Look for the resolved model in the startup output
+
+# Check models.json for the tier mapping
+cat models.json
+
+# Check for runtime overrides
+cat runtime-overrides.json
+
+# Use the !models Discord command to see/change the active model at runtime
+```
+
+### OpenAI-compat tool loop hits 25-round safety cap
+**Symptom:** Response ends abruptly with a note about tool loop cap.
+**Cause:** The model entered an infinite tool-calling loop (e.g., repeatedly reading the same file).
+**Recovery:**
+```bash
+# This is a safety feature — the model's behavior was unbounded.
+# Check logs to see what tools it kept calling:
+journalctl --user -u discoclaw.service --since "10 min ago" --no-pager | grep "tool_calls\|function"
+
+# If the model genuinely needs more rounds, this cap is hardcoded (25).
+# Consider simplifying the prompt or breaking the task into smaller steps.
+```

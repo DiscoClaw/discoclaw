@@ -27,6 +27,7 @@ export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   'planShow',
   // Memory
   'memoryShow',
+  'memoryQuery',
   // Config
   'modelShow',
   'workspaceWarnings',

@@ -26,7 +26,7 @@ export const CONSOLIDATION_PROMPT = `You are a long-term memory consolidator. Re
 4. **Do not invent**: never add new information not present in the input items.
 
 ## Output format
-Return a JSON array of objects with "kind", "text", and optional "retainedFrom" (an array of original item IDs this consolidated item was derived from, for the audit trail). Valid kinds: preference, fact, project, constraint, person, tool, workflow.
+Return a JSON array of objects with "kind", "text", optional "retainedFrom" (an array of original item IDs this consolidated item was derived from, for the audit trail), and optional "entity" (preserve from source items when present — the entity tag groups items about the same person, project, or tool). Valid kinds: preference, fact, project, constraint, person, tool, workflow.
 
 Return only the revised items that should remain active. The result must not be empty (if all items are valid, return them as-is or merged). Do not exceed the original item count.
 
@@ -36,6 +36,7 @@ export type ConsolidatedItem = {
   kind: DurableItem['kind'];
   text: string;
   retainedFrom?: string[];
+  entity?: string;
 };
 
 function asConsolidatedItem(value: unknown): ConsolidatedItem | null {
@@ -52,6 +53,10 @@ function asConsolidatedItem(value: unknown): ConsolidatedItem | null {
       (id): id is string => typeof id === 'string' && id.trim().length > 0,
     );
     if (ids.length > 0) result.retainedFrom = ids;
+  }
+  const candidateEntity = (candidate as { entity?: unknown }).entity;
+  if (typeof candidateEntity === 'string' && candidateEntity.trim().length > 0) {
+    result.entity = candidateEntity.trim();
   }
   return result;
 }
@@ -92,7 +97,12 @@ export async function runConsolidation(
     if (originalCount === 0) return { originalCount: 0, consolidatedCount: 0 };
 
     const itemsJson = JSON.stringify(
-      activeItems.map((it) => ({ id: it.id, kind: it.kind, text: it.text })),
+      activeItems.map((it) => ({
+        id: it.id,
+        kind: it.kind,
+        text: it.text,
+        ...(it.entity ? { entity: it.entity } : {}),
+      })),
     );
     const prompt = CONSOLIDATION_PROMPT.replace('{activeItems}', itemsJson);
 
@@ -138,7 +148,7 @@ export async function runConsolidation(
     // Add consolidated items with source.type 'consolidation'.
     const source: DurableItem['source'] = { type: 'consolidation' };
     for (const item of consolidated) {
-      addItem(store, item.text, source, opts.durableMaxItems, item.kind);
+      addItem(store, item.text, source, opts.durableMaxItems, item.kind, item.entity);
     }
 
     await saveDurableMemory(opts.durableDataDir, opts.userId, store);

@@ -17,6 +17,9 @@ import {
   recordHits,
   tokenize,
   keywordRelevance,
+  groupItemsByEntity,
+  queryByEntity,
+  formatEntityGroupedSection,
   CURRENT_VERSION,
 } from './durable-memory.js';
 import type { DurableMemoryStore, DurableItem } from './durable-memory.js';
@@ -782,5 +785,184 @@ describe('selectItemsForInjection — query-aware boosting', () => {
     );
     const items = selectItemsForInjection(store, 80, 'TypeScript');
     expect(items).toHaveLength(1);
+  });
+});
+
+describe('addItem — entity support', () => {
+  it('stores entity tag on new item', () => {
+    const store = emptyStore();
+    addItem(store, 'Retired game designer', { type: 'manual' }, 100, 'person', 'David');
+    expect(store.items).toHaveLength(1);
+    expect(store.items[0].entity).toBe('David');
+  });
+
+  it('omits entity field when not provided', () => {
+    const store = emptyStore();
+    addItem(store, 'Some fact', { type: 'manual' }, 100);
+    expect(store.items[0].entity).toBeUndefined();
+  });
+
+  it('trims whitespace from entity', () => {
+    const store = emptyStore();
+    addItem(store, 'Some fact', { type: 'manual' }, 100, 'fact', '  David  ');
+    expect(store.items[0].entity).toBe('David');
+  });
+
+  it('treats empty string entity as undefined', () => {
+    const store = emptyStore();
+    addItem(store, 'Some fact', { type: 'manual' }, 100, 'fact', '  ');
+    expect(store.items[0].entity).toBeUndefined();
+  });
+
+  it('updates entity on existing item when re-added', () => {
+    const store = emptyStore();
+    addItem(store, 'Works at Acme', { type: 'manual' }, 100, 'fact');
+    expect(store.items[0].entity).toBeUndefined();
+
+    addItem(store, 'Works at Acme', { type: 'manual' }, 100, 'fact', 'Acme');
+    expect(store.items).toHaveLength(1);
+    expect(store.items[0].entity).toBe('Acme');
+  });
+});
+
+describe('groupItemsByEntity', () => {
+  it('groups active items by entity tag', () => {
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'a', text: 'fact about David', entity: 'David', status: 'active', updatedAt: 200 }),
+      makeItem({ id: 'b', text: 'another about David', entity: 'David', status: 'active', updatedAt: 100 }),
+      makeItem({ id: 'c', text: 'about Acme', entity: 'Acme', status: 'active', updatedAt: 300 }),
+    );
+    const groups = groupItemsByEntity(store);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].entity).toBe('Acme'); // most recently updated
+    expect(groups[0].items).toHaveLength(1);
+    expect(groups[1].entity).toBe('David');
+    expect(groups[1].items).toHaveLength(2);
+  });
+
+  it('puts untagged items in (untagged) group', () => {
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'a', text: 'tagged', entity: 'David', status: 'active', updatedAt: 100 }),
+      makeItem({ id: 'b', text: 'untagged', status: 'active', updatedAt: 200 }),
+    );
+    const groups = groupItemsByEntity(store);
+    expect(groups).toHaveLength(2);
+    const untagged = groups.find((g) => g.entity === '(untagged)');
+    expect(untagged).toBeDefined();
+    expect(untagged!.items).toHaveLength(1);
+  });
+
+  it('excludes deprecated items', () => {
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'a', text: 'active', entity: 'David', status: 'active', updatedAt: 100 }),
+      makeItem({ id: 'b', text: 'deprecated', entity: 'David', status: 'deprecated', updatedAt: 200 }),
+    );
+    const groups = groupItemsByEntity(store);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].items).toHaveLength(1);
+  });
+
+  it('returns empty array for empty store', () => {
+    const store = emptyStore();
+    expect(groupItemsByEntity(store)).toEqual([]);
+  });
+});
+
+describe('queryByEntity', () => {
+  it('returns items matching entity (case-insensitive substring)', () => {
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'a', text: 'fact 1', entity: 'David Marsh', status: 'active', updatedAt: 200 }),
+      makeItem({ id: 'b', text: 'fact 2', entity: 'David Marsh', status: 'active', updatedAt: 100 }),
+      makeItem({ id: 'c', text: 'fact 3', entity: 'Acme Corp', status: 'active', updatedAt: 300 }),
+    );
+    const results = queryByEntity(store, 'david');
+    expect(results).toHaveLength(2);
+    expect(results[0].updatedAt).toBeGreaterThanOrEqual(results[1].updatedAt);
+  });
+
+  it('returns empty for no match', () => {
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'a', text: 'fact', entity: 'Acme', status: 'active' }),
+    );
+    expect(queryByEntity(store, 'nonexistent')).toEqual([]);
+  });
+
+  it('excludes items without entity tag', () => {
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'a', text: 'no entity', status: 'active' }),
+    );
+    expect(queryByEntity(store, 'anything')).toEqual([]);
+  });
+
+  it('excludes deprecated items', () => {
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'a', text: 'dep', entity: 'David', status: 'deprecated' }),
+    );
+    expect(queryByEntity(store, 'David')).toEqual([]);
+  });
+
+  it('returns empty for empty query', () => {
+    const store = emptyStore();
+    store.items.push(
+      makeItem({ id: 'a', text: 'fact', entity: 'David', status: 'active' }),
+    );
+    expect(queryByEntity(store, '')).toEqual([]);
+    expect(queryByEntity(store, '  ')).toEqual([]);
+  });
+});
+
+describe('formatEntityGroupedSection', () => {
+  it('formats groups with headers and indented items', () => {
+    const groups = [
+      { entity: 'David', items: [makeItem({ kind: 'person', text: 'Retired game designer' })] },
+      { entity: 'Acme', items: [makeItem({ kind: 'project', text: 'Main project' })] },
+    ];
+    const result = formatEntityGroupedSection(groups);
+    expect(result).toContain('**David** (1)');
+    expect(result).toContain('  - [person] Retired game designer');
+    expect(result).toContain('**Acme** (1)');
+    expect(result).toContain('  - [project] Main project');
+  });
+
+  it('returns (none) for empty groups', () => {
+    expect(formatEntityGroupedSection([])).toBe('(none)');
+  });
+});
+
+describe('formatDurableSection — entity display', () => {
+  it('includes entity tag in formatted line', () => {
+    const items: DurableItem[] = [
+      makeItem({
+        kind: 'person',
+        text: 'Retired game designer',
+        entity: 'David',
+        source: { type: 'manual' },
+        updatedAt: new Date('2026-03-24').getTime(),
+      }),
+    ];
+    const result = formatDurableSection(items);
+    expect(result).toContain('[person] [David]');
+    expect(result).toContain('Retired game designer');
+  });
+
+  it('omits entity bracket when entity is absent', () => {
+    const items: DurableItem[] = [
+      makeItem({
+        kind: 'fact',
+        text: 'Some fact',
+        source: { type: 'manual' },
+        updatedAt: new Date('2026-03-24').getTime(),
+      }),
+    ];
+    const result = formatDurableSection(items);
+    expect(result).toMatch(/\[fact\] Some fact/);
+    expect(result).not.toMatch(/\[fact\] \[/);
   });
 });
