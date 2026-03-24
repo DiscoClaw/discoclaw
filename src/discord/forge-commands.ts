@@ -62,7 +62,7 @@ const FORGE_COMPACT_SALVAGE_SUPERVISOR_POLICY: RuntimeSupervisorPolicy = {
 
 export const AUDIT_CRITERIA_LINES: string[] = [
   '1. Missing or underspecified details (vague scope, unclear file changes)',
-  '2. Structural integrity — the plan MUST have a `## Changes` section with concrete file paths. If file changes are described only inside a `## Phases` section (or any section other than `## Changes`), flag it as **blocking**.',
+  '2. Structural integrity — the plan MUST have a `## Changes` section with concrete file paths. The heading must be exactly `## Changes` (no suffixes like `## Changes — Phase A`; use `###` subheadings instead). If file changes are described only inside a `## Phases` section (or any section other than `## Changes`), flag it as **blocking**.',
   '3. Enforceability of restrictions — if the plan claims a limited capability ("read-only", "post-only", "only these actions"), it must name the concrete enforcement mechanism in the current codebase or explicitly add one. If the mechanism does not exist, flag it as **blocking**.',
   '4. Architectural issues (wrong abstraction, missing error handling, wrong patterns)',
   '5. Risk gaps (unidentified failure modes, missing rollback plans)',
@@ -587,7 +587,7 @@ export function buildDrafterPrompt(
     '## Instructions',
     '',
     DRAFTER_CODEBASE_TOOLS_INSTRUCTION,
-    '- **`## Changes` is a required top-level section.** List every file that will be created, modified, or deleted with concrete repo-relative file paths (for example, `src/discord/forge-commands.ts`). Do not place file change information inside a `## Phases` section or any other section — changes belong exclusively in `## Changes`. If you need to describe implementation sequencing, use a separate `## Phases` section.',
+    '- **`## Changes` is a required top-level section.** The heading must be exactly `## Changes` — no suffixes, qualifiers, or em-dashes (e.g., NOT `## Changes — Phase A`). If you need to organize changes by phase or category, use `###` subheadings inside the single `## Changes` section. List every file that will be created, modified, or deleted with concrete repo-relative file paths (for example, `src/discord/forge-commands.ts`). Do not place file change information inside a `## Phases` section or any other section — changes belong exclusively in `## Changes`.',
     '- In `## Changes`, each file entry must include a backtick-wrapped path and specific planned edits (function names and type signatures when relevant). Do not use placeholder paths like `path/to/file.ts`.',
     '- If you claim a restriction on what the system can do ("read-only", "post-only", "only these actions", etc.), name the exact enforcement mechanism that makes it true in the current codebase or as part of this plan. Do not rely on policy prose alone.',
     '- Identify real risks and dependencies based on the actual codebase.',
@@ -677,7 +677,7 @@ function buildCompactRevisionRetryPrompt(
     '- Start writing the revised plan immediately. Do not narrate, explain, or reason aloud.',
     '- Address all blocking concerns from the latest audit while preserving already-accepted structure.',
     '- Preserve the plan header fields and overall section layout.',
-    '- In `## Changes`, keep concrete backtick-wrapped repo-relative file paths.',
+    '- The `## Changes` heading must be exactly `## Changes` — no suffixes or qualifiers. Use `###` subheadings inside it for phases. Keep concrete backtick-wrapped repo-relative file paths.',
     '- The first line of your answer must be `# Plan: <title>` with the current plan title on the same line.',
     '- Output only the complete revised plan markdown.',
   ].join('\n');
@@ -893,7 +893,7 @@ export function buildRevisionPrompt(
     '- Address all blocking severity concerns. Consider medium concerns if the fix is straightforward, but do not loop over them.',
     '- Read the codebase using your tools if needed to resolve concerns.',
     '- Keep the same plan structure and format.',
-    '- In `## Changes`, every file entry must use a concrete backtick-wrapped repo-relative path (for example, `src/discord/forge-commands.ts`). Replace placeholder paths like `path/to/file.ts`.',
+    '- The `## Changes` heading must be exactly `## Changes` (no suffixes). Use `###` subheadings for phases. Every file entry must use a concrete backtick-wrapped repo-relative path (for example, `src/discord/forge-commands.ts`). Replace placeholder paths like `path/to/file.ts`.',
     '- If you keep or add a restriction claim ("read-only", "post-only", "only these actions"), rewrite it to name the exact enforcement mechanism. If no such mechanism exists, narrow the claim or add the necessary implementation work.',
     `- If the task is about codifying reusable engineering lessons, route that work through \`${COMPOUND_LESSONS_PATH}\` as the single checked-in durable artifact. The revised plan should describe the format, ownership, update rules, and mandatory review gate there, including search/dedup expectations and the explicit promotion decision (update an existing lesson, add a materially distinct new one, or record that no promotion is needed), instead of treating \`## Audit Log\` or \`## Implementation Notes\` as the durable lesson sink.`,
     '- Preserve resolutions from prior audit rounds that were accepted — do not weaken, revert, or remove them unless the current audit explicitly challenges them.',

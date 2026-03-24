@@ -605,6 +605,47 @@ describe('decomposePlan', () => {
     expect(phases.phases[1]!.description).toBe('Implement the plan manually based on the analysis output.');
     expect(phases.phases[1]!.contextFiles).toEqual([planPath]);
   });
+
+  it('extracts file paths from suffixed Changes headings (## Changes — Phase A)', () => {
+    const plan = [
+      '# Plan: Multi-phase changes test',
+      '',
+      '**ID:** plan-620',
+      '**Task:** ws-test',
+      '**Created:** 2026-03-24',
+      '**Status:** APPROVED',
+      '**Project:** discoclaw',
+      '',
+      '## Objective',
+      '',
+      'Test prefix matching for suffixed Changes headings.',
+      '',
+      '## Changes \u2014 Phase A: First batch',
+      '',
+      '- `src/alpha.ts` \u2014 first change',
+      '- `src/beta.ts` \u2014 second change',
+      '',
+      '## Changes \u2014 Phase B: Second batch',
+      '',
+      '- `src/gamma.ts` \u2014 third change',
+      '',
+      '## Risks',
+      '',
+      '- none',
+    ].join('\n');
+
+    const phases = decomposePlan(plan, 'plan-620', 'workspace/plans/plan-620.md');
+    const implPhases = phases.phases.filter((p) => p.kind === 'implement');
+    const auditPhases = phases.phases.filter((p) => p.kind === 'audit');
+
+    // Should find files from both Changes sections, not fall back to manual phases
+    expect(implPhases.length).toBeGreaterThanOrEqual(1);
+    expect(auditPhases.length).toBe(1);
+
+    const allContextFiles = phases.phases.flatMap((p) => p.contextFiles);
+    expect(allContextFiles.some((f) => f.includes('alpha.ts'))).toBe(true);
+    expect(allContextFiles.some((f) => f.includes('gamma.ts'))).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
