@@ -928,21 +928,13 @@ describe('forgeActionsPromptSection', () => {
   it('includes forge guidelines', () => {
     const section = forgeActionsPromptSection();
     expect(section).toContain('one forge');
-    expect(section).toContain('asynchronous');
+    expect(section).toContain('async');
   });
 
   it('describes forgeResume as status-dependent', () => {
     const section = forgeActionsPromptSection();
-    expect(section).toContain('Continue an existing plan based on its current status');
-    expect(section).toContain('DRAFT / REVIEW');
-    expect(section).toContain('APPROVED / IMPLEMENTING');
+    expect(section).toContain('DRAFT/REVIEW');
+    expect(section).toContain('APPROVED/IMPLEMENTING');
     expect(section).toContain('planRun');
-    expect(section).toContain('pick up a plan again; the next step depends on the plan\'s status');
-  });
-
-  it('documents the bounded forge phase gate', () => {
-    const section = forgeActionsPromptSection();
-    expect(section).toContain('research/discovery completes before any final strict-output turn');
-    expect(section).toContain('grounded allowlist');
   });
 });

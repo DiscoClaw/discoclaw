@@ -666,35 +666,15 @@ export async function executeForgeAction(
 export function forgeActionsPromptSection(): string {
   return `### Forge (Plan Drafting + Audit)
 
-**forgeCreate** — Start a new forge run (drafts a plan, then audits/revises iteratively):
-\`\`\`
-<discord-action>{"type":"forgeCreate","description":"Add retry logic to webhook handler","context":"Optional extra context or requirements"}</discord-action>
-\`\`\`
-- \`description\` (required): What to plan for.
-- \`context\` (optional): Additional context appended to the plan.
+**forgeCreate** — \`{"type":"forgeCreate","description":"Add retry logic","context":"extra context"}\`
+\`description\` required. \`context\` optional. Drafts a plan, then audits/revises iteratively.
 
-**forgeResume** — Continue an existing plan based on its current status:
-\`\`\`
-<discord-action>{"type":"forgeResume","planId":"plan-042"}</discord-action>
-\`\`\`
-- \`planId\` (required): The plan ID to resume.
-- DRAFT / REVIEW: re-enter the forge audit/revise loop.
-- APPROVED / IMPLEMENTING: route to \`planRun\` and continue implementation.
+**forgeResume** — \`{"type":"forgeResume","planId":"plan-042"}\`
+DRAFT/REVIEW: re-enters audit/revise loop. APPROVED/IMPLEMENTING: routes to planRun.
 
-**forgeStatus** — Check if a forge is currently running:
-\`\`\`
-<discord-action>{"type":"forgeStatus"}</discord-action>
-\`\`\`
+**forgeStatus** — \`{"type":"forgeStatus"}\` — check if a forge is running.
 
-**forgeCancel** — Cancel a running forge:
-\`\`\`
-<discord-action>{"type":"forgeCancel"}</discord-action>
-\`\`\`
+**forgeCancel** — \`{"type":"forgeCancel"}\`
 
-#### Forge Guidelines
-- Only one forge can run at a time. Check status before starting a new one.
-- Forge runs are asynchronous — progress updates are posted to the channel.
-- Use forgeResume when you want DiscoClaw to pick up a plan again; the next step depends on the plan's status.
-- Re-audit with forgeResume after manual plan edits when the plan is still in DRAFT or REVIEW.
-- Forge phases are bounded: research/discovery completes before any final strict-output turn, and candidate file access stays inside the grounded allowlist unless forge explicitly re-enters research.`;
+Only one forge at a time. Runs are async with channel progress updates. Use forgeResume after manual plan edits (DRAFT/REVIEW).`;
 }

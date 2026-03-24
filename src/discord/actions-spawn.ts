@@ -381,19 +381,7 @@ export async function executeSpawnActions(
 export function spawnActionsPromptSection(): string {
   return `### Spawn Agent
 
-**spawnAgent** — Spawn a parallel sub-agent in a target channel:
-\`\`\`
-<discord-action>{"type":"spawnAgent","channel":"general","prompt":"List all open tasks and summarize their status","label":"task-summary"}</discord-action>
-\`\`\`
-- \`channel\` (required): Target channel name or ID where the spawned agent posts its output.
-- \`prompt\` (required): The instruction to send to the sub-agent.
-- \`model\` (optional): Model override for the spawned invocation.
-- \`label\` (optional): A short human-readable label for the agent (used in error messages).
-
-#### Spawn Guidelines
-- Multiple spawnAgent actions in a single response are run in parallel for efficiency.
-- Spawned agents run at recursion depth 1 and cannot themselves spawn further agents.
-- The spawned agent runs fire-and-forget: it posts its output directly to the target channel.
-- Keep prompts focused — each agent handles a single well-defined task.
-- **Context isolation:** The spawned agent has **no conversation history** — it receives only the \`prompt\` string. The prompt must be fully self-contained: include all entity IDs, channel names, file paths, and relevant state. Do not reference "the above," "this task," or anything from the current conversation — the spawned agent cannot see it.`;
+**spawnAgent** — \`{"type":"spawnAgent","channel":"general","prompt":"List open tasks","label":"task-summary"}\`
+\`channel\`, \`prompt\` required. \`model\`, \`label\` optional. Multiple spawn actions run in parallel. Spawned agents cannot spawn further agents.
+**Context isolation:** The spawned agent has no conversation history — include all IDs, names, and state in the prompt.`;
 }

@@ -739,49 +739,18 @@ export async function executePlanAction(
 export function planActionsPromptSection(): string {
   return `### Plan Management
 
-**planList** — List all plans (optionally filter by status):
-\`\`\`
-<discord-action>{"type":"planList"}</discord-action>
-<discord-action>{"type":"planList","status":"APPROVED"}</discord-action>
-\`\`\`
-- \`status\` (optional): Filter by plan status (DRAFT, REVIEW, APPROVED, IMPLEMENTING, CLOSED).
+**planList** — \`{"type":"planList","status":"APPROVED"}\` — \`status\` optional (DRAFT/REVIEW/APPROVED/IMPLEMENTING/CLOSED).
 
-**planShow** — Show plan details:
-\`\`\`
-<discord-action>{"type":"planShow","planId":"plan-042"}</discord-action>
-\`\`\`
-- \`planId\` (required): The plan ID or backing task ID (legacy header IDs are still accepted).
+**planShow** — \`{"type":"planShow","planId":"plan-042"}\` — accepts plan ID or backing task ID.
 
-**planApprove** — Approve a plan for implementation:
-\`\`\`
-<discord-action>{"type":"planApprove","planId":"plan-042"}</discord-action>
-\`\`\`
-- \`planId\` (required): The plan ID to approve.
+**planApprove** — \`{"type":"planApprove","planId":"plan-042"}\`
 
-**planClose** — Close/abandon a plan:
-\`\`\`
-<discord-action>{"type":"planClose","planId":"plan-042"}</discord-action>
-\`\`\`
-- \`planId\` (required): The plan ID to close.
+**planClose** — \`{"type":"planClose","planId":"plan-042"}\`
 
-**planCreate** — Create a new plan (drafts a plan file and backing task):
-\`\`\`
-<discord-action>{"type":"planCreate","description":"Add retry logic to webhook handler","context":"Optional extra context"}</discord-action>
-\`\`\`
-- \`description\` (required): What the plan is for.
-- \`context\` (optional): Additional context appended to the plan.
+**planCreate** — \`{"type":"planCreate","description":"Add retry logic","context":"extra context"}\`
+\`description\` required. \`context\` optional.
 
-**planRun** — Execute all remaining phases of a plan (fire-and-forget):
-\`\`\`
-<discord-action>{"type":"planRun","planId":"plan-042"}</discord-action>
-\`\`\`
-- \`planId\` (required): The plan ID to execute.
-- The plan must be in APPROVED or IMPLEMENTING status. Phases run sequentially with the writer lock. On successful completion of all phases, the plan is auto-closed and the backing task is closed.
+**planRun** — \`{"type":"planRun","planId":"plan-042"}\` — execute remaining phases (APPROVED/IMPLEMENTING only). Auto-closes on completion.
 
-#### Plan Guidelines
-- Use planList to check existing plans before creating duplicates.
-- Plans go through statuses: DRAFT → REVIEW → APPROVED → IMPLEMENTING → CLOSED.
-- Use forgeCreate to draft+audit a plan, or planCreate for a bare plan file without forge auditing.
-- Approving a plan marks its backing task as in_progress.
-- Use planRun to execute approved plans autonomously.`;
+Lifecycle: DRAFT → REVIEW → APPROVED → IMPLEMENTING → CLOSED. Use forgeCreate for draft+audit, planCreate for bare plans. Check planList before creating duplicates.`;
 }

@@ -163,28 +163,13 @@ async function loadOrCreate(dir: string, userId: string): Promise<DurableMemoryS
 export function memoryActionsPromptSection(): string {
   return `### Memory (Durable User Memory)
 
-**memoryRemember** — Store a fact, preference, or note in the user's durable memory:
-\`\`\`
-<discord-action>{"type":"memoryRemember","text":"Prefers Rust over Go for systems work"}</discord-action>
-<discord-action>{"type":"memoryRemember","text":"Working on API migration","kind":"project"}</discord-action>
-\`\`\`
-- \`text\` (required): The fact or note to remember.
-- \`kind\` (optional): One of \`fact\`, \`preference\`, \`project\`, \`constraint\`, \`person\`, \`tool\`, \`workflow\`. Defaults to \`fact\`.
+**memoryRemember** — \`{"type":"memoryRemember","text":"Prefers Rust over Go","kind":"preference"}\`
+\`text\` required. \`kind\` optional: fact (default), preference, project, constraint, person, tool, workflow.
 
-**memoryForget** — Deprecate matching items from the user's durable memory:
-\`\`\`
-<discord-action>{"type":"memoryForget","substring":"Prefers Rust over Go"}</discord-action>
-\`\`\`
-- \`substring\` (required): Text to match against. Items where this covers >= 60% of the item's text length are deprecated.
+**memoryForget** — \`{"type":"memoryForget","substring":"Prefers Rust over Go"}\`
+Deprecates items where substring covers >= 60% of text length.
 
-**memoryShow** — Show the user's current memory (durable items, rolling summary, and short-term):
-\`\`\`
-<discord-action>{"type":"memoryShow"}</discord-action>
-\`\`\`
+**memoryShow** — \`{"type":"memoryShow"}\`
 
-#### Memory Guidelines
-- Use memoryRemember to proactively store important facts the user mentions (preferences, projects, tools, constraints).
-- Pick the most specific \`kind\` that fits — it helps with organization and retrieval.
-- Use memoryForget to clean up outdated or incorrect items.
-- Memory items persist across sessions, channels, and restarts.`;
+Proactively store important user facts/preferences. Memory persists across sessions and restarts.`;
 }

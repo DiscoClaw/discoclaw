@@ -756,24 +756,20 @@ describe('taskActionsPromptSection', () => {
     expect(section).toContain('taskUpdate');
   });
 
-  it('keeps guidelines block under 600 chars', () => {
+  it('keeps guidelines compact', () => {
     const section = taskActionsPromptSection();
-    const marker = '#### Task Quality Guidelines';
-    const crossRefMarker = '#### Cross-Task References';
+    // Guidelines are inlined at the end of the compressed section
+    const marker = 'Quality:';
     const idx = section.indexOf(marker);
     expect(idx).toBeGreaterThanOrEqual(0);
-    const crossRefIdx = section.indexOf(crossRefMarker);
-    // Slice up to the cross-task section (or end of string if not found)
-    const end = crossRefIdx > idx ? crossRefIdx : section.length;
-    const guidelinesBlock = section.slice(idx, end);
-    expect(guidelinesBlock.length).toBeLessThanOrEqual(700);
+    const guidelinesBlock = section.slice(idx);
+    expect(guidelinesBlock.length).toBeLessThanOrEqual(300);
   });
 
   it('includes cross-task references guideline', () => {
     const section = taskActionsPromptSection();
-    expect(section).toContain('#### Cross-Task References');
+    expect(section).toContain('Cross-task refs');
     expect(section).toContain('taskShow');
     expect(section).toContain('taskUpdate');
-    expect(section).toContain('taskSync');
   });
 });

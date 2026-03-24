@@ -465,7 +465,7 @@ describe('memoryActionsPromptSection', () => {
 
   it('includes memory guidelines', () => {
     const section = memoryActionsPromptSection();
-    expect(section).toContain('proactively');
+    expect(section).toContain('Proactively');
     expect(section).toContain('persist');
     expect(section).toContain('kind');
   });

@@ -463,87 +463,32 @@ export async function executeChannelAction(
 export function channelActionsPromptSection(): string {
   return `### Channel Management
 
-**channelCreate** — Create a channel:
-\`\`\`
-<discord-action>{"type":"channelCreate","name":"channel-name","parent":"Category Name","topic":"Optional topic","channelType":"text"}</discord-action>
-\`\`\`
-- \`name\` (required): Channel name (lowercase, hyphens, no spaces).
-- \`parent\` (optional): Category name to create the channel under.
-- \`topic\` (optional): Channel topic description.
-- \`channelType\` (optional): \`text\` (default), \`voice\`, \`announcement\`, or \`stage\`.
+**channelCreate** — \`{"type":"channelCreate","name":"channel-name","parent":"Category","topic":"desc","channelType":"text"}\`
+\`name\` required (lowercase, hyphens). \`parent\` category name, \`topic\`, \`channelType\` (text|voice|announcement|stage) optional.
 
-**channelEdit** — Edit a channel's name or topic:
-\`\`\`
-<discord-action>{"type":"channelEdit","channelId":"123","name":"new-name","topic":"New topic"}</discord-action>
-\`\`\`
-- \`channelId\` (required): Channel ID.
-- \`name\` (optional): New channel name.
-- \`topic\` (optional): New channel topic.
+**channelEdit** — \`{"type":"channelEdit","channelId":"123","name":"new-name","topic":"New topic"}\`
 
-**channelDelete** — Delete a channel (destructive — confirm with user first):
-\`\`\`
-<discord-action>{"type":"channelDelete","channelId":"123"}</discord-action>
-\`\`\`
+**channelDelete** — \`{"type":"channelDelete","channelId":"123"}\` (destructive — confirm first)
 
-**channelList** — List all channels in the server:
-\`\`\`
-<discord-action>{"type":"channelList"}</discord-action>
-\`\`\`
+**channelList** — \`{"type":"channelList"}\`
 
-**channelInfo** — Get details about a channel:
-\`\`\`
-<discord-action>{"type":"channelInfo","channelId":"123"}</discord-action>
-\`\`\`
+**channelInfo** — \`{"type":"channelInfo","channelId":"123"}\`
 
-**categoryCreate** — Create a channel category:
-\`\`\`
-<discord-action>{"type":"categoryCreate","name":"Category Name"}</discord-action>
-\`\`\`
+**categoryCreate** — \`{"type":"categoryCreate","name":"Category Name"}\`
 
-**channelMove** — Move a channel to a category or position:
-\`\`\`
-<discord-action>{"type":"channelMove","channelId":"123","parent":"Category Name","position":0}</discord-action>
-\`\`\`
-- \`channelId\` (required): Channel ID.
-- \`parent\` (optional): Category name or ID. Empty string removes from category.
-- \`position\` (optional): New position (0-based).
-At least one of parent or position is required.
+**channelMove** — \`{"type":"channelMove","channelId":"123","parent":"Category","position":0}\`
+\`parent\` (name/ID, empty string removes) and/or \`position\` (0-based). At least one required.
 
-**threadListArchived** — List archived threads in a forum or text channel:
-\`\`\`
-<discord-action>{"type":"threadListArchived","channelId":"123","limit":25}</discord-action>
-\`\`\`
-- \`channelId\` (required): The forum or text channel ID.
-- \`limit\` (optional): Max threads to return (default 50).
+**threadListArchived** — \`{"type":"threadListArchived","channelId":"123","limit":25}\`
+\`limit\` default 50.
 
-**forumTagCreate** — Create a tag on a forum channel:
-\`\`\`
-<discord-action>{"type":"forumTagCreate","channelId":"123","name":"open","emoji":{"name":"🟢"}}</discord-action>
-\`\`\`
-- \`channelId\` (required): The forum channel ID.
-- \`name\` (required): Tag name.
-- \`emoji\` (optional): Object with \`id\` (custom emoji) or \`name\` (unicode emoji).
-Returns the created tag's ID in the summary.
+**forumTagCreate** — \`{"type":"forumTagCreate","channelId":"123","name":"open","emoji":{"name":"🟢"}}\`
+\`emoji\` optional: \`{id}\` for custom or \`{name}\` for unicode. Returns tag ID.
 
-**forumTagDelete** — Delete a tag from a forum channel (destructive — confirm with user first):
-\`\`\`
-<discord-action>{"type":"forumTagDelete","channelId":"123","tagId":"456"}</discord-action>
-\`\`\`
-- \`channelId\` (required): The forum channel ID.
-- \`tagId\` (required): The tag ID to delete.
+**forumTagDelete** — \`{"type":"forumTagDelete","channelId":"123","tagId":"456"}\` (destructive — confirm first)
 
-**forumTagList** — List all tags on a forum channel:
-\`\`\`
-<discord-action>{"type":"forumTagList","channelId":"123"}</discord-action>
-\`\`\`
+**forumTagList** — \`{"type":"forumTagList","channelId":"123"}\`
 
-**threadEdit** — Edit a forum thread's applied tags and/or name:
-\`\`\`
-<discord-action>{"type":"threadEdit","threadId":"789","appliedTags":["tag-id-1","tag-id-2"],"name":"New thread name"}</discord-action>
-\`\`\`
-- \`threadId\` (required): The thread ID (resolved via cache then fetch).
-- \`appliedTags\` (optional): Array of tag IDs to apply. Max 5. Only valid for threads in forum channels.
-- \`name\` (optional): New thread title.
-At least one of appliedTags or name is required.
-Use \`forumTagList\` to get tag IDs, then pass them here to swap status tags on orphan threads.`;
+**threadEdit** — \`{"type":"threadEdit","threadId":"789","appliedTags":["tag-id-1"],"name":"New name"}\`
+\`appliedTags\` (tag IDs, max 5, forum threads only) and/or \`name\`. Use \`forumTagList\` for tag IDs.`;
 }

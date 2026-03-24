@@ -746,105 +746,38 @@ export async function executeMessagingAction(
 export function messagingActionsPromptSection(): string {
   return `### Messaging
 
-**sendMessage** — Send a message to a channel:
-\`\`\`
-<discord-action>{"type":"sendMessage","channel":"#general","content":"Hello world!","replyTo":"message-id"}</discord-action>
-\`\`\`
-- \`channel\` (required): Channel name (with or without #) or channel ID.
-- \`content\` (required): Message text.
-- \`replyTo\` (optional): Message ID to reply to.
-- **Important:** Do NOT use sendMessage to reply to the current conversation — your response text is automatically posted as a reply. Only use sendMessage to post in a *different* channel.
-- Forum channels do NOT support sendMessage. To post in a forum, use \`threadCreate\` instead.
+**sendMessage** — \`{"type":"sendMessage","channel":"#general","content":"text","replyTo":"msg-id"}\`
+\`channel\` (name/#name/ID), \`content\` required. \`replyTo\` optional.
+Do NOT use sendMessage to reply in the current conversation — your response is auto-posted. Only use to post in a *different* channel. Forums: use \`threadCreate\` instead.
 
-**sendFile** — Send a local file as a Discord attachment:
-\`\`\`
-<discord-action>{"type":"sendFile","channel":"#general","filePath":"/tmp/screenshot.png","content":"Here is the screenshot"}</discord-action>
-\`\`\`
-- \`channel\` (required): Channel name (with or without #) or channel ID.
-- \`filePath\` (required): Absolute path to the local file to upload.
-- \`content\` (optional): Caption text to accompany the file.
-- Allowed extensions: png, jpg, jpeg, gif, webp, pdf.
-- Maximum file size: 25 MB.
-- Unlike sendMessage, sendFile is never suppressed when targeting the current channel — the file is not auto-posted as a reply.
+**sendFile** — \`{"type":"sendFile","channel":"#general","filePath":"/tmp/file.png","content":"caption"}\`
+\`channel\`, \`filePath\` (absolute) required. \`content\` optional caption. Allowed: png/jpg/jpeg/gif/webp/pdf, max 25 MB.
 
-**react** — Add a reaction to a message:
-\`\`\`
-<discord-action>{"type":"react","channelId":"123","messageId":"456","emoji":"👍"}</discord-action>
-\`\`\`
+**react** / **unreact** — \`{"type":"react","channelId":"123","messageId":"456","emoji":"👍"}\`
 
-**unreact** — Remove the bot's reaction from a message:
-\`\`\`
-<discord-action>{"type":"unreact","channelId":"123","messageId":"456","emoji":"👍"}</discord-action>
-\`\`\`
+**readMessages** — \`{"type":"readMessages","channel":"#general","limit":10,"before":"msg-id"}\`
+\`channel\` required. \`limit\` 1–20 (default 10). \`before\` optional. Includes attachment metadata.
 
-**readMessages** — Read recent messages from a channel:
-\`\`\`
-<discord-action>{"type":"readMessages","channel":"#general","limit":10,"before":"message-id"}</discord-action>
-\`\`\`
-- \`channel\` (required): Channel name or ID.
-- \`limit\` (optional): 1–20, default 10.
-- \`before\` (optional): Message ID to fetch messages before.
-- Summaries include image attachment metadata (filename, content type, dimensions, URL) when present.
+**fetchMessage** — \`{"type":"fetchMessage","channelId":"123","messageId":"456","full":true}\`
+Retrieves full message content. \`full\`: true=untruncated (default false, capped 2000 chars). Includes attachment metadata.
 
-**fetchMessage** — Fetch a single message by ID:
-\`\`\`
-<discord-action>{"type":"fetchMessage","channelId":"123","messageId":"456","full":true}</discord-action>
-\`\`\`
-- Use \`fetchMessage\` to retrieve the full content of any Discord message by channel and message ID. This works for pinned prompts, status messages, and any other message you have the IDs for.
-- \`full\` (optional): When true, returns the complete message content without truncation. Default: false (content truncated to 2000 chars).
-- Includes image attachment metadata (filename, content type, dimensions, URL) when present.
+**downloadAttachment** — \`{"type":"downloadAttachment","channelId":"123","messageId":"456","attachmentIndex":0}\`
+Downloads attachment to \`/tmp/discoclaw-att-<messageId>-<index>.<ext>\`. \`attachmentIndex\` default 0. Max 25 MB.
 
-**downloadAttachment** — Download an image attachment from a message to a local temp file:
-\`\`\`
-<discord-action>{"type":"downloadAttachment","channelId":"123","messageId":"456","attachmentIndex":0}</discord-action>
-\`\`\`
-- \`channelId\` (required): Channel ID.
-- \`messageId\` (required): Message ID containing the attachment.
-- \`attachmentIndex\` (optional): Zero-based index of the attachment to download. Default: 0 (first attachment).
-- Downloads the file to \`/tmp/discoclaw-att-<messageId>-<index>.<ext>\` and returns the path.
-- Maximum file size: 25 MB.
-- Use after \`readMessages\` or \`fetchMessage\` to download image attachments for processing.
+**editMessage** — \`{"type":"editMessage","channelId":"123","messageId":"456","content":"Updated"}\`
 
-**editMessage** — Edit a bot message:
-\`\`\`
-<discord-action>{"type":"editMessage","channelId":"123","messageId":"456","content":"Updated text"}</discord-action>
-\`\`\`
+**deleteMessage** — \`{"type":"deleteMessage","channelId":"123","messageId":"456"}\` (destructive — confirm first)
 
-**deleteMessage** — Delete a message (destructive — confirm with user first):
-\`\`\`
-<discord-action>{"type":"deleteMessage","channelId":"123","messageId":"456"}</discord-action>
-\`\`\`
+**bulkDelete** — \`{"type":"bulkDelete","channelId":"123","count":10}\` (destructive — confirm first)
+\`count\` 2–100. Messages >14 days skipped.
 
-**bulkDelete** — Delete multiple recent messages at once (destructive — confirm with user first):
-\`\`\`
-<discord-action>{"type":"bulkDelete","channelId":"123","count":10}</discord-action>
-\`\`\`
-- \`channelId\` (required): Channel ID.
-- \`count\` (required): Number of messages to delete (2–100). Messages older than 14 days are skipped.
+**crosspost** — \`{"type":"crosspost","channelId":"123","messageId":"456"}\`
+Announcement channels only.
 
-**crosspost** — Publish a message in an announcement channel to all following servers:
-\`\`\`
-<discord-action>{"type":"crosspost","channelId":"123","messageId":"456"}</discord-action>
-\`\`\`
-- Only works in announcement channels. The message will be pushed to all servers following the channel.
+**threadCreate** — \`{"type":"threadCreate","channelId":"123","name":"Discussion","messageId":"456"}\`
+\`channelId\`, \`name\` required. \`messageId\` optional (starts from message). \`autoArchiveMinutes\`: 60/1440/4320/10080 (default 1440).
 
-**threadCreate** — Create a thread:
-\`\`\`
-<discord-action>{"type":"threadCreate","channelId":"123","name":"Discussion","messageId":"456"}</discord-action>
-\`\`\`
-- \`channelId\` (required): Parent channel ID.
-- \`name\` (required): Thread name.
-- \`messageId\` (optional): Start thread from this message. If omitted, creates a standalone thread.
-- \`autoArchiveMinutes\` (optional): Auto-archive after N minutes (60, 1440, 4320, 10080). Default: 1440.
+**pinMessage** / **unpinMessage** — \`{"type":"pinMessage","channelId":"123","messageId":"456"}\`
 
-**pinMessage** / **unpinMessage** — Pin or unpin a message:
-\`\`\`
-<discord-action>{"type":"pinMessage","channelId":"123","messageId":"456"}</discord-action>
-<discord-action>{"type":"unpinMessage","channelId":"123","messageId":"456"}</discord-action>
-\`\`\`
-
-**listPins** — List pinned messages in a channel:
-\`\`\`
-<discord-action>{"type":"listPins","channel":"#general"}</discord-action>
-\`\`\``;
+**listPins** — \`{"type":"listPins","channel":"#general"}\``;
 }

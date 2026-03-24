@@ -1106,89 +1106,27 @@ export async function executeCronAction(
 export function cronActionsPromptSection(): string {
   return `### Cron Scheduled Tasks
 
-You can directly create, update, and manage cron-scheduled tasks using the actions below.
-When a user asks you to "create a cron," "set up a recurring task," "schedule something,"
-"register an automation," or any similar phrasing, use \`cronCreate\` (or \`cronUpdate\` for
-changes to existing jobs). These are live capabilities you execute right now — do not tell
-the user to set them up manually or that you cannot do this.
+**cronCreate** — \`{"type":"cronCreate","name":"Morning Report","schedule":"0 7 * * 1-5","channel":"general","prompt":"Generate a status update"}\`
+Required: \`name\`, \`schedule\` (5-field cron), \`channel\` (name/ID), \`prompt\`.
+Optional: \`timezone\` (IANA, default: system), \`model\` (fast|capable|deep), \`tags\` (comma-sep).
+Advanced: \`inputMode\` ("shell" + \`inputShell\` for pre-command), \`routingMode\` ("json"), \`allowedActions\` (comma-sep action types), \`chain\` (comma-sep cronIds for pipeline).
 
-**cronCreate** — Create a new scheduled task:
-\`\`\`
-<discord-action>{"type":"cronCreate","name":"Morning Report","schedule":"0 7 * * 1-5","timezone":"America/Los_Angeles","channel":"general","prompt":"Generate a brief morning status update","model":"fast"}</discord-action>
-\`\`\`
-- \`name\` (required): Human-readable name.
-- \`schedule\` (required): 5-field cron expression (e.g., "0 7 * * 1-5").
-- \`channel\` (required): Target channel name or ID.
-- \`prompt\` (required): The instruction text.
-- \`timezone\` (optional, default: system timezone, or DEFAULT_TIMEZONE env if set): IANA timezone.
-- \`tags\` (optional): Comma-separated purpose tags.
-- \`model\` (optional): "fast", "capable", or "deep" (auto-classified if omitted).
-- \`inputMode\` (optional): \`"prompt"\` or \`"shell"\`. Omit for the normal prompt-only flow. Set to \`"shell"\` to run a deterministic pre-command before the AI step.
-- \`inputShell\` (optional): Shell command string for \`inputMode: "shell"\`. Required when \`inputMode\` is \`"shell"\`; rejected otherwise.
-- \`routingMode\` (optional): Set to \`"json"\` to enable JSON routing mode. In this mode the executor uses the JSON router to dispatch structured responses. The prompt may contain \`{{channel}}\` and \`{{channelId}}\` placeholders which are expanded to the target channel name and ID at runtime.
-- \`allowedActions\` (optional): Comma-separated list of Discord action types this job may emit (e.g., "cronList,cronShow"). Restricts the AI to only these action types during execution. Rejects unrecognized type names. Requires at least one entry if provided.
-- \`chain\` (optional): Comma-separated cronIds of downstream jobs to trigger on successful completion (e.g., "cron-a1b2c3d4,cron-e5f6g7h8"). Creates a multi-step pipeline — the completed job's persisted state is forwarded to downstream jobs. Referenced cronIds must exist. Cycles are rejected.
+**cronUpdate** — \`{"type":"cronUpdate","cronId":"cron-a1b2c3d4","schedule":"0 9 * * *"}\`
+\`cronId\` required. Any cronCreate field optional. Also: \`silent\` (bool), \`state\` (JSON string to replace persistent state — clear with \`"{}"\` when changing prompt schema).
 
-**cronUpdate** — Update a cron's settings:
-\`\`\`
-<discord-action>{"type":"cronUpdate","cronId":"cron-a1b2c3d4","schedule":"0 9 * * *","model":"capable"}</discord-action>
-\`\`\`
-- \`cronId\` (required): The stable cron ID.
-- \`schedule\`, \`timezone\`, \`channel\`, \`prompt\`, \`model\`, \`tags\` (optional).
-- \`silent\` (optional): Boolean. When true, suppresses short "nothing to report" responses.
-- \`inputMode\` (optional): Set to \`"shell"\` with \`inputShell\` to enable deterministic shell-input runs, or set to \`"prompt"\` to clear shell-input and return to prompt-only mode.
-- \`inputShell\` (optional): Required together with \`inputMode: "shell"\`. Rejected in prompt-only mode.
-- \`routingMode\` (optional): Set to \`"json"\` to enable JSON routing mode, or omit/pass empty string to clear.
-- \`allowedActions\` (optional): Update the allowed action types list. Empty string clears the restriction.
-- \`chain\` (optional): Update downstream pipeline jobs (comma-separated cronIds). Empty string clears the chain. Cycles are detected and rejected.
-- \`state\` (optional): JSON string to replace the job's persistent state object (e.g., \`"{\\"cursor\\":\\"abc\\"}"\`). Must be a JSON object. Used for manual state manipulation; normally state is managed by the job itself.
-- When updating \`prompt\`, consider clearing stale state with \`state: "{}"\` if the old prompt's state schema no longer applies.
+**cronList** — \`{"type":"cronList"}\`
 
-**cronList** — List all cron jobs:
-\`\`\`
-<discord-action>{"type":"cronList"}</discord-action>
-\`\`\`
+**cronShow** — \`{"type":"cronShow","cronId":"cron-a1b2c3d4"}\` — full prompt, schedule, status, config.
 
-**cronShow** — Show the full prompt text, schedule, status, and all configuration for a cron:
-\`\`\`
-<discord-action>{"type":"cronShow","cronId":"cron-a1b2c3d4"}</discord-action>
-\`\`\`
-Use \`cronShow\` to inspect or verify a cron's full prompt before editing. The full prompt text is always included in the response.
+**cronPause** / **cronResume** — \`{"type":"cronPause","cronId":"cron-a1b2c3d4"}\`
 
-**cronPause** / **cronResume** — Pause or resume a cron:
-\`\`\`
-<discord-action>{"type":"cronPause","cronId":"cron-a1b2c3d4"}</discord-action>
-<discord-action>{"type":"cronResume","cronId":"cron-a1b2c3d4"}</discord-action>
-\`\`\`
+**cronDelete** — \`{"type":"cronDelete","cronId":"cron-a1b2c3d4"}\` — archives thread (reversible). Unarchiving re-registers the job.
 
-**cronDelete** — Remove a cron job and archive its thread:
-\`\`\`
-<discord-action>{"type":"cronDelete","cronId":"cron-a1b2c3d4"}</discord-action>
-\`\`\`
-Note: cronDelete **archives** the thread (reversible) — it does not permanently
-delete it. The thread history is preserved and the thread can be unarchived later
-via the Discord UI, which will re-register the cron job automatically. Permanent
-thread deletion can only be done manually through Discord.
+**cronTrigger** — \`{"type":"cronTrigger","cronId":"cron-a1b2c3d4"}\` — immediate manual fire.
 
-**cronTrigger** — Immediately execute a cron (manual fire):
-\`\`\`
-<discord-action>{"type":"cronTrigger","cronId":"cron-a1b2c3d4"}</discord-action>
-\`\`\`
-Note: \`force\` overrides are disabled in Discord actions.
+**cronSync** — \`{"type":"cronSync"}\` — full bidirectional sync.
 
-**cronSync** — Run full bidirectional sync:
-\`\`\`
-<discord-action>{"type":"cronSync"}</discord-action>
-\`\`\`
+**cronExport** — \`{"type":"cronExport"}\` — JSON snapshot of all cron definitions from local store.
 
-**cronExport** — Export all cron definitions from local store (no Discord dependency):
-\`\`\`
-<discord-action>{"type":"cronExport"}</discord-action>
-\`\`\`
-Returns a JSON snapshot of all canonical cron definitions with schedule, prompt, model, projection status, and run history. Backed only by local state — works even if Discord is unreachable.
-
-**cronTagMapReload** — Reload tag map from disk and optionally trigger sync:
-\`\`\`
-<discord-action>{"type":"cronTagMapReload"}</discord-action>
-\`\`\``;
+**cronTagMapReload** — \`{"type":"cronTagMapReload"}\``;
 }

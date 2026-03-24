@@ -115,24 +115,11 @@ export async function executeModerationAction(
 // ---------------------------------------------------------------------------
 
 export function moderationActionsPromptSection(): string {
-  return `### Moderation
+  return `### Moderation (destructive — always confirm first)
 
-All moderation actions are destructive. **Always confirm with the user before executing.**
+**timeout** — \`{"type":"timeout","userId":"123","durationMinutes":10,"reason":"Spamming"}\` — default 5 min.
 
-**timeout** — Temporarily mute a member:
-\`\`\`
-<discord-action>{"type":"timeout","userId":"123","durationMinutes":10,"reason":"Spamming"}</discord-action>
-\`\`\`
-- \`durationMinutes\` (optional): Default 5 minutes.
+**kick** — \`{"type":"kick","userId":"123","reason":"Rule violation"}\`
 
-**kick** — Kick a member from the server:
-\`\`\`
-<discord-action>{"type":"kick","userId":"123","reason":"Rule violation"}</discord-action>
-\`\`\`
-
-**ban** — Ban a member from the server:
-\`\`\`
-<discord-action>{"type":"ban","userId":"123","reason":"Repeated violations","deleteMessageDays":1}</discord-action>
-\`\`\`
-- \`deleteMessageDays\` (optional): Delete messages from the last N days (0–7).`;
+**ban** — \`{"type":"ban","userId":"123","reason":"Repeated violations","deleteMessageDays":1}\` — \`deleteMessageDays\` 0–7.`;
 }

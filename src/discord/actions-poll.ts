@@ -109,13 +109,6 @@ export async function executePollAction(
 export function pollActionsPromptSection(): string {
   return `### Polls
 
-**poll** — Create a poll in a channel:
-\`\`\`
-<discord-action>{"type":"poll","channel":"#general","question":"What should we do?","answers":["Option A","Option B","Option C"],"allowMultiselect":false,"durationHours":24}</discord-action>
-\`\`\`
-- \`channel\` (required): Channel name or ID.
-- \`question\` (required): Poll question text.
-- \`answers\` (required): Array of answer strings (2–10 options).
-- \`allowMultiselect\` (optional): Allow multiple selections. Default: false.
-- \`durationHours\` (optional): Poll duration in hours. Default: 24.`;
+**poll** — \`{"type":"poll","channel":"#general","question":"What should we do?","answers":["A","B","C"]}\`
+\`channel\`, \`question\`, \`answers\` (2–10) required. \`allowMultiselect\` (default false), \`durationHours\` (default 24) optional.`;
 }
