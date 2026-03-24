@@ -200,6 +200,13 @@ Source: forge run incident — unpushed commits on local main were reported as "
 Applied: docs/compound-lessons.md
 Status: active
 
+### 2026-03-23 - Guild-originated onboarding must prefer the originating channel over DMs
+Tags: #discord #onboarding #workflow
+Lesson: When onboarding starts from a guild channel, the conversation should stay in that channel by default — falling back to DMs only when the guild channel is unavailable or the bot lacks send permissions. Defaulting to DM-first for guild-originated flows creates a confusing redirect that breaks the user's context. The channel-selection decision must happen at `start()` time using explicit `ChannelContext` (guild channel ID + send-permission check), and the message coordinator must verify `ViewChannel | SendMessages` permissions before committing to guild mode. The flow's `channelMode` property then drives all downstream routing: reply targets, redirect notices for wrong-channel messages, write-completion send targets, and timeout-default completion targets.
+Source: task/chat context - guild-originated onboarding defaulted to DM-first because `OnboardingFlow.channelMode` initialized to `'dm'` and no `ChannelContext` was passed to `start()`; fixed by adding `ChannelContext` to the flow and permission-checking in message-coordinator before selecting channel mode
+Applied: `src/onboarding/onboarding-flow.ts`, `src/discord/message-coordinator.ts`, `src/discord/message-coordinator.onboarding.test.ts`
+Status: active
+
 ### 2026-03-19 - Discord Activity proxy blocks chained ESM sub-module imports
 Tags: #discord #canvas #architecture
 Lesson: When serving JavaScript to a Discord Activity iframe, all vendor code must be pre-bundled into single self-contained files because Discord's Activity proxy does not follow chained ES module import chains. Multi-file SDK output (the default for `@discord/embedded-app-sdk`) causes silent "Module load failed" errors as secondary network requests for sub-modules are blocked by the proxy. Build vendor dependencies into single ESM bundles at build time (e.g. via esbuild) and serve those instead of the raw SDK output directory.

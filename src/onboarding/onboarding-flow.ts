@@ -11,6 +11,17 @@ export interface OnboardingValues {
   morningCheckin: boolean;
 }
 
+/**
+ * Channel context for resolving where the onboarding conversation happens.
+ * Passed to `start()` so the flow can prefer the originating guild channel.
+ */
+export interface ChannelContext {
+  /** Guild channel ID when onboarding starts in a server channel. */
+  guildChannelId?: string;
+  /** Whether the bot can send messages in the guild channel. Defaults to true when guildChannelId is set. */
+  canSend?: boolean;
+}
+
 export type FlowResult = {
   done: boolean;
   reply: string;
@@ -99,8 +110,16 @@ export class OnboardingFlow {
   /** Guild channel ID when channelMode is 'guild'. */
   channelId?: string;
 
-  start(displayName: string): FlowResult {
+  start(displayName: string, channel?: ChannelContext): FlowResult {
     this.lastActivityTimestamp = Date.now();
+
+    // Prefer the originating guild channel; fall back to DM only when
+    // no guild context is provided or canSend is explicitly false.
+    if (channel?.guildChannelId && channel.canSend !== false) {
+      this.channelMode = 'guild';
+      this.channelId = channel.guildChannelId;
+    }
+
     return {
       done: false,
       reply:

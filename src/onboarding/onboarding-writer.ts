@@ -37,19 +37,28 @@ function generateIdentityContent(): string {
 /**
  * Generate USER.md content from onboarding values.
  */
-function generateUserContent(values: OnboardingValues): string {
-  return [
+function generateUserContent(values: OnboardingValues, channelMode?: 'dm' | 'guild'): string {
+  const lines = [
     `# USER.md - About Your Human`,
     ``,
     `- **Name:** ${values.userName}`,
     `- **What to call them:** ${values.userName}`,
     `- **Timezone:** ${values.timezone}`,
     `- **Morning check-in:** ${values.morningCheckin ? 'Yes' : 'No'}`,
+  ];
+
+  if (channelMode) {
+    lines.push(`- **Preferred channel:** ${channelMode === 'guild' ? 'Server channel' : 'DMs'}`);
+  }
+
+  lines.push(
     ``,
     `---`,
     ``,
     `The more you know, the better you can help. But remember — you're learning about a person, not building a dossier. Respect the difference.`,
-  ].join('\n') + '\n';
+  );
+
+  return lines.join('\n') + '\n';
 }
 
 /**
@@ -59,6 +68,7 @@ function generateUserContent(values: OnboardingValues): string {
 export async function writeWorkspaceFiles(
   values: OnboardingValues,
   workspaceCwd: string,
+  options?: { channelMode?: 'dm' | 'guild' },
 ): Promise<WriteResult> {
   const result: WriteResult = { written: [], errors: [], warnings: [] };
 
@@ -73,7 +83,7 @@ export async function writeWorkspaceFiles(
   }
 
   // Generate USER.md
-  const userContent = generateUserContent(values);
+  const userContent = generateUserContent(values, options?.channelMode);
   const userPath = path.join(workspaceCwd, 'USER.md');
   try {
     await fs.writeFile(userPath, userContent, 'utf-8');
