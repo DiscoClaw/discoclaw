@@ -145,32 +145,13 @@ export async function executeVoiceAction(
 export function voiceActionsPromptSection(): string {
   return `### Voice Session Control
 
-**voiceJoin** — Join a voice channel:
-\`\`\`
-<discord-action>{"type":"voiceJoin","channel":"voice"}</discord-action>
-\`\`\`
-- \`channel\` (required): Voice channel name or ID. Accepts voice and stage channels.
+**voiceJoin** — \`{"type":"voiceJoin","channel":"voice"}\` — voice/stage channel name or ID.
 
-**voiceLeave** — Leave the current voice channel:
-\`\`\`
-<discord-action>{"type":"voiceLeave"}</discord-action>
-\`\`\`
-- \`guildId\` (optional): Guild to leave. Defaults to the current guild.
+**voiceLeave** — \`{"type":"voiceLeave"}\`
 
-**voiceStatus** — Check current voice connection status:
-\`\`\`
-<discord-action>{"type":"voiceStatus"}</discord-action>
-\`\`\`
+**voiceStatus** — \`{"type":"voiceStatus"}\`
 
-**voiceMute** — Mute or unmute the bot in voice:
-\`\`\`
-<discord-action>{"type":"voiceMute","mute":true}</discord-action>
-\`\`\`
-- \`mute\` (required): \`true\` to mute, \`false\` to unmute.
+**voiceMute** — \`{"type":"voiceMute","mute":true}\`
 
-**voiceDeafen** — Deafen or undeafen the bot in voice:
-\`\`\`
-<discord-action>{"type":"voiceDeafen","deafen":true}</discord-action>
-\`\`\`
-- \`deafen\` (required): \`true\` to deafen, \`false\` to undeafen.`;
+**voiceDeafen** — \`{"type":"voiceDeafen","deafen":true}\``;
 }

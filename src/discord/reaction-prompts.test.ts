@@ -372,12 +372,12 @@ describe('reactionPromptSection', () => {
     const section = reactionPromptSection();
     expect(section).toContain('question');
     expect(section).toContain('choices');
-    expect(section).toContain('timeoutSeconds');
+    expect(section).toContain('choices');
   });
 
   it('includes a usage example', () => {
     const section = reactionPromptSection();
-    expect(section).toContain('<discord-action>');
+    expect(section).toContain('reactionPrompt');
     expect(section).toContain('✅');
   });
 
@@ -385,9 +385,9 @@ describe('reactionPromptSection', () => {
     expect(reactionPromptSection()).toContain('2–9');
   });
 
-  it('warns about no conversation history in follow-up invocation', () => {
+  it('warns about context isolation in follow-up invocation', () => {
     const section = reactionPromptSection();
-    expect(section).toContain('no conversation history');
+    expect(section).toContain('no history');
     expect(section).toContain('self-contained');
   });
 });

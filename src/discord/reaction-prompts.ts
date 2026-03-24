@@ -158,19 +158,7 @@ export async function executeReactionPromptAction(
 export function reactionPromptSection(): string {
   return `### Reaction Prompts
 
-**reactionPrompt** — Present a yes/no or multiple-choice question to the user via emoji reactions instead of requiring a typed reply. The bot sends a dedicated message with the question text, adds each choice as a reaction, and returns immediately. When the user reacts, their choice triggers a follow-up AI invocation automatically with a prompt that conveys the user's decision.
-
-\`\`\`
-<discord-action>{"type":"reactionPrompt","question":"Should I proceed?","choices":["✅","❌"]}</discord-action>
-\`\`\`
-
-- \`question\` (required): The question text displayed to the user.
-- \`choices\` (required): 2–9 emoji strings. Each will be added as a reaction to the prompt message.
-- \`timeoutSeconds\` (optional): Accepted for compatibility but not used — the prompt waits indefinitely and the user's reaction triggers a follow-up automatically.
-
-The action returns immediately with a confirmation that the prompt was sent. When the user reacts with a valid choice, a follow-up invocation is triggered automatically so you can act on the decision.
-
-**Context warning:** The follow-up AI invocation receives *only* the \`question\` text and the chosen emoji — no conversation history or prior context is included. Write questions that are specific and self-contained so the follow-up AI knows exactly what action to take for each choice. For example, use "Deploy commit abc123 to staging?" instead of "Should I proceed?" — the follow-up invocation won't know what "proceed" refers to.
-
-Use this for binary confirmations (✅/❌) or short option lists — not for open-ended text input.`;
+**reactionPrompt** — \`{"type":"reactionPrompt","question":"Deploy abc123 to staging?","choices":["✅","❌"]}\`
+\`question\`, \`choices\` (2–9 emojis) required. User reacts to trigger a follow-up invocation automatically.
+**Context isolation:** Follow-up receives only the question text + chosen emoji — no history. Write self-contained questions with specific IDs/details.`;
 }

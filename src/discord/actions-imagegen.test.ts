@@ -2009,14 +2009,13 @@ describe('imagegenActionsPromptSection — sourceImage docs', () => {
     expect(section).toContain('channelId');
     expect(section).toContain('messageId');
     expect(section).toContain('attachmentIndex');
-    expect(section).toContain('Only supported with native Gemini models');
+    expect(section).toContain('Gemini-native models only');
   });
 
   it('documents the URL form of sourceImage', () => {
     const section = imagegenActionsPromptSection();
     expect(section).toContain('"url"');
-    expect(section).toContain('http(s)');
-    expect(section).toContain('URL form');
+    expect(section).toContain('URL');
   });
 });
 

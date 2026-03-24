@@ -114,22 +114,10 @@ export async function executeBotProfileAction(
 export function botProfileActionsPromptSection(): string {
   return `### Bot Profile
 
-**botSetStatus** — Change the bot's online status:
-\`\`\`
-<discord-action>{"type":"botSetStatus","status":"idle"}</discord-action>
-\`\`\`
-- \`status\` (required): One of \`online\`, \`idle\`, \`dnd\`, \`invisible\`.
+**botSetStatus** — \`{"type":"botSetStatus","status":"idle"}\` — online/idle/dnd/invisible.
 
-**botSetActivity** — Set the bot's activity text:
-\`\`\`
-<discord-action>{"type":"botSetActivity","name":"with tasks","activityType":"Playing"}</discord-action>
-\`\`\`
-- \`name\` (required): The activity text shown in the bot's presence.
-- \`activityType\` (optional): One of \`Playing\` (default), \`Listening\`, \`Watching\`, \`Competing\`, \`Custom\`.
+**botSetActivity** — \`{"type":"botSetActivity","name":"with tasks","activityType":"Playing"}\`
+\`activityType\`: Playing (default), Listening, Watching, Competing, Custom.
 
-**botSetNickname** — Change the bot's nickname in the current server:
-\`\`\`
-<discord-action>{"type":"botSetNickname","nickname":"Weston"}</discord-action>
-\`\`\`
-- \`nickname\` (required): The new display name for this server.`;
+**botSetNickname** — \`{"type":"botSetNickname","nickname":"Weston"}\``;
 }

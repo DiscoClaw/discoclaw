@@ -689,43 +689,19 @@ export function configActionsPromptSection(): string {
 
   return `### Model Configuration
 
-**modelShow** — Show current model assignments for all roles:
-\`\`\`
-<discord-action>{"type":"modelShow"}</discord-action>
-\`\`\`
+**modelShow** — \`{"type":"modelShow"}\` — current model assignments for all roles.
 
-**workspaceWarnings** — Live-check current workspace bootstrap cleanup warnings (AGENTS.md / DISCOCLAW.md / TOOLS.md):
-\`\`\`
-<discord-action>{"type":"workspaceWarnings"}</discord-action>
-\`\`\`
-- Use this when the user asks whether a workspace warning is still current, fixed, or safe to ignore. This returns the live file state for the configured workspace, not historical thread context.
+**workspaceWarnings** — \`{"type":"workspaceWarnings"}\` — live-check workspace bootstrap warnings.
 
-**modelSet** — Change the model for a role at runtime:
-\`\`\`
-<discord-action>{"type":"modelSet","role":"chat","model":"sonnet"}</discord-action>
-<discord-action>{"type":"modelSet","role":"fast","model":"haiku"}</discord-action>
-\`\`\`
-- \`role\` (required): One of \`chat\`, \`plan-run\`, \`fast\`, \`forge-drafter\`, \`forge-auditor\`, \`summary\`, \`cron\`, \`cron-exec\`, \`voice\`, \`imagegen\`.
-- \`model\` (required): Model tier (\`fast\`, \`capable\`, \`deep\`), concrete model name (\`haiku\`, \`sonnet\`, \`opus\`), runtime name (${chatRuntimeNames}; compatibility aliases ${compatibilityAliases} normalize to canonical names; voice-only runtime: ${voiceOnlyRuntimeNames}), or \`default\` (for cron-exec only, to revert to the startup default for that role). For the \`voice\` role, setting a model name that belongs to a different provider's tier map (e.g. \`sonnet\` while voice is on Gemini) will auto-switch the voice runtime to match.
+**modelSet** — \`{"type":"modelSet","role":"chat","model":"sonnet"}\`
+\`role\` (required): chat, plan-run, fast, forge-drafter, forge-auditor, summary, cron, cron-exec, voice, imagegen.
+\`model\` (required): tier (fast/capable/deep), name (haiku/sonnet/opus), runtime (${chatRuntimeNames}; aliases ${compatibilityAliases}; voice-only: ${voiceOnlyRuntimeNames}), or \`default\` (cron-exec only).
 
-**Roles:**
-${formatPromptRoleDescriptions()}
+**Roles:** ${formatPromptRoleDescriptions()}
 
-Persistence semantics:
-- Model-role overrides persist in \`models.json\` and survive restart.
-- Fast and voice runtime overlays persist in \`runtime-overrides.json\`.
-- Chat runtime swaps are live-only memory changes; they reset on restart or another explicit runtime switch.
+Persistence: model-role overrides in \`models.json\` survive restart. Fast/voice runtime overlays in \`runtime-overrides.json\`. Chat runtime swaps are live-only.
 
-**modelReset** — Revert model(s) to startup defaults. Role resets write startup defaults back to \`models.json\`; fast/voice resets also clear persisted runtime overlays:
-\`\`\`
-<discord-action>{\"type\":\"modelReset\"}</discord-action>
-<discord-action>{\"type\":\"modelReset\",\"role\":\"chat\"}</discord-action>
-\`\`\`
-- Omit \`role\` to reset all roles.
-- \`!models reset fast\` also clears the persisted fast runtime overlay.
-- \`!models reset voice\` also clears the persisted voice runtime overlay.
-- \`!models reset chat\` resets the chat model override, but live chat runtime swaps remain live-only and clear on restart or another explicit runtime switch.
+**modelReset** — \`{"type":"modelReset","role":"chat"}\` — omit \`role\` to reset all. Fast/voice resets also clear runtime overlays.
 
-**Cron model priority:** per-job override (cronUpdate) > AI-classified model > cron-exec default > chat fallback.
-Set \`cron-exec\` to \`default\` to clear the override and revert to the startup default for that role.`;
+Cron model priority: per-job override > AI-classified > cron-exec default > chat fallback.`;
 }

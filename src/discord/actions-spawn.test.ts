@@ -802,19 +802,18 @@ describe('spawnActionsPromptSection', () => {
     expect(section).toContain('parallel');
   });
 
-  it('mentions recursion depth guard', () => {
+  it('mentions spawn limitations', () => {
     const section = spawnActionsPromptSection();
-    expect(section).toContain('recursion');
+    expect(section).toContain('cannot spawn further');
   });
 
-  it('warns about no conversation history (context isolation)', () => {
+  it('warns about context isolation', () => {
     const section = spawnActionsPromptSection();
     expect(section).toContain('no conversation history');
   });
 
-  it('includes a usage example block', () => {
+  it('includes a usage example', () => {
     const section = spawnActionsPromptSection();
-    expect(section).toContain('<discord-action>');
     expect(section).toContain('spawnAgent');
   });
 });

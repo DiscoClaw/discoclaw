@@ -156,25 +156,11 @@ export async function executeArchiveAction(
 export function archiveActionsPromptSection(): string {
   return `### Archive
 
-Move channels to/from a dedicated Archive category for housekeeping.
+**archiveChannel** — \`{"type":"archiveChannel","channelId":"123","lock":false}\`
+\`channelId\` required. \`archiveCategoryName\` (default "Archive"), \`lock\` (true=read-only) optional.
 
-**archiveChannel** — Move a channel into the Archive category (creates it if missing):
-\`\`\`
-<discord-action>{"type":"archiveChannel","channelId":"123","archiveCategoryName":"Archive","lock":false}</discord-action>
-\`\`\`
-- \`channelId\` (required): ID of the channel to archive.
-- \`archiveCategoryName\` (optional): Name of the archive category (default: \`"Archive"\`).
-- \`lock\` (optional): Set \`true\` to make the channel read-only (no messages/reactions).
+**unarchiveChannel** — \`{"type":"unarchiveChannel","channelId":"123","targetCategory":"General"}\`
+\`targetCategory\` optional (omit to leave uncategorised).
 
-**unarchiveChannel** — Restore a channel from the archive:
-\`\`\`
-<discord-action>{"type":"unarchiveChannel","channelId":"123","targetCategory":"General"}</discord-action>
-\`\`\`
-- \`channelId\` (required): ID of the archived channel.
-- \`targetCategory\` (optional): Category to move it back to. Omit to leave uncategorised.
-
-**archiveList** — List all channels currently in the Archive category:
-\`\`\`
-<discord-action>{"type":"archiveList","archiveCategoryName":"Archive"}</discord-action>
-\`\`\``;
+**archiveList** — \`{"type":"archiveList"}\``;
 }

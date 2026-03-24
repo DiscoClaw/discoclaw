@@ -495,43 +495,16 @@ export function imagegenActionsPromptSection(resolvedDefaultModel?: string): str
     : `- \`model\` (optional): Default depends on configuration. Supported families/examples:`;
   return `### Image Generation
 
-**generateImage** — Generate an image and post it to a channel:
-\`\`\`
-<discord-action>{"type":"generateImage","prompt":"A serene mountain lake at sunset","channel":"#art"}</discord-action>
-\`\`\`
-- \`prompt\` (required): Text description of the image to generate.
-- \`channel\` (optional): Channel name (with or without #) or channel ID to post the image to. Defaults to the current channel/thread if omitted.
+**generateImage** — \`{"type":"generateImage","prompt":"A serene mountain lake at sunset","channel":"#art"}\`
+\`prompt\` required. \`channel\` optional (default: current).
 ${modelFieldDoc}
   - OpenAI: \`dall-e-3\`, \`gpt-image-1\`
   - Gemini (Imagen): \`imagen-4.0-generate-001\`, \`imagen-4.0-fast-generate-001\`, \`imagen-4.0-ultra-generate-001\`
   - Gemini (native): \`gemini-3.1-flash-image-preview\`, \`gemini-3-pro-image-preview\`
-- \`provider\` (optional): \`openai\` or \`gemini\`. Auto-detected from model prefix if omitted.
-- \`size\` (optional): Depends on provider:
-  - OpenAI dall-e-3 / dall-e-2: pixel dimensions — \`1024x1024\` (default), \`1024x1792\`, \`1792x1024\`, \`256x256\`, \`512x512\`
-  - OpenAI gpt-image-1: pixel dimensions as above, plus \`auto\`
-  - Gemini (Imagen): aspect ratios — \`1:1\` (default), \`3:4\`, \`4:3\`, \`9:16\`, \`16:9\`
-  - Gemini (native): size/aspect-ratio params do not apply — omit \`size\` for these models
-- \`quality\` (optional): \`standard\` (default) or \`hd\` — applies to OpenAI dall-e-3 only.
-- \`caption\` (optional): Text message to accompany the image in the channel.
-- \`sourceImage\` (optional): Provide a source image for image-to-image editing. **Only supported with native Gemini models** (\`gemini-*\`). Two forms:
-  - **Attachment form** — reference a Discord message attachment:
-    - \`type\` (required): \`"attachment"\`
-    - \`channelId\` (optional): Channel ID of the message containing the image. Defaults to the current channel.
-    - \`messageId\` (optional): Message ID containing the image attachment. Defaults to the current message.
-    - \`attachmentIndex\` (optional): Zero-based index of the attachment to use. Defaults to \`0\` (first attachment).
-    - Example — edit the image from the current message:
-      \`\`\`
-      <discord-action>{"type":"generateImage","prompt":"Make this image look like a watercolor painting","model":"gemini-3.1-flash-image-preview","sourceImage":{"type":"attachment"}}</discord-action>
-      \`\`\`
-    - Example — edit an image from a specific message:
-      \`\`\`
-      <discord-action>{"type":"generateImage","prompt":"Add a sunset sky","model":"gemini-3.1-flash-image-preview","sourceImage":{"type":"attachment","channelId":"123","messageId":"456","attachmentIndex":1}}</discord-action>
-      \`\`\`
-  - **URL form** — provide a public http(s) image URL directly:
-    - \`type\` (required): \`"url"\`
-    - \`url\` (required): A public \`http(s)\` image URL (PNG, JPEG, GIF, or WebP).
-    - Example:
-      \`\`\`
-      <discord-action>{"type":"generateImage","prompt":"Make this photo a pencil sketch","model":"gemini-3.1-flash-image-preview","sourceImage":{"type":"url","url":"https://example.com/photo.jpg"}}</discord-action>
-      \`\`\``;
+- \`provider\` (optional): \`openai\` or \`gemini\` (auto-detected from model).
+- \`size\` (optional): OpenAI: \`1024x1024\`/\`1024x1792\`/\`1792x1024\`; Imagen: \`1:1\`/\`3:4\`/\`4:3\`/\`9:16\`/\`16:9\`; native Gemini: omit.
+- \`quality\` (optional): \`standard\`/\`hd\` (dall-e-3 only). \`caption\` (optional): text with image.
+- \`sourceImage\` (optional, Gemini-native models only): image-to-image editing.
+  - Attachment: \`{"type":"attachment","channelId":"123","messageId":"456","attachmentIndex":0}\` (all fields optional, defaults to current message first attachment)
+  - URL: \`{"type":"url","url":"https://example.com/photo.jpg"}\``;
 }

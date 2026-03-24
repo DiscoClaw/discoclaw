@@ -452,64 +452,23 @@ export async function executeGuildAction(
 export function guildActionsPromptSection(): string {
   return `### Guild Info & Management
 
-**memberInfo** — Get info about a server member:
-\`\`\`
-<discord-action>{"type":"memberInfo","userId":"123456789"}</discord-action>
-\`\`\`
+**memberInfo** — \`{"type":"memberInfo","userId":"123456789"}\`
 
-**roleInfo** — List all roles in the server:
-\`\`\`
-<discord-action>{"type":"roleInfo"}</discord-action>
-\`\`\`
+**roleInfo** — \`{"type":"roleInfo"}\` — list all server roles.
 
-**roleAdd** / **roleRemove** — Add or remove a role from a member:
-\`\`\`
-<discord-action>{"type":"roleAdd","userId":"123","role":"Moderator"}</discord-action>
-<discord-action>{"type":"roleRemove","userId":"123","role":"Moderator"}</discord-action>
-\`\`\`
-- \`role\`: Role name or ID.
+**roleAdd** / **roleRemove** — \`{"type":"roleAdd","userId":"123","role":"Moderator"}\`
+\`role\`: name or ID.
 
-**searchMessages** — Search messages in a channel (paginated, client-side filter):
-\`\`\`
-<discord-action>{"type":"searchMessages","query":"keyword","channel":"#general","limit":10}</discord-action>
-\`\`\`
-- \`query\` (required): Text to search for (case-insensitive substring match).
-- \`channel\` (optional): Channel to search; defaults to current channel.
-- \`limit\` (optional): Max results (1–50, default 25).
-- \`before\` (optional): Message ID or ISO date — only search messages before this point.
-- \`after\` (optional): Message ID or ISO date — stop scanning at this point.
-- \`maxPages\` (optional): Pages of 100 messages to scan (1–10, default 5 = 500 messages).
+**searchMessages** — \`{"type":"searchMessages","query":"keyword","channel":"#general","limit":10}\`
+\`query\` required (case-insensitive substring). \`channel\` default current. \`limit\` 1–50 (default 25). \`before\`/\`after\` (msg ID or ISO date). \`maxPages\` 1–10 (default 5, scans 500 msgs).
 
-**eventList** — List scheduled events:
-\`\`\`
-<discord-action>{"type":"eventList"}</discord-action>
-\`\`\`
+**eventList** — \`{"type":"eventList"}\`
 
-**eventCreate** — Create a scheduled event:
-\`\`\`
-<discord-action>{"type":"eventCreate","name":"Team Meeting","startTime":"2026-04-01T15:00:00Z","description":"Weekly sync","location":"Zoom"}</discord-action>
-\`\`\`
-- \`name\` (required): Event name.
-- \`startTime\` (required): ISO 8601 datetime.
-- \`endTime\` (optional): ISO 8601 datetime.
-- \`description\` (optional): Event description.
-- \`channelId\` (optional): Voice channel ID for voice events.
-- \`location\` (optional): External location (creates an external event).
+**eventCreate** — \`{"type":"eventCreate","name":"Team Meeting","startTime":"2026-04-01T15:00:00Z","location":"Zoom"}\`
+\`name\`, \`startTime\` (ISO 8601) required. Optional: \`endTime\`, \`description\`, \`channelId\` (voice), \`location\` (external).
 
-**eventEdit** — Edit a scheduled event:
-\`\`\`
-<discord-action>{"type":"eventEdit","eventId":"123","name":"New Name","startTime":"2027-04-01T10:00:00Z"}</discord-action>
-\`\`\`
-- \`eventId\` (required): Event ID (from eventList).
-- \`name\` (optional): New event name.
-- \`startTime\` (optional): New ISO 8601 start time.
-- \`endTime\` (optional): New ISO 8601 end time.
-- \`description\` (optional): New description.
-- \`location\` (optional): New external location.
-At least one field besides eventId is required.
+**eventEdit** — \`{"type":"eventEdit","eventId":"123","name":"New Name"}\`
+\`eventId\` required. Optional: \`name\`, \`startTime\`, \`endTime\`, \`description\`, \`location\`.
 
-**eventDelete** — Delete a scheduled event (destructive — confirm with user first):
-\`\`\`
-<discord-action>{"type":"eventDelete","eventId":"123"}</discord-action>
-\`\`\``;
+**eventDelete** — \`{"type":"eventDelete","eventId":"123"}\` (destructive — confirm first)`;
 }
