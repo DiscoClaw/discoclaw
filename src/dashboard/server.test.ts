@@ -19,8 +19,8 @@ import {
   type DashboardSnapshotApiResponse,
   type LiveAuthCheckHandler,
   type LiveModelHandler,
-  type LiveSnapshotProvider,
 } from './server.js';
+import type { LiveSnapshotProvider } from './snapshot.js';
 
 type RequestOptions = {
   method?: string;
