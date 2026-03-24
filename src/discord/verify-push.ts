@@ -137,7 +137,7 @@ async function checkPRExists(
     const result = await execa(
       'gh',
       ['pr', 'list', '--head', branchName, '--json', 'number,state,url', '--limit', '1'],
-      { cwd, env: localGitEnv(), stdio: 'pipe' },
+      { cwd, env: localGitEnv(), stdio: 'pipe', timeout: 5_000 },
     );
     const prs = JSON.parse(result.stdout.trim() || '[]');
     if (Array.isArray(prs) && prs.length > 0) {

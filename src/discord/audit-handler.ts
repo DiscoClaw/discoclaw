@@ -9,7 +9,7 @@ import { parseAuditVerdict } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
 import { collectRuntimeText } from './runtime-utils.js';
 import type { RuntimeAdapter, RuntimeSupervisorPolicy } from '../runtime/types.js';
-import { getSection, parsePlan } from './plan-parser.js';
+import { getSection, getSectionByPrefix, hasSectionByPrefix, parsePlan } from './plan-parser.js';
 import { resolveReasoningEffort } from '../runtime/model-tiers.js';
 
 // ---------------------------------------------------------------------------
@@ -60,10 +60,9 @@ export function auditPlanStructure(content: string): AuditConcern[] {
   const concerns: AuditConcern[] = [];
   const parsed = parsePlan(content);
 
-  // Check for required sections
+  // Check for required sections (prefix-aware: "## Changes — Phase A" satisfies "Changes")
   for (const section of REQUIRED_SECTIONS) {
-    const hasSection = parsed.sections.has(section);
-    if (!hasSection) {
+    if (!hasSectionByPrefix(parsed, section)) {
       concerns.push({
         title: `Missing section: ${section}`,
         description: `The plan is missing the required "## ${section}" section.`,
@@ -72,7 +71,7 @@ export function auditPlanStructure(content: string): AuditConcern[] {
       continue;
     }
 
-    const body = getSection(parsed, section).trim();
+    const body = getSectionByPrefix(parsed, section).trim();
     // Check if the section has meaningful content (not just placeholder text)
     if (!body || /^_.*_$/.test(body) || body.startsWith('(') || body.length < 10) {
       concerns.push({
@@ -83,8 +82,8 @@ export function auditPlanStructure(content: string): AuditConcern[] {
     }
   }
 
-  // Check for a Changes section with file paths
-  const changesBody = getSection(parsed, 'Changes').trim();
+  // Check for a Changes section with file paths (prefix-aware)
+  const changesBody = getSectionByPrefix(parsed, 'Changes').trim();
   if (changesBody) {
     const filePathMatches = [...changesBody.matchAll(/`([^`\n]+(?:\/[^`\n]+)*\.[a-z0-9]+)`/gi)].map((m) => m[1]!.trim());
     const hasFilePaths = filePathMatches.length > 0;

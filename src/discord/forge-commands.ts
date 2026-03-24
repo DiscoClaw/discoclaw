@@ -9,7 +9,7 @@ import { auditPlanStructure, deriveVerdict, maxReviewNumber } from './audit-hand
 import { resolveModel, resolveReasoningEffort } from '../runtime/model-tiers.js';
 import { parseAuditVerdict } from './forge-audit-verdict.js';
 import type { AuditVerdict } from './forge-audit-verdict.js';
-import { getSection, parsePlan } from './plan-parser.js';
+import { getSection, getSectionByPrefix, parsePlan } from './plan-parser.js';
 import { resolveForgeTurnKind } from '../runtime/cli-strategy.js';
 import { PHASE_SAFETY_REMINDER } from '../runtime/strategies/claude-strategy.js';
 import { buildPromptPreamble } from './prompt-common.js';
@@ -927,8 +927,8 @@ export function buildPlanSummary(planContent: string): string {
     scope = inMatch?.[1]?.trim() || scopeText;
   }
 
-  // Extract changed files (look for file paths in the Changes section)
-  const changesBlock = getSection(parsedPlan, 'Changes');
+  // Extract changed files (look for file paths in the Changes section, prefix-aware)
+  const changesBlock = getSectionByPrefix(parsedPlan, 'Changes');
   const files: string[] = [];
   if (changesBlock) {
     const fileMatches = changesBlock.matchAll(/####\s+`([^`]+)`/g);

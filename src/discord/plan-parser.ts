@@ -81,6 +81,47 @@ export function getSection(
   return doc.sections.get(sectionName) ?? '';
 }
 
+function matchesSectionPrefix(key: string, prefix: string): boolean {
+  return key === prefix || (key.startsWith(prefix) && /[\s\u2014:—-]/.test(key[prefix.length] ?? ''));
+}
+
+/**
+ * Check whether any section heading matches or starts with the given prefix.
+ */
+export function hasSectionByPrefix(
+  doc: ParsedPlanDoc,
+  prefix: string,
+): boolean {
+  for (const key of doc.sections.keys()) {
+    if (matchesSectionPrefix(key, prefix)) return true;
+  }
+  return false;
+}
+
+/**
+ * Get the concatenated body of all sections whose heading matches or starts
+ * with the given prefix (followed by a word boundary: space, dash, colon,
+ * em-dash, or end-of-string).
+ * Useful for structural checks where `## Changes — Phase A` should
+ * satisfy a requirement for `Changes`.
+ */
+export function getSectionByPrefix(
+  doc: ParsedPlanDoc,
+  prefix: string,
+): string {
+  // Exact match first
+  const exact = doc.sections.get(prefix);
+  if (exact !== undefined) return exact;
+
+  const bodies: string[] = [];
+  for (const [key, body] of doc.sections) {
+    if (matchesSectionPrefix(key, prefix)) {
+      bodies.push(body);
+    }
+  }
+  return bodies.join('\n\n');
+}
+
 function stripFencedCode(text: string): string {
   const lines = text.split('\n');
   const out: string[] = [];
