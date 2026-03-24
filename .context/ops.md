@@ -57,3 +57,84 @@ Validation:
 - Post in a non-allowlisted channel (should not respond).
 - Create a new channel and post once (should auto-index + create a stub context file).
 - If `DISCOCLAW_STATUS_CHANNEL` is set, confirm a green "Bot Online" embed appears on startup and a gray "Bot Offline" embed on shutdown.
+
+## Known Footguns
+
+- **Forgetting `daemon-reload`:** Editing `systemd/discoclaw.service` without running `systemctl --user daemon-reload` means systemd uses the stale cached unit. The restart will succeed but run the old config. Always reload before restart.
+- **`systemctl --user` vs `sudo systemctl`:** DiscoClaw uses a *user* service. Running `sudo systemctl restart discoclaw.service` targets the system scope and will fail with "Unit discoclaw.service not found." Always use the `--user` flag.
+- **Building after deploy:** The service runs `dist/index.js`. If you `systemctl --user restart` without running `pnpm build` first, the old compiled JS runs — your code changes are silently missing.
+- **Lingering gateway session:** If a previous bot instance (or another bot) used the same `DISCORD_TOKEN`, Discord may still have an active gateway session. The new instance can connect but may miss events for 30-60 seconds until the old session times out. Stop the old process first, then start the new one.
+- **Empty allowlist on first deploy:** If `.env` is missing `DISCORD_ALLOW_USER_IDS` or the value is blank, the bot starts successfully but silently ignores every message. Logs show no errors — check the allowlist first.
+
+## Common Failure Modes
+
+### Service won't start — "Address already in use" or PID lock refused
+**Symptom:** `systemctl --user start discoclaw.service` exits immediately. Journal shows `pidlock: another instance is running (pid XXXXX)`.
+**Cause:** A previous instance is still running, or crashed without releasing the lock.
+**Recovery:**
+```bash
+# Check if the PID in the lock file is actually alive
+cat data/discoclaw.pid
+kill -0 $(cat data/discoclaw.pid) 2>/dev/null && echo "alive" || echo "stale"
+
+# If stale — just restart; the lock auto-clears on stale detection
+systemctl --user restart discoclaw.service
+
+# If alive — stop the running instance first
+systemctl --user stop discoclaw.service
+systemctl --user start discoclaw.service
+```
+
+### Service starts but bot never comes online in Discord
+**Symptom:** `systemctl --user status discoclaw.service` shows active/running, but the bot never appears online. No "Bot Online" in the status channel.
+**Cause:** Invalid or expired `DISCORD_TOKEN`, or network issue.
+**Recovery:**
+```bash
+# Check recent logs for auth errors
+journalctl --user -u discoclaw.service -n 30 --no-pager
+
+# Look for: "An invalid token was provided" or "Used disallowed intents"
+# Fix: regenerate token in Discord Developer Portal, update .env, restart
+```
+
+### Service runs but bot ignores messages
+**Symptom:** Bot shows as online in Discord but never responds to any messages.
+**Cause:** Usually one of: empty allowlist, channel restriction mismatch, or missing channel context.
+**Recovery:**
+```bash
+# Dump resolved config at startup to verify env loading
+DISCOCLAW_DEBUG_RUNTIME=1 systemctl --user restart discoclaw.service
+journalctl --user -u discoclaw.service -n 50 --no-pager
+
+# Check these in order:
+# 1. DISCORD_ALLOW_USER_IDS — must contain your Discord user ID
+# 2. DISCORD_CHANNEL_IDS — if set, must include the channel you're posting in
+# 3. DISCORD_REQUIRE_CHANNEL_CONTEXT — if 1, channel context file must exist
+```
+
+### Rollback to previous version
+**Recovery:**
+```bash
+# Find the last known-good commit
+git log --oneline -10
+
+# Reset to it (keeps .env and data/ untouched)
+git checkout <commit-hash> -- .
+pnpm build
+systemctl --user restart discoclaw.service
+journalctl --user -u discoclaw.service -n 20 --no-pager
+```
+
+### systemd environment differs from shell
+**Symptom:** Bot works with `pnpm dev` but behaves differently (wrong model, missing tools) under systemd.
+**Cause:** systemd user services don't load `.bashrc` or shell profiles. The `.env` must be loaded by the service unit.
+**Recovery:**
+```bash
+# Verify what env the service actually sees
+DISCOCLAW_DEBUG_RUNTIME=1 systemctl --user restart discoclaw.service
+journalctl --user -u discoclaw.service --since "1 min ago" --no-pager | head -30
+
+# Compare with local dev
+DISCOCLAW_DEBUG_RUNTIME=1 pnpm dev
+# If they differ, check the EnvironmentFile= line in the .service unit
+```

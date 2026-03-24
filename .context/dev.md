@@ -341,6 +341,89 @@ SMOKE_TEST_TIERS=fast SMOKE_TEST_TIMEOUT_MS=120000 pnpm test
 
 The suite uses your real `.env` — the same config that runs the bot is sufficient. No separate test credentials are needed.
 
+## Known Footguns
+
+- **`pnpm build` caches stale output:** TypeScript's `tsc` writes to `dist/` incrementally. If you rename or delete a source file, the old `.js` remains in `dist/` and may be imported at runtime. Fix: `rm -rf dist && pnpm build`.
+- **`.env` not loaded in subshells:** `pnpm dev` loads `.env` via dotenv, but raw `node dist/index.js` does not. Always use `pnpm dev` or `pnpm start` for local runs.
+- **`pnpm i` after branch switch:** Switching branches that change `package.json` or `pnpm-lock.yaml` can leave `node_modules` in a stale state. Run `pnpm i` after checkout if you see unexpected import errors.
+- **Port conflicts with webhook server:** If `DISCOCLAW_WEBHOOK_ENABLED=1` and another process holds port `9400` (or your configured `DISCOCLAW_WEBHOOK_PORT`), the bot crashes on startup with `EADDRINUSE`. Check with `lsof -i :9400`.
+- **Editing `.env.example` vs `.env`:** `.env.example` is tracked in git and has no effect at runtime. Your actual config is in `.env` (gitignored). Editing the wrong file is a common mistake.
+
+## Common Failure Modes
+
+### `pnpm build` fails with type errors
+**Symptom:** `tsc` reports type errors in `src/`. Build exits non-zero.
+**Recovery:**
+```bash
+# Check for stale dist artifacts
+rm -rf dist
+pnpm build
+
+# If errors persist, check for missing deps
+pnpm i
+pnpm build
+
+# For type errors in unchanged files, your deps may have updated types
+# Check what changed:
+git diff pnpm-lock.yaml
+```
+
+### `pnpm dev` exits immediately with "Missing DISCORD_TOKEN"
+**Symptom:** Process exits within 1 second, logs `Missing required env: DISCORD_TOKEN`.
+**Cause:** `.env` file is missing, misnamed, or the variable is commented out.
+**Recovery:**
+```bash
+# Verify .env exists and has the token
+ls -la .env
+grep DISCORD_TOKEN .env
+
+# If missing, create from example
+cp .env.example .env
+# Then edit .env with your actual values
+```
+
+### `pnpm dev` starts but Claude CLI invocations fail
+**Symptom:** Bot responds to messages but replies with an error like "Runtime invocation failed" or "spawn claude ENOENT".
+**Cause:** Claude CLI binary not found on `PATH`, or wrong binary name in `CLAUDE_BIN`.
+**Recovery:**
+```bash
+# Verify the CLI is installed and reachable
+which claude
+claude --version
+
+# If installed but not found, check CLAUDE_BIN in .env
+grep CLAUDE_BIN .env
+
+# If using a non-standard path
+CLAUDE_BIN=/path/to/claude pnpm dev
+```
+
+### Tests fail with "Cannot find module" errors
+**Symptom:** `pnpm test` crashes before tests run, with Node module resolution errors.
+**Cause:** `dist/` is stale or `node_modules` is incomplete.
+**Recovery:**
+```bash
+rm -rf dist
+pnpm i
+pnpm build
+pnpm test
+```
+
+### `pnpm sync:discord-context` fails
+**Symptom:** Command exits with an error about missing `DISCORD.md` or content directory.
+**Cause:** `DISCOCLAW_CONTENT_DIR` or `DISCOCLAW_DATA_DIR` not set, or the content directory doesn't exist yet.
+**Recovery:**
+```bash
+# Check which content dir is configured
+grep -E 'DISCOCLAW_CONTENT_DIR|DISCOCLAW_DATA_DIR' .env
+
+# Create the directory structure if missing
+mkdir -p data/content/discord/channels
+
+# Re-run
+pnpm sync:discord-context
+```
+
 ## Notes
 - Runtime invocation defaults are configurable via env (`RUNTIME_MODEL`, `RUNTIME_TOOLS`, `RUNTIME_TIMEOUT_MS`).
 - If `pnpm dev` fails with "Missing DISCORD_TOKEN", your `.env` isn't loaded or the var is unset.

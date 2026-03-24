@@ -85,3 +85,72 @@ creating forum threads.
 | Gated actions | `allowedActions` for least-privilege |
 
 See [docs/cron-patterns.md](../docs/cron-patterns.md) for full examples of each.
+
+## Known Footguns
+
+- **`<cron-state>` replaces, does not merge:** If a job's state is `{"cursor": "abc", "count": 5}` and the AI outputs `<cron-state>{"cursor": "def"}</cron-state>`, the `count` key is lost. The AI must echo back all keys it wants to keep.
+- **Manual thread creation is ignored:** Jobs must be created via the `cronCreate` action. Manually creating a forum thread will not register a job — the thread will sit inert. Use `cronCreate` or ask the bot to create it.
+- **Archiving ≠ deleting:** The `cronDelete` action archives the thread (reversible). The job stops, but history is preserved. Actual thread deletion is permanent and removes all messages.
+- **Chain depth silently caps at 10:** If a chain exceeds 10 hops, execution stops with no visible error in the target channel. Check the bot logs for `chain depth limit reached`.
+- **Webhook jobs require `DISCOCLAW_WEBHOOK_ENABLED=true`:** Defining a webhook-triggered job without enabling the webhook server means the job exists but can never fire. No warning is logged at startup.
+- **Timezone defaults to system timezone:** If `DEFAULT_TIMEZONE` is unset and the server's system timezone is UTC, all cron schedules without explicit timezones run in UTC. This catches people who expect local time.
+
+## Common Failure Modes
+
+### Cron job not firing on schedule
+**Symptom:** Job was created and confirmed, schedule looks correct, but no output appears at the expected time.
+**Cause (in order of likelihood):**
+1. Thread is archived (job is paused).
+2. Timezone mismatch — job runs in UTC but user expects local time.
+3. Previous run is still active (overlap guard skipped this tick).
+4. `DISCOCLAW_CRON_ENABLED` is `0` or `DISCOCLAW_CRON_FORUM` is unset.
+**Recovery:**
+```bash
+# Check if the thread is archived (in Discord, archived threads are hidden by default)
+# Use the cronList action to see all jobs and their states
+
+# Check bot logs for skip reasons
+journalctl --user -u discoclaw.service --since "1 hour ago" --no-pager | grep -i "cron\|skip\|overlap"
+
+# Verify cron config
+grep -E 'DISCOCLAW_CRON_ENABLED|DISCOCLAW_CRON_FORUM|DEFAULT_TIMEZONE' .env
+```
+
+### Cron job fires but output goes to wrong channel
+**Symptom:** Job runs successfully but posts to the wrong Discord channel or to no channel.
+**Cause:** The AI parsed the target channel incorrectly from the natural-language definition, or the channel ID in the parsed config is stale (channel was deleted/renamed).
+**Recovery:**
+```bash
+# Use cronShow to inspect the parsed config
+# Ask the bot: "show cron <job-name>"
+# Check the targetChannel field
+
+# Update by editing the starter message in the forum thread, then:
+# Ask the bot: "trigger cron <job-name>" to test the new config
+```
+
+### State corruption — job keeps repeating or skipping work
+**Symptom:** A stateful polling job re-processes old items, or skips new ones.
+**Cause:** The AI's `<cron-state>` output replaced state instead of merging, or the state hit the 4000-char injection cap and was truncated.
+**Recovery:**
+```bash
+# Check current state via cronShow
+# Reset state by asking the bot:
+# "update cron <job-name> with state {}"
+
+# Or reset to a specific cursor:
+# "update cron <job-name> with state {\"cursor\": \"known-good-value\"}"
+```
+
+### Chain cascade — downstream jobs keep firing
+**Symptom:** A chained pipeline fires repeatedly or produces unexpected output.
+**Cause:** Cycle in the chain graph (should be caught at write time, but can occur if jobs were edited after initial creation without re-validation).
+**Recovery:**
+```bash
+# Check logs for chain-related entries
+journalctl --user -u discoclaw.service --since "30 min ago" --no-pager | grep -i "chain"
+
+# Break the cycle by removing the chain field from the looping job:
+# "update cron <job-name> with chain: none"
+# Then re-architect the chain graph
+```
