@@ -306,6 +306,19 @@ export function buildContextFiles(
 }
 
 /**
+ * Build context files for the stable preamble prefix, excluding channel-specific
+ * context. Channel context is injected as a separate post-preamble section so
+ * the preamble stays byte-identical across channels and follow-up turns,
+ * maximizing provider-level prefix cache hits (~90% cost reduction on cached prefix).
+ */
+export function buildPreambleContextFiles(
+  paFiles: string[],
+  discordChannelContext: DiscordChannelContext | undefined,
+): string[] {
+  return buildContextFiles(paFiles, discordChannelContext, null);
+}
+
+/**
  * Read all context files and return their contents inlined into a single string.
  * Falls back gracefully if any file can't be read, unless the file is in the
  * `required` set — required files throw on read failure.

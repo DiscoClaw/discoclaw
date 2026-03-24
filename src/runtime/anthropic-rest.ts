@@ -62,6 +62,8 @@ export function createAnthropicRestRuntime(opts: AnthropicRestOpts): RuntimeAdap
         );
         let actualInputTokens = 0;
         let actualOutputTokens = 0;
+        let cacheCreationTokens = 0;
+        let cacheReadTokens = 0;
 
         try {
           opts.log?.debug({ url, model }, 'anthropic-rest: request');
@@ -123,7 +125,12 @@ export function createAnthropicRestRuntime(opts: AnthropicRestOpts): RuntimeAdap
               const parsed = JSON.parse(data) as {
                 type?: string;
                 delta?: { type?: string; text?: string; stop_reason?: string };
-                message?: { usage?: { input_tokens?: number; output_tokens?: number } };
+                message?: { usage?: {
+                  input_tokens?: number;
+                  output_tokens?: number;
+                  cache_creation_input_tokens?: number;
+                  cache_read_input_tokens?: number;
+                } };
                 usage?: { output_tokens?: number };
                 error?: { message?: string };
               };
@@ -143,6 +150,13 @@ export function createAnthropicRestRuntime(opts: AnthropicRestOpts): RuntimeAdap
                     type: 'usage',
                     inputTokens: usage.input_tokens,
                   };
+                }
+                // Anthropic automatic prompt caching metrics
+                if (usage?.cache_creation_input_tokens != null) {
+                  cacheCreationTokens = usage.cache_creation_input_tokens;
+                }
+                if (usage?.cache_read_input_tokens != null) {
+                  cacheReadTokens = usage.cache_read_input_tokens;
                 }
               } else if (parsed.type === 'message_delta') {
                 // Output token usage from message_delta
@@ -195,6 +209,27 @@ export function createAnthropicRestRuntime(opts: AnthropicRestOpts): RuntimeAdap
                 sessionId: params.sessionId,
               },
               { info: opts.log.info.bind(opts.log) },
+            );
+          }
+
+          // Log prompt cache metrics when present (automatic prefix caching).
+          // cache_read > 0 means the provider matched a cached prefix — ~90% cost
+          // reduction on those tokens.  cache_creation > 0 means a new prefix was
+          // written to the cache for subsequent turns.
+          if ((cacheReadTokens > 0 || cacheCreationTokens > 0) && opts.log?.info) {
+            opts.log.info(
+              {
+                cacheCreationTokens,
+                cacheReadTokens,
+                actualInputTokens,
+                cacheHitPct: actualInputTokens > 0
+                  ? Math.round((cacheReadTokens / actualInputTokens) * 100)
+                  : 0,
+                provider: 'anthropic',
+                model,
+                sessionId: params.sessionId,
+              },
+              'anthropic-cache-telemetry',
             );
           }
 

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { EngineEvent } from '../runtime/types.js';
+import type { EngineEvent, RuntimeInvokeParams } from '../runtime/types.js';
+import { splitSystemPrompt } from '../runtime/openai-compat.js';
 import { _resetForTest as resetAbortRegistry } from './abort-registry.js';
 import { _resetForTest as resetInflightReplies, drainInFlightReplies } from './inflight-replies.js';
 
@@ -616,5 +617,107 @@ describe('message auto-follow-up lifecycle', () => {
       expect.any(String),
       expect.objectContaining({ outcome: 'succeeded', deliveryConfirmed: true }),
     );
+  });
+
+  it('follow-up prompt contains system/user sentinel so splitSystemPrompt produces a system field', async () => {
+    const order: string[] = [];
+    const capturedPrompts: string[] = [];
+    const initialReply = makeReply('initial-reply');
+    const followUpReply = makeReply('follow-up-reply');
+
+    const runtime = {
+      id: 'test',
+      capabilities: new Set<string>(['streaming_text']),
+      async *invoke(params: RuntimeInvokeParams): AsyncIterable<EngineEvent> {
+        capturedPrompts.push(params.prompt);
+        if (capturedPrompts.length === 1) {
+          yield {
+            type: 'text_final',
+            text: 'Looking up channels.\n<discord-action>{"type":"channelList"}</discord-action>',
+          };
+        } else {
+          yield { type: 'text_final', text: 'The channel list is ready.' };
+        }
+        yield { type: 'done' };
+      },
+    };
+
+    const watchdog = {
+      start: vi.fn(async (input: { messageId: string }) => {
+        order.push(`watchdog-start:${input.messageId}`);
+        return { deduped: false, run: {} };
+      }),
+      stageRecovery: vi.fn(async () => ({})),
+      complete: vi.fn(async () => ({
+        runId: 'run-1',
+        channelId: 'ch-1',
+        messageId: 'follow-up-reply',
+        sessionKey: 'session-1',
+        runKind: 'discord-action-followup',
+        correlationToken: 'ignored',
+        notifyOnCompletion: false,
+        status: 'completed',
+        startedAt: 0,
+        checkInDueAt: 0,
+        checkInPosted: false,
+        checkInPostedAt: null,
+        recoveryText: null,
+        completion: 'succeeded',
+        completionDetail: null,
+        completedAt: 0,
+        deliveryConfirmed: false,
+        finalPosted: false,
+        finalPostAttempts: 0,
+        lastFinalAttemptAt: null,
+        finalError: null,
+        updatedAt: 0,
+      })),
+      startupSweep: vi.fn(async () => ({ interruptedRuns: 0, finalRetried: 0, finalPosted: 0, finalFailed: 0 })),
+    };
+
+    const channelSend = vi.fn(async () => followUpReply);
+    const msg = {
+      id: 'm1',
+      type: 0,
+      content: 'hello',
+      author: { id: 'user-1', bot: false },
+      guildId: 'guild-1',
+      guild: { id: 'guild-1' },
+      channelId: 'ch-1',
+      channel: {
+        id: 'ch-1',
+        name: 'general',
+        send: channelSend,
+        isThread: () => false,
+      },
+      client: { channels: { cache: new Map() }, user: { id: 'bot-1' } },
+      attachments: new Map(),
+      stickers: new Map(),
+      embeds: [],
+      mentions: { has: () => false },
+      reply: vi.fn().mockResolvedValue(initialReply),
+    };
+
+    const { createMessageCreateHandler } = await import('./message-coordinator.js');
+    const handler = createMessageCreateHandler(makeParams(runtime, watchdog), {
+      run: vi.fn(async (_key: string, fn: () => Promise<void>) => fn()),
+    } as any);
+
+    await handler(msg as any);
+
+    // Should have 2 invocations: initial + follow-up
+    expect(capturedPrompts.length).toBe(2);
+
+    // Initial turn should have the sentinel and produce a system field
+    const initialSplit = splitSystemPrompt({ prompt: capturedPrompts[0] });
+    expect(initialSplit.system).toBeDefined();
+
+    // Follow-up prompt must also contain the sentinel and produce a system field
+    const followUpSplit = splitSystemPrompt({ prompt: capturedPrompts[1] });
+    expect(followUpSplit.system).toBeDefined();
+
+    // Both system fields should share the same preamble prefix
+    // (at minimum both start with the root policy)
+    expect(followUpSplit.system!.slice(0, 100)).toBe(initialSplit.system!.slice(0, 100));
   });
 });
