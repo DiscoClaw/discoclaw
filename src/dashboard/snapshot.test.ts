@@ -149,6 +149,8 @@ describe('collectLiveSnapshot', () => {
     expect(snap.imagegenProvider).toBe('gemini');
     expect(snap.imagegenModel).toBe('gemini-3.1-flash-image-preview');
     expect(snap.imagegenOptions.length).toBeGreaterThan(0);
+    expect(snap.imagegenHasGeminiKey).toBe(true);
+    expect(snap.imagegenHasOpenaiKey).toBe(false);
   });
 
   it('returns undefined imagegen fields when imagegenCtx is missing', () => {
@@ -162,6 +164,8 @@ describe('collectLiveSnapshot', () => {
     expect(snap.imagegenProvider).toBeUndefined();
     expect(snap.imagegenModel).toBeUndefined();
     expect(snap.imagegenOptions).toEqual([]);
+    expect(snap.imagegenHasGeminiKey).toBe(false);
+    expect(snap.imagegenHasOpenaiKey).toBe(false);
   });
 
   it('uses fetched gemini models in imagegen options', () => {
@@ -190,5 +194,18 @@ describe('collectLiveSnapshot', () => {
 
     expect(snap.chatThinking).toBe('enabled');
     expect(snap.pendingRestart).toBe(true);
+  });
+
+  it('reports both key presence flags when both keys are set', () => {
+    const snap = collectLiveSnapshot({
+      runtimeName: 'claude',
+      runtimeModel: 'opus',
+      availableRuntimes: ['claude'],
+      pendingRestart: false,
+      imagegenCtx: { apiKey: 'oai-key', geminiApiKey: 'gem-key' },
+    });
+
+    expect(snap.imagegenHasOpenaiKey).toBe(true);
+    expect(snap.imagegenHasGeminiKey).toBe(true);
   });
 });

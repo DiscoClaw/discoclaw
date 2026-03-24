@@ -14,6 +14,8 @@ export type LiveRuntimeSnapshot = {
   imagegenProvider: string | undefined;
   imagegenModel: string | undefined;
   imagegenOptions: string[];
+  imagegenHasGeminiKey: boolean;
+  imagegenHasOpenaiKey: boolean;
 };
 
 /**
@@ -133,5 +135,7 @@ export function collectLiveSnapshot(state: {
     imagegenProvider,
     imagegenModel,
     imagegenOptions,
+    imagegenHasGeminiKey: Boolean(imagegenCtx?.geminiApiKey),
+    imagegenHasOpenaiKey: Boolean(imagegenCtx?.apiKey),
   };
 }

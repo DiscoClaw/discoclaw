@@ -6,6 +6,7 @@ import type { BootReportMcpStatus } from '../discord/status-channel.js';
 import type { DoctorContext, DoctorReport, FixResult } from '../health/config-doctor.js';
 import {
   startDashboardServer,
+  type DashboardAuthCheckApiResponse,
   type DashboardDoctorApiResponse,
   type DashboardDoctorFixApiResponse,
   type DashboardModelApiResponse,
@@ -14,6 +15,7 @@ import {
   type DashboardServer,
   type DashboardServiceApiResponse,
   type DashboardSnapshotApiResponse,
+  type LiveAuthCheckHandler,
 } from './server.js';
 
 type RequestOptions = {
@@ -35,6 +37,7 @@ type StartServerOptions = {
   trustedHosts?: Set<string>;
   startupMcpStatus?: BootReportMcpStatus;
   startupMcpWarnings?: number;
+  liveAuthCheckHandler?: LiveAuthCheckHandler;
 };
 
 let handle: DashboardServer | null = null;
@@ -243,6 +246,7 @@ async function startServer(
     startupMcpWarnings: options.startupMcpWarnings,
     deps: fullDeps,
     restartExecutor: options.restartExecutor,
+    liveAuthCheckHandler: options.liveAuthCheckHandler,
     log: mockLog(),
   });
   const address = handle.server.address() as { port: number };
@@ -997,6 +1001,91 @@ describe('startDashboardServer', () => {
 
     expect(response.status).toBe(405);
     expect(body).toEqual({ ok: false, message: 'Method Not Allowed' });
+  });
+
+  it('returns 501 for /api/auth-check when handler is not provided', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/auth-check',
+      method: 'POST',
+      body: JSON.stringify({ target: 'imagegen' }),
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+    expect(response.status).toBe(501);
+    expect(body).toEqual({ ok: false, message: 'Auth checks are not available (bot not fully initialized).' });
+  });
+
+  it('returns auth probe results from /api/auth-check', async () => {
+    const handler: LiveAuthCheckHandler = vi.fn(async () => ({
+      results: [
+        { provider: 'openai', status: 'skip' as const },
+        { provider: 'gemini', status: 'ok' as const },
+      ],
+      allOk: true,
+    }));
+    const { port } = await startServer({}, { liveAuthCheckHandler: handler });
+    const response = await makeRequest(port, {
+      path: '/api/auth-check',
+      method: 'POST',
+      body: JSON.stringify({ target: 'imagegen' }),
+    });
+    const body = parseJson<DashboardAuthCheckApiResponse>(response.text);
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.status).toBe('ok');
+    expect(body.message).toBe('All configured keys are valid.');
+    expect(body.results).toHaveLength(2);
+    expect(handler).toHaveBeenCalledWith('imagegen');
+  });
+
+  it('returns warn status when all keys are skipped', async () => {
+    const handler: LiveAuthCheckHandler = vi.fn(async () => ({
+      results: [
+        { provider: 'openai', status: 'skip' as const },
+        { provider: 'gemini', status: 'skip' as const },
+      ],
+      allOk: true,
+    }));
+    const { port } = await startServer({}, { liveAuthCheckHandler: handler });
+    const response = await makeRequest(port, {
+      path: '/api/auth-check',
+      method: 'POST',
+      body: JSON.stringify({ target: 'imagegen' }),
+    });
+    const body = parseJson<DashboardAuthCheckApiResponse>(response.text);
+    expect(response.status).toBe(200);
+    expect(body.status).toBe('warn');
+    expect(body.message).toBe('No API keys configured for this target.');
+  });
+
+  it('returns error status when a key probe fails', async () => {
+    const handler: LiveAuthCheckHandler = vi.fn(async () => ({
+      results: [
+        { provider: 'openai', status: 'fail' as const, message: 'invalid or expired key (401)' },
+        { provider: 'gemini', status: 'ok' as const },
+      ],
+      allOk: false,
+    }));
+    const { port } = await startServer({}, { liveAuthCheckHandler: handler });
+    const response = await makeRequest(port, {
+      path: '/api/auth-check',
+      method: 'POST',
+      body: JSON.stringify({ target: 'imagegen' }),
+    });
+    const body = parseJson<DashboardAuthCheckApiResponse>(response.text);
+    expect(response.status).toBe(200);
+    expect(body.status).toBe('error');
+    expect(body.message).toContain('openai');
+    expect(body.message).toContain('invalid or expired key (401)');
+  });
+
+  it('rejects /api/auth-check with GET method', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/auth-check',
+      method: 'GET',
+    });
+    expect(response.status).toBe(405);
   });
 
   it('returns 404 for unknown routes', async () => {

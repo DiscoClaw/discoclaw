@@ -94,6 +94,7 @@ import type { DashboardServer as LocalDashboardServer, LiveModelHandler } from '
 import { executeConfigAction } from './discord/actions-config.js';
 import { formatDashboardOperatorUrl, resolveDashboardBindHost } from './dashboard/options.js';
 import { collectLiveSnapshot, fetchGeminiImagegenModels } from './dashboard/snapshot.js';
+import { probeProviderAuth } from './dashboard/auth-probe.js';
 import { collectDashboardSnapshot } from './cli/dashboard.js';
 import { ArtifactStore } from './canvas/artifact-store.js';
 import { createCanvasBuiltinApps } from './canvas/apps.js';
@@ -2767,6 +2768,21 @@ if (cfg.dashboardEnabled) {
         if (!configCtx) return { ok: false as const, error: 'Live model changes are not available (bot not fully initialized).' };
         return executeConfigAction({ type: 'modelSet', role: role as import('./discord/actions-config.js').ModelRole, model }, configCtx);
       }) satisfies LiveModelHandler,
+      liveAuthCheckHandler: async (target: string) => {
+        const ctx = botParams.imagegenCtx;
+        if (target === 'imagegen') {
+          return probeProviderAuth({
+            openaiApiKey: ctx?.apiKey,
+            openaiBaseUrl: ctx?.baseUrl,
+            geminiApiKey: ctx?.geminiApiKey,
+          });
+        }
+        // For 'chat' target, probe the primary runtime's key.
+        return probeProviderAuth({
+          openaiApiKey: cfg.openaiApiKey,
+          geminiApiKey: cfg.geminiApiKey,
+        });
+      },
     });
     const address = dashboardServer.server.address();
     dashboardUrl = formatDashboardOperatorUrl(
