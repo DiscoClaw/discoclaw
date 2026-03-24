@@ -18,6 +18,7 @@ import {
 import { DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT, formatDashboardUrl } from './options.js';
 import { renderDashboardPage } from './page.js';
 import { buildSnapshotResponse, type DashboardSnapshotApiResponse } from './api/snapshot.js';
+import type { LiveRuntimeSnapshot, LiveSnapshotProvider } from './snapshot.js';
 import { hasErrorCode, mapListenError } from './server-errors.js';
 import type { DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext, updateEnvKey } from '../health/config-doctor.js';
@@ -65,6 +66,7 @@ export type DashboardServerOptions = {
   log?: LoggerLike;
   deps?: Partial<DashboardDeps>;
   restartExecutor?: (cmd: string, args: string[]) => void;
+  liveSnapshotProvider?: LiveSnapshotProvider;
 };
 
 export type DashboardServer = {
@@ -350,6 +352,23 @@ function withStartupMcpSnapshot<T extends { snapshot: DashboardSnapshot }>(
   };
 }
 
+function withLiveSnapshot<T extends { snapshot: DashboardSnapshot }>(
+  response: T,
+  liveSnapshotProvider?: LiveSnapshotProvider,
+): T {
+  if (!liveSnapshotProvider) return response;
+  const live = liveSnapshotProvider();
+  if (!live) return response;
+
+  return {
+    ...response,
+    snapshot: {
+      ...response.snapshot,
+      live,
+    },
+  };
+}
+
 type DeferredRestart = {
   response: DashboardRestartApiResponse;
   deferred: () => void;
@@ -568,10 +587,13 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
         respondJson(
           res,
           200,
-          withStartupMcpSnapshot(
-            await buildSnapshotResponse(inspectOpts, deps),
-            opts.startupMcpStatus,
-            opts.startupMcpWarnings,
+          withLiveSnapshot(
+            withStartupMcpSnapshot(
+              await buildSnapshotResponse(inspectOpts, deps),
+              opts.startupMcpStatus,
+              opts.startupMcpWarnings,
+            ),
+            opts.liveSnapshotProvider,
           ),
         );
         return;
@@ -626,10 +648,13 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
         respondJson(
           res,
           200,
-          withStartupMcpSnapshot(
-            await buildDoctorFixResponse(inspectOpts, deps),
-            opts.startupMcpStatus,
-            opts.startupMcpWarnings,
+          withLiveSnapshot(
+            withStartupMcpSnapshot(
+              await buildDoctorFixResponse(inspectOpts, deps),
+              opts.startupMcpStatus,
+              opts.startupMcpWarnings,
+            ),
+            opts.liveSnapshotProvider,
           ),
         );
         return;
@@ -648,10 +673,13 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
         respondJson(
           res,
           200,
-          withStartupMcpSnapshot(
-            await buildModelResponse(body, inspectOpts, deps, KNOWN_RUNTIMES),
-            opts.startupMcpStatus,
-            opts.startupMcpWarnings,
+          withLiveSnapshot(
+            withStartupMcpSnapshot(
+              await buildModelResponse(body, inspectOpts, deps, KNOWN_RUNTIMES),
+              opts.startupMcpStatus,
+              opts.startupMcpWarnings,
+            ),
+            opts.liveSnapshotProvider,
           ),
         );
         return;
@@ -670,10 +698,13 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
         respondJson(
           res,
           200,
-          withStartupMcpSnapshot(
-            await buildPresetResponse(body, inspectOpts, deps),
-            opts.startupMcpStatus,
-            opts.startupMcpWarnings,
+          withLiveSnapshot(
+            withStartupMcpSnapshot(
+              await buildPresetResponse(body, inspectOpts, deps),
+              opts.startupMcpStatus,
+              opts.startupMcpWarnings,
+            ),
+            opts.liveSnapshotProvider,
           ),
         );
         return;
