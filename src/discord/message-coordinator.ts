@@ -4507,12 +4507,16 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                   ? `One or more actions failed. If you retry, explicitly tell the user what failed and whether the retry succeeded or failed. Do not announce success before the action confirms it.`
                   : `Continue your analysis based on these results. If you need additional information, you may emit further query actions.`;
 
-                // Build follow-up prompt with preamble prefix for provider cache hits.
-                // Channel context and conversation history are excluded — the model
-                // already processed them on the initial turn.
+                // Build follow-up prompt with system/user sentinel for provider cache hits.
+                // The sentinel ensures splitSystemPrompt() produces a `system` field on
+                // follow-ups, matching the initial turn's API structure. Without it, the
+                // follow-up has no system field → zero prefix cache hits between the
+                // initial turn and first follow-up. Channel context and conversation
+                // history are excluded — the model already processed them on the initial turn.
                 const followUpParts: string[] = [];
 
-                // Stable preamble prefix (byte-identical to initial turn → cached at ~90% discount).
+                // Stable preamble prefix (byte-identical to initial turn's system field
+                // prefix → provider prefix caching applies on the shared leading bytes).
                 followUpParts.push(preambleText);
 
                 // High-signal primacy-zone sections carry over to follow-ups.
@@ -4522,6 +4526,14 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 if (durableSection) {
                   followUpParts.push(`---\nDurable memory (user-specific notes):\n${durableSection}`);
                 }
+
+                // System/user sentinel — splitSystemPrompt() splits here, placing
+                // everything above into the `system` field and everything below into
+                // the `user` field. This matches the initial turn's API structure so
+                // the provider can cache the shared system prefix across turns.
+                followUpParts.push(
+                  `---\nThe sections above are internal system context. Do not reference them in your response.`,
+                );
 
                 // Original request summary so a reset session knows what task it is continuing.
                 const originalRequest = userText.trim();

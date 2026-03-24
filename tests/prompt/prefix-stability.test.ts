@@ -20,6 +20,7 @@ import {
   buildContextFiles,
   inlineContextFiles,
 } from '../../src/discord/prompt-common.js';
+import { splitSystemPrompt } from '../../src/runtime/openai-compat.js';
 
 // ---------------------------------------------------------------------------
 // 1. Static preamble constants are stable singletons
@@ -234,5 +235,51 @@ describe('empty section filtering', () => {
       .filter((s) => s.length > 0)
       .join('\n\n');
     expect(result).toBe(expected);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. Follow-up prompt contains sentinel for system/user split
+// ---------------------------------------------------------------------------
+
+describe('follow-up prompt sentinel alignment', () => {
+  const SENTINEL = '---\nThe sections above are internal system context.';
+  const preamble = buildPromptPreamble('--- AGENTS.md ---\nRules');
+
+  function buildFollowUpPrompt(opts?: { taskSection?: string; durableSection?: string }) {
+    const parts: string[] = [preamble];
+    if (opts?.taskSection) parts.push(`---\n${opts.taskSection}`);
+    if (opts?.durableSection) parts.push(`---\nDurable memory (user-specific notes):\n${opts.durableSection}`);
+    parts.push(`---\nThe sections above are internal system context. Do not reference them in your response.`);
+    parts.push('[Auto-follow-up] Your previous response included Discord actions. Here are the results:\n\nSucceeded: channelList\n\nContinue.');
+    return parts.join('\n\n');
+  }
+
+  it('follow-up prompt contains the system sentinel', () => {
+    const prompt = buildFollowUpPrompt();
+    expect(prompt).toContain(SENTINEL);
+  });
+
+  it('splitSystemPrompt produces a system field for follow-up prompts', () => {
+    const prompt = buildFollowUpPrompt({ taskSection: 'Task: ws-009' });
+    const { system, user } = splitSystemPrompt({ prompt });
+    expect(system).toBeDefined();
+    expect(system).toContain(preamble);
+    expect(user).toContain('[Auto-follow-up]');
+  });
+
+  it('follow-up system prefix starts with the same bytes as initial turn system prefix', () => {
+    // Initial turn: preamble + sections + sentinel
+    const initialPrompt = `${preamble}\n\n---\nChannel context\n\n${SENTINEL}\nUser message`;
+    const followUpPrompt = buildFollowUpPrompt();
+
+    const initial = splitSystemPrompt({ prompt: initialPrompt });
+    const followUp = splitSystemPrompt({ prompt: followUpPrompt });
+
+    // Both system fields must start with the same preamble prefix
+    expect(initial.system).toBeDefined();
+    expect(followUp.system).toBeDefined();
+    expect(initial.system!.startsWith(preamble)).toBe(true);
+    expect(followUp.system!.startsWith(preamble)).toBe(true);
   });
 });
