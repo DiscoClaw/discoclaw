@@ -90,8 +90,11 @@ import { parseConfig } from './config.js';
 import { startWebhookServer } from './webhook/server.js';
 import type { WebhookServer } from './webhook/server.js';
 import { startDashboardServer } from './dashboard/server.js';
-import type { DashboardServer as LocalDashboardServer } from './dashboard/server.js';
+import type { DashboardServer as LocalDashboardServer, LiveModelHandler } from './dashboard/server.js';
+import { executeConfigAction } from './discord/actions-config.js';
 import { formatDashboardOperatorUrl, resolveDashboardBindHost } from './dashboard/options.js';
+import { collectLiveSnapshot, fetchGeminiImagegenModels } from './dashboard/snapshot.js';
+import { probeProviderAuth } from './dashboard/auth-probe.js';
 import { collectDashboardSnapshot } from './cli/dashboard.js';
 import { ArtifactStore } from './canvas/artifact-store.js';
 import { createCanvasBuiltinApps } from './canvas/apps.js';
@@ -2002,6 +2005,21 @@ if (taskCtx) {
       log.info({ imagegenModel: currentModelConfig['imagegen'] }, 'models: imagegen model applied');
     }
     log.info('imagegen:action context initialized');
+
+    // Fetch available Gemini image models in the background so the dashboard
+    // selector reflects real API availability instead of a hardcoded list.
+    if (botParams.imagegenCtx.geminiApiKey) {
+      const ctx = botParams.imagegenCtx;
+      const geminiKey = botParams.imagegenCtx.geminiApiKey;
+      fetchGeminiImagegenModels(geminiKey).then((models) => {
+        if (models.length > 0) {
+          ctx.geminiImageModels = models;
+          log.info({ count: models.length, models }, 'imagegen:gemini models fetched from API');
+        }
+      }).catch((err) => {
+        log.warn({ err }, 'imagegen:gemini model list fetch failed; using hardcoded fallback');
+      });
+    }
   }
 
   if (discordActionsEnabled && cfg.discordActionsSpawn) {
@@ -2737,6 +2755,35 @@ if (cfg.dashboardEnabled) {
       startupMcpStatus: bootReportMcpStatus,
       startupMcpWarnings: mcpWarnings,
       log,
+      liveSnapshotProvider: () =>
+        collectLiveSnapshot({
+          runtimeName: botParams.configCtx?.runtimeName ?? primaryRuntimeName,
+          runtimeModel: botParams.runtimeModel,
+          availableRuntimes: runtimeRegistry.list(),
+          pendingRestart: false,
+          imagegenCtx: botParams.imagegenCtx,
+        }),
+      liveModelHandler: ((role: string, model: string) => {
+        const configCtx = botParams.configCtx;
+        if (!configCtx) return { ok: false as const, error: 'Live model changes are not available (bot not fully initialized).' };
+        return executeConfigAction({ type: 'modelSet', role: role as import('./discord/actions-config.js').ModelRole, model }, configCtx);
+      }) satisfies LiveModelHandler,
+      liveAuthCheckHandler: async (target: string) => {
+        const ctx = botParams.imagegenCtx;
+        if (target === 'imagegen') {
+          return probeProviderAuth({
+            openaiApiKey: ctx?.apiKey,
+            openaiBaseUrl: ctx?.baseUrl,
+            geminiApiKey: ctx?.geminiApiKey,
+          });
+        }
+        // For 'chat' target, probe the primary runtime's key.
+        return probeProviderAuth({
+          openaiApiKey: cfg.openaiApiKey,
+          geminiApiKey: cfg.geminiApiKey,
+          anthropicApiKey: cfg.anthropicApiKey,
+        });
+      },
     });
     const address = dashboardServer.server.address();
     dashboardUrl = formatDashboardOperatorUrl(

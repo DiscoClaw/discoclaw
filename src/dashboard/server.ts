@@ -18,6 +18,8 @@ import {
 import { DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT, formatDashboardUrl } from './options.js';
 import { renderDashboardPage } from './page.js';
 import { buildSnapshotResponse, type DashboardSnapshotApiResponse } from './api/snapshot.js';
+import type { LiveRuntimeSnapshot, LiveSnapshotProvider } from './snapshot.js';
+import type { AuthProbeReport } from './auth-probe.js';
 import { hasErrorCode, mapListenError } from './server-errors.js';
 import type { DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext, updateEnvKey } from '../health/config-doctor.js';
@@ -54,6 +56,25 @@ type KnownRuntimesType = typeof KNOWN_RUNTIMES;
 
 export type { DashboardSnapshotApiResponse } from './api/snapshot.js';
 
+/**
+ * Result of a live model change applied to the running bot's in-memory state.
+ */
+export type LiveModelResult =
+  | { ok: true; summary: string }
+  | { ok: false; error: string };
+
+/**
+ * Callback that applies a live (in-memory) model change to the running bot.
+ * The role and model mirror the executeConfigAction modelSet interface.
+ */
+export type LiveModelHandler = (role: string, model: string) => LiveModelResult;
+
+/**
+ * Callback that runs API key auth probes against the running bot's credentials.
+ * The target selects which provider group to check ('imagegen' or 'chat').
+ */
+export type LiveAuthCheckHandler = (target: string) => Promise<AuthProbeReport>;
+
 export type DashboardServerOptions = {
   port?: number;
   host?: string;
@@ -65,6 +86,9 @@ export type DashboardServerOptions = {
   log?: LoggerLike;
   deps?: Partial<DashboardDeps>;
   restartExecutor?: (cmd: string, args: string[]) => void;
+  liveSnapshotProvider?: LiveSnapshotProvider;
+  liveModelHandler?: LiveModelHandler;
+  liveAuthCheckHandler?: LiveAuthCheckHandler;
 };
 
 export type DashboardServer = {
@@ -120,6 +144,25 @@ export type DashboardPresetApiResponse = {
   ok: true;
   message: string;
   snapshot: DashboardSnapshot;
+};
+
+export type DashboardLiveModelApiResponse = {
+  ok: true;
+  message: string;
+  snapshot: DashboardSnapshot;
+};
+
+export type DashboardSecretApiResponse = {
+  ok: true;
+  message: string;
+  snapshot: DashboardSnapshot;
+};
+
+export type DashboardAuthCheckApiResponse = {
+  ok: true;
+  status: 'ok' | 'warn' | 'error';
+  message: string;
+  results: AuthProbeReport['results'];
 };
 
 function createDefaultDeps(): DashboardDeps {
@@ -350,6 +393,26 @@ function withStartupMcpSnapshot<T extends { snapshot: DashboardSnapshot }>(
   };
 }
 
+function withLiveSnapshot<T extends { snapshot: DashboardSnapshot }>(
+  response: T,
+  liveSnapshotProvider?: LiveSnapshotProvider,
+  pendingRestartOverride?: boolean,
+): T {
+  if (!liveSnapshotProvider) return response;
+  const live = liveSnapshotProvider();
+  if (!live) return response;
+
+  return {
+    ...response,
+    snapshot: {
+      ...response.snapshot,
+      live: pendingRestartOverride !== undefined
+        ? { ...live, pendingRestart: live.pendingRestart || pendingRestartOverride }
+        : live,
+    },
+  };
+}
+
 type DeferredRestart = {
   response: DashboardRestartApiResponse;
   deferred: () => void;
@@ -474,6 +537,13 @@ async function buildModelResponse(
   };
 }
 
+const ALLOWED_SECRET_KEYS = new Set([
+  'OPENAI_API_KEY',
+  'OPENROUTER_API_KEY',
+  'ANTHROPIC_API_KEY',
+  'IMAGEGEN_GEMINI_API_KEY',
+]);
+
 const ALLOWED_PRESETS = new Set(['claude', 'codex']);
 
 async function applyPreset(
@@ -530,6 +600,10 @@ function isDashboardBadRequest(message: string): boolean {
     || message.startsWith('Model value must be one of the known saved options')
     || message.startsWith('Unknown preset:')
     || message === 'Preset is required.'
+    || message === 'Auth check target is required.'
+    || message === 'Secret key is required.'
+    || message === 'Secret value is required.'
+    || message.startsWith('Unknown secret key:')
   );
 }
 
@@ -548,6 +622,11 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
       }
     });
   });
+  const liveModelHandler = opts.liveModelHandler;
+  const liveAuthCheckHandler = opts.liveAuthCheckHandler;
+
+  // Mutable flag — set when a persisted config change requires a restart to take effect.
+  let pendingRestart = false;
 
   const server = http.createServer(async (req, res) => {
     const method = req.method ?? 'GET';
@@ -568,10 +647,14 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
         respondJson(
           res,
           200,
-          withStartupMcpSnapshot(
-            await buildSnapshotResponse(inspectOpts, deps),
-            opts.startupMcpStatus,
-            opts.startupMcpWarnings,
+          withLiveSnapshot(
+            withStartupMcpSnapshot(
+              await buildSnapshotResponse(inspectOpts, deps),
+              opts.startupMcpStatus,
+              opts.startupMcpWarnings,
+            ),
+            opts.liveSnapshotProvider,
+            pendingRestart,
           ),
         );
         return;
@@ -602,6 +685,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           return;
         }
         const restart = await buildRestartResponse(inspectOpts, deps, restartExecutor);
+        pendingRestart = false;
         res.once('finish', () => {
           setTimeout(restart.deferred, 25);
         });
@@ -626,10 +710,55 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
         respondJson(
           res,
           200,
-          withStartupMcpSnapshot(
-            await buildDoctorFixResponse(inspectOpts, deps),
-            opts.startupMcpStatus,
-            opts.startupMcpWarnings,
+          withLiveSnapshot(
+            withStartupMcpSnapshot(
+              await buildDoctorFixResponse(inspectOpts, deps),
+              opts.startupMcpStatus,
+              opts.startupMcpWarnings,
+            ),
+            opts.liveSnapshotProvider,
+            pendingRestart,
+          ),
+        );
+        return;
+      }
+
+      if (pathname === '/api/live-model') {
+        if (method !== 'POST') {
+          respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
+          return;
+        }
+        if (!hasSafeDashboardOrigin(req, trustedHosts)) {
+          respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
+          return;
+        }
+        if (!liveModelHandler) {
+          respondJson(res, 501, { ok: false, message: 'Live model changes are not available (bot not fully initialized).' });
+          return;
+        }
+        const body = await readJsonBody(req);
+        const role = typeof body.role === 'string' ? body.role.trim() : '';
+        const model = typeof body.model === 'string' ? body.model.trim() : '';
+        if (!role) throw new Error('Model role is required.');
+        if (!model) throw new Error('Model value is required.');
+
+        const result = liveModelHandler(role, model);
+        if (!result.ok) {
+          respondJson(res, 400, { ok: false, message: result.error });
+          return;
+        }
+        const snapshot = await collectDashboardSnapshot(inspectOpts, deps);
+        respondJson(
+          res,
+          200,
+          withLiveSnapshot(
+            withStartupMcpSnapshot(
+              { ok: true as const, message: result.summary, snapshot },
+              opts.startupMcpStatus,
+              opts.startupMcpWarnings,
+            ),
+            opts.liveSnapshotProvider,
+            pendingRestart,
           ),
         );
         return;
@@ -645,13 +774,19 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           return;
         }
         const body = await readJsonBody(req);
+        const modelResponse = await buildModelResponse(body, inspectOpts, deps, KNOWN_RUNTIMES);
+        pendingRestart = true;
         respondJson(
           res,
           200,
-          withStartupMcpSnapshot(
-            await buildModelResponse(body, inspectOpts, deps, KNOWN_RUNTIMES),
-            opts.startupMcpStatus,
-            opts.startupMcpWarnings,
+          withLiveSnapshot(
+            withStartupMcpSnapshot(
+              modelResponse,
+              opts.startupMcpStatus,
+              opts.startupMcpWarnings,
+            ),
+            opts.liveSnapshotProvider,
+            pendingRestart,
           ),
         );
         return;
@@ -667,15 +802,92 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           return;
         }
         const body = await readJsonBody(req);
+        const presetResponse = await buildPresetResponse(body, inspectOpts, deps);
+        pendingRestart = true;
         respondJson(
           res,
           200,
-          withStartupMcpSnapshot(
-            await buildPresetResponse(body, inspectOpts, deps),
-            opts.startupMcpStatus,
-            opts.startupMcpWarnings,
+          withLiveSnapshot(
+            withStartupMcpSnapshot(
+              presetResponse,
+              opts.startupMcpStatus,
+              opts.startupMcpWarnings,
+            ),
+            opts.liveSnapshotProvider,
+            pendingRestart,
           ),
         );
+        return;
+      }
+
+      if (pathname === '/api/secret') {
+        if (method !== 'POST') {
+          respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
+          return;
+        }
+        if (!hasSafeDashboardOrigin(req, trustedHosts)) {
+          respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
+          return;
+        }
+        const body = await readJsonBody(req);
+        const key = typeof body.key === 'string' ? body.key.trim() : '';
+        const value = typeof body.value === 'string' ? body.value : '';
+        if (!key) throw new Error('Secret key is required.');
+        if (!ALLOWED_SECRET_KEYS.has(key)) throw new Error(`Unknown secret key: ${key}`);
+        if (!value) throw new Error('Secret value is required.');
+
+        const ctx = await deps.loadDoctorContext(inspectOpts);
+        await deps.updateEnvKey(ctx.configPaths.env, key, value);
+        pendingRestart = true;
+        const snapshot = await collectDashboardSnapshot(inspectOpts, deps);
+        respondJson(
+          res,
+          200,
+          withLiveSnapshot(
+            withStartupMcpSnapshot(
+              { ok: true as const, message: `Updated ${key}. Restart the service to apply.`, snapshot },
+              opts.startupMcpStatus,
+              opts.startupMcpWarnings,
+            ),
+            opts.liveSnapshotProvider,
+            pendingRestart,
+          ) satisfies DashboardSecretApiResponse,
+        );
+        return;
+      }
+
+      if (pathname === '/api/auth-check') {
+        if (method !== 'POST') {
+          respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
+          return;
+        }
+        if (!hasSafeDashboardOrigin(req, trustedHosts)) {
+          respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
+          return;
+        }
+        if (!liveAuthCheckHandler) {
+          respondJson(res, 501, { ok: false, message: 'Auth checks are not available (bot not fully initialized).' });
+          return;
+        }
+        const body = await readJsonBody(req);
+        const target = typeof body.target === 'string' ? body.target.trim() : '';
+        if (!target) throw new Error('Auth check target is required.');
+        const report = await liveAuthCheckHandler(target);
+        const failed = report.results.filter((r) => r.status === 'fail');
+        const skipped = report.results.filter((r) => r.status === 'skip');
+        let status: 'ok' | 'warn' | 'error';
+        let message: string;
+        if (report.allOk && skipped.length === report.results.length) {
+          status = 'warn';
+          message = 'No API keys configured for this target.';
+        } else if (report.allOk) {
+          status = 'ok';
+          message = 'All configured keys are valid.';
+        } else {
+          status = 'error';
+          message = failed.map((r) => `${r.provider}: ${r.message ?? 'failed'}`).join('; ');
+        }
+        respondJson(res, 200, { ok: true, status, message, results: report.results } satisfies DashboardAuthCheckApiResponse);
         return;
       }
 

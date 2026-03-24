@@ -32,6 +32,8 @@ export type ImagegenContext = {
   baseUrl?: string;
   geminiApiKey?: string;
   defaultModel?: string;
+  /** Dynamically fetched Gemini image model IDs; populated at startup. */
+  geminiImageModels?: string[];
 };
 
 // ---------------------------------------------------------------------------

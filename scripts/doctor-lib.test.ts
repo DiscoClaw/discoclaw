@@ -14,7 +14,7 @@ describe('doctor-lib: required forums', () => {
   });
 
   it('fails when forums are missing and DISCORD_GUILD_ID is absent', () => {
-    const checks = checkRequiredForums({});
+    const checks = checkRequiredForums({ DISCOCLAW_DATA_DIR: '/tmp/doctor-lib-test-nonexistent' });
     expect(checks.some((c) => !c.ok && c.label.includes('DISCOCLAW_CRON_FORUM is required'))).toBe(true);
     expect(checks.some((c) => !c.ok && c.label.includes('DISCOCLAW_TASKS_FORUM is required'))).toBe(true);
   });

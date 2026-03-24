@@ -6,15 +6,21 @@ import type { BootReportMcpStatus } from '../discord/status-channel.js';
 import type { DoctorContext, DoctorReport, FixResult } from '../health/config-doctor.js';
 import {
   startDashboardServer,
+  type DashboardAuthCheckApiResponse,
   type DashboardDoctorApiResponse,
   type DashboardDoctorFixApiResponse,
+  type DashboardLiveModelApiResponse,
   type DashboardModelApiResponse,
   type DashboardPresetApiResponse,
   type DashboardRestartApiResponse,
+  type DashboardSecretApiResponse,
   type DashboardServer,
   type DashboardServiceApiResponse,
   type DashboardSnapshotApiResponse,
+  type LiveAuthCheckHandler,
+  type LiveModelHandler,
 } from './server.js';
+import type { LiveSnapshotProvider } from './snapshot.js';
 
 type RequestOptions = {
   method?: string;
@@ -35,6 +41,9 @@ type StartServerOptions = {
   trustedHosts?: Set<string>;
   startupMcpStatus?: BootReportMcpStatus;
   startupMcpWarnings?: number;
+  liveSnapshotProvider?: LiveSnapshotProvider;
+  liveModelHandler?: LiveModelHandler;
+  liveAuthCheckHandler?: LiveAuthCheckHandler;
 };
 
 let handle: DashboardServer | null = null;
@@ -243,6 +252,9 @@ async function startServer(
     startupMcpWarnings: options.startupMcpWarnings,
     deps: fullDeps,
     restartExecutor: options.restartExecutor,
+    liveSnapshotProvider: options.liveSnapshotProvider,
+    liveModelHandler: options.liveModelHandler,
+    liveAuthCheckHandler: options.liveAuthCheckHandler,
     log: mockLog(),
   });
   const address = handle.server.address() as { port: number };
@@ -999,6 +1011,91 @@ describe('startDashboardServer', () => {
     expect(body).toEqual({ ok: false, message: 'Method Not Allowed' });
   });
 
+  it('returns 501 for /api/auth-check when handler is not provided', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/auth-check',
+      method: 'POST',
+      body: JSON.stringify({ target: 'imagegen' }),
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+    expect(response.status).toBe(501);
+    expect(body).toEqual({ ok: false, message: 'Auth checks are not available (bot not fully initialized).' });
+  });
+
+  it('returns auth probe results from /api/auth-check', async () => {
+    const handler: LiveAuthCheckHandler = vi.fn(async () => ({
+      results: [
+        { provider: 'openai', status: 'skip' as const },
+        { provider: 'gemini', status: 'ok' as const },
+      ],
+      allOk: true,
+    }));
+    const { port } = await startServer({}, { liveAuthCheckHandler: handler });
+    const response = await makeRequest(port, {
+      path: '/api/auth-check',
+      method: 'POST',
+      body: JSON.stringify({ target: 'imagegen' }),
+    });
+    const body = parseJson<DashboardAuthCheckApiResponse>(response.text);
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.status).toBe('ok');
+    expect(body.message).toBe('All configured keys are valid.');
+    expect(body.results).toHaveLength(2);
+    expect(handler).toHaveBeenCalledWith('imagegen');
+  });
+
+  it('returns warn status when all keys are skipped', async () => {
+    const handler: LiveAuthCheckHandler = vi.fn(async () => ({
+      results: [
+        { provider: 'openai', status: 'skip' as const },
+        { provider: 'gemini', status: 'skip' as const },
+      ],
+      allOk: true,
+    }));
+    const { port } = await startServer({}, { liveAuthCheckHandler: handler });
+    const response = await makeRequest(port, {
+      path: '/api/auth-check',
+      method: 'POST',
+      body: JSON.stringify({ target: 'imagegen' }),
+    });
+    const body = parseJson<DashboardAuthCheckApiResponse>(response.text);
+    expect(response.status).toBe(200);
+    expect(body.status).toBe('warn');
+    expect(body.message).toBe('No API keys configured for this target.');
+  });
+
+  it('returns error status when a key probe fails', async () => {
+    const handler: LiveAuthCheckHandler = vi.fn(async () => ({
+      results: [
+        { provider: 'openai', status: 'fail' as const, message: 'invalid or expired key (401)' },
+        { provider: 'gemini', status: 'ok' as const },
+      ],
+      allOk: false,
+    }));
+    const { port } = await startServer({}, { liveAuthCheckHandler: handler });
+    const response = await makeRequest(port, {
+      path: '/api/auth-check',
+      method: 'POST',
+      body: JSON.stringify({ target: 'imagegen' }),
+    });
+    const body = parseJson<DashboardAuthCheckApiResponse>(response.text);
+    expect(response.status).toBe(200);
+    expect(body.status).toBe('error');
+    expect(body.message).toContain('openai');
+    expect(body.message).toContain('invalid or expired key (401)');
+  });
+
+  it('rejects /api/auth-check with GET method', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/auth-check',
+      method: 'GET',
+    });
+    expect(response.status).toBe(405);
+  });
+
   it('returns 404 for unknown routes', async () => {
     const { port } = await startServer();
     const response = await makeRequest(port, { path: '/api/nope' });
@@ -1132,6 +1229,185 @@ describe('startDashboardServer', () => {
       expect.objectContaining({ attempt: expect.any(Number) }),
       expect.stringContaining('in use'),
     );
+  });
+
+  it('includes live snapshot in /api/snapshot when provider is wired', async () => {
+    const liveSnapshotProvider: LiveSnapshotProvider = vi.fn(() => ({
+      chatRuntime: 'anthropic',
+      chatModel: 'claude-opus-4-6',
+      chatThinking: undefined,
+      availableRuntimes: ['claude', 'anthropic'],
+      pendingRestart: false,
+      imagegenProvider: 'gemini',
+      imagegenModel: 'gemini-3.1-flash-image-preview',
+      imagegenOptions: ['gemini-3.1-flash-image-preview'],
+      imagegenHasGeminiKey: true,
+      imagegenHasOpenaiKey: false,
+    }));
+    const { port } = await startServer({}, { liveSnapshotProvider });
+    const response = await makeRequest(port, { path: '/api/snapshot' });
+    const body = parseJson<DashboardSnapshotApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.snapshot.live).toBeDefined();
+    expect(body.snapshot.live?.chatRuntime).toBe('anthropic');
+    expect(body.snapshot.live?.chatModel).toBe('claude-opus-4-6');
+    expect(body.snapshot.live?.imagegenProvider).toBe('gemini');
+    expect(liveSnapshotProvider).toHaveBeenCalled();
+  });
+
+  it('merges pendingRestart flag from persisted config changes into live snapshot', async () => {
+    const liveSnapshotProvider: LiveSnapshotProvider = vi.fn(() => ({
+      chatRuntime: 'claude',
+      chatModel: 'opus',
+      chatThinking: undefined,
+      availableRuntimes: ['claude'],
+      pendingRestart: false,
+      imagegenProvider: undefined,
+      imagegenModel: undefined,
+      imagegenOptions: [],
+      imagegenHasGeminiKey: false,
+      imagegenHasOpenaiKey: false,
+    }));
+    const ctx = makeDoctorContext();
+    const { port } = await startServer(
+      { loadDoctorContext: vi.fn(async () => ctx) },
+      { liveSnapshotProvider },
+    );
+
+    // Make a persisted model change to set pendingRestart=true
+    await makeRequest(port, {
+      path: '/api/model',
+      method: 'POST',
+      body: JSON.stringify({ role: 'chat', model: 'claude-opus-4-6' }),
+    });
+
+    // Now fetch snapshot — live.pendingRestart should be true from the override
+    const response = await makeRequest(port, { path: '/api/snapshot' });
+    const body = parseJson<DashboardSnapshotApiResponse>(response.text);
+    expect(body.snapshot.live?.pendingRestart).toBe(true);
+  });
+
+  it('returns 501 for /api/live-model when handler is not provided', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/live-model',
+      method: 'POST',
+      body: JSON.stringify({ role: 'chat', model: 'opus' }),
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+    expect(response.status).toBe(501);
+    expect(body.ok).toBe(false);
+  });
+
+  it('applies live model changes via /api/live-model', async () => {
+    const liveModelHandler: LiveModelHandler = vi.fn(() => ({
+      ok: true as const,
+      summary: 'Switched chat to opus (live).',
+    }));
+    const { port } = await startServer({}, { liveModelHandler });
+    const response = await makeRequest(port, {
+      path: '/api/live-model',
+      method: 'POST',
+      body: JSON.stringify({ role: 'chat', model: 'opus' }),
+    });
+    const body = parseJson<DashboardLiveModelApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.message).toBe('Switched chat to opus (live).');
+    expect(body.snapshot).toBeDefined();
+    expect(liveModelHandler).toHaveBeenCalledWith('chat', 'opus');
+  });
+
+  it('returns 400 when live model handler rejects the change', async () => {
+    const liveModelHandler: LiveModelHandler = vi.fn(() => ({
+      ok: false as const,
+      error: 'Unknown role: nope',
+    }));
+    const { port } = await startServer({}, { liveModelHandler });
+    const response = await makeRequest(port, {
+      path: '/api/live-model',
+      method: 'POST',
+      body: JSON.stringify({ role: 'nope', model: 'opus' }),
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+
+    expect(response.status).toBe(400);
+    expect(body.ok).toBe(false);
+    expect(body.message).toBe('Unknown role: nope');
+  });
+
+  it('saves secret via /api/secret and sets pendingRestart', async () => {
+    const ctx = makeDoctorContext();
+    const updateEnvKeyMock = vi.fn(async () => undefined);
+    const { port } = await startServer({
+      loadDoctorContext: vi.fn(async () => ctx),
+      updateEnvKey: updateEnvKeyMock,
+    });
+
+    const response = await makeRequest(port, {
+      path: '/api/secret',
+      method: 'POST',
+      body: JSON.stringify({ key: 'OPENAI_API_KEY', value: 'sk-test-123' }),
+    });
+    const body = parseJson<DashboardSecretApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.message).toBe('Updated OPENAI_API_KEY. Restart the service to apply.');
+    expect(body.snapshot).toBeDefined();
+    expect(updateEnvKeyMock).toHaveBeenCalledWith('/repo/.env', 'OPENAI_API_KEY', 'sk-test-123');
+  });
+
+  it('rejects unknown secret keys on /api/secret', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/secret',
+      method: 'POST',
+      body: JSON.stringify({ key: 'NOT_A_KEY', value: 'value' }),
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+
+    expect(response.status).toBe(400);
+    expect(body.ok).toBe(false);
+    expect(body.message).toBe('Unknown secret key: NOT_A_KEY');
+  });
+
+  it('rejects empty value on /api/secret', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/secret',
+      method: 'POST',
+      body: JSON.stringify({ key: 'OPENAI_API_KEY', value: '' }),
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+
+    expect(response.status).toBe(400);
+    expect(body.ok).toBe(false);
+    expect(body.message).toBe('Secret value is required.');
+  });
+
+  it('rejects GET requests on /api/secret', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/secret',
+      method: 'GET',
+    });
+    expect(response.status).toBe(405);
+  });
+
+  it('rejects cross-origin POST on /api/secret', async () => {
+    const { port } = await startServer();
+    const response = await makeRequest(port, {
+      path: '/api/secret',
+      method: 'POST',
+      body: JSON.stringify({ key: 'OPENAI_API_KEY', value: 'sk-test' }),
+      headers: { Origin: 'http://evil.example' },
+    });
+    const body = parseJson<{ ok: boolean; message: string }>(response.text);
+    expect(response.status).toBe(403);
+    expect(body.message).toBe('Cross-origin mutation requests are not allowed.');
   });
 
   it('logs the formatted dashboard URL when the server starts listening', async () => {

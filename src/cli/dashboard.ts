@@ -17,6 +17,7 @@ import {
   validateMcpServerEnv,
   validateMcpServerNames,
 } from '../mcp-detect.js';
+import type { LiveRuntimeSnapshot } from '../dashboard/snapshot.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
 import { saveOverrides, type RuntimeOverrides } from '../runtime-overrides.js';
 import type { CommandResult, ServiceControlDeps } from '../service-control.js';
@@ -80,6 +81,7 @@ export type DashboardSnapshot = {
   mcpStatus: BootReportMcpStatus;
   mcpWarnings: number;
   primaryRuntime: string;
+  live?: LiveRuntimeSnapshot;
 };
 
 export type DashboardIo = {
