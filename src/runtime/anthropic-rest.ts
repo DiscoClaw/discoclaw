@@ -5,6 +5,7 @@
 import type { RuntimeAdapter, EngineEvent, RuntimeCapability, RuntimeInvokeParams } from './types.js';
 import { splitSystemPrompt } from './openai-compat.js';
 import { createRuntimeErrorEvent } from './runtime-failure.js';
+import { estimateTokensFromChars, recordTokenTelemetry } from '../discord/prompt-common.js';
 
 export type AnthropicRestOpts = {
   apiKey: string;
@@ -13,7 +14,7 @@ export type AnthropicRestOpts = {
   apiVersion?: string;
   /** Default max_tokens when not specified per-invocation. Defaults to 1024. */
   defaultMaxTokens?: number;
-  log?: { debug(...args: unknown[]): void; warn(...args: unknown[]): void };
+  log?: { debug(...args: unknown[]): void; info?(obj: unknown, msg?: string): void; warn(...args: unknown[]): void };
 };
 
 /** Extract the data payload from an SSE line, or undefined if not a data line. */
@@ -56,6 +57,11 @@ export function createAnthropicRestRuntime(opts: AnthropicRestOpts): RuntimeAdap
         if (params.signal?.aborted) controller.abort();
 
         const { system: sysContent, user: userContent } = splitSystemPrompt(params);
+        const estimatedInputTokens = estimateTokensFromChars(
+          (sysContent?.length ?? 0) + userContent.length,
+        );
+        let actualInputTokens = 0;
+        let actualOutputTokens = 0;
 
         try {
           opts.log?.debug({ url, model }, 'anthropic-rest: request');
@@ -132,6 +138,7 @@ export function createAnthropicRestRuntime(opts: AnthropicRestOpts): RuntimeAdap
                 // Input token usage from message_start
                 const usage = parsed.message?.usage;
                 if (usage?.input_tokens != null) {
+                  actualInputTokens = usage.input_tokens;
                   yield {
                     type: 'usage',
                     inputTokens: usage.input_tokens,
@@ -141,6 +148,7 @@ export function createAnthropicRestRuntime(opts: AnthropicRestOpts): RuntimeAdap
                 // Output token usage from message_delta
                 const usage = parsed.usage;
                 if (usage?.output_tokens != null) {
+                  actualOutputTokens = usage.output_tokens;
                   yield {
                     type: 'usage',
                     outputTokens: usage.output_tokens,
@@ -175,6 +183,21 @@ export function createAnthropicRestRuntime(opts: AnthropicRestOpts): RuntimeAdap
           }
 
           yield { type: 'text_final', text: accumulated };
+
+          if (actualInputTokens > 0 && opts.log?.info) {
+            recordTokenTelemetry(
+              {
+                estimatedInputTokens,
+                actualInputTokens,
+                actualOutputTokens: actualOutputTokens || undefined,
+                provider: 'anthropic',
+                model,
+                sessionId: params.sessionId,
+              },
+              { info: opts.log.info.bind(opts.log) },
+            );
+          }
+
           yield { type: 'done' };
         } catch (err) {
           if (timer) clearTimeout(timer);

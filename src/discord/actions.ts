@@ -879,18 +879,16 @@ Perform Discord server actions by including \`<discord-action>\` JSON blocks in 
 
 function discordActionsRulesSection(displayName: string): string {
   return `### Rules
-- Only action types listed above are supported. Never emit actions with empty/placeholder/missing required parameters — skip instead.
-- Confirm with the user before destructive actions (delete, kick, ban, timeout). However, when the user explicitly confirms AND provides specific resource IDs (e.g. "yes, delete message 123456 in channel 789012"), emit the action immediately — do not re-ask. The user providing specific IDs with an affirmative IS the confirmation, even if you don't see a prior exchange in your context. Never double-confirm when the user has already said yes with specific targets.
-- Action blocks are stripped from displayed output; results appended automatically.
-- Actions ending in List, Show, Info, Status, or prefixed with fetch/read/search are query actions — results are sent back for follow-up analysis.
-- Include all needed actions in one response. Multiple same-type actions are supported and executed sequentially.
-- If you say you are starting work now, proceeding now, cleaning something up now, or taking the next pass in this response, include the concrete \`<discord-action>\` block(s) that actually begin that work. If you are not emitting an action block, say that you have not started yet.
-- Keep the continuation capsule current with a single \`<continuation-capsule>{"activeTaskId":"...","currentFocus":"...","nextStep":"...","blockedOn":"..."}</continuation-capsule>\` block whenever the active task, current focus, next step, or blocker changes.
-- Keep continuation capsules machine-readable only; do not mention them in user-facing prose.
+- Only listed action types are valid. Skip actions with empty or missing required parameters.
+- Confirm before destructive actions (delete, kick, ban, timeout). If the user already confirmed with specific IDs, emit immediately — do not re-ask.
+- Action blocks are stripped from output; results appended automatically.
+- Actions ending in List/Show/Info/Status or prefixed fetch/read/search are queries — results return for follow-up.
+- Include all needed actions in one response. Multiple same-type actions execute sequentially.
+- When stating you are proceeding now, include the \`<discord-action>\` block(s). If not emitting an action, say you have not started.
+- Update \`<continuation-capsule>{"activeTaskId":"...","currentFocus":"...","nextStep":"...","blockedOn":"..."}</continuation-capsule>\` when active task, focus, next step, or blocker changes. Keep capsules machine-readable only.
 
 ### Permissions
-Bot requires appropriate server-level role permissions (e.g. Manage Channels, Manage Roles, Moderate Members).
-If "Missing Permissions" errors occur, tell the user to check **Server Settings → Roles** and enable the required permission on the ${displayName} bot's role.`;
+Bot requires server-level role permissions. On "Missing Permissions" errors, direct the user to **Server Settings → Roles** to enable the required permission on ${displayName}'s role.`;
 }
 
 function liveActionInventorySection(flags: ActionCategoryFlags): string {
@@ -900,16 +898,16 @@ function liveActionInventorySection(flags: ActionCategoryFlags): string {
   return `### Available action types this turn
 ${sorted.join(', ')}
 
-Before refusing any Discord-managed resource request as manual-only or unsupported, check the list above. If the relevant action type is present (e.g. \`cronCreate\` for scheduling, \`channelCreate\` for channels, \`forumTagCreate\` for forum tags), prefer executing the action or gathering the required parameters over a manual-only refusal. This list is the source of truth for what you can do this turn.`;
+This list is the source of truth. Before refusing a request as unsupported, check if the action type is listed above — if present, execute it or gather parameters.`;
 }
 
 function deferredSelfInvocationSection(): string {
   return `### Deferred self-invocation
-Use a <discord-action>{"type":"defer","channel":"general","delaySeconds":600,"prompt":"Check on the forge run"}</discord-action> block to schedule a one-shot follow-up run inside the requested channel without another user prompt. You must specify the channel by name or ID; delaySeconds is how long to wait (capped by DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS) and prompt becomes the user message when the deferred invocation runs. The scheduler enforces DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT pending jobs, respects the same channel permissions as this response, automatically posts the follow-up output, and allows nested defers up to the configured depth limit (DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH, default 4); once the limit is reached, \`defer\` is disabled for that run. If the task is recurring, use \`loopCreate\` instead of chaining repeated defers. If a guard rail rejects the request (too long, too many active defers, missing permissions, or the channel becomes invalid) the action fails with an explanatory message.
+Schedule a one-shot follow-up: \`<discord-action>{"type":"defer","channel":"general","delaySeconds":600,"prompt":"Check on the forge run"}</discord-action>\`. Specify channel by name or ID. Delay capped by DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS. Nested defers allowed up to DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH (default 4). For recurring tasks, use \`loopCreate\` instead.
 
-**Context isolation warning:** The deferred invocation runs with no conversation history — the \`prompt\` string is the **only** context the AI receives. It must include all relevant IDs, file paths, channel references, and state needed to act. Vague prompts like "check on that" will fail because the AI has no memory of what "that" refers to. Write every deferred prompt as a fully self-contained instruction.
+**Context isolation:** Deferred runs have no history — the \`prompt\` is the only context. Include all IDs, paths, and state needed. Vague prompts will fail.
 
-Use <discord-action>{"type":"deferList"}</discord-action> to query all pending one-shot deferred actions. Returns a job \`id\`, channel, prompt, and time remaining for each entry. This is a read-only query action — results are automatically sent back for further analysis.`;
+Query pending defers: \`<discord-action>{"type":"deferList"}</discord-action>\` — returns job id, channel, prompt, time remaining.`;
 }
 
 function deriveContextualCategories(opts: {

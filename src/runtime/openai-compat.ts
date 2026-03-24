@@ -3,6 +3,7 @@ import type { ChatGptTokenProvider } from './openai-auth.js';
 import { buildToolSchemas, OPENAI_TO_DISCO_NAME } from './openai-tool-schemas.js';
 import { executeToolCall } from './openai-tool-exec.js';
 import { createRuntimeErrorEvent } from './runtime-failure.js';
+import { estimateTokensFromChars, recordTokenTelemetry } from '../discord/prompt-common.js';
 
 type CommonOpts = {
   id?: RuntimeId;
@@ -11,7 +12,7 @@ type CommonOpts = {
   providerPreferences?: Readonly<Record<string, unknown>>;
   enableTools?: boolean;
   enableHybridPipeline?: boolean;
-  log?: { debug(...args: unknown[]): void };
+  log?: { debug(...args: unknown[]): void; info?(obj: unknown, msg?: string): void };
 };
 
 type ApiKeyOpts = CommonOpts & {
@@ -189,6 +190,11 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
         if (params.signal?.aborted) controller.abort();
 
         const { system: sysContent, user: userContent } = splitSystemPrompt(params);
+        const estimatedInputTokens = estimateTokensFromChars(
+          (sysContent?.length ?? 0) + userContent.length,
+        );
+        let totalActualPromptTokens = 0;
+        let totalActualCompletionTokens = 0;
 
         try {
           opts.log?.debug({ url, model }, 'openai-compat: request');
@@ -235,6 +241,13 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
               const choice = json.choices?.[0];
               const assistantMsg = choice?.message;
 
+              // Accumulate usage from each tool-loop round.
+              const roundUsage = json.usage as
+                | { prompt_tokens?: number; completion_tokens?: number }
+                | undefined;
+              if (roundUsage?.prompt_tokens) totalActualPromptTokens += roundUsage.prompt_tokens;
+              if (roundUsage?.completion_tokens) totalActualCompletionTokens += roundUsage.completion_tokens;
+
               if (!assistantMsg) {
                 yield createRuntimeErrorEvent('No response from model');
                 yield { type: 'done' };
@@ -257,6 +270,19 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
                   truncated: toolLoopFinishReason === 'length',
                   ...(toolLoopFinishReason ? { finishReason: toolLoopFinishReason } : {}),
                 };
+                if (totalActualPromptTokens > 0 && opts.log?.info) {
+                  recordTokenTelemetry(
+                    {
+                      estimatedInputTokens,
+                      actualInputTokens: totalActualPromptTokens,
+                      actualOutputTokens: totalActualCompletionTokens || undefined,
+                      provider: opts.id ?? 'openai',
+                      model,
+                      sessionId: params.sessionId,
+                    },
+                    { info: opts.log.info.bind(opts.log) },
+                  );
+                }
                 yield { type: 'done' };
                 return;
               }
@@ -316,6 +342,7 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
               model,
               messages: streamMessages,
               stream: true,
+              stream_options: { include_usage: true },
               ...tokenField,
               ...providerField,
             });
@@ -366,12 +393,33 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
                   truncated: streamFinishReason === 'length',
                   ...(streamFinishReason ? { finishReason: streamFinishReason } : {}),
                 };
+                if (totalActualPromptTokens > 0 && opts.log?.info) {
+                  recordTokenTelemetry(
+                    {
+                      estimatedInputTokens,
+                      actualInputTokens: totalActualPromptTokens,
+                      actualOutputTokens: totalActualCompletionTokens || undefined,
+                      provider: opts.id ?? 'openai',
+                      model,
+                      sessionId: params.sessionId,
+                    },
+                    { info: opts.log.info.bind(opts.log) },
+                  );
+                }
                 yield { type: 'done' };
                 return true;
               }
 
               try {
                 const parsed = JSON.parse(data);
+
+                // Extract streaming usage from the final chunk (stream_options.include_usage)
+                const streamUsage = parsed?.usage as
+                  | { prompt_tokens?: number; completion_tokens?: number }
+                  | undefined;
+                if (streamUsage?.prompt_tokens) totalActualPromptTokens = streamUsage.prompt_tokens;
+                if (streamUsage?.completion_tokens) totalActualCompletionTokens = streamUsage.completion_tokens;
+
                 const choice = parsed?.choices?.[0];
                 const content = choice?.delta?.content;
                 if (content) {
@@ -426,6 +474,19 @@ export function createOpenAICompatRuntime(opts: OpenAICompatOpts): RuntimeAdapte
               truncated: streamFinishReason === 'length',
               ...(streamFinishReason ? { finishReason: streamFinishReason } : {}),
             };
+            if (totalActualPromptTokens > 0 && opts.log?.info) {
+              recordTokenTelemetry(
+                {
+                  estimatedInputTokens,
+                  actualInputTokens: totalActualPromptTokens,
+                  actualOutputTokens: totalActualCompletionTokens || undefined,
+                  provider: opts.id ?? 'openai',
+                  model,
+                  sessionId: params.sessionId,
+                },
+                { info: opts.log.info.bind(opts.log) },
+              );
+            }
             yield { type: 'done' };
           }
         } catch (err) {

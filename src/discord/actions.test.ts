@@ -415,7 +415,7 @@ describe('parseDiscordActions', () => {
 
   it('prompt Rules section confirms multiple same-type actions are supported', () => {
     const prompt = discordActionsPromptSection(ALL_FLAGS, 'ClawBot');
-    expect(prompt).toContain('Multiple same-type actions are supported');
+    expect(prompt).toContain('Multiple same-type actions execute sequentially');
   });
 });
 
@@ -423,8 +423,8 @@ describe('buildTieredDiscordActionsPromptSection', () => {
   it('tells the model not to promise work without emitting an action block', () => {
     const prompt = buildTieredDiscordActionsPromptSection(ALL_FLAGS, 'Weston').prompt;
 
-    expect(prompt).toContain('include the concrete `<discord-action>` block(s) that actually begin that work');
-    expect(prompt).toContain('If you are not emitting an action block, say that you have not started yet');
+    expect(prompt).toContain('include the `<discord-action>` block(s)');
+    expect(prompt).toContain('If not emitting an action, say you have not started');
   });
 });
 
@@ -1096,7 +1096,7 @@ describe('discordActionsPromptSection', () => {
     const prompt = discordActionsPromptSection(flags, 'ClawBot');
     expect(prompt).toContain('Perform Discord server actions by including');
     expect(prompt).toContain('### Rules');
-    expect(prompt).toContain('Keep the continuation capsule current');
+    expect(prompt).toContain('Update `<continuation-capsule>');
     expect(prompt).toContain('<continuation-capsule>{"activeTaskId":"...","currentFocus":"...","nextStep":"...","blockedOn":"..."}</continuation-capsule>');
   });
 
@@ -1120,11 +1120,9 @@ describe('discordActionsPromptSection', () => {
     const prompt = discordActionsPromptSection(flags);
     expect(prompt).toContain('### Deferred self-invocation');
     expect(prompt).toContain('{"type":"defer","channel":"general","delaySeconds":600,"prompt":"Check on the forge run"}');
-    expect(prompt).toContain('without another user prompt');
     expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DELAY_SECONDS');
-    expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_CONCURRENT');
     expect(prompt).toContain('DISCOCLAW_DISCORD_ACTIONS_DEFER_MAX_DEPTH');
-    expect(prompt).toContain('no conversation history');
+    expect(prompt).toContain('no history');
   });
 
   it('includes imagegen guidance whenever the caller advertises imagegen', () => {
@@ -1333,8 +1331,7 @@ describe('buildTieredDiscordActionsPromptSection', () => {
     expect(selection.prompt).toContain('### Available action types this turn');
     expect(selection.prompt).toContain('cronCreate');
     expect(selection.prompt).toContain('cronList');
-    expect(selection.prompt).toMatch(/Before refusing any Discord-managed resource request/);
-    expect(selection.prompt).toMatch(/source of truth for what you can do this turn/);
+    expect(selection.prompt).toMatch(/source of truth/);
   });
 
   it('includes live action inventory with channel types when channels enabled', () => {
@@ -1350,7 +1347,7 @@ describe('buildTieredDiscordActionsPromptSection', () => {
     expect(selection.prompt).toContain('channelCreate');
     expect(selection.prompt).toContain('channelList');
     expect(selection.prompt).toContain('forumTagCreate');
-    expect(selection.prompt).toMatch(/Before refusing any Discord-managed resource request/);
+    expect(selection.prompt).toMatch(/source of truth/);
   });
 
   it('includes live action inventory with guild event types when guild keyword-triggered', () => {
@@ -1365,7 +1362,7 @@ describe('buildTieredDiscordActionsPromptSection', () => {
     expect(selection.prompt).toContain('### Available action types this turn');
     expect(selection.prompt).toContain('eventCreate');
     expect(selection.prompt).toContain('roleAdd');
-    expect(selection.prompt).toMatch(/Before refusing any Discord-managed resource request/);
+    expect(selection.prompt).toMatch(/source of truth/);
   });
 
   it('omits live inventory section when no flags are enabled', () => {
