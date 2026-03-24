@@ -36,6 +36,33 @@ Build/deploy reminder:
 - Legacy flat-file locks (`data/discoclaw.pid`) are auto-migrated: if the flat file exists and the PID is dead, it's removed before the directory lock is attempted.
 - Implementation: `src/pidlock.ts`
 
+### `meta.json` format
+```json
+{"pid":4185760,"token":"2e5751c27d8f2b35369f211708b204e6","acquiredAt":"2026-03-24T22:36:12.793Z","startTime":45779798}
+```
+- `pid` — process ID of the lock holder
+- `token` — random hex token; only the holder can release its own lock
+- `acquiredAt` — ISO timestamp of lock acquisition
+- `startTime` — Linux `/proc/<pid>/stat` field 22 (jiffies since boot); used to detect PID reuse
+
+### PID lock inspection commands
+```bash
+# Check who holds the lock
+cat data/discoclaw.pid.lock/meta.json | jq .
+
+# Is the holder alive?
+kill -0 $(jq -r .pid data/discoclaw.pid.lock/meta.json) 2>/dev/null && echo "alive" || echo "stale"
+
+# Verify startTime matches (detects PID reuse)
+PID=$(jq -r .pid data/discoclaw.pid.lock/meta.json)
+LOCK_ST=$(jq -r .startTime data/discoclaw.pid.lock/meta.json)
+PROC_ST=$(awk '{print $22}' /proc/$PID/stat 2>/dev/null)
+[ "$LOCK_ST" = "$PROC_ST" ] && echo "genuine" || echo "PID reused — lock is stale"
+
+# Check lock directory age
+stat data/discoclaw.pid.lock/meta.json
+```
+
 ## Safety
 - Prefer running new behavior in a private channel first.
 - Keep allowlist strict; do not run with an empty allowlist.

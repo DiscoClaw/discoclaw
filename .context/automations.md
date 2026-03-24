@@ -86,6 +86,52 @@ creating forum threads.
 
 See [docs/cron-patterns.md](../docs/cron-patterns.md) for full examples of each.
 
+## Data Directory
+
+Cron data lives in `data/cron/`:
+
+| File/Dir | Contents |
+|----------|----------|
+| `cron-run-stats.json` | Per-job run statistics: run count, last run time/status, schedule, model, channel, projection state. Rewritten on every run completion. |
+| `tag-map.json` | Maps tag names (e.g. `report`, `monitor`) to Discord forum tag snowflake IDs. Used for auto-tagging cron threads. |
+| `locks/` | Per-job lock directories. Each active job gets `<sanitized-id>.<hash>.lock/meta.json`. Prevents overlap (concurrent execution of the same job). |
+
+### Lock directory format
+Each lock dir contains a `meta.json`:
+```json
+{"pid":12345,"token":"a1b2c3...","acquiredAt":"2026-03-24T15:00:00.009Z","startTime":45779798}
+```
+- `pid` — PID of the process holding the lock
+- `token` — random token for safe release (prevents cross-process release)
+- `startTime` — Linux `/proc/<pid>/stat` field 22 (jiffies); detects PID reuse
+
+### Exact commands for data inspection
+```bash
+# View all job stats
+jq . data/cron/cron-run-stats.json
+
+# List jobs and their last run status
+jq '.jobs | to_entries[] | {id: .key, status: .value.lastRunStatus, lastRun: .value.lastRunAt}' data/cron/cron-run-stats.json
+
+# Check for stuck locks
+ls -la data/cron/locks/
+
+# Inspect a specific lock
+cat data/cron/locks/*.lock/meta.json 2>/dev/null
+
+# Check if a locked PID is still alive
+for meta in data/cron/locks/*.lock/meta.json; do
+  pid=$(jq -r .pid "$meta" 2>/dev/null)
+  kill -0 "$pid" 2>/dev/null && echo "$meta: PID $pid alive" || echo "$meta: PID $pid STALE"
+done
+
+# View the tag map
+jq . data/cron/tag-map.json
+
+# Check run stats file size (large = many jobs or accumulating history)
+ls -lh data/cron/cron-run-stats.json
+```
+
 ## Known Footguns
 
 - **`<cron-state>` replaces, does not merge:** If a job's state is `{"cursor": "abc", "count": 5}` and the AI outputs `<cron-state>{"cursor": "def"}</cron-state>`, the `count` key is lost. The AI must echo back all keys it wants to keep.
@@ -152,6 +198,30 @@ timedatectl | grep "Time zone"
 
 # Or reset to a specific cursor:
 # "update cron <job-name> with state {\"cursor\": \"known-good-value\"}"
+```
+
+### Cron job stuck — overlap guard never releases
+**Symptom:** A job ran once and now never fires again. Logs show `Lock held by PID XXXXX` on every tick.
+**Cause:** The previous execution crashed without releasing its lock in `data/cron/locks/`. The lock dir persists with a `meta.json` pointing to a dead (or reused) PID. Stale-lock detection usually catches this, but can fail if `/proc/<pid>/stat` is unreadable or the PID was reused by a long-lived process.
+**Recovery:**
+```bash
+# List all lock dirs
+ls -la data/cron/locks/
+
+# Find the stuck lock (match the cron ID from the log message)
+# Lock dirs are named <sanitized-id>.<hash>.lock
+cat data/cron/locks/*.lock/meta.json 2>/dev/null
+
+# Check if the PID is alive
+kill -0 <pid> 2>/dev/null && echo "alive" || echo "stale"
+
+# If stale: remove the lock dir, the next tick will acquire fresh
+rm -rf data/cron/locks/<lock-dir-name>.lock
+
+# If the PID is alive but belongs to a different process (PID reuse):
+# compare the startTime in meta.json with /proc/<pid>/stat field 22
+cat /proc/<pid>/stat | awk '{print $22}'
+# If they differ, the lock is stale — safe to remove
 ```
 
 ### Chain cascade — downstream jobs keep firing
