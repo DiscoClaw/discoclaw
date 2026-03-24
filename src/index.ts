@@ -92,7 +92,7 @@ import type { WebhookServer } from './webhook/server.js';
 import { startDashboardServer } from './dashboard/server.js';
 import type { DashboardServer as LocalDashboardServer } from './dashboard/server.js';
 import { formatDashboardOperatorUrl, resolveDashboardBindHost } from './dashboard/options.js';
-import { collectLiveSnapshot } from './dashboard/snapshot.js';
+import { collectLiveSnapshot, fetchGeminiImagegenModels } from './dashboard/snapshot.js';
 import { collectDashboardSnapshot } from './cli/dashboard.js';
 import { ArtifactStore } from './canvas/artifact-store.js';
 import { createCanvasBuiltinApps } from './canvas/apps.js';
@@ -2003,6 +2003,21 @@ if (taskCtx) {
       log.info({ imagegenModel: currentModelConfig['imagegen'] }, 'models: imagegen model applied');
     }
     log.info('imagegen:action context initialized');
+
+    // Fetch available Gemini image models in the background so the dashboard
+    // selector reflects real API availability instead of a hardcoded list.
+    if (botParams.imagegenCtx.geminiApiKey) {
+      const ctx = botParams.imagegenCtx;
+      const geminiKey = botParams.imagegenCtx.geminiApiKey;
+      fetchGeminiImagegenModels(geminiKey).then((models) => {
+        if (models.length > 0) {
+          ctx.geminiImageModels = models;
+          log.info({ count: models.length, models }, 'imagegen:gemini models fetched from API');
+        }
+      }).catch((err) => {
+        log.warn({ err }, 'imagegen:gemini model list fetch failed; using hardcoded fallback');
+      });
+    }
   }
 
   if (discordActionsEnabled && cfg.discordActionsSpawn) {
