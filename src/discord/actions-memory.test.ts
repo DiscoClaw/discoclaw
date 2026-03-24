@@ -207,6 +207,7 @@ describe('executeMemoryAction', () => {
         expect.objectContaining({ type: 'discord' }),
         200,
         'project',
+        undefined,
       );
     });
 
@@ -225,6 +226,7 @@ describe('executeMemoryAction', () => {
         expect.any(Object),
         200,
         'fact',
+        undefined,
       );
     });
 
@@ -249,6 +251,7 @@ describe('executeMemoryAction', () => {
         }),
         200,
         'fact',
+        undefined,
       );
     });
 
