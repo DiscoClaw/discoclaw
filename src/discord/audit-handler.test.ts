@@ -206,6 +206,12 @@ describe('auditPlanStructure', () => {
     expect(concerns.some((c) => c.title === 'Changes section uses placeholder file paths')).toBe(true);
   });
 
+  it('accepts suffixed section headings like "## Changes — Phase A"', () => {
+    const content = `# Plan: Test\n\n## Objective\n\nDo the thing.\n\n## Scope\n\n**In:** stuff\n\n---\n\n## Changes — Phase A\n\n- \`src/foo.ts\` — add feature\n\n## Changes — Phase B\n\n- \`src/bar.ts\` — update feature\n\n## Risks\n\n- Widget might break.\n\n## Testing\n\nUnit tests for foo and bar.`;
+    const concerns = auditPlanStructure(content);
+    expect(concerns.some((c) => c.title === 'Missing section: Changes')).toBe(false);
+  });
+
   it('allows Changes section when all file paths are concrete', () => {
     const content = MINIMAL_PLAN.replace(
       /## Changes[\s\S]*?## Risks/m,
