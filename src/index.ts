@@ -92,6 +92,7 @@ import type { WebhookServer } from './webhook/server.js';
 import { startDashboardServer } from './dashboard/server.js';
 import type { DashboardServer as LocalDashboardServer } from './dashboard/server.js';
 import { formatDashboardOperatorUrl, resolveDashboardBindHost } from './dashboard/options.js';
+import { collectLiveSnapshot } from './dashboard/snapshot.js';
 import { collectDashboardSnapshot } from './cli/dashboard.js';
 import { ArtifactStore } from './canvas/artifact-store.js';
 import { createCanvasBuiltinApps } from './canvas/apps.js';
@@ -2737,6 +2738,14 @@ if (cfg.dashboardEnabled) {
       startupMcpStatus: bootReportMcpStatus,
       startupMcpWarnings: mcpWarnings,
       log,
+      liveSnapshotProvider: () =>
+        collectLiveSnapshot({
+          runtimeName: botParams.configCtx?.runtimeName ?? primaryRuntimeName,
+          runtimeModel: botParams.runtimeModel,
+          availableRuntimes: runtimeRegistry.list(),
+          pendingRestart: false,
+          imagegenCtx: botParams.imagegenCtx,
+        }),
     });
     const address = dashboardServer.server.address();
     dashboardUrl = formatDashboardOperatorUrl(
