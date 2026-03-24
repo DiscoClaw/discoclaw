@@ -213,3 +213,10 @@ Lesson: When serving JavaScript to a Discord Activity iframe, all vendor code mu
 Source: task ws-1266 — canvas server proxying individual module files from the SDK's `output/` directory triggered cascading load failures in the Activity iframe
 Applied: vendor bundling of `@discord/embedded-app-sdk` via esbuild
 Status: active
+
+### 2026-03-24 - Stateless invocations require prefix stability, not cross-turn retention assumptions
+Tags: #prompting #workflow #runtime
+Lesson: Each runtime invocation is stateless — the model receives only the prompt string passed to `invoke()` and retains nothing from prior turns. Optimization strategies that assume cross-turn system prompt retention (e.g., hash placeholders, omitting previously-sent preamble sections) are correctness bugs. The correct approach has two complementary parts: (1) structure prompt assembly so the static preamble (`buildPromptPreamble()`) produces byte-identical output across turns and channels, enabling Anthropic's automatic prefix matching to cache the longest matching prefix at ~90% cost reduction — this requires no explicit `cache_control` parameters; (2) reduce dynamic sections on follow-up turns by excluding per-channel context from the preamble's `contextFiles` array (via `buildPreambleContextFiles()`) and placing it in a separate post-preamble section, and by trimming conversation history to only new messages in the post-preamble zones. The preamble must be sent in full every turn; the savings come from the provider caching it automatically when the prefix bytes match.
+Source: task/chat context — multi-turn follow-up token cost analysis; `buildPreambleContextFiles()` in `src/discord/prompt-common.ts` separates channel context from the preamble prefix; `docs/prompt-token-audit.md` and `docs/prompt-ordering.md` document the static vs dynamic section split
+Applied: `src/discord/prompt-common.ts` (`buildPreambleContextFiles()`), `docs/compound-lessons.md`
+Status: active
