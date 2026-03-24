@@ -248,7 +248,7 @@ describe('message coordinator onboarding', () => {
     expect(vi.mocked(completeOnboarding)).toHaveBeenCalledWith(
       { userName: 'Alice', timezone: 'Etc/Test', morningCheckin: false },
       workspaceCwd,
-      startMsg.author,
+      guildChannel,
       expect.objectContaining({
         actionCtx: expect.objectContaining({ requesterId: 'user-1' }),
       }),

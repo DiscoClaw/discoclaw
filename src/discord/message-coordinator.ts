@@ -1658,39 +1658,51 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               };
               resetOnboardingTimeout();
 
-              const startResult = onboardingSession.start(displayName);
+              // Determine guild send capability. Default to true (guild-preferred)
+              // when we can't check — the message arrived here, so sending likely works.
+              let canSendInGuild = false;
+              if (!isDm) {
+                try {
+                  const me = msg.guild?.members.me;
+                  if (me && 'permissionsFor' in msg.channel && typeof msg.channel.permissionsFor === 'function') {
+                    canSendInGuild = !!msg.channel.permissionsFor(me)?.has(
+                      PermissionFlagsBits.ViewChannel | PermissionFlagsBits.SendMessages,
+                    );
+                  } else {
+                    // Can't check permissions (member not cached or unsupported channel type)
+                    // — optimistically assume guild channel is usable.
+                    canSendInGuild = true;
+                  }
+                } catch {
+                  // Permission check threw — assume guild works since the message arrived here.
+                  canSendInGuild = true;
+                }
+              }
 
-              if (isDm) {
-                // Already in DMs — just send the greeting
-                onboardingSession.channelMode = 'dm';
+              const channelCtx = isDm ? undefined : {
+                guildChannelId: msg.channelId,
+                canSend: canSendInGuild,
+              };
+              const startResult = onboardingSession.start(displayName, channelCtx);
+
+              if (onboardingSession.channelMode === 'guild') {
+                // Stay in the originating guild channel.
+                await msg.reply({ content: startResult.reply, allowedMentions: NO_MENTIONS });
+              } else if (isDm) {
+                // Already in DMs — send the greeting here.
                 await msg.reply({ content: startResult.reply, allowedMentions: NO_MENTIONS });
               } else {
-                // Guild-originated: prefer staying in the guild channel.
-                // Only fall back to DM if the bot lacks send permissions here.
-                const canSendInGuild = 'permissionsFor' in msg.channel
-                  && typeof msg.channel.permissionsFor === 'function'
-                  && msg.channel.permissionsFor(msg.guild!.members.me!)?.has(
-                    PermissionFlagsBits.ViewChannel | PermissionFlagsBits.SendMessages,
+                // Guild-originated but bot lacks send permissions — fall back to DM.
+                try {
+                  await msg.author.send({ content: startResult.reply, allowedMentions: NO_MENTIONS });
+                  params.log?.info(
+                    { userId, channelId: msg.channelId },
+                    'onboarding:guild-channel-unavailable, falling back to DM',
                   );
-
-                if (canSendInGuild) {
-                  onboardingSession.channelMode = 'guild';
-                  onboardingSession.channelId = msg.channelId;
-                  await msg.reply({ content: startResult.reply, allowedMentions: NO_MENTIONS });
-                } else {
-                  // Guild channel unavailable — fall back to DM
-                  try {
-                    await msg.author.send({ content: startResult.reply, allowedMentions: NO_MENTIONS });
-                    onboardingSession.channelMode = 'dm';
-                    params.log?.info(
-                      { userId, channelId: msg.channelId },
-                      'onboarding:guild-channel-unavailable, falling back to DM',
-                    );
-                    await msg.reply({ content: 'I can\'t reply here — let\'s set up in DMs. Check your messages!', allowedMentions: NO_MENTIONS });
-                  } catch {
-                    // Both guild and DM failed — destroy session
-                    destroyOnboardingSession();
-                  }
+                  await msg.reply({ content: 'I can\'t reply here — let\'s set up in DMs. Check your messages!', allowedMentions: NO_MENTIONS });
+                } catch {
+                  // Both guild and DM failed — destroy session
+                  destroyOnboardingSession();
                 }
               }
             })().finally(() => sessionCreationGuards.delete(userId));
