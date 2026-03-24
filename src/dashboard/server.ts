@@ -152,6 +152,12 @@ export type DashboardLiveModelApiResponse = {
   snapshot: DashboardSnapshot;
 };
 
+export type DashboardSecretApiResponse = {
+  ok: true;
+  message: string;
+  snapshot: DashboardSnapshot;
+};
+
 export type DashboardAuthCheckApiResponse = {
   ok: true;
   status: 'ok' | 'warn' | 'error';
@@ -531,6 +537,13 @@ async function buildModelResponse(
   };
 }
 
+const ALLOWED_SECRET_KEYS = new Set([
+  'OPENAI_API_KEY',
+  'OPENROUTER_API_KEY',
+  'ANTHROPIC_API_KEY',
+  'IMAGEGEN_GEMINI_API_KEY',
+]);
+
 const ALLOWED_PRESETS = new Set(['claude', 'codex']);
 
 async function applyPreset(
@@ -588,6 +601,9 @@ function isDashboardBadRequest(message: string): boolean {
     || message.startsWith('Unknown preset:')
     || message === 'Preset is required.'
     || message === 'Auth check target is required.'
+    || message === 'Secret key is required.'
+    || message === 'Secret value is required.'
+    || message.startsWith('Unknown secret key:')
   );
 }
 
@@ -800,6 +816,42 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
             opts.liveSnapshotProvider,
             pendingRestart,
           ),
+        );
+        return;
+      }
+
+      if (pathname === '/api/secret') {
+        if (method !== 'POST') {
+          respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
+          return;
+        }
+        if (!hasSafeDashboardOrigin(req, trustedHosts)) {
+          respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
+          return;
+        }
+        const body = await readJsonBody(req);
+        const key = typeof body.key === 'string' ? body.key.trim() : '';
+        const value = typeof body.value === 'string' ? body.value : '';
+        if (!key) throw new Error('Secret key is required.');
+        if (!ALLOWED_SECRET_KEYS.has(key)) throw new Error(`Unknown secret key: ${key}`);
+        if (!value) throw new Error('Secret value is required.');
+
+        const ctx = await deps.loadDoctorContext(inspectOpts);
+        await deps.updateEnvKey(ctx.configPaths.env, key, value);
+        pendingRestart = true;
+        const snapshot = await collectDashboardSnapshot(inspectOpts, deps);
+        respondJson(
+          res,
+          200,
+          withLiveSnapshot(
+            withStartupMcpSnapshot(
+              { ok: true as const, message: `Updated ${key}. Restart the service to apply.`, snapshot },
+              opts.startupMcpStatus,
+              opts.startupMcpWarnings,
+            ),
+            opts.liveSnapshotProvider,
+            pendingRestart,
+          ) satisfies DashboardSecretApiResponse,
         );
         return;
       }

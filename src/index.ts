@@ -2781,6 +2781,7 @@ if (cfg.dashboardEnabled) {
         return probeProviderAuth({
           openaiApiKey: cfg.openaiApiKey,
           geminiApiKey: cfg.geminiApiKey,
+          anthropicApiKey: cfg.anthropicApiKey,
         });
       },
     });
