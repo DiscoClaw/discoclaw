@@ -402,6 +402,8 @@ The rest is automatic: the runtime adapter extracts the image blocks, deduplicat
 - **OpenRouter model IDs are provider-namespaced:** Using bare model names like `claude-sonnet-4-6` with OpenRouter will fail silently or pick the wrong model. Always use `anthropic/claude-sonnet-4.6` format.
 - **Multi-turn image limitation:** If images arrive on a resumed Codex turn, the adapter resets to a fresh session and loses prior conversation context. The user sees a notification, but the context loss is not recoverable.
 - **Stream stall timeout kills the process:** When `DISCOCLAW_STREAM_STALL_TIMEOUT_MS` fires, the entire CLI subprocess is killed — any in-flight tool execution or file writes are interrupted mid-operation. Set the timeout high enough for long tool runs.
+- **Runtime config in `.env` requires restart:** Changing `RUNTIME_MODEL`, `RUNTIME_TOOLS`, `PRIMARY_RUNTIME`, or any runtime env var in `.env` has no effect until the service is restarted. For systemd: `systemctl --user restart discoclaw.service`. For dev: stop and re-run `pnpm dev`. There is no hot-reload for env vars.
+- **`dist/index.js` is the production entrypoint:** The systemd service runs `node dist/index.js` directly. If `dist/` is stale (files renamed/deleted in `src/` but old `.js` lingers), the runtime may import ghost modules or miss new code. Always `rm -rf dist && pnpm build` before deploy if source structure changed.
 
 ## Common Failure Modes
 
@@ -410,15 +412,19 @@ The rest is automatic: the runtime adapter extracts the image blocks, deduplicat
 **Cause:** Claude CLI is not installed, not on PATH, or `CLAUDE_BIN` points to the wrong path.
 **Recovery:**
 ```bash
-# Verify the binary
+# Verify the binary exists and is executable
 which claude
 claude --version
 
 # If using a custom path, check the env
 grep CLAUDE_BIN .env
 
-# For systemd, PATH may differ — use an absolute path
-# CLAUDE_BIN=/home/user/.local/bin/claude
+# For systemd: the service unit sets PATH to %h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+# If claude is installed elsewhere, use an absolute path in .env:
+#   CLAUDE_BIN=/home/user/.local/bin/claude
+
+# Verify what PATH the service actually sees:
+systemctl --user show discoclaw.service | grep -i environment
 ```
 
 ### Model overloaded — "overloaded_error" or 529 responses
@@ -432,6 +438,10 @@ RUNTIME_FALLBACK_MODEL=sonnet
 
 # Restart to apply
 systemctl --user restart discoclaw.service
+
+# If repeated overload errors caused crash loops and the service is stuck in "failed":
+systemctl --user reset-failed discoclaw.service
+systemctl --user start discoclaw.service
 ```
 
 ### Multi-turn process hangs — no response after first message

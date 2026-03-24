@@ -289,7 +289,8 @@ This is especially useful for systemd, where env loading can differ from your sh
 - **Bot not responding:** Check allowlist (`DISCORD_ALLOW_USER_IDS`), channel restrictions (`DISCORD_CHANNEL_IDS`), and channel context requirement (`DISCORD_REQUIRE_CHANNEL_CONTEXT`).
 - **Claude CLI errors:** Look for `runtime` or `spawn` in logs. Use `CLAUDE_DEBUG_FILE` to capture full CLI output.
 - **Timeout issues:** Look for `timeout` in logs. Adjust `RUNTIME_TIMEOUT_MS` if needed.
-- **PID lock conflicts:** Look for `pidlock` in logs. See ops.md for stale lock handling.
+- **PID lock conflicts:** Look for `pidlock` or `pid lock` in logs. The lock is a directory at `data/discoclaw.pid.lock/` with `meta.json` inside. See ops.md for stale lock handling.
+- **`.env` not loaded:** If env vars appear unset, check that `.env` exists (not `.env.example`) and is in the project root. `pnpm dev` loads it via dotenv; `node dist/index.js` does not.
 
 ## Task Auto-Sync
 
@@ -343,11 +344,13 @@ The suite uses your real `.env` — the same config that runs the bot is suffici
 
 ## Known Footguns
 
-- **`pnpm build` caches stale output:** TypeScript's `tsc` writes to `dist/` incrementally. If you rename or delete a source file, the old `.js` remains in `dist/` and may be imported at runtime. Fix: `rm -rf dist && pnpm build`.
+- **`pnpm build` caches stale output:** TypeScript's `tsc` writes to `dist/` incrementally. If you rename or delete a source file, the old `.js` remains in `dist/` and may be imported at runtime. **Symptoms:** mysterious `Cannot find module` errors for files that exist in source, or runtime behavior that doesn't match the code. **Fix:** `rm -rf dist && pnpm build`. Do this after any branch switch, file rename, or when `dist/` behavior doesn't match `src/`.
 - **`.env` not loaded in subshells:** `pnpm dev` loads `.env` via dotenv, but raw `node dist/index.js` does not. Always use `pnpm dev` or `pnpm start` for local runs.
 - **`pnpm i` after branch switch:** Switching branches that change `package.json` or `pnpm-lock.yaml` can leave `node_modules` in a stale state. Run `pnpm i` after checkout if you see unexpected import errors.
 - **Port conflicts with webhook server:** If `DISCOCLAW_WEBHOOK_ENABLED=1` and another process holds port `9400` (or your configured `DISCOCLAW_WEBHOOK_PORT`), the bot crashes on startup with `EADDRINUSE`. Check with `lsof -i :9400`.
-- **Editing `.env.example` vs `.env`:** `.env.example` is tracked in git and has no effect at runtime. Your actual config is in `.env` (gitignored). Editing the wrong file is a common mistake.
+- **Editing `.env.example` vs `.env`:** `.env.example` is tracked in git and has no effect at runtime. Your actual config is in `.env` (gitignored). Editing the wrong file is a common mistake. **How to tell:** `git diff` shows changes → you edited the tracked `.env.example`. `.env` changes never appear in `git diff`.
+- **`.env` values with spaces or special characters:** Values with spaces must be quoted (`VAR="value with spaces"`). Values with `#` are truncated at the `#` (treated as inline comment by dotenv). Wrap in double quotes to include literal `#` characters.
+- **PID lock contention during rapid restarts:** If you `pnpm dev`, Ctrl-C, and immediately `pnpm dev` again, the lock directory (`data/discoclaw.pid.lock/`) may still exist from the previous process. The 2-second grace period can cause `PID lock initializing` errors. Wait 2 seconds or manually `rm -rf data/discoclaw.pid.lock` if it persists.
 
 ## Common Failure Modes
 
@@ -407,6 +410,38 @@ rm -rf dist
 pnpm i
 pnpm build
 pnpm test
+```
+
+### `dist/` contains ghost files from deleted/renamed source
+**Symptom:** Runtime imports a module that no longer exists in `src/`, or old behavior persists after source changes. `pnpm build` succeeds (tsc only checks current source files — it doesn't clean up old output).
+**Cause:** `tsc` incremental compilation never deletes output files. Renamed `src/foo.ts` → `src/bar.ts` leaves `dist/foo.js` behind.
+**Recovery:**
+```bash
+# Clean and rebuild
+rm -rf dist
+pnpm build
+
+# Verify no ghosts: dist/ should only contain files corresponding to src/
+# Quick check — file count should roughly match
+ls src/**/*.ts | wc -l
+ls dist/**/*.js | wc -l
+```
+
+### PID lock error on `pnpm dev` — "PID lock initializing" or "another instance is already running"
+**Symptom:** `pnpm dev` exits immediately with `PID lock initializing (dir age: Xms)` or `Another discoclaw instance is already running (PID XXXXX)`.
+**Cause:** Previous `pnpm dev` was killed (Ctrl-C / SIGKILL) before the lock was released, or another instance is genuinely running.
+**Recovery:**
+```bash
+# Check if another instance is actually running
+cat data/discoclaw.pid.lock/meta.json 2>/dev/null
+# If it shows a PID, check if alive:
+kill -0 $(jq -r .pid data/discoclaw.pid.lock/meta.json) 2>/dev/null && echo "alive" || echo "stale"
+
+# If stale or "initializing" error: remove and retry
+rm -rf data/discoclaw.pid.lock
+pnpm dev
+
+# If alive: stop the other instance first, or use a different terminal
 ```
 
 ### `pnpm sync:discord-context` fails

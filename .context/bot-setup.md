@@ -96,6 +96,8 @@ pnpm preflight
 - **Private threads require explicit addition.** The bot must be added to private threads manually regardless of its channel permissions. Public threads are auto-joined when `DISCORD_AUTO_JOIN_THREADS=1`.
 - **Editing `.env.example` instead of `.env`.** `.env.example` is tracked in git and has no runtime effect. Your actual config is in `.env` (gitignored). A common mistake — changes to `.env.example` appear to do nothing.
 - **`discoclaw install-daemon` PATH divergence.** The systemd service uses `/usr/bin/node` and a fixed `PATH`. The daemon may not find the same CLI binaries (e.g., `claude`, `codex`) that your interactive shell finds. Verify service logs after daemon install.
+- **Service stuck after repeated setup failures.** If the service crashes 3 times within 10 minutes during initial setup (bad token, missing env, etc.), systemd marks it as `failed` and refuses further starts. Run `systemctl --user reset-failed discoclaw.service` to clear the failure counter before retrying.
+- **Stale `dist/` after setup changes.** If you checked out a different branch or changed source files during setup, `dist/` may contain old compiled code. Run `rm -rf dist && pnpm build` before `pnpm dev` or service start to ensure fresh output.
 
 ## Common Failure Modes
 

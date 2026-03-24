@@ -94,6 +94,8 @@ See [docs/cron-patterns.md](../docs/cron-patterns.md) for full examples of each.
 - **Chain depth silently caps at 10:** If a chain exceeds 10 hops, execution stops with no visible error in the target channel. Check the bot logs for `chain depth limit reached`.
 - **Webhook jobs require `DISCOCLAW_WEBHOOK_ENABLED=true`:** Defining a webhook-triggered job without enabling the webhook server means the job exists but can never fire. No warning is logged at startup.
 - **Timezone defaults to system timezone:** If `DEFAULT_TIMEZONE` is unset and the server's system timezone is UTC, all cron schedules without explicit timezones run in UTC. This catches people who expect local time.
+- **Cron config changes in `.env` require restart:** Changing `DISCOCLAW_CRON_ENABLED`, `DISCOCLAW_CRON_FORUM`, or `DEFAULT_TIMEZONE` in `.env` has no effect until the service is restarted (`systemctl --user restart discoclaw.service`). The cron subsystem reads config once at startup.
+- **`dist/` must be rebuilt for cron code changes:** Cron executor, parser, and scheduler code lives in `src/cron/`. After modifying these files, `pnpm build` must be run and the service restarted — the systemd service runs `dist/index.js`, not `src/`.
 
 ## Common Failure Modes
 
@@ -104,8 +106,15 @@ See [docs/cron-patterns.md](../docs/cron-patterns.md) for full examples of each.
 2. Timezone mismatch — job runs in UTC but user expects local time.
 3. Previous run is still active (overlap guard skipped this tick).
 4. `DISCOCLAW_CRON_ENABLED` is `0` or `DISCOCLAW_CRON_FORUM` is unset.
+5. Service is in `failed` state after crash loop — cron timers are not running.
 **Recovery:**
 ```bash
+# First: is the service even running?
+systemctl --user status discoclaw.service
+# If "failed (Result: start-limit-hit)":
+systemctl --user reset-failed discoclaw.service
+systemctl --user start discoclaw.service
+
 # Check if the thread is archived (in Discord, archived threads are hidden by default)
 # Use the cronList action to see all jobs and their states
 
@@ -114,6 +123,9 @@ journalctl --user -u discoclaw.service --since "1 hour ago" --no-pager | grep -i
 
 # Verify cron config
 grep -E 'DISCOCLAW_CRON_ENABLED|DISCOCLAW_CRON_FORUM|DEFAULT_TIMEZONE' .env
+
+# Verify timezone
+timedatectl | grep "Time zone"
 ```
 
 ### Cron job fires but output goes to wrong channel
