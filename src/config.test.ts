@@ -1444,4 +1444,24 @@ describe('parseConfig', () => {
     const { config } = parseConfig(env());
     expect(config.coldStorageChannelFilter).toEqual([]);
   });
+
+  it('defaults messageHistoryFetchLimit to 10', () => {
+    const { config } = parseConfig(env());
+    expect(config.messageHistoryFetchLimit).toBe(10);
+  });
+
+  it('parses DISCOCLAW_MESSAGE_HISTORY_FETCH_LIMIT when set', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_MESSAGE_HISTORY_FETCH_LIMIT: '25' }));
+    expect(config.messageHistoryFetchLimit).toBe(25);
+  });
+
+  it('defaults messageHistoryMaxAgeMs to 48 hours in milliseconds', () => {
+    const { config } = parseConfig(env());
+    expect(config.messageHistoryMaxAgeMs).toBe(48 * 3_600_000);
+  });
+
+  it('parses DISCOCLAW_MESSAGE_HISTORY_MAX_AGE_HOURS and converts to ms', () => {
+    const { config } = parseConfig(env({ DISCOCLAW_MESSAGE_HISTORY_MAX_AGE_HOURS: '24' }));
+    expect(config.messageHistoryMaxAgeMs).toBe(24 * 3_600_000);
+  });
 });

@@ -5,6 +5,8 @@ import type { AttachmentLike } from './image-download.js';
 export type MessageHistoryOpts = {
   budgetChars: number;
   fetchLimit?: number;
+  /** Drop messages older than this many milliseconds. 0 or omitted = no cutoff. */
+  maxAgeMs?: number;
   botDisplayName?: string;
   excludeMessageIds?: Iterable<string>;
   /** Reference timestamp (epoch ms) for relative-time labels. Defaults to Date.now(). */
@@ -70,14 +72,20 @@ export async function fetchMessageHistory(
   if (!messages || messages.size === 0) return EMPTY_RESULT;
 
   // Discord API returns newest-first; convert to array and reverse to chronological order.
+  const now = opts.now ?? Date.now();
+  const maxAgeMs = opts.maxAgeMs ?? 0;
   const sorted = [...messages.values()]
     .filter((message) => !excludedMessageIds.has(message.id))
+    .filter((message) => {
+      if (maxAgeMs <= 0) return true;
+      const ts = typeof message.createdTimestamp === 'number' ? message.createdTimestamp : 0;
+      return ts > 0 && (now - ts) <= maxAgeMs;
+    })
     .reverse();
 
   if (sorted.length === 0) return EMPTY_RESULT;
 
   // Build history from most recent backward so the most relevant context is kept.
-  const now = opts.now ?? Date.now();
   let remaining = opts.budgetChars;
   const selected: string[] = [];
 

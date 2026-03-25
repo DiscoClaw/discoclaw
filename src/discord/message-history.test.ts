@@ -287,6 +287,42 @@ describe('fetchMessageHistory', () => {
     expect(result.text).toBe('[User, 23h ago]: msg');
   });
 
+  it('filters out messages older than maxAgeMs', async () => {
+    const now = 1700000000000;
+    const ch = fakeChannel([
+      fakeMsg('3', 'recent', 'User', false, undefined, now - 60_000),          // 1m ago
+      fakeMsg('2', 'stale', 'User', false, undefined, now - 25 * 3600_000),    // 25h ago
+      fakeMsg('1', 'ancient', 'User', false, undefined, now - 72 * 3600_000),  // 3d ago
+    ]);
+
+    // maxAgeMs = 24h — only the 1m-ago message should survive
+    const result = await fetchMessageHistory(ch, '4', { budgetChars: 5000, now, maxAgeMs: 24 * 3600_000 });
+    const lines = result.text.split('\n');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe('[User, 1m ago]: recent');
+  });
+
+  it('returns empty when all messages exceed maxAgeMs', async () => {
+    const now = 1700000000000;
+    const ch = fakeChannel([
+      fakeMsg('1', 'old', 'User', false, undefined, now - 48 * 3600_000),
+    ]);
+
+    const result = await fetchMessageHistory(ch, '2', { budgetChars: 5000, now, maxAgeMs: 24 * 3600_000 });
+    expect(result.text).toBe('');
+    expect(result.historyAttachments).toEqual([]);
+  });
+
+  it('does not filter by age when maxAgeMs is 0', async () => {
+    const now = 1700000000000;
+    const ch = fakeChannel([
+      fakeMsg('1', 'ancient', 'User', false, undefined, now - 100 * 86_400_000),
+    ]);
+
+    const result = await fetchMessageHistory(ch, '2', { budgetChars: 5000, now, maxAgeMs: 0 });
+    expect(result.text).toContain('ancient');
+  });
+
   it('shows weeks for messages older than 30 days', async () => {
     const now = 1700000000000;
     const ch = fakeChannel([

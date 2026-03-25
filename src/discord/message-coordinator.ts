@@ -397,6 +397,8 @@ export type BotParams = {
   voiceCtx?: VoiceContext;
   spawnCtx?: SpawnContext;
   messageHistoryBudget: number;
+  messageHistoryFetchLimit?: number;
+  messageHistoryMaxAgeMs?: number;
   summaryEnabled: boolean;
   summaryModel: string;
   summaryMaxChars: number;
@@ -835,7 +837,7 @@ async function gatherConversationContext(opts: ConversationContextOptions): Prom
       const history = await fetchMessageHistory(
         msg.channel as TextBasedChannel,
         msg.id,
-        { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
+        { budgetChars: params.messageHistoryBudget, fetchLimit: params.messageHistoryFetchLimit, maxAgeMs: params.messageHistoryMaxAgeMs, botDisplayName: params.botDisplayName },
       );
       if (history.text) {
         contextParts.push(`Context (recent channel messages):\n${history.text}`);
@@ -3307,7 +3309,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               const historyResult = await fetchMessageHistory(
                 msg.channel as TextBasedChannel,
                 msg.id,
-                { budgetChars: params.messageHistoryBudget, botDisplayName: params.botDisplayName },
+                { budgetChars: params.messageHistoryBudget, fetchLimit: params.messageHistoryFetchLimit, maxAgeMs: params.messageHistoryMaxAgeMs, botDisplayName: params.botDisplayName },
               );
               historySection = historyResult.text;
               historyAttachments = historyResult.historyAttachments;
