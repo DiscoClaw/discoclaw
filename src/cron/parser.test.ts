@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { parseCronDefinition } from './parser.js';
+import { parseCronDefinition, parseStarterContent } from './parser.js';
 import type { RuntimeAdapter, EngineEvent } from '../runtime/types.js';
 
 function makeMockRuntime(response: string): RuntimeAdapter {
@@ -129,5 +129,116 @@ describe('parseCronDefinition', () => {
     const result = await parseCronDefinition('test', runtime);
     expect(result?.timezone).toBe(systemTz);
     vi.unstubAllEnvs();
+  });
+});
+
+describe('parseStarterContent', () => {
+  it('parses standard prompt-only format', () => {
+    const text = [
+      '**Schedule:** `0 7 * * 1-5` (America/Los_Angeles)',
+      '**Channel:** #general',
+      '**Input:** prompt-only',
+      '',
+      'Check the weather for Portland OR and post a brief summary.',
+    ].join('\n');
+
+    expect(parseStarterContent(text)).toEqual({
+      triggerType: 'schedule',
+      schedule: '0 7 * * 1-5',
+      timezone: 'America/Los_Angeles',
+      channel: 'general',
+      prompt: 'Check the weather for Portland OR and post a brief summary.',
+    });
+  });
+
+  it('parses shell-input format with bash block', () => {
+    const text = [
+      '**Schedule:** `*/30 * * * *` (UTC)',
+      '**Channel:** #ops',
+      '**Input:** shell-input',
+      '```bash',
+      'curl -s https://api.example.com/status',
+      '```',
+      '',
+      'Summarize the API status and report any errors.',
+    ].join('\n');
+
+    expect(parseStarterContent(text)).toEqual({
+      triggerType: 'schedule',
+      schedule: '*/30 * * * *',
+      timezone: 'UTC',
+      channel: 'ops',
+      prompt: 'Summarize the API status and report any errors.',
+    });
+  });
+
+  it('parses truncated prompt (with continuation marker)', () => {
+    const longPrompt = 'A'.repeat(200) + '… *(full prompt pinned below)*';
+    const text = [
+      '**Schedule:** `0 9 * * 1` (Europe/London)',
+      '**Channel:** #reports',
+      '**Input:** prompt-only',
+      '',
+      longPrompt,
+    ].join('\n');
+
+    const result = parseStarterContent(text);
+    expect(result).not.toBeNull();
+    expect(result!.schedule).toBe('0 9 * * 1');
+    expect(result!.timezone).toBe('Europe/London');
+    expect(result!.channel).toBe('reports');
+    expect(result!.prompt).toBe(longPrompt);
+  });
+
+  it('returns null when schedule line is missing', () => {
+    const text = [
+      '**Channel:** #general',
+      '**Input:** prompt-only',
+      '',
+      'Do something.',
+    ].join('\n');
+
+    expect(parseStarterContent(text)).toBeNull();
+  });
+
+  it('returns null when channel line is missing', () => {
+    const text = [
+      '**Schedule:** `0 7 * * *` (UTC)',
+      '**Input:** prompt-only',
+      '',
+      'Do something.',
+    ].join('\n');
+
+    expect(parseStarterContent(text)).toBeNull();
+  });
+
+  it('returns null when prompt body is missing', () => {
+    const text = [
+      '**Schedule:** `0 7 * * *` (UTC)',
+      '**Channel:** #general',
+      '**Input:** prompt-only',
+      '',
+    ].join('\n');
+
+    expect(parseStarterContent(text)).toBeNull();
+  });
+
+  it('returns null for non-bot-formatted freeform text', () => {
+    const text = 'Every weekday at 7am Pacific, check the weather and post to #general';
+    expect(parseStarterContent(text)).toBeNull();
+  });
+
+  it('parses channel with ID instead of name', () => {
+    const text = [
+      '**Schedule:** `0 12 * * *` (UTC)',
+      '**Channel:** #1234567890',
+      '**Input:** prompt-only',
+      '',
+      'Post the daily digest.',
+    ].join('\n');
+
+    const result = parseStarterContent(text);
+    expect(result).not.toBeNull();
+    expect(result!.channel).toBe('1234567890');
   });
 });

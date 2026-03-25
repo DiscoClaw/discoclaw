@@ -3,7 +3,7 @@ import type { Client, ForumChannel, AnyThreadChannel, Message } from 'discord.js
 import type { RuntimeAdapter } from '../runtime/types.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { CronScheduler } from './scheduler.js';
-import { parseCronDefinition } from './parser.js';
+import { parseCronDefinition, parseStarterContent } from './parser.js';
 import type { ParsedCronDef } from './types.js';
 import type { CronRunStats } from './run-stats.js';
 import { generateCronId, parseCronIdFromContent } from './run-stats.js';
@@ -156,14 +156,22 @@ async function loadThreadAsCron(
     return false;
   }
 
-  const def = await parseCronDefinition(starter.content, runtime, { model: opts.cronModel, cwd: opts.cwd });
+  // Try deterministic parse of bot-formatted starter first (no LLM needed).
+  const deterministicDef = parseStarterContent(starter.content);
+  const def = deterministicDef ?? await parseCronDefinition(starter.content, runtime, { model: opts.cronModel, cwd: opts.cwd });
   if (!def) {
-    opts.log?.warn({ threadId: thread.id, name: thread.name }, 'cron:forum parse failed');
-    scheduler.disable(thread.id);
-    try {
-      await thread.send('Could not parse this cron definition. Please edit the starter message with a clearer schedule, timezone, target channel, and instruction.');
-    } catch {
-      // Ignore send failures.
+    if (opts.isNew) {
+      // Fresh thread — user just created it and needs feedback.
+      opts.log?.warn({ threadId: thread.id, name: thread.name }, 'cron:forum parse failed');
+      scheduler.disable(thread.id);
+      try {
+        await thread.send('Could not parse this cron definition. Please edit the starter message with a clearer schedule, timezone, target channel, and instruction.');
+      } catch {
+        // Ignore send failures.
+      }
+    } else {
+      // Boot/re-parse — soft failure: leave unregistered so cron-sync can retry.
+      opts.log?.warn({ threadId: thread.id, name: thread.name }, 'cron:forum parse failed (boot re-parse), skipping without disabling');
     }
     return false;
   }

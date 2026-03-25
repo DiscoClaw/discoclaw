@@ -3,6 +3,68 @@ import type { RuntimeAdapter } from '../runtime/types.js';
 import type { ParsedCronDef } from './types.js';
 import { getDefaultTimezone } from './default-timezone.js';
 
+/**
+ * Deterministic parser for bot-formatted starter messages produced by
+ * `buildStarterContent` in `src/discord/actions-crons.ts`.
+ *
+ * Expected format:
+ *   **Schedule:** `<schedule>` (<timezone>)
+ *   **Channel:** #<channel>
+ *   **Input:** <input-mode>
+ *   [optional ```bash block```]
+ *
+ *   <prompt text>
+ *
+ * Returns null if any required field is missing — non-bot-formatted
+ * messages silently fall through to AI.
+ */
+export function parseStarterContent(text: string): ParsedCronDef | null {
+  // Extract schedule and timezone from: **Schedule:** `<schedule>` (<timezone>)
+  const scheduleMatch = text.match(/\*\*Schedule:\*\*\s*`([^`]+)`\s*\(([^)]+)\)/);
+  if (!scheduleMatch) return null;
+  const schedule = scheduleMatch[1].trim();
+  const timezone = scheduleMatch[2].trim();
+  if (!schedule || !timezone) return null;
+
+  // Extract channel from: **Channel:** #<channel>
+  const channelMatch = text.match(/\*\*Channel:\*\*\s*#(\S+)/);
+  if (!channelMatch) return null;
+  const channel = channelMatch[1].trim();
+  if (!channel) return null;
+
+  // The prompt is everything after the blank-line separator following the metadata block.
+  // The metadata block ends after the **Input:** line (and optional ```bash``` block).
+  // Split on the first blank line that follows the metadata lines.
+  const lines = text.split('\n');
+  let blankLineIdx = -1;
+  let pastMetadata = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    // Track when we've passed the metadata lines (lines starting with ** or code fences)
+    if (line.startsWith('**') || line.startsWith('```')) {
+      pastMetadata = true;
+      continue;
+    }
+    // After metadata, find the first blank line
+    if (pastMetadata && line.trim() === '') {
+      blankLineIdx = i;
+      break;
+    }
+  }
+  if (blankLineIdx === -1) return null;
+
+  const prompt = lines.slice(blankLineIdx + 1).join('\n').trim();
+  if (!prompt) return null;
+
+  return {
+    triggerType: 'schedule',
+    schedule,
+    timezone,
+    channel,
+    prompt,
+  };
+}
+
 function buildSystemPrompt(): string {
   const defaultTz = getDefaultTimezone();
   return `You are a cron definition parser. Extract a cron schedule from a natural-language task description.
