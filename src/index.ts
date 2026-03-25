@@ -14,6 +14,7 @@ import { createCodexCliRuntime } from './runtime/codex-cli.js';
 import { createGeminiRestRuntime } from './runtime/gemini-rest.js';
 import { createAnthropicRestRuntime } from './runtime/anthropic-rest.js';
 import { createConcurrencyLimiter } from './runtime/concurrency-limit.js';
+import { getMigrationHint } from './runtime/migration-hints.js';
 import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, validatePaContextModules, ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './discord/channel-context.js';
 import { buildDurableMemorySection } from './discord/prompt-common.js';
@@ -1106,12 +1107,18 @@ if (claudeRequested) {
 
 const runtime = runtimeRegistry.get(primaryRuntimeName);
 if (!runtime) {
+  const hint = getMigrationHint(primaryRuntimeName);
+  const baseMsg = 'PRIMARY_RUNTIME is not available.';
+  const hintMsg = hint
+    ? hint.message
+    : 'Check configuration (OPENAI_API_KEY, Claude CLI, runtime name).';
   log.error(
     {
       primaryRuntime: primaryRuntimeName,
       availableRuntimes: runtimeRegistry.list(),
+      migrationHint: hint?.kind ?? null,
     },
-    'PRIMARY_RUNTIME is not available. Check configuration (OPENAI_API_KEY, Claude CLI, runtime name).',
+    `${baseMsg} ${hintMsg}`,
   );
   process.exit(1);
 }
