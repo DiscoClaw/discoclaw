@@ -88,12 +88,10 @@ export type DoctorContext = {
 };
 
 export const KNOWN_RUNTIMES = new Set([
-  'anthropic',
-  'claude',
-  'codex',
-  'gemini',
+  'claude-api',
+  'claude-cli',
+  'codex-cli',
   'gemini-api',
-  'gemini-cli',
   'openai',
   'openrouter',
 ]);
