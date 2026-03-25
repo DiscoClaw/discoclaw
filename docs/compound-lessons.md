@@ -241,3 +241,10 @@ Lesson: Discord thread lifecycle events (auto-archive from inactivity, manual ar
 Source: task/chat context — Discord auto-archive permanently disabled crons because `threadUpdate` persisted `disabled: true` to the stats store without distinguishing auto-archive from explicit `cronPause`; dedup search on 2026-03-25 against the existing cron-state lesson (2026-03-10) and the canonical-persistence lesson (2026-03-15) concluded this is materially distinct: those lessons address state schema drift and projection authority respectively, while this lesson addresses the specific boundary between Discord lifecycle events and scheduling state mutation
 Applied: `src/cron/forum-sync.ts`, `docs/compound-lessons.md`
 Status: active
+
+### 2026-03-25 - Prefer deterministic parsing of bot-generated content before AI fallback
+Tags: #cron #architecture #workflow
+Lesson: When the system produces structured output (starter messages, status embeds, etc.), parse it deterministically on re-read rather than routing through an LLM. Bot-formatted content from `buildStarterContent` has a known, deterministic structure that can be matched with regex — no LLM call needed. The AI parser becomes a fallback for user-authored or legacy content only. This layering (stats-store fast path → deterministic regex parser → AI parser) eliminates unnecessary LLM calls on fresh installs and data resets, avoids timeout/API-error failures on the boot path, and makes cron-sync recoverable on subsequent cycles when all parsers fail instead of hard-disabling the cron.
+Source: task/chat context — `initCronForum` boot path fell through to `parseCronDefinition` (an LLM call) when the stats store had no record for a cron thread, causing timeout and API failures that hard-disabled crons with a scary error; dedup search on 2026-03-25 against existing lessons for cron state authority (2026-03-15), state schema drift (2026-03-10), and archive-state decoupling (2026-03-25) confirmed none address parser fallback ordering for bot-generated content — this is materially distinct
+Applied: `docs/compound-lessons.md`
+Status: active
