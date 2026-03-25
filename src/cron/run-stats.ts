@@ -22,6 +22,9 @@ export type CronRunRecord = {
   cadence: CadenceTag | null;
   purposeTags: string[];
   disabled: boolean;
+  /** Tracks why the cron was disabled.  'user' = explicit cronPause command;
+   *  'system' = parse failure or other automated disable.  Only set when disabled is true. */
+  pauseSource?: 'user' | 'system';
   model: string | null;
   modelOverride?: string;
   triggerType?: 'schedule' | 'webhook' | 'manual';  // defaults to 'schedule'
@@ -47,12 +50,12 @@ export type CronRunRecord = {
 };
 
 export type CronRunStatsStore = {
-  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12;
+  version: 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13;
   updatedAt: number;
   jobs: Record<string, CronRunRecord>;
 };
 
-export const CURRENT_VERSION = 12 as const;
+export const CURRENT_VERSION = 13 as const;
 
 // ---------------------------------------------------------------------------
 // Stable Cron ID generation
@@ -72,13 +75,16 @@ export function parseCronIdFromContent(content: string): string | null {
 // ---------------------------------------------------------------------------
 
 export function computeDefinitionHash(record: CronRunRecord): string {
+  // NOTE: `disabled` is intentionally excluded — it is operational state
+  // (set by cronPause/cronResume), not part of the cron definition.
+  // Including it would cause spurious projection reconciliation whenever
+  // a cron is paused or resumed.
   const payload = JSON.stringify({
     schedule: record.schedule ?? null,
     timezone: record.timezone ?? null,
     channel: record.channel ?? null,
     prompt: record.prompt ?? null,
     triggerType: record.triggerType ?? 'schedule',
-    disabled: record.disabled,
     inputMode: record.inputMode ?? 'prompt',
     inputShell: record.inputShell ?? null,
   });
@@ -476,6 +482,14 @@ export async function loadRunStats(filePath: string): Promise<CronRunStats> {
       if (!rec.inputMode) rec.inputMode = 'prompt';
     }
     store.version = 12;
+  }
+  // Migrate v12 → v13: backfill pauseSource on disabled records.
+  // Existing disabled records are assumed to have been set by explicit user command.
+  if (store.version === 12) {
+    for (const rec of Object.values(store.jobs)) {
+      if (rec.disabled && !rec.pauseSource) rec.pauseSource = 'user';
+    }
+    store.version = 13;
   }
   return new CronRunStats(store, filePath);
 }

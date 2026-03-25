@@ -473,15 +473,10 @@ export async function initCronForum(opts: ForumSyncOptions): Promise<{ forumId: 
       // Archive state changed.
       if (oldThread.archived !== newThread.archived) {
         if (newThread.archived) {
-          log?.info({ threadId: newThread.id }, 'cron:forum thread archived, disabling');
-          scheduler.disable(newThread.id);
-          // Persist disabled state.
-          if (statsStore) {
-            const record = statsStore.getRecordByThreadId(newThread.id);
-            if (record) {
-              void statsStore.upsertRecord(record.cronId, newThread.id, { disabled: true }).catch(() => {});
-            }
-          }
+          // Auto-archive (Discord inactivity) must NOT disable crons.
+          // Only explicit cronPause commands persist disabled: true.
+          // The cron keeps firing to its target channel; the thread is just UI.
+          log?.info({ threadId: newThread.id }, 'cron:forum thread archived (cron continues)');
         } else {
           // Reject unarchived manual threads not already grandfathered into the scheduler.
           if (!scheduler.getJob(newThread.id) && !isBotOwned(newThread)) {

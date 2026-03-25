@@ -515,4 +515,126 @@ describe('runCronSync', () => {
       expect.stringContaining('orphan'),
     );
   });
+
+  it('sync preserves disabled flag without modifying it', async () => {
+    const forum = makeForum([{ id: 'thread-1', name: 'Paused Job', parentId: 'forum-1' }]);
+    const client = makeClient(forum);
+    const statsStore = makeStatsStore([
+      makeRecord({
+        cronId: 'cron-1',
+        threadId: 'thread-1',
+        disabled: true,
+        pauseSource: 'user',
+        cadence: 'daily',
+        purposeTags: ['monitoring'],
+        model: 'haiku',
+      }),
+    ]);
+    const scheduler = makeScheduler([
+      { id: 'thread-1', threadId: 'thread-1', cronId: 'cron-1', name: 'Paused Job', schedule: '0 7 * * *', prompt: 'Check things' },
+    ]);
+
+    await runCronSync({
+      client: client as any,
+      forumId: 'forum-1',
+      scheduler,
+      statsStore,
+      runtime: makeMockRuntime('monitoring'),
+      tagMap: { ...defaultTagMap },
+      autoTag: false,
+      autoTagModel: 'haiku',
+      cwd: '/tmp',
+      log: mockLog(),
+      throttleMs: 0,
+    });
+
+    // Verify disabled and pauseSource were not altered by sync
+    const record = statsStore.getRecord('cron-1');
+    expect(record?.disabled).toBe(true);
+    expect(record?.pauseSource).toBe('user');
+  });
+
+  it('phase 5: recreating disabled cron calls scheduler.disable on new thread', async () => {
+    const create = vi.fn(async ({ name, message }: { name: string; message: { content: string } }) => ({
+      id: 'thread-new',
+      name,
+      message,
+    }));
+    const forum = makeForum([], { create });
+    const client = makeClient(forum);
+    const statsStore = makeStatsStore([
+      makeRecord({
+        cronId: 'cron-disabled',
+        threadId: 'thread-old',
+        disabled: true,
+        pauseSource: 'user',
+        cadence: 'daily',
+        schedule: '0 7 * * *',
+        timezone: 'UTC',
+        channel: 'general',
+        prompt: 'Disabled job that needs thread recreation.',
+        projectionStatus: 'missing',
+        projectionHash: 'stale-hash',
+      }),
+    ]);
+    const scheduler = makeScheduler([]);
+
+    const result = await runCronSync({
+      client: client as any,
+      forumId: 'forum-1',
+      scheduler,
+      statsStore,
+      runtime: makeMockRuntime('monitoring'),
+      tagMap: { ...defaultTagMap },
+      autoTag: false,
+      autoTagModel: 'haiku',
+      cwd: '/tmp',
+      log: mockLog(),
+      throttleMs: 0,
+    });
+
+    expect(result.projectionsRepaired).toBe(1);
+    // Scheduler should have been called: register then disable
+    expect(scheduler.register).toHaveBeenCalled();
+    expect(scheduler.disable).toHaveBeenCalledWith('thread-new');
+    // Record should still be disabled after recreation
+    const record = statsStore.getRecord('cron-disabled');
+    expect(record?.disabled).toBe(true);
+    expect(record?.threadId).toBe('thread-new');
+  });
+
+  it('phase 3: updates status messages for disabled crons', async () => {
+    const forum = makeForum([{ id: 'thread-1', name: 'Paused Job', parentId: 'forum-1' }]);
+    const client = makeClient(forum);
+    const statsStore = makeStatsStore([
+      makeRecord({
+        cronId: 'cron-1',
+        threadId: 'thread-1',
+        disabled: true,
+        pauseSource: 'user',
+        cadence: 'daily',
+        model: 'haiku',
+      }),
+    ]);
+    const scheduler = makeScheduler([
+      { id: 'thread-1', threadId: 'thread-1', cronId: 'cron-1', name: 'Paused Job', schedule: '0 7 * * *', prompt: 'Check things' },
+    ]);
+
+    const result = await runCronSync({
+      client: client as any,
+      forumId: 'forum-1',
+      scheduler,
+      statsStore,
+      runtime: makeMockRuntime('monitoring'),
+      tagMap: { ...defaultTagMap },
+      autoTag: false,
+      autoTagModel: 'haiku',
+      cwd: '/tmp',
+      log: mockLog(),
+      throttleMs: 0,
+    });
+
+    // Disabled crons should still get status message updates
+    expect(result.statusMessagesUpdated).toBe(1);
+  });
 });
