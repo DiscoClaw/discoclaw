@@ -7,7 +7,26 @@ export type MessageHistoryOpts = {
   fetchLimit?: number;
   botDisplayName?: string;
   excludeMessageIds?: Iterable<string>;
+  /** Reference timestamp (epoch ms) for relative-time labels. Defaults to Date.now(). */
+  now?: number;
 };
+
+/**
+ * Format a duration in milliseconds as a compact relative-time label.
+ * Examples: "2m ago", "3h ago", "5d ago", "just now".
+ */
+export function formatRelativeTime(deltaMs: number): string {
+  const seconds = Math.floor(deltaMs / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  return `${weeks}w ago`;
+}
 
 export type MessageHistoryResult = {
   /** Formatted text transcript in chronological order. */
@@ -58,6 +77,7 @@ export async function fetchMessageHistory(
   if (sorted.length === 0) return EMPTY_RESULT;
 
   // Build history from most recent backward so the most relevant context is kept.
+  const now = opts.now ?? Date.now();
   let remaining = opts.budgetChars;
   const selected: string[] = [];
 
@@ -65,11 +85,14 @@ export async function fetchMessageHistory(
     const m = sorted[i]!;
     const author = m.author.bot ? (opts.botDisplayName ?? 'Discoclaw') : (m.author.displayName || m.author.username);
     const content = String(m.content ?? '');
-    const full = `[${author}]: ${content}`;
+    const ts = typeof m.createdTimestamp === 'number' ? m.createdTimestamp : 0;
+    const age = ts > 0 ? formatRelativeTime(now - ts) : '';
+    const tag = age ? `${author}, ${age}` : author;
+    const full = `[${tag}]: ${content}`;
 
     if (m.author.bot && full.length > remaining) {
       // Truncate bot messages to fit remaining budget.
-      const prefix = `[${author}]: `;
+      const prefix = `[${tag}]: `;
       const maxContent = Math.max(0, remaining - prefix.length - 3);
       if (maxContent <= 0) break;
       selected.unshift(`${prefix}${content.slice(0, maxContent)}...`);
