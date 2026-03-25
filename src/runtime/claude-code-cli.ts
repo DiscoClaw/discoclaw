@@ -1,4 +1,5 @@
-// Claude Code CLI runtime adapter — thin wrapper around the universal CLI adapter.
+// Claude Code CLI runtime adapter (registry key: "claude-cli").
+// Thin wrapper around the universal CLI adapter.
 // All substantive logic lives in cli-adapter.ts + strategies/claude-strategy.ts.
 
 import type { RuntimeAdapter } from './types.js';

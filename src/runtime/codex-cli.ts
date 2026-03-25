@@ -1,4 +1,5 @@
-// Codex runtime adapter — uses the CLI adapter (`codex exec`) exclusively.
+// Codex CLI runtime adapter (registry key: "codex-cli").
+// Uses the CLI adapter (`codex exec`) exclusively.
 
 import type { RuntimeAdapter, RuntimeInvokeParams } from './types.js';
 import { createCliRuntime, killAllSubprocesses } from './cli-adapter.js';
