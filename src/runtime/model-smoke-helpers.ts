@@ -13,6 +13,7 @@ import type { EngineEvent, RuntimeAdapter } from './types.js';
 import { createClaudeCliRuntime } from './claude-code-cli.js';
 import { createOpenAICompatRuntime } from './openai-compat.js';
 import { createCodexCliRuntime } from './codex-cli.js';
+import { createGeminiRestRuntime } from './gemini-rest.js';
 
 // ---------------------------------------------------------------------------
 // Prompt definitions
@@ -216,4 +217,18 @@ export function buildCodexSmokeRuntime(env: NodeJS.ProcessEnv = process.env) {
   const runtime = createCodexCliRuntime({ codexBin, defaultModel });
 
   return { runtime, codexBin };
+}
+
+/**
+ * Build a Gemini REST RuntimeAdapter from env vars.
+ * Reads `GEMINI_API_KEY`, `GEMINI_BASE_URL`, and `GEMINI_MODEL` (default: `gemini-2.5-flash`).
+ */
+export function buildGeminiSmokeRuntime(env: NodeJS.ProcessEnv = process.env) {
+  const apiKey = env.GEMINI_API_KEY?.trim() || '';
+  const baseUrl = env.GEMINI_BASE_URL?.trim() || undefined;
+  const defaultModel = env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
+
+  const runtime = createGeminiRestRuntime({ apiKey, defaultModel, baseUrl });
+
+  return { runtime, apiKey };
 }
