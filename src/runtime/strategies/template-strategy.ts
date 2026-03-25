@@ -1,7 +1,7 @@
 // Template strategy for adding a new CLI-based runtime adapter.
 //
 // To add a new model:
-// 1. Copy this file and rename (e.g. gemini-strategy.ts).
+// 1. Copy this file and rename (e.g. my-strategy.ts).
 // 2. Implement the required hooks below.
 // 3. Create a thin wrapper in src/runtime/<model>-cli.ts:
 //
