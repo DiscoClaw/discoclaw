@@ -18,6 +18,12 @@ import {
 import { DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT, formatDashboardUrl } from './options.js';
 import { renderDashboardPage } from './page.js';
 import { buildSnapshotResponse, type DashboardSnapshotApiResponse } from './api/snapshot.js';
+import {
+  buildSettingsGetResponse,
+  buildSettingsPostResponse,
+  type DashboardSettingsGetResponse,
+  type DashboardSettingsPostResponse,
+} from './api/settings.js';
 import type { LiveRuntimeSnapshot, LiveSnapshotProvider } from './snapshot.js';
 import type { AuthProbeReport } from './auth-probe.js';
 import { hasErrorCode, mapListenError } from './server-errors.js';
@@ -55,6 +61,7 @@ const DNS_REBIND_ERROR = 'Dashboard requests must use a loopback Host header.';
 type KnownRuntimesType = typeof KNOWN_RUNTIMES;
 
 export type { DashboardSnapshotApiResponse } from './api/snapshot.js';
+export type { DashboardSettingsGetResponse, DashboardSettingsPostResponse } from './api/settings.js';
 
 /**
  * Result of a live model change applied to the running bot's in-memory state.
@@ -604,6 +611,10 @@ function isDashboardBadRequest(message: string): boolean {
     || message === 'Secret key is required.'
     || message === 'Secret value is required.'
     || message.startsWith('Unknown secret key:')
+    || message === 'Setting key is required.'
+    || message === 'Setting value is required.'
+    || message.startsWith('Unknown setting key:')
+    || message.startsWith('Setting value must be')
   );
 }
 
@@ -888,6 +899,31 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           message = failed.map((r) => `${r.provider}: ${r.message ?? 'failed'}`).join('; ');
         }
         respondJson(res, 200, { ok: true, status, message, results: report.results } satisfies DashboardAuthCheckApiResponse);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/settings') {
+        respondJson(res, 200, buildSettingsGetResponse(inspectOpts.env));
+        return;
+      }
+
+      if (pathname === '/api/settings') {
+        if (method !== 'POST') {
+          respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
+          return;
+        }
+        if (!hasSafeDashboardOrigin(req, trustedHosts)) {
+          respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
+          return;
+        }
+        const body = await readJsonBody(req);
+        const key = typeof body.key === 'string' ? body.key.trim() : '';
+        const value = typeof body.value === 'string' ? body.value.trim() : '';
+
+        const response = await buildSettingsPostResponse(inspectOpts, deps, key, value);
+        pendingRestart = true;
+
+        respondJson(res, 200, response);
         return;
       }
 

@@ -363,6 +363,16 @@ See [docs/dashboard-tailscale.md](dashboard-tailscale.md) for access and trusted
 
 If you run multiple DiscoClaw instances on one machine and want dashboards on both, assign distinct `DISCOCLAW_DASHBOARD_PORT` values such as `9401` and `9402`.
 
+### Dashboard Settings Panel
+
+The web dashboard exposes a **Settings** card for editing toggle-able feature flags and tuning knobs that are otherwise only reachable through `.env`. The following config categories are editable from the panel:
+
+- **Discord action toggles** — master switch and per-category flags (`DISCOCLAW_DISCORD_ACTIONS`, `DISCOCLAW_DISCORD_ACTIONS_CHANNELS`, etc.)
+- **Feature subsystems** — cron (`DISCOCLAW_CRON_ENABLED`), tasks (`DISCOCLAW_TASKS_ENABLED`), webhooks (`DISCOCLAW_WEBHOOK_ENABLED`), voice (`DISCOCLAW_VOICE_ENABLED`), canvas (`DISCOCLAW_CANVAS_ENABLED`), forge/plan (`DISCOCLAW_FORGE_COMMANDS_ENABLED`, `DISCOCLAW_PLAN_COMMANDS_ENABLED`), and memory (`DISCOCLAW_MEMORY_COMMANDS_ENABLED`, `DISCOCLAW_DURABLE_MEMORY_ENABLED`)
+- **Behavior tuning** — multi-turn sessions (`DISCOCLAW_MULTI_TURN`), streaming (`DISCOCLAW_TOOL_AWARE_STREAMING`, `DISCOCLAW_STREAM_PREVIEW_RAW`), reactions (`DISCOCLAW_REACTION_HANDLER`), and concurrency limits (`DISCOCLAW_MAX_CONCURRENT_INVOCATIONS`, `DISCOCLAW_MULTI_TURN_MAX_PROCESSES`)
+
+All changes made through the Settings panel are written to `.env` and require a service restart to take effect. The panel does not edit model configuration, secrets, or provider API keys — those remain `.env`-only or are managed through `!models` / the Secrets card.
+
 ## Canvas
 
 Interactive HTML artifacts served as Discord Activities. See [docs/discord-bot-setup.md](discord-bot-setup.md) § Canvas Activities for the Discord Developer Portal setup steps.
