@@ -1,4 +1,4 @@
-export type TaskRuntimeId = 'claude_code' | 'openai' | 'openrouter' | 'codex' | 'gemini' | 'other';
+export type TaskRuntimeId = 'claude_code' | 'claude_api' | 'openai' | 'openrouter' | 'codex' | 'gemini' | 'other';
 export type TaskModelResolver = (model: string, runtimeId: TaskRuntimeId) => string;
 
 export type TaskRuntimeInvokeParams = {
