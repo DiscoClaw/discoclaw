@@ -838,7 +838,7 @@ describe('threadUpdate listener', () => {
     vi.mocked(parseCronDefinition).mockReset();
   });
 
-  async function setupAndGetListener(opts: { scheduler?: any } = {}) {
+  async function setupAndGetListener(opts: { scheduler?: any; statsStore?: any } = {}) {
     const forum = makeForum([]);
     const client = makeClient(forum);
     const scheduler = opts.scheduler ?? makeScheduler();
@@ -852,12 +852,74 @@ describe('threadUpdate listener', () => {
       cronModel: 'haiku',
       cwd: '/tmp',
       log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+      statsStore: opts.statsStore,
     });
 
     const threadUpdateCallbacks = client._listeners['threadUpdate'] ?? [];
     expect(threadUpdateCallbacks.length).toBeGreaterThan(0);
     return { listener: threadUpdateCallbacks[0], scheduler, client };
   }
+
+  it('does not disable scheduler or persist disabled when thread is archived', async () => {
+    const scheduler = makeScheduler();
+    const statsStore = {
+      getRecordByThreadId: vi.fn().mockReturnValue({ cronId: 'cron-1', threadId: 'thread-1', disabled: false }),
+      getRecord: vi.fn(),
+      getStore: vi.fn().mockReturnValue({ jobs: {} }),
+      upsertRecord: vi.fn(async () => ({})),
+    };
+    const { listener } = await setupAndGetListener({ scheduler, statsStore });
+
+    const oldThread = makeThread({ id: 'thread-1', parentId: 'forum-1', archived: false });
+    const newThread = makeThread({ id: 'thread-1', parentId: 'forum-1', archived: true });
+    await listener(oldThread, newThread);
+
+    // Archiving should NOT disable the scheduler — cron keeps running.
+    expect(scheduler.disable).not.toHaveBeenCalled();
+    // Should NOT persist disabled: true to the stats store.
+    expect(statsStore.upsertRecord).not.toHaveBeenCalled();
+  });
+
+  it('cron survives archive+unarchive cycle without becoming stuck disabled', async () => {
+    const scheduler = makeScheduler();
+    scheduler.register.mockReturnValue({ cron: { nextRun: () => new Date() } });
+
+    vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
+      schedule: '0 7 * * *',
+      timezone: 'UTC',
+      channel: 'general',
+      prompt: 'Say hello.',
+    });
+
+    const statsStore = {
+      getRecordByThreadId: vi.fn().mockReturnValue({ cronId: 'cron-1', threadId: 'thread-1', disabled: false }),
+      getRecord: vi.fn().mockReturnValue({ cronId: 'cron-1', threadId: 'thread-1', disabled: false }),
+      getStore: vi.fn().mockReturnValue({ jobs: {} }),
+      upsertRecord: vi.fn(async () => ({})),
+    };
+    const { listener } = await setupAndGetListener({ scheduler, statsStore });
+
+    // Step 1: archive
+    const oldThread = makeThread({ id: 'thread-1', parentId: 'forum-1', archived: false });
+    const archivedThread = makeThread({ id: 'thread-1', parentId: 'forum-1', archived: true });
+    await listener(oldThread, archivedThread);
+
+    // Step 2: unarchive
+    const unarchivedThread = makeThread({ id: 'thread-1', parentId: 'forum-1', archived: false });
+    unarchivedThread.fetchStarterMessage.mockResolvedValue({
+      id: 'm1',
+      content: 'every day at 7am say hello',
+      author: { id: 'u-allowed' },
+      react: vi.fn().mockResolvedValue(undefined),
+    });
+    unarchivedThread.messages = { fetch: vi.fn().mockResolvedValue(new Map()) };
+    await listener(archivedThread, unarchivedThread);
+
+    // The cron should be re-registered, NOT disabled.
+    expect(scheduler.register).toHaveBeenCalled();
+    expect(scheduler.disable).not.toHaveBeenCalled();
+  });
 
   it('rejects unarchived manual thread not in scheduler', async () => {
     const scheduler = makeScheduler();
