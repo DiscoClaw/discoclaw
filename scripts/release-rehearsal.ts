@@ -16,6 +16,7 @@ import { resolveTaskDataLoadPath, resolveTaskDataPath } from '../src/tasks/path-
 import { runTaskSyncWithStore } from '../src/tasks/task-sync-cli.js';
 import { loadRunStats } from '../src/cron/run-stats.js';
 import { killProcessTree } from '../src/runtime/cli-shared.js';
+import { createAutoCheckpoint } from './auto-checkpoint.js';
 
 const defaultRoot = path.resolve(import.meta.dirname, '..');
 
@@ -229,6 +230,12 @@ function usage(): string[] {
     'manual checkpoint failures, or any rehearsal task/cron artifact left active after teardown.',
     'Optionally record checkout provenance with --checkout-provenance=throwaway-clone|reused-checkout,',
     'RELEASE_REHEARSAL_CHECKOUT_PROVENANCE, or the interactive prompt.',
+    '',
+    'Flags:',
+    '  --auto                      Replace TTY checkpoints with programmatic Discord API verification.',
+    '  --auto-channel=<id>         Text-channel ID for auto-checkpoint probe messages (required with --auto).',
+    '  --auto-poll-interval=<ms>   Milliseconds between polls for a bot reply (default: 2000).',
+    '  --auto-poll-timeout=<ms>    Maximum milliseconds to wait for a bot reply (default: 120000).',
   ];
 }
 
@@ -619,6 +626,31 @@ function readCheckoutProvenanceFromArgv(
     }
   }
   return null;
+}
+
+function readArgvFlag(argv: string[], name: string): boolean {
+  return argv.includes(name);
+}
+
+function readArgvValue(argv: string[], name: string): string | undefined {
+  for (let index = 0; index < argv.length; index += 1) {
+    const current = argv[index];
+    if (!current) continue;
+    if (current.startsWith(`${name}=`)) {
+      return current.slice(name.length + 1);
+    }
+    if (current === name && index + 1 < argv.length) {
+      return argv[index + 1];
+    }
+  }
+  return undefined;
+}
+
+function readArgvInt(argv: string[], name: string): number | undefined {
+  const raw = readArgvValue(argv, name);
+  if (raw === undefined) return undefined;
+  const parsed = parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 function formatCheckoutProvenance(
@@ -1132,10 +1164,14 @@ export async function runReleaseRehearsal(options: {
   const log = deps.log ?? console.log;
   const runCommand = deps.runCommand ?? defaultRunCommand;
   const startDev = deps.startDev ?? defaultStartDev;
-  const promptCheckpoint = deps.promptCheckpoint ?? defaultPromptCheckpoint;
+  let promptCheckpoint = deps.promptCheckpoint ?? defaultPromptCheckpoint;
   const cleanupArtifacts = deps.cleanupArtifacts ?? defaultCleanupArtifacts;
   const resolveCheckoutProvenance = deps.resolveCheckoutProvenance ?? defaultResolveCheckoutProvenance;
   const randomSuffix = deps.randomSuffix ?? defaultRandomSuffix;
+  const autoMode = readArgvFlag(argv, '--auto');
+  const autoChannelId = readArgvValue(argv, '--auto-channel');
+  const autoPollIntervalMs = readArgvInt(argv, '--auto-poll-interval');
+  const autoPollTimeoutMs = readArgvInt(argv, '--auto-poll-timeout');
 
   if (argv.includes('--help') || argv.includes('-h')) {
     for (const line of usage()) log(line);
@@ -1271,6 +1307,65 @@ export async function runReleaseRehearsal(options: {
   }
 
   const childEnv = buildChildEnv(env, repoEnv, summary.envOverrides);
+
+  let autoCheckpointDispose: (() => void) | null = null;
+  if (autoMode && !deps.promptCheckpoint) {
+    if (!autoChannelId) {
+      summary.verdict = 'blocked';
+      summary.refusalReason = '--auto requires --auto-channel=<channel-id>.';
+      summary.steps.push(makeStep(
+        'validate-auto-channel',
+        'Validate Auto-Channel',
+        'blocked',
+        '--auto was set but --auto-channel was not provided.',
+      ));
+      return finish('blocked', 1);
+    }
+
+    const discordToken = String(repoEnv.DISCORD_TOKEN ?? '').trim();
+    if (!discordToken) {
+      summary.verdict = 'blocked';
+      summary.refusalReason = '--auto requires DISCORD_TOKEN in repo-local .env.';
+      summary.steps.push(makeStep(
+        'validate-auto-token',
+        'Validate Auto-Checkpoint Token',
+        'blocked',
+        '--auto was set but DISCORD_TOKEN is missing from repo-local .env.',
+      ));
+      return finish('blocked', 1);
+    }
+
+    try {
+      const autoCtx = await createAutoCheckpoint({
+        discordToken,
+        channelId: autoChannelId,
+        slug,
+        artifacts,
+        log,
+        pollIntervalMs: autoPollIntervalMs,
+        pollTimeoutMs: autoPollTimeoutMs,
+      });
+      promptCheckpoint = autoCtx.promptCheckpoint;
+      autoCheckpointDispose = autoCtx.dispose;
+      summary.steps.push(makeStep(
+        'auto-checkpoint-init',
+        'Initialize Auto-Checkpoint',
+        'pass',
+        `Auto-checkpoint observer connected to channel ${autoChannelId}.`,
+      ));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      summary.verdict = 'blocked';
+      summary.refusalReason = `Auto-checkpoint initialization failed: ${message}`;
+      summary.steps.push(makeStep(
+        'auto-checkpoint-init',
+        'Initialize Auto-Checkpoint',
+        'blocked',
+        message,
+      ));
+      return finish('blocked', 1);
+    }
+  }
 
   summary.steps.push(makeStep(
     'validate-inputs',
@@ -1750,6 +1845,7 @@ export async function runReleaseRehearsal(options: {
 
     return finish(summary.verdict, summary.verdict === 'pass' ? 0 : 1);
   } finally {
+    autoCheckpointDispose?.();
     removeInterruptHandlers();
   }
 }
