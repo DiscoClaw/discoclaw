@@ -25,15 +25,11 @@ const CANVAS_VOID_ELEMENT_TAG_RE = /<(area|base|br|col|embed|hr|img|input|link|m
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const CANVAS_PROMPT_TEMPLATE_PATH = path.resolve(__dirname, '..', '..', 'templates', 'instructions', 'canvas.md');
-const CANVAS_EXPERIMENTAL_POSTURE_NOTE = [
-  'Canvas Activities are experimental and default-off in DiscoClaw.',
-  'Fresh installs and upgraded installs both require an explicit opt-in via `DISCOCLAW_CANVAS_ENABLED=1`, followed by a bot restart.',
-].join(' ');
-const DEFAULT_SAVE_BRIDGE_GUIDANCE = [
-  '- Save-file export is available through the trusted shell bridge when enabled.',
-  '- To export a file from inside the artifact, post a message to the parent shell:',
-  '  `window.parent.postMessage({ type: "canvas.saveFile", suggestedName: "report.md", mimeType: "text/markdown", encoding: "utf8", content: "# Report" }, "*")`',
-].join('\n');
+const CANVAS_SETUP_POSTURE_NOTE =
+  'Canvas Activities are experimental and default-off in DiscoClaw.' +
+  ' Fresh installs and upgraded installs both require an explicit opt-in via `DISCOCLAW_CANVAS_ENABLED=1`, followed by a bot restart.';
+const DEFAULT_SAVE_BRIDGE_GUIDANCE =
+  '- Save-file export: `window.parent.postMessage({ type: "canvas.saveFile", suggestedName: "report.md", mimeType: "text/markdown", encoding: "utf8", content: "..." }, "*")`';
 
 let cachedCanvasPromptTemplate: string | null = null;
 
@@ -104,7 +100,7 @@ export function buildCanvasSetupRequiredStub(canvasCtx?: CanvasContext): string 
       'Enable Activities on the Discord application in the Developer Portal (Application → Activities → Enable). Requires the URL Mapping first.',
     ],
   };
-  return [CANVAS_EXPERIMENTAL_POSTURE_NOTE, buildCanvasSetupWalkthrough(readiness)].join(' ');
+  return [CANVAS_SETUP_POSTURE_NOTE, buildCanvasSetupWalkthrough(readiness)].join(' ');
 }
 
 export function shouldCanvasPromptBeSurfaced(canvasCtx: CanvasContext | undefined, userText?: string): boolean {
@@ -341,50 +337,7 @@ function findCanvasArtifactLintError(content: string): string | null {
 
 function loadCanvasPromptTemplate(): string {
   if (cachedCanvasPromptTemplate != null) return cachedCanvasPromptTemplate;
-  try {
-    cachedCanvasPromptTemplate = fs.readFileSync(CANVAS_PROMPT_TEMPLATE_PATH, 'utf8').trim();
-  } catch {
-    cachedCanvasPromptTemplate = [
-      '### Canvas Activities',
-      '',
-      '**launchCanvas** — Generate and serve an interactive HTML artifact or built-in app in a Discord Activity panel:',
-      '```',
-      '<discord-action>{"type":"launchCanvas","title":"Tax Calculator","content":"<!doctype html><html><head><meta charset=\\"utf-8\\" /><meta name=\\"viewport\\" content=\\"width=device-width,initial-scale=1\\" /><style>body{font-family:sans-serif;padding:16px}label,input{display:block;margin-top:12px}</style></head><body><div id=\\"app\\"></div><script>const { html, render, useState } = window.canvasRuntime;function TaxCalculator(){const [income,setIncome]=useState(50000);const tax=Math.round(income*0.22);return html`<main><h1>Tax Calculator</h1><label>Income <input type=\\"number\\" value=${income} onInput=${(event)=>setIncome(Number(event.currentTarget.value||0))} /></label><p>Estimated tax: $${tax.toLocaleString()}</p></main>`;}render(TaxCalculator, document.getElementById(\\"app\\"));</script></body></html>"}</discord-action>',
-      '<discord-action>{"type":"launchCanvas","title":"Dashboard","app":"dashboard"}</discord-action>',
-      '```',
-      '- `title` (required): Human-readable label for the launch button.',
-      '- `content` (artifact mode): Full self-contained HTML document with all CSS and JS inline.',
-      '- `app` (built-in mode): Named built-in Activity app such as `dashboard`.',
-      '- Use canvas only when interactivity materially improves the result over plain text.',
-      '- Default is plain text. Do not use canvas for short answers, conversational replies, or single values.',
-      '- Good fits: calculators, forms, charts, diffs, large comparison views, filterable tables, live dashboard launches.',
-      '- Bad fits: simple status updates, brief explanations, or anything the user explicitly wants as plain text.',
-      '- Artifact render responses inject `window.canvasRuntime`; use that built-in runtime instead of bundling React, Preact, Vue, or another UI framework.',
-      '- The injected runtime exposes `html`, `render`, and the installed `preact/hooks` surface: `useState`, `useEffect`, `useLayoutEffect`, `useReducer`, `useRef`, `useMemo`, `useCallback`, `useContext`, `useImperativeHandle`, `useDebugValue`, `useErrorBoundary`, and `useId`.',
-      '- Start interactive artifacts with `const { html, render, useState } = window.canvasRuntime`; keep the starter small unless the artifact actually needs more hook surface, and mount into a dedicated root node.',
-      '- In `html` template literals, self-close void HTML elements: use `<input ... />`, `<img ... />`, `<br />`, etc. Bare `<input>` tags can corrupt the rendered DOM in canvas artifacts.',
-      '- Generated artifacts must be a single HTML file, responsive at phone width, and keep total size under roughly 500KB.',
-      '- No external scripts, stylesheets, fonts, images, or nested iframes in generated artifacts.',
-      '- Generated artifacts run inside a sandboxed iframe and cannot call backend routes directly.',
-      '- Artifacts are stored under a cap-based LRU policy; they are not time-expired in v1.',
-      '- Include visible loading/error/fallback states when the UI depends on JavaScript.',
-      '- Default visual direction: feel at home in Discord without mimicking Discord\'s UI chrome.',
-      '- Favor Discord-adjacent contrast and restraint for dark surroundings, but choose colors and themes based on the content instead of cloning Discord\'s palette by default.',
-      '- Use explicitly Discord-like styling only when the user asks for a native/control-panel/admin-tool feel.',
-      '- Prefer semantic HTML, clear contrast, and obvious focus states.',
-      '{{CANVAS_SAVE_BRIDGE_GUIDANCE}}',
-    ].join('\n');
-  }
-  if (!cachedCanvasPromptTemplate.includes(CANVAS_EXPERIMENTAL_POSTURE_NOTE)) {
-    if (cachedCanvasPromptTemplate.startsWith('### Canvas Activities')) {
-      cachedCanvasPromptTemplate = cachedCanvasPromptTemplate.replace(
-        '### Canvas Activities',
-        `### Canvas Activities\n\n${CANVAS_EXPERIMENTAL_POSTURE_NOTE}`,
-      );
-    } else {
-      cachedCanvasPromptTemplate = `${CANVAS_EXPERIMENTAL_POSTURE_NOTE}\n\n${cachedCanvasPromptTemplate}`;
-    }
-  }
+  cachedCanvasPromptTemplate = fs.readFileSync(CANVAS_PROMPT_TEMPLATE_PATH, 'utf8').trim();
   return cachedCanvasPromptTemplate;
 }
 

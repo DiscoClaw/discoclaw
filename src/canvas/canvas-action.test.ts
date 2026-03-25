@@ -1,5 +1,4 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -86,14 +85,12 @@ async function makeCanvasContext() {
 }
 
 describe('canvas-action', () => {
-  it('surfaces the injected canvas runtime contract from the checked-in prompt template', async () => {
+  it('surfaces the canvas runtime contract from the checked-in prompt template', async () => {
     vi.resetModules();
     const { canvasActionsPromptSection } = await import('./canvas-action.js');
 
     const prompt = canvasActionsPromptSection({ writeBridgeEnabled: true });
     expect(prompt).toContain('experimental and default-off');
-    expect(prompt).toContain('DISCOCLAW_CANVAS_ENABLED=1');
-    expect(prompt).toContain('Fresh installs and upgraded installs both require an explicit opt-in');
     expect(prompt).toContain('window.canvasRuntime');
     expect(prompt).toContain('installed `preact/hooks` surface');
     expect(prompt).toContain('`useLayoutEffect`');
@@ -102,39 +99,30 @@ describe('canvas-action', () => {
     expect(prompt).toContain('Bare `<input>` tags can corrupt the rendered DOM');
     expect(prompt).toContain('feel at home in Discord without mimicking Discord');
     expect(prompt).toContain('instead of cloning Discord\'s palette by default');
+    expect(prompt).toContain('canvas.saveFile');
+    expect(prompt).not.toContain('{{CANVAS_SAVE_BRIDGE_GUIDANCE}}');
   });
 
-  it('documents the injected canvas runtime in fallback prompt text and preserves save-bridge substitution', async () => {
+  it('omits save-bridge guidance when writeBridgeEnabled is false', async () => {
     vi.resetModules();
-    vi.spyOn(fsSync, 'readFileSync').mockImplementation(() => {
-      throw new Error('template unavailable');
-    });
-
     const { canvasActionsPromptSection } = await import('./canvas-action.js');
-
-    const withSaveBridge = canvasActionsPromptSection({ writeBridgeEnabled: true });
-    expect(withSaveBridge).toContain('experimental and default-off');
-    expect(withSaveBridge).toContain('DISCOCLAW_CANVAS_ENABLED=1');
-    expect(withSaveBridge).toContain('Fresh installs and upgraded installs both require an explicit opt-in');
-    expect(withSaveBridge).toContain('window.canvasRuntime');
-    expect(withSaveBridge).toContain('installed `preact/hooks` surface');
-    expect(withSaveBridge).toContain('`useErrorBoundary`');
-    expect(withSaveBridge).toContain('const { html, render, useState } = window.canvasRuntime');
-    expect(withSaveBridge).toContain('self-close void HTML elements');
-    expect(withSaveBridge).toContain('feel at home in Discord without mimicking Discord');
-    expect(withSaveBridge).toContain('canvas.saveFile');
-    expect(withSaveBridge).not.toContain('{{CANVAS_SAVE_BRIDGE_GUIDANCE}}');
 
     const withoutSaveBridge = canvasActionsPromptSection({ writeBridgeEnabled: false });
     expect(withoutSaveBridge).toContain('experimental and default-off');
-    expect(withoutSaveBridge).toContain('DISCOCLAW_CANVAS_ENABLED=1');
     expect(withoutSaveBridge).toContain('window.canvasRuntime');
     expect(withoutSaveBridge).toContain('installed `preact/hooks` surface');
-    expect(withoutSaveBridge).toContain('`useId`');
     expect(withoutSaveBridge).toContain('Bare `<input>` tags can corrupt the rendered DOM');
-    expect(withoutSaveBridge).toContain('instead of cloning Discord\'s palette by default');
     expect(withoutSaveBridge).not.toContain('canvas.saveFile');
     expect(withoutSaveBridge).not.toContain('{{CANVAS_SAVE_BRIDGE_GUIDANCE}}');
+  });
+
+  it('does not inject the setup posture note into the prompt template', async () => {
+    vi.resetModules();
+    const { canvasActionsPromptSection } = await import('./canvas-action.js');
+
+    const prompt = canvasActionsPromptSection({ writeBridgeEnabled: true });
+    expect(prompt).not.toContain('DISCOCLAW_CANVAS_ENABLED=1');
+    expect(prompt).not.toContain('Fresh installs and upgraded installs both require an explicit opt-in');
   });
 
   it('describes canvas setup as experimental and explicit opt-in', async () => {
