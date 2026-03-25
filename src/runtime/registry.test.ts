@@ -30,15 +30,15 @@ describe('RuntimeRegistry', () => {
 
   it('list returns registered names', () => {
     const registry = new RuntimeRegistry();
-    registry.register('claude', makeMockAdapter('claude_code'));
+    registry.register('claude-cli', makeMockAdapter('claude_code'));
     registry.register('openai', makeMockAdapter('openai'));
-    expect(registry.list()).toEqual(['claude', 'openai']);
+    expect(registry.list()).toEqual(['claude-cli', 'openai']);
   });
 
   it('has returns correct boolean', () => {
     const registry = new RuntimeRegistry();
-    registry.register('claude', makeMockAdapter('claude_code'));
-    expect(registry.has('claude')).toBe(true);
+    registry.register('claude-cli', makeMockAdapter('claude_code'));
+    expect(registry.has('claude-cli')).toBe(true);
     expect(registry.has('openai')).toBe(false);
   });
 

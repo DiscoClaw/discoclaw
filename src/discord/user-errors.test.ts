@@ -13,9 +13,9 @@ describe('mapRuntimeErrorToUserMessage', () => {
     expect(msg).not.toContain('Claude CLI was not found');
   });
 
-  it('maps Gemini binary missing errors to Gemini install guidance', () => {
+  it('maps Gemini binary missing errors to generic runtime error (gemini-cli removed)', () => {
     const msg = mapRuntimeErrorToUserMessage('spawn gemini ENOENT');
-    expect(msg).toContain('Gemini CLI was not found');
+    expect(msg).toContain('Runtime error:');
   });
 
   it('maps Gemini auth errors to Gemini-specific guidance', () => {

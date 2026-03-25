@@ -5,16 +5,16 @@
  * `pnpm test` runs are not slowed down):
  *
  *   SMOKE_TEST_TIERS=fast,capable pnpm test
- *     Run Claude Code smoke tests for the fast and capable tiers.
- *
- *   GEMINI_SMOKE_TEST_TIERS=fast pnpm test
- *     Run Gemini smoke tests for the fast tier.
+ *     Run Claude CLI smoke tests for the fast and capable tiers.
  *
  *   OPENAI_SMOKE_TEST_TIERS=fast pnpm test
  *     Run OpenAI smoke tests (requires OPENAI_API_KEY).
  *
  *   CODEX_SMOKE_TEST_TIERS=fast pnpm test
- *     Run Codex smoke tests (requires codex binary on PATH).
+ *     Run Codex CLI smoke tests (requires codex binary on PATH).
+ *
+ *   GEMINI_SMOKE_TEST_TIERS=fast pnpm test
+ *     Run Gemini API smoke tests (requires GEMINI_API_KEY).
  *
  *   OPENROUTER_SMOKE_TEST_TIERS=capable pnpm test
  *     Run the separate OpenRouter smoke suite in openrouter-smoke.test.ts.
@@ -35,9 +35,9 @@ import {
   PROMPT_CATEGORIES,
   validateSmokeResponse,
   buildSmokeRuntime,
-  buildGeminiSmokeRuntime,
   buildOpenAISmokeRuntime,
   buildCodexSmokeRuntime,
+  buildGeminiSmokeRuntime,
 } from './model-smoke-helpers.js';
 import { initTierOverrides, resolveModel } from './model-tiers.js';
 
@@ -73,12 +73,6 @@ function parseSmokeTierEnv(envVarName: string): string[] {
 const SMOKE_TIERS: string[] = parseSmokeTierEnv('SMOKE_TEST_TIERS');
 
 /**
- * Comma-separated tier names or literal model IDs from GEMINI_SMOKE_TEST_TIERS.
- * Empty = all Gemini smoke tests skipped.
- */
-const GEMINI_SMOKE_TIERS: string[] = parseSmokeTierEnv('GEMINI_SMOKE_TEST_TIERS');
-
-/**
  * Comma-separated tier names or literal model IDs from OPENAI_SMOKE_TEST_TIERS.
  * Empty = all OpenAI smoke tests skipped.
  */
@@ -86,21 +80,27 @@ const OPENAI_SMOKE_TIERS: string[] = parseSmokeTierEnv('OPENAI_SMOKE_TEST_TIERS'
 
 /**
  * Comma-separated tier names or literal model IDs from CODEX_SMOKE_TEST_TIERS.
- * Empty = all Codex smoke tests skipped.
+ * Empty = all Codex CLI smoke tests skipped.
  */
 const CODEX_SMOKE_TIERS: string[] = parseSmokeTierEnv('CODEX_SMOKE_TEST_TIERS');
 
+/**
+ * Comma-separated tier names or literal model IDs from GEMINI_SMOKE_TEST_TIERS.
+ * Empty = all Gemini API smoke tests skipped.
+ */
+const GEMINI_SMOKE_TIERS: string[] = parseSmokeTierEnv('GEMINI_SMOKE_TEST_TIERS');
+
 // Only build when opt-in is requested; avoids config-error noise in normal CI runs.
 const smokeState = SMOKE_TIERS.length > 0 ? buildSmokeRuntime() : null;
-const geminiSmokeState = GEMINI_SMOKE_TIERS.length > 0 ? buildGeminiSmokeRuntime() : null;
 const openaiSmokeState = OPENAI_SMOKE_TIERS.length > 0 ? buildOpenAISmokeRuntime() : null;
 const codexSmokeState = CODEX_SMOKE_TIERS.length > 0 ? buildCodexSmokeRuntime() : null;
+const geminiSmokeState = GEMINI_SMOKE_TIERS.length > 0 ? buildGeminiSmokeRuntime() : null;
 
 if (
   SMOKE_TIERS.length === 0
-  && GEMINI_SMOKE_TIERS.length === 0
   && OPENAI_SMOKE_TIERS.length === 0
   && CODEX_SMOKE_TIERS.length === 0
+  && GEMINI_SMOKE_TIERS.length === 0
 ) {
   describe('model smoke opt-in', () => {
     it.skip('set a provider-specific *_SMOKE_TEST_TIERS env var to enable live smoke cases', () => {});
@@ -108,10 +108,10 @@ if (
 }
 
 // ---------------------------------------------------------------------------
-// Claude Code — one describe block per requested tier
+// Claude CLI — one describe block per requested tier
 // ---------------------------------------------------------------------------
 
-describe.each(SMOKE_TIERS)('claude_code / %s', (tierOrModel) => {
+describe.each(SMOKE_TIERS)('claude_cli / %s', (tierOrModel) => {
   const model = resolveModel(tierOrModel, 'claude_code');
   const { runtime, claudeBin } = smokeState!;
 
@@ -123,42 +123,6 @@ describe.each(SMOKE_TIERS)('claude_code / %s', (tierOrModel) => {
         `Smoke test opt-in (SMOKE_TEST_TIERS="${process.env.SMOKE_TEST_TIERS}") ` +
           `requires binary "${claudeBin}" on PATH. ` +
           `Install the Claude CLI or set CLAUDE_BIN to the correct path.`,
-      );
-    }
-  });
-
-  it.each(PROMPT_CATEGORIES)('$name', async ({ prompt, validate, name }) => {
-    const events: EngineEvent[] = [];
-    for await (const evt of runtime.invoke({ prompt, model, cwd: CWD, tools: [] })) {
-      events.push(evt);
-    }
-    const result = validateSmokeResponse(events, tierOrModel, name);
-    expect(result.ok, `smoke failed: ${result.errorMessage}`).toBe(true);
-    if (validate) {
-      expect(
-        validate(result.text),
-        `[${tierOrModel}/${name}] validation failed for text: ${JSON.stringify(result.text)}`,
-      ).toBe(true);
-    }
-  }, TIMEOUT);
-});
-
-// ---------------------------------------------------------------------------
-// Gemini CLI — one describe block per requested tier
-// ---------------------------------------------------------------------------
-
-describe.each(GEMINI_SMOKE_TIERS)('gemini / %s', (tierOrModel) => {
-  const model = resolveModel(tierOrModel, 'gemini');
-  const { runtime, geminiBin } = geminiSmokeState!;
-
-  beforeAll(() => {
-    try {
-      execFileSync('which', [geminiBin], { stdio: 'pipe' });
-    } catch {
-      throw new Error(
-        `Smoke test opt-in (GEMINI_SMOKE_TEST_TIERS="${process.env.GEMINI_SMOKE_TEST_TIERS}") ` +
-          `requires binary "${geminiBin}" on PATH. ` +
-          `Install the Gemini CLI or set GEMINI_BIN to the correct path.`,
       );
     }
   });
@@ -216,7 +180,7 @@ describe.each(OPENAI_SMOKE_TIERS)('openai / %s', (tierOrModel) => {
 // Codex CLI — one describe block per requested tier
 // ---------------------------------------------------------------------------
 
-describe.each(CODEX_SMOKE_TIERS)('codex / %s', (tierOrModel) => {
+describe.each(CODEX_SMOKE_TIERS)('codex_cli / %s', (tierOrModel) => {
   const model = resolveModel(tierOrModel, 'codex');
   const { runtime, codexBin } = codexSmokeState!;
 
@@ -228,6 +192,39 @@ describe.each(CODEX_SMOKE_TIERS)('codex / %s', (tierOrModel) => {
         `Smoke test opt-in (CODEX_SMOKE_TEST_TIERS="${process.env.CODEX_SMOKE_TEST_TIERS}") ` +
           `requires binary "${codexBin}" on PATH. ` +
           `Install the Codex CLI or set CODEX_BIN to the correct path.`,
+      );
+    }
+  });
+
+  it.each(PROMPT_CATEGORIES)('$name', async ({ prompt, validate, name }) => {
+    const events: EngineEvent[] = [];
+    for await (const evt of runtime.invoke({ prompt, model, cwd: CWD, tools: [] })) {
+      events.push(evt);
+    }
+    const result = validateSmokeResponse(events, tierOrModel, name);
+    expect(result.ok, `smoke failed: ${result.errorMessage}`).toBe(true);
+    if (validate) {
+      expect(
+        validate(result.text),
+        `[${tierOrModel}/${name}] validation failed for text: ${JSON.stringify(result.text)}`,
+      ).toBe(true);
+    }
+  }, TIMEOUT);
+});
+
+// ---------------------------------------------------------------------------
+// Gemini API — one describe block per requested tier
+// ---------------------------------------------------------------------------
+
+describe.each(GEMINI_SMOKE_TIERS)('gemini / %s', (tierOrModel) => {
+  const model = resolveModel(tierOrModel, 'gemini');
+  const { runtime, apiKey } = geminiSmokeState!;
+
+  beforeAll(() => {
+    if (!apiKey) {
+      throw new Error(
+        `Smoke test opt-in (GEMINI_SMOKE_TEST_TIERS="${process.env.GEMINI_SMOKE_TEST_TIERS}") ` +
+          `requires GEMINI_API_KEY to be set.`,
       );
     }
   });

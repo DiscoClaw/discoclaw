@@ -279,9 +279,6 @@ export function createCliRuntime(strategy: CliAdapterStrategy, opts: UniversalCl
       if (!trimmed) return null;
 
       switch (strategy.id) {
-        case 'gemini':
-          // Explicit no-op: Gemini CLI is stateless for session persistence in this adapter.
-          return null;
         case 'codex':
           if (!CODEX_LAUNCHER_STATE_ERROR_PATTERN.test(trimmed)) return null;
           break;

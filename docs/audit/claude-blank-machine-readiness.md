@@ -54,7 +54,7 @@ Use this checklist for the Claude source-checkout 1.0 signoff:
 
 1. Create a throwaway clone in `/tmp` and run `pnpm install --frozen-lockfile`.
 2. Supply a real clone-local `.env` and isolate repo-owned state with throwaway `DISCOCLAW_DATA_DIR` and `WORKSPACE_CWD` paths.
-3. Force `PRIMARY_RUNTIME=claude` if the source env came from a different provider path.
+3. Force `PRIMARY_RUNTIME=claude-cli` if the source env came from a different provider path.
 4. Run `pnpm preflight:blank-machine`.
 5. If preflight fails, record the exact config drift or missing prerequisite. Do not silently treat that failure as Claude-auth evidence.
 6. Run `pnpm claude:auth-smoke` from a shell or account with no active Claude session.

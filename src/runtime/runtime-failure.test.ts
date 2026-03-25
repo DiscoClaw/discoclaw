@@ -102,7 +102,7 @@ describe('normalizeRuntimeFailure', () => {
     ['worker timed out after 30000ms', 'RUNTIME_TIMEOUT', true],
     ['Discord missing permissions for channel send', 'DISCORD_MISSING_PERMISSIONS', false],
     ['spawn claude ENOENT', 'CLAUDE_CLI_NOT_FOUND', false],
-    ['spawn gemini ENOENT', 'GEMINI_CLI_NOT_FOUND', false],
+    ['spawn gemini ENOENT', 'UNKNOWN', null],
     [
       'ERROR: {"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The \'gpt-5-mini\' model is not supported when using Codex with a ChatGPT account."}}',
       'CODEX_MODEL_UNSUPPORTED',
@@ -218,11 +218,11 @@ describe('normalizeRuntimeFailure', () => {
   it('normalizes legacy error events', () => {
     const failure = normalizeRuntimeFailureEvent({
       type: 'error',
-      message: 'spawn gemini ENOENT',
+      message: 'spawn claude ENOENT',
     });
 
-    expect(failure.code).toBe('GEMINI_CLI_NOT_FOUND');
-    expect(failure.userMessage).toContain('Gemini CLI was not found');
+    expect(failure.code).toBe('CLAUDE_CLI_NOT_FOUND');
+    expect(failure.userMessage).toContain('Claude CLI was not found');
   });
 
   it('creates emitter-side error events with attached runtime failure envelopes', () => {
@@ -244,15 +244,15 @@ describe('normalizeRuntimeFailure', () => {
   });
 
   it('prefers event.failure over event.message when both are present', () => {
-    const failure = normalizeRuntimeFailure('spawn gemini ENOENT');
+    const failure = normalizeRuntimeFailure('spawn claude ENOENT');
     const normalized = normalizeRuntimeFailureEvent({
       type: 'error',
       message: 'unauthorized',
       failure,
     });
 
-    expect(normalized.code).toBe('GEMINI_CLI_NOT_FOUND');
-    expect(normalized.message).toBe('spawn gemini ENOENT');
+    expect(normalized.code).toBe('CLAUDE_CLI_NOT_FOUND');
+    expect(normalized.message).toBe('spawn claude ENOENT');
   });
 
   it('projects structured pipeline failures without reclassifying from strings', () => {

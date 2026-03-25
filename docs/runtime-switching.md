@@ -6,7 +6,7 @@ Use this page when you need to answer:
 - Which `.env` is authoritative for this instance?
 - Which runtime names are canonical, and where is each one actually supported?
 - What does `!models` change live, and what survives restart?
-- How do I move between `claude`, `gemini-api`, `gemini-cli`, `codex`, `openai`, and `openrouter`?
+- How do I move between `claude-cli`, `gemini-api`, `codex-cli`, `openai`, and `openrouter`?
 - How do `DISCOCLAW_TIER_OPENROUTER_FAST`, `DISCOCLAW_TIER_OPENROUTER_CAPABLE`, and `DISCOCLAW_TIER_OPENROUTER_DEEP` work?
 - Why did `!models reset` or a restart not do what I expected?
 
@@ -31,24 +31,16 @@ Important: if chat is currently live-swapped to another runtime, `!models reset`
 
 | Adapter name | Startup via `PRIMARY_RUNTIME` | Requirement |
 | --- | --- | --- |
-| `claude` | yes | Claude CLI available |
-| `gemini-api` | yes | `GEMINI_API_KEY`; `gemini` remains a compatibility alias for this API runtime |
-| `gemini-cli` | yes | Gemini CLI binary available; limited by the runtime capability gate to `streaming_text` |
-| `codex` | yes | Install-mode-specific Codex proof gate, not binary presence alone |
+| `claude-cli` | yes | Claude CLI available (legacy alias `claude` still accepted) |
+| `gemini-api` | yes | `GEMINI_API_KEY` |
+| `codex-cli` | yes | Install-mode-specific Codex proof gate, not binary presence alone (legacy alias `codex` still accepted) |
 | `openai` | yes | Install-mode-specific OpenAI proof gate, not `OPENAI_API_KEY` presence alone |
 | `openrouter` | yes | Shipped env-key path plus live `openrouter-key: ok` proof; not key presence alone |
-| `anthropic` | no | Voice-only direct API runtime; not a valid `PRIMARY_RUNTIME` |
+| `claude-api` | no | Voice-only direct API runtime; not a valid `PRIMARY_RUNTIME` (legacy alias `anthropic` still accepted) |
 
 For the authoritative 1.0 provider/auth verdicts, including the blessed `Claude CLI` default path, the supported `Codex CLI` secondary path, the `PARTIAL` status of OpenAI/OpenRouter/Gemini, and the `OUT OF SCOPE` status of direct Anthropic for chat/startup, see [docs/audit/provider-auth-1.0-matrix.md](audit/provider-auth-1.0-matrix.md).
 
-Use these canonical names in operator-facing docs, prompts, and commands. `gemini` is accepted only as a compatibility alias and normalizes to the canonical name `gemini-api`.
-
-For Gemini, keep the runtime paths explicit:
-- `gemini-api` is the API-backed Gemini runtime. `PRIMARY_RUNTIME=gemini` and `!models set <chat|voice> gemini` both normalize to `gemini-api` for compatibility.
-- `gemini-cli` is the CLI-backed Gemini runtime. It is intentionally narrow: `src/runtime/strategies/gemini-strategy.ts` advertises only `streaming_text`, and DiscoClaw enforces that limit through `resolveEffectiveTools()` in `src/discord/prompt-common.ts` plus `filterToolsByCapabilities()` in `src/runtime/tool-capabilities.ts`, which drop unsupported tools before the turn starts.
-- Model-based runtime inference is still provider-level for Gemini. When you need a specific subpath, use an explicit runtime-name switch (`gemini-api` or `gemini-cli`) or set `PRIMARY_RUNTIME` explicitly instead of relying on model ownership inference.
-- Treat `GEMINI_API_KEY` and Gemini CLI binary availability as proof for different subpaths, not as a single interchangeable "Gemini is supported" story.
-- `discoclaw init` currently scaffolds the limited `gemini-cli` path, not the API-backed `gemini-api` path.
+Use these canonical names in operator-facing docs, prompts, and commands. Legacy aliases (`claude`, `codex`, `anthropic`) are still accepted as input and normalize to the canonical names.
 
 For `codex`, use the proof gate that matches the install mode you are actually operating:
 - Source checkout: [docs/audit/codex-blank-machine-readiness.md](audit/codex-blank-machine-readiness.md), including the manual `codex exec ...` session-auth step.
@@ -66,7 +58,7 @@ For `openrouter`, the current shipped boundary is narrower:
 - Treat `!models set chat openrouter`, `PRIMARY_RUNTIME=openrouter`, `.env` key presence, and npm-managed `discoclaw doctor` as routing/config evidence only until that proof appears.
 - Treat the path as `PARTIAL` in the 1.0 matrix unless you are making only the narrower env-key or exact-workload claim that the audits permit.
 
-For `openai` and `openrouter`, set `OPENAI_COMPAT_TOOLS_ENABLED=1` if you expect full tool use. In logs, the Claude adapter runtime ID is `claude_code` even though the user-facing adapter name is `claude`.
+For `openai` and `openrouter`, set `OPENAI_COMPAT_TOOLS_ENABLED=1` if you expect full tool use. In logs, the Claude CLI adapter runtime ID is `claude_code` even though the user-facing adapter name is `claude-cli`.
 
 ## Runtime-path contract
 
@@ -74,14 +66,14 @@ The operator-facing contract is placement-specific. Supported runtime names, per
 
 | Placement | Operator path | Supported canonical runtime names | Persistence | Reset behavior |
 | --- | --- | --- | --- | --- |
-| Startup default | `.env` `PRIMARY_RUNTIME` | `claude`, `codex`, `gemini-api`, `gemini-cli`, `openai`, `openrouter` | `.env` | Edit `.env`, then restart |
-| Live chat runtime swap | `!models set chat <runtime>` | `claude`, `codex`, `gemini-api`, `gemini-cli`, `openai`, `openrouter` | Memory only | Restart or another explicit chat runtime switch |
-| Persisted fast runtime overlay | `!models set fast <model>` when an exact model string uniquely reverse-maps to another runtime | `claude`, `codex`, `gemini-api`, `gemini-cli`, `openai`, `openrouter` | `runtime-overrides.json` (`fastRuntime`) | `!models reset fast` or `!models reset` |
-| Persisted voice runtime overlay | `!models set voice <runtime>` or voice auto-switch from an exact cross-provider model string | `anthropic`, `claude`, `codex`, `gemini-api`, `gemini-cli`, `openai`, `openrouter` | `runtime-overrides.json` (`voiceRuntime`) | `!models reset voice` or `!models reset` |
+| Startup default | `.env` `PRIMARY_RUNTIME` | `claude-cli`, `codex-cli`, `gemini-api`, `openai`, `openrouter` | `.env` | Edit `.env`, then restart |
+| Live chat runtime swap | `!models set chat <runtime>` | `claude-cli`, `codex-cli`, `gemini-api`, `openai`, `openrouter` | Memory only | Restart or another explicit chat runtime switch |
+| Persisted fast runtime overlay | `!models set fast <model>` when an exact model string uniquely reverse-maps to another runtime | `claude-cli`, `codex-cli`, `gemini-api`, `openai`, `openrouter` | `runtime-overrides.json` (`fastRuntime`) | `!models reset fast` or `!models reset` |
+| Persisted voice runtime overlay | `!models set voice <runtime>` or voice auto-switch from an exact cross-provider model string | `claude-api`, `claude-cli`, `codex-cli`, `gemini-api`, `openai`, `openrouter` | `runtime-overrides.json` (`voiceRuntime`) | `!models reset voice` or `!models reset` |
 
 Contract notes:
-- `gemini` is accepted anywhere `gemini-api` is supported, but operator-facing output should prefer the canonical name `gemini-api`.
-- `anthropic` is valid only for voice placement. It is intentionally voice-only and is never a valid `PRIMARY_RUNTIME` or `!models set chat <runtime>` target.
+- Legacy aliases (`claude`, `codex`, `anthropic`) are accepted as input and normalize to their canonical names.
+- `claude-api` is valid only for voice placement. It is intentionally voice-only and is never a valid `PRIMARY_RUNTIME` or `!models set chat <runtime>` target.
 - There is no persisted `chatRuntime` overlay in `runtime-overrides.json`. Chat runtime swaps are intentionally live-only.
 - `voiceRuntime` and `fastRuntime` are the only persisted runtime-path overlays today.
 
@@ -165,14 +157,11 @@ Built-in tier maps shipped in code:
 
 | Runtime | `fast` | `capable` | `deep` |
 | --- | --- | --- | --- |
-| `claude` (`claude_code`) | `haiku` | `claude-opus-4-6` | `claude-opus-4-6` |
+| `claude-cli` (`claude_code`) | `haiku` | `claude-opus-4-6` | `claude-opus-4-6` |
 | `gemini-api` | `gemini-2.5-flash` | `gemini-2.5-pro` | `gemini-2.5-pro` |
-| `gemini-cli` | `gemini-2.5-flash` | `gemini-2.5-pro` | `gemini-2.5-pro` |
 | `openai` | `gpt-5-mini` | `gpt-5.4` | `gpt-5.4-pro` |
 | `openrouter` | `openai/gpt-5-mini` | `anthropic/claude-sonnet-4.6` | `anthropic/claude-opus-4.6` |
-| `codex` | `gpt-5.1-codex-mini` | `gpt-5.4` | `gpt-5.4` |
-
-`gemini-api` and `gemini-cli` currently resolve through the same shipped Gemini tier defaults; the operator-facing split is about runtime selection and capability guarantees, not different built-in Gemini model tiers.
+| `codex-cli` | `gpt-5.1-codex-mini` | `gpt-5.4` | `gpt-5.4` |
 
 ## OpenRouter tier defaults and overrides
 
@@ -199,7 +188,7 @@ Even without overrides, `PRIMARY_RUNTIME=openrouter` and the default `OPENROUTER
 | Change | Persists in | Notes |
 | --- | --- | --- |
 | Default chat adapter at startup | `.env` `PRIMARY_RUNTIME` | Restart required |
-| Adapter default model | `.env` `OPENAI_MODEL`, `OPENROUTER_MODEL`, `GEMINI_MODEL`, `CODEX_MODEL` | `GEMINI_MODEL` applies to both `gemini-api` and `gemini-cli`; used when a role follows the adapter default |
+| Adapter default model | `.env` `OPENAI_MODEL`, `OPENROUTER_MODEL`, `GEMINI_MODEL`, `CODEX_MODEL` | `GEMINI_MODEL` applies to `gemini-api`; used when a role follows the adapter default |
 | Tier map for a runtime | `.env` `DISCOCLAW_TIER_<RUNTIME>_<TIER>` | Restart required |
 | Per-role model override | `models.json` | Written by `!models set <role> <tier-or-model>` |
 | Persistent fast runtime override | `runtime-overrides.json` (`fastRuntime`) | Written when fast auto-switches to another runtime from an exact uniquely owned model string |
@@ -262,7 +251,7 @@ Use this when the default adapter should remain changed after restart.
 
 1. Confirm the authoritative working directory and `.env`.
 2. Record the current `!models` output and the `.env` keys you are about to change.
-3. Edit `.env` and set `PRIMARY_RUNTIME` to one of `claude`, `gemini-api`, `gemini-cli`, `codex`, `openai`, or `openrouter`. `gemini` still works as a compatibility alias for `gemini-api`, but the explicit names are the canonical operator-facing values.
+3. Edit `.env` and set `PRIMARY_RUNTIME` to one of `claude-cli`, `gemini-api`, `codex-cli`, `openai`, or `openrouter`. Legacy aliases (`claude`, `codex`) are still accepted.
 4. Set or verify the adapter-specific default model env var if you care about adapter-default behavior: `GEMINI_MODEL`, `CODEX_MODEL`, `OPENAI_MODEL`, or `OPENROUTER_MODEL`.
 5. If the target is OpenRouter tier switching, inspect or set the specific `DISCOCLAW_TIER_OPENROUTER_<TIER>` vars you want to override from the shipped defaults.
 6. Clear role overrides that should stop fighting the new startup defaults, usually with `!models reset chat`, `!models reset fast`, `!models reset plan-run`, `!models reset summary`, `!models reset cron`, `!models reset cron-exec`, `!models reset voice`, `!models reset forge-drafter`, and `!models reset forge-auditor`.
@@ -276,18 +265,12 @@ If you changed credentials through Discord DMs, `!secret set KEY=value` updates 
 Use this for a temporary experiment:
 
 ```text
-!models set chat codex
+!models set chat codex-cli
 !models set chat openrouter
 !models set chat gemini-api
-!models set chat gemini-cli
 ```
 
 Expected result in `!models`: the `runtime` row changes to the new adapter, the `chat` row usually becomes that adapter's default model, and plan/deferred-run/cron-exec follow that runtime adapter immediately. Plan execution no longer inherits the `chat` model string, though: it uses the dedicated `plan-run` role and stays on its own startup default or override. Fast and voice can still remain separate if they already have their own runtime overrides. This change is live-only and is lost on restart. To end the experiment, restart or switch chat to another runtime explicitly. Do not assume `!models reset chat` will switch the runtime row back immediately.
-
-When choosing between the two Gemini runtime names:
-- Use `gemini-api` for the API-backed path.
-- Use `gemini-cli` only when you explicitly want the limited CLI runtime with the tool-capability gate.
-- Use `gemini` only when you need compatibility with older operator habits; DiscoClaw resolves it to `gemini-api`.
 
 ### 3. Change chat to another model on the current adapter
 
@@ -312,24 +295,19 @@ Preferred path: use `!models set fast <model>`, not `DISCOCLAW_FAST_RUNTIME`.
 Fast runtime auto-switching only happens when the concrete model string exactly matches another runtime's tier map entry and that ownership is unique. That means:
 - `!models set fast gemini-2.5-flash` can auto-switch to Gemini
 - `!models set fast openai/gpt-5-mini` can auto-switch to OpenRouter because that exact string is already the shipped OpenRouter `fast` tier, or because you overrode `DISCOCLAW_TIER_OPENROUTER_FAST` to that same exact string
-- `!models set fast gpt-5.4` does not auto-switch because that model ID is shared by `openai` and `codex`
+- `!models set fast gpt-5.4` does not auto-switch because that model ID is shared by `openai` and `codex-cli`
 - `!models set fast fast` changes the model tier but does not identify another provider
-
-If the exact Gemini subpath matters, do not rely on this model-based fast-runtime inference. It selects the Gemini provider family, not an operator-guaranteed `gemini-api` versus `gemini-cli` path.
 
 ### 5. Move voice independently
 
 ```text
 !models set voice gemini-api
-!models set voice gemini-cli
-!models set voice codex
+!models set voice codex-cli
 !models set voice capable
 !models set voice google/gemini-2.5-pro
 ```
 
 Verification pattern in `!models`: the `voice` row shows `[runtime: <adapter>]` when voice differs from chat. Voice runtime changes persist because they write `voiceRuntime` to `runtime-overrides.json`. As with fast runtime, a tier name such as `capable` changes the voice model value but does not, by itself, identify another provider; cross-provider auto-switching needs an exact model string from a tier map.
-
-If you need voice on a specific Gemini subpath, prefer the explicit runtime-name forms above (`!models set voice gemini-api` or `!models set voice gemini-cli`) instead of relying on model-based auto-switching from a Gemini model string.
 
 ### 6. Change plan, forge, cron, or summary roles
 
@@ -368,7 +346,7 @@ After any switch:
 
 Good signs:
 - `runtime` changed after a live chat runtime switch
-- `voice` shows `[runtime: gemini-api]`, `[runtime: gemini-cli]`, or similar when intentionally separated
+- `voice` shows `[runtime: gemini-api]`, `[runtime: claude-api]`, or similar when intentionally separated
 - `summary`, `cron-auto-tag`, or `tasks-auto-tag` show `[runtime: ...]` when fast runtime moved
 - the displayed model is a concrete model or a tier resolution like ``capable → anthropic/claude-sonnet-4.6``
 

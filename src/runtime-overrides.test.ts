@@ -123,9 +123,9 @@ describe('loadOverrides', () => {
     const dir = await tmpDir();
     dirs.push(dir);
     const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify({ voiceRuntime: 'gemini' }), 'utf-8');
+    await fs.writeFile(filePath, JSON.stringify({ voiceRuntime: 'gemini-api' }), 'utf-8');
     const result = await loadOverrides(filePath);
-    expect(result).toEqual({ voiceRuntime: 'gemini' });
+    expect(result).toEqual({ voiceRuntime: 'gemini-api' });
   });
 
   it('silently drops voiceRuntime when it is not a string', async () => {
@@ -140,9 +140,9 @@ describe('loadOverrides', () => {
 
 describe('normalizeRuntimeOverrides', () => {
   it('canonicalizes accepted voice runtime aliases', () => {
-    const result = normalizeRuntimeOverrides({ voiceRuntime: 'Gemini' });
+    const result = normalizeRuntimeOverrides({ voiceRuntime: 'Anthropic' });
     expect(result).toEqual({
-      overrides: { voiceRuntime: 'gemini-api' },
+      overrides: { voiceRuntime: 'claude-api' },
       changed: true,
     });
   });
@@ -150,20 +150,20 @@ describe('normalizeRuntimeOverrides', () => {
   it('canonicalizes accepted fast runtime aliases', () => {
     const result = normalizeRuntimeOverrides({ fastRuntime: 'claude_code' });
     expect(result).toEqual({
-      overrides: { fastRuntime: 'claude' },
+      overrides: { fastRuntime: 'claude-cli' },
       changed: true,
     });
   });
 
   it('leaves invalid or already-canonical runtime values unchanged', () => {
     const result = normalizeRuntimeOverrides({
-      voiceRuntime: 'anthropic',
+      voiceRuntime: 'claude-api',
       fastRuntime: 'not-a-runtime',
       ttsVoice: 'aura-2-asteria-en',
     });
     expect(result).toEqual({
       overrides: {
-        voiceRuntime: 'anthropic',
+        voiceRuntime: 'claude-api',
         fastRuntime: 'not-a-runtime',
         ttsVoice: 'aura-2-asteria-en',
       },
@@ -185,9 +185,9 @@ describe('saveOverrides', () => {
     const dir = await tmpDir();
     dirs.push(dir);
     const filePath = path.join(dir, 'runtime-overrides.json');
-    await saveOverrides(filePath, { ttsVoice: 'aura-2-asteria-en', voiceRuntime: 'anthropic' });
+    await saveOverrides(filePath, { ttsVoice: 'aura-2-asteria-en', voiceRuntime: 'claude-api' });
     const raw = await fs.readFile(filePath, 'utf-8');
-    expect(JSON.parse(raw)).toEqual({ ttsVoice: 'aura-2-asteria-en', voiceRuntime: 'anthropic' });
+    expect(JSON.parse(raw)).toEqual({ ttsVoice: 'aura-2-asteria-en', voiceRuntime: 'claude-api' });
   });
 
   it('writes ttsVoice and reads it back correctly', async () => {
@@ -205,7 +205,7 @@ describe('saveOverrides', () => {
     const filePath = path.join(dir, 'runtime-overrides.json');
     const original: import('./runtime-overrides.js').RuntimeOverrides = {
       ttsVoice: 'aura-2-luna-en',
-      voiceRuntime: 'gemini',
+      voiceRuntime: 'gemini-api',
     };
     await saveOverrides(filePath, original);
     const result = await loadOverrides(filePath);
@@ -216,9 +216,9 @@ describe('saveOverrides', () => {
     const dir = await tmpDir();
     dirs.push(dir);
     const filePath = path.join(dir, 'subdir', 'runtime-overrides.json');
-    await saveOverrides(filePath, { voiceRuntime: 'anthropic' });
+    await saveOverrides(filePath, { voiceRuntime: 'claude-api' });
     const raw = await fs.readFile(filePath, 'utf-8');
-    expect(JSON.parse(raw)).toEqual({ voiceRuntime: 'anthropic' });
+    expect(JSON.parse(raw)).toEqual({ voiceRuntime: 'claude-api' });
   });
 
   it('leaves no tmp file behind after a successful write', async () => {
@@ -247,7 +247,7 @@ describe('saveOverrides', () => {
     const filePath = path.join(dir, 'runtime-overrides.json');
     await fs.writeFile(
       filePath,
-      JSON.stringify({ customFlag: true, voiceRuntime: 'anthropic', ttsVoice: 'voice-a' }),
+      JSON.stringify({ customFlag: true, voiceRuntime: 'claude-api', ttsVoice: 'voice-a' }),
       'utf-8',
     );
 

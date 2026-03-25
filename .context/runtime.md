@@ -25,6 +25,23 @@ Current model IDs (as of 2026-02-17):
 
 **OpenRouter model IDs** use provider-namespaced format: `anthropic/claude-sonnet-4.6`, `openai/gpt-4o`, etc. Always check the OpenRouter model list for current IDs — do not guess.
 
+## Runtime Registry (6 entries)
+
+Naming convention: `-cli` suffix = local subprocess adapter, `-api` or plain name = HTTP API adapter.
+
+| Registry Key | Kind | Adapter |
+|-------------|------|---------|
+| `claude-cli` | CLI | Claude Code subprocess |
+| `codex-cli` | CLI | Codex CLI subprocess |
+| `openai` | HTTP | OpenAI-compatible REST API |
+| `openrouter` | HTTP | OpenRouter REST API (OpenAI-compat) |
+| `gemini-api` | HTTP | Google Gemini REST API |
+| `claude-api` | HTTP | Anthropic Messages API (direct, zero cold-start) |
+
+Removed entries:
+- `gemini` — was a redundant alias for `gemini-api`
+- `gemini-cli` — removed due to TOS risk
+
 ## Runtime Adapter Interface
 - The orchestrator consumes a provider-agnostic event stream (`EngineEvent`) from any adapter.
 - Each runtime adapter implements `RuntimeAdapter.invoke()` and declares capabilities.
@@ -47,7 +64,6 @@ The factory provides: subprocess tracking, process pool, stall detection, sessio
 |----------|------|------------|-------|
 | Claude Code | `strategies/claude-strategy.ts` | process-pool | Default JSONL parsing, image support |
 | Codex CLI | `strategies/codex-strategy.ts` | session-resume | Custom JSONL (thread.started, item.completed), error sanitization; reasoning items surface in the Discord preview during streaming but are excluded from the final reply; image support via `--image` temp files; if a resumed turn includes images, the adapter resets to a fresh session because `codex exec resume` cannot accept `--image`, notifies the user, and loses prior conversation context |
-| Gemini CLI | `strategies/gemini-strategy.ts` | none (Phase 1) | Text-only output mode; no sessions; stdin fallback for large prompts |
 | Template | `strategies/template-strategy.ts` | — | Commented starting point for new models |
 
 Thin wrappers (`claude-code-cli.ts`, `codex-cli.ts`) map legacy opts and re-export for backward compatibility. Shared utilities live in `cli-shared.ts` and `cli-output-parsers.ts`. Strategy types are in `cli-strategy.ts`.
@@ -82,32 +98,6 @@ Shutdown: `killAllSubprocesses()` from `cli-adapter.ts` kills all tracked subpro
 - Adapter: `src/runtime/codex-cli.ts` (thin wrapper around `cli-adapter.ts` + `strategies/codex-strategy.ts`)
 - Transport: `codex exec` / `codex exec resume` exclusively.
 
-## Gemini CLI Runtime
-
-- Adapter: `src/runtime/gemini-cli.ts` (thin wrapper around `cli-adapter.ts` + `strategies/gemini-strategy.ts`)
-- Invocation shape:
-  ```
-  gemini --model <id> -- <prompt>
-  ```
-  For large prompts that exceed arg length limits, the prompt is passed via stdin instead.
-- Auth: the Gemini CLI binary handles its own authentication — either OAuth (interactive login) or `GEMINI_API_KEY` env var. DiscoClaw does not manage credentials directly.
-- Env vars:
-  | Var | Default | Purpose |
-  |-----|---------|---------|
-  | `GEMINI_BIN` | `gemini` | Path to the Gemini CLI binary |
-  | `GEMINI_MODEL` | `gemini-2.5-pro` | Default model ID |
-- Model tier mapping:
-  | Tier | Model |
-  |------|-------|
-  | `fast` | `gemini-2.5-flash` |
-  | `capable` | `gemini-2.5-pro` |
-- Capabilities (Phase 1):
-  - `streaming_text` only
-  - No sessions / multi-turn (each invocation is independent)
-  - No JSONL streaming — output is plain text
-  - No tool execution, no fs tools
-  - No image input/output support
-
 ## Anthropic REST Runtime
 
 Direct HTTP adapter for the Anthropic Messages API — no CLI subprocess, no cold-start. Designed for latency-sensitive paths like voice where the ~2-4 s CLI bootstrap is unacceptable.
@@ -116,10 +106,10 @@ Direct HTTP adapter for the Anthropic Messages API — no CLI subprocess, no col
 - Factory: `createAnthropicRestRuntime(opts)`
 - Auth: `x-api-key` header (from `ANTHROPIC_API_KEY` env var)
 - Streaming: SSE (`stream: true`) — emits `text_delta`, `usage`, `text_final`, `done` engine events
-- Runtime ID: `claude_code` (same as CLI adapter so model tier resolution is compatible)
+- Runtime ID: `claude_api` (distinct from CLI adapter's `claude_code`)
 - Default model: `claude-sonnet-4-6` (set at registration time in `src/index.ts`)
 - Capabilities: `streaming_text` only (no tools, no sessions)
-- Conditional registration: only registered as `'anthropic'` in the runtime registry when `ANTHROPIC_API_KEY` is set
+- Conditional registration: only registered as `'claude-api'` in the runtime registry when `ANTHROPIC_API_KEY` is set
 
 Env vars:
 
@@ -131,7 +121,7 @@ Configurable via `AnthropicRestOpts`: `baseUrl` (default `https://api.anthropic.
 
 ### Voice auto-wiring
 
-When both `ANTHROPIC_API_KEY` and `DISCOCLAW_VOICE_ENABLED=1` are set, the startup path in `src/index.ts` auto-wires the Anthropic REST adapter as the voice runtime. `resolveVoiceRuntime()` checks `voiceModelRef.runtime` first, then falls back to the `'anthropic'` registry entry, then the primary CLI runtime. Model overrides are now configured in `models.json`; the voice runtime override is still in `runtime-overrides.json` (`voiceRuntime` key). The model can also be changed via the `!models` command.
+When both `ANTHROPIC_API_KEY` and `DISCOCLAW_VOICE_ENABLED=1` are set, the startup path in `src/index.ts` auto-wires the Anthropic REST adapter as the voice runtime. `resolveVoiceRuntime()` checks `voiceModelRef.runtime` first, then falls back to the `'claude-api'` registry entry, then the primary CLI runtime. Model overrides are now configured in `models.json`; the voice runtime override is still in `runtime-overrides.json` (`voiceRuntime` key). The model can also be changed via the `!models` command.
 
 ### Key files
 
@@ -215,8 +205,8 @@ Schemas: `src/runtime/openai-tool-schemas.ts`. Execution handlers: `src/runtime/
 - Non-Claude adapters use a **capability gate** (`tools_fs`) to determine tool access:
   - Codex CLI adapter: declares `tools_fs` — receives read-only tools (Read, Glob, Grep) in auditor role.
   - OpenAI HTTP adapter: when `OPENAI_COMPAT_TOOLS_ENABLED=1`, declares `tools_fs` + `tools_exec` and runs a server-side tool loop (see below). Otherwise text-only (`streaming_text` only).
-  - Gemini CLI adapter: text-only (`streaming_text` only) — no tool execution, no fs tools (Phase 1).
   - OpenRouter adapter: when `OPENAI_COMPAT_TOOLS_ENABLED=1`, declares `tools_fs` + `tools_exec` (same adapter, same flag). Otherwise text-only (`streaming_text` only).
+  - Gemini API adapter: text-only (`streaming_text` only) — no tool execution.
 
 ## Per-Workspace Permissions
 - `workspace/PERMISSIONS.json` controls the tool surface per workspace.

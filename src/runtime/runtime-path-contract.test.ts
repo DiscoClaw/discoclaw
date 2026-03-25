@@ -12,52 +12,67 @@ import {
 
 describe('runtime-path-contract', () => {
   it('canonicalizes documented compatibility aliases', () => {
-    expect(canonicalizeRuntimePathName(' claude ')).toBe('claude');
-    expect(canonicalizeRuntimePathName('CLAUDE_CODE')).toBe('claude');
-    expect(canonicalizeRuntimePathName('Gemini')).toBe('gemini-api');
+    expect(canonicalizeRuntimePathName(' claude ')).toBe('claude-cli');
+    expect(canonicalizeRuntimePathName('CLAUDE_CODE')).toBe('claude-cli');
+    expect(canonicalizeRuntimePathName('claude-cli')).toBe('claude-cli');
+    expect(canonicalizeRuntimePathName('anthropic')).toBe('claude-api');
+    expect(canonicalizeRuntimePathName('claude-api')).toBe('claude-api');
+    expect(canonicalizeRuntimePathName('codex')).toBe('codex-cli');
+    expect(canonicalizeRuntimePathName('codex-cli')).toBe('codex-cli');
     expect(canonicalizeRuntimePathName('gemini-api')).toBe('gemini-api');
-    expect(canonicalizeRuntimePathName('gemini-cli')).toBe('gemini-cli');
     expect(canonicalizeRuntimePathName('')).toBeUndefined();
     expect(canonicalizeRuntimePathName('not-a-runtime')).toBeUndefined();
   });
 
+  it('rejects removed runtime names', () => {
+    expect(canonicalizeRuntimePathName('gemini')).toBeUndefined();
+    expect(canonicalizeRuntimePathName('gemini-cli')).toBeUndefined();
+  });
+
   it('keeps runtime metadata explicit about registry keys, runtime ids, and env-key-backed providers', () => {
     expect(getRuntimePathDefinition('claude')).toEqual({
-      canonicalName: 'claude',
-      acceptedAliases: ['claude', 'claude_code'],
-      registryKeys: ['claude', 'claude_code'],
+      canonicalName: 'claude-cli',
+      acceptedAliases: ['claude-cli', 'claude', 'claude_code'],
+      registryKeys: ['claude-cli'],
       runtimeId: 'claude_code',
     });
 
-    expect(getRuntimePathDefinition('gemini')).toEqual({
+    expect(getRuntimePathDefinition('gemini-api')).toEqual({
       canonicalName: 'gemini-api',
-      acceptedAliases: ['gemini-api', 'gemini'],
-      registryKeys: ['gemini-api', 'gemini'],
+      acceptedAliases: ['gemini-api'],
+      registryKeys: ['gemini-api'],
       runtimeId: 'gemini',
       providerSecretEnvKey: 'GEMINI_API_KEY',
     });
 
     expect(getRuntimePathDefinition('anthropic')).toEqual({
-      canonicalName: 'anthropic',
-      acceptedAliases: ['anthropic'],
-      registryKeys: ['anthropic'],
-      runtimeId: 'claude_code',
+      canonicalName: 'claude-api',
+      acceptedAliases: ['claude-api', 'anthropic'],
+      registryKeys: ['claude-api'],
+      runtimeId: 'claude_api',
       providerSecretEnvKey: 'ANTHROPIC_API_KEY',
+    });
+
+    expect(getRuntimePathDefinition('codex')).toEqual({
+      canonicalName: 'codex-cli',
+      acceptedAliases: ['codex-cli', 'codex'],
+      registryKeys: ['codex-cli'],
+      runtimeId: 'codex',
     });
   });
 
   it('returns provider secret lookups only for env-key-backed runtime paths', () => {
     expect(getRuntimeProviderSecretEnvKey('openai')).toBe('OPENAI_API_KEY');
     expect(getRuntimeProviderSecretEnvKey('openrouter')).toBe('OPENROUTER_API_KEY');
-    expect(getRuntimeProviderSecretEnvKey('gemini')).toBe('GEMINI_API_KEY');
+    expect(getRuntimeProviderSecretEnvKey('gemini-api')).toBe('GEMINI_API_KEY');
+    expect(getRuntimeProviderSecretEnvKey('claude-api')).toBe('ANTHROPIC_API_KEY');
     expect(getRuntimeProviderSecretEnvKey('anthropic')).toBe('ANTHROPIC_API_KEY');
 
-    expect(getRuntimeProviderSecretEnvKey('claude')).toBeUndefined();
-    expect(getRuntimeProviderSecretEnvKey('codex')).toBeUndefined();
-    expect(getRuntimeProviderSecretEnvKey('gemini-cli')).toBeUndefined();
+    expect(getRuntimeProviderSecretEnvKey('claude-cli')).toBeUndefined();
+    expect(getRuntimeProviderSecretEnvKey('codex-cli')).toBeUndefined();
   });
 
-  it('keeps startup and fast placements on the canonical six operator-facing runtime paths', () => {
+  it('keeps startup and fast placements on the canonical five operator-facing runtime paths', () => {
     const startupPlacements: RuntimePathPlacement[] = [
       'startup:PRIMARY_RUNTIME',
       'startup:DISCOCLAW_FAST_RUNTIME',
@@ -69,21 +84,19 @@ describe('runtime-path-contract', () => {
 
     for (const placement of startupPlacements) {
       expect(listCanonicalRuntimeNames(placement)).toEqual([
-        'claude',
-        'codex',
+        'claude-cli',
+        'codex-cli',
         'gemini-api',
-        'gemini-cli',
         'openai',
         'openrouter',
       ]);
       expect(isRuntimeNameSupportedInPlacement('claude_code', placement)).toBe(true);
-      expect(isRuntimeNameSupportedInPlacement('gemini', placement)).toBe(true);
-      expect(isRuntimeNameSupportedInPlacement('anthropic', placement)).toBe(false);
-      expect(parseRuntimeNameForPlacement('anthropic', placement)).toBeUndefined();
+      expect(isRuntimeNameSupportedInPlacement('claude-api', placement)).toBe(false);
+      expect(parseRuntimeNameForPlacement('claude-api', placement)).toBeUndefined();
     }
   });
 
-  it('allows anthropic only on the voice-specific runtime paths', () => {
+  it('allows claude-api only on the voice-specific runtime paths', () => {
     const voicePlacements: RuntimePathPlacement[] = [
       'live:voice',
       'runtime-overrides:voiceRuntime',
@@ -91,17 +104,15 @@ describe('runtime-path-contract', () => {
 
     for (const placement of voicePlacements) {
       expect(listCanonicalRuntimeNames(placement)).toEqual([
-        'claude',
-        'codex',
+        'claude-cli',
+        'codex-cli',
         'gemini-api',
-        'gemini-cli',
         'openai',
         'openrouter',
-        'anthropic',
+        'claude-api',
       ]);
-      expect(isRuntimeNameSupportedInPlacement('anthropic', placement)).toBe(true);
-      expect(parseRuntimeNameForPlacement('anthropic', placement)).toBe('anthropic');
-      expect(parseRuntimeNameForPlacement('gemini', placement)).toBe('gemini-api');
+      expect(isRuntimeNameSupportedInPlacement('claude-api', placement)).toBe(true);
+      expect(parseRuntimeNameForPlacement('anthropic', placement)).toBe('claude-api');
     }
   });
 
@@ -110,38 +121,37 @@ describe('runtime-path-contract', () => {
       placement: 'startup:PRIMARY_RUNTIME',
       persistence: 'env',
       resetBehavior: 'edit-env-and-restart',
-      supportedRuntimeNames: ['claude', 'codex', 'gemini-api', 'gemini-cli', 'openai', 'openrouter'],
+      supportedRuntimeNames: ['claude-cli', 'codex-cli', 'gemini-api', 'openai', 'openrouter'],
     });
 
     expect(getRuntimePlacementDefinition('live:chat')).toEqual({
       placement: 'live:chat',
       persistence: 'memory',
       resetBehavior: 'restart-or-explicit-runtime-switch',
-      supportedRuntimeNames: ['claude', 'codex', 'gemini-api', 'gemini-cli', 'openai', 'openrouter'],
+      supportedRuntimeNames: ['claude-cli', 'codex-cli', 'gemini-api', 'openai', 'openrouter'],
     });
 
     expect(getRuntimePlacementDefinition('runtime-overrides:fastRuntime')).toEqual({
       placement: 'runtime-overrides:fastRuntime',
       persistence: 'runtime-overrides.json',
       resetBehavior: '!models reset fast',
-      supportedRuntimeNames: ['claude', 'codex', 'gemini-api', 'gemini-cli', 'openai', 'openrouter'],
+      supportedRuntimeNames: ['claude-cli', 'codex-cli', 'gemini-api', 'openai', 'openrouter'],
     });
 
     expect(getRuntimePlacementDefinition('runtime-overrides:voiceRuntime')).toEqual({
       placement: 'runtime-overrides:voiceRuntime',
       persistence: 'runtime-overrides.json',
       resetBehavior: '!models reset voice',
-      supportedRuntimeNames: ['claude', 'codex', 'gemini-api', 'gemini-cli', 'openai', 'openrouter', 'anthropic'],
+      supportedRuntimeNames: ['claude-cli', 'codex-cli', 'gemini-api', 'openai', 'openrouter', 'claude-api'],
     });
   });
 
   it('lists all canonical runtime paths in one place', () => {
     expect(listCanonicalRuntimeNames()).toEqual([
-      'anthropic',
-      'claude',
-      'codex',
+      'claude-api',
+      'claude-cli',
+      'codex-cli',
       'gemini-api',
-      'gemini-cli',
       'openai',
       'openrouter',
     ]);

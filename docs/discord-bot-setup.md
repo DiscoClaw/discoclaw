@@ -126,7 +126,7 @@ Edit `.env`:
 
 For the blessed Claude source-checkout validation path, keep one real clone-local `.env` in the checkout you are testing. `pnpm preflight:blank-machine` only reads that checkout's own `.env`; it does not inherit runtime config from your normal shell.
 
-If you are validating from a machine that already has DiscoClaw or Claude state, isolate `DISCOCLAW_DATA_DIR`, `WORKSPACE_CWD`, `GROUPS_DIR`, and `BEADS_DIR` to throwaway paths before you claim fresh-clone or stranger-path evidence. If you copied an existing maintainer `.env` or another provider's config, force `PRIMARY_RUNTIME=claude` before auditing the blessed Claude path.
+If you are validating from a machine that already has DiscoClaw or Claude state, isolate `DISCOCLAW_DATA_DIR`, `WORKSPACE_CWD`, `GROUPS_DIR`, and `BEADS_DIR` to throwaway paths before you claim fresh-clone or stranger-path evidence. If you copied an existing maintainer `.env` or another provider's config, force `PRIMARY_RUNTIME=claude-cli` before auditing the blessed Claude path.
 
 Run:
 
@@ -197,7 +197,7 @@ Run through this checklist in order. Each step should produce the expected outpu
    - **Any install mode + OpenAI or Gemini path:**
      - Use the matrix above first.
      - `openai` remains a narrower manual/proof-gated path rather than a blanket one-command setup claim.
-     - `discoclaw init` currently scaffolds `gemini-cli`, not `gemini-api`; configure `gemini-api` manually if that is the route you want.
+     - `discoclaw init` scaffolds `gemini-api` as the Gemini runtime path.
    - **Global install (`npm install -g discoclaw`) + Claude path:**
      - Read [docs/audit/claude-npm-managed-path.md](audit/claude-npm-managed-path.md).
      - Run:
@@ -220,7 +220,7 @@ Run through this checklist in order. Each step should produce the expected outpu
    - **From source + Claude path:**
      - Supply a real clone-local `.env` first. `pnpm preflight:blank-machine` ignores inherited shell env and only reads the checkout's own `.env`.
      - If you are auditing from a machine with existing DiscoClaw or Claude state, isolate `DISCOCLAW_DATA_DIR`, `WORKSPACE_CWD`, `GROUPS_DIR`, and `BEADS_DIR` to throwaway paths before you claim fresh-clone or stranger-path evidence.
-     - If the source `.env` came from another provider path or an older maintainer copy, force `PRIMARY_RUNTIME=claude` before testing this blessed path.
+     - If the source `.env` came from another provider path or an older maintainer copy, force `PRIMARY_RUNTIME=claude-cli` before testing this blessed path.
      - Run:
        ```bash
        pnpm preflight:blank-machine

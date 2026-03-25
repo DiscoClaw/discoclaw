@@ -377,12 +377,12 @@ describe('Anthropic REST runtime adapter', () => {
     expect((error as { failure?: { message: string } }).failure?.message).toBe('aborted');
   });
 
-  it('has runtime id "claude_code"', () => {
+  it('has runtime id "claude_api"', () => {
     const runtime = createAnthropicRestRuntime({
       apiKey: 'test-key',
       defaultModel: 'claude-sonnet-4-20250514',
     });
-    expect(runtime.id).toBe('claude_code');
+    expect(runtime.id).toBe('claude_api');
   });
 
   it('exposes defaultModel', () => {

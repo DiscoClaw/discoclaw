@@ -25,9 +25,8 @@ This matrix is about the main startup/chat runtime story. The voice-only direct 
 | OpenAI-compatible HTTP | npm / global install | `PARTIAL` | The running instance can prove it sees the configured key only after startup via runtime-visible evidence such as `openai-key: ok`. | Post-start proof only; no dedicated npm-managed OpenAI workload/readiness audit; model capability still varies by provider/model and is not guaranteed by API shape alone. | `docs/runtime-switching.md`, `src/cli/init-wizard.ts`, `src/health/config-doctor.ts` |
 | OpenRouter | Source checkout | `PARTIAL` | Source checkouts can prove the running env-key path via `openrouter-key: ok`, and can separately prove the exact workload under test through the repo smoke harness. | The current 1.0 claim stops at env-key visibility plus exact smoke-tested workloads. Blanket tool, model-quality, daemon, and install-mode parity claims are not support-safe. | `docs/audit/openrouter-api-key-support-boundary.md`, `docs/audit/openrouter-parity-audit.md` |
 | OpenRouter | npm / global install | `PARTIAL` | The running instance can support-claim that it sees and probes its configured `OPENROUTER_API_KEY` path when `openrouter-key: ok` is visible. | No shipped npm-managed workload smoke path; no blanket workload or daemon parity claim is support-safe. | `docs/audit/openrouter-api-key-support-boundary.md`, `docs/audit/openrouter-parity-audit.md` |
-| Gemini API (`gemini-api`) | Source checkout or npm / global install | `PARTIAL` | The canonical runtime name and config boundary are explicit: `gemini-api` is the API-backed Gemini path, and `gemini` is only a compatibility alias to it. | No dedicated install-mode/provider-auth readiness audit is locked yet, so broader 1.0 workload/readiness claims are not support-claimable from the current shipped evidence. | `docs/audit/gemini-support-boundary.md`, `docs/runtime-switching.md` |
-| Gemini CLI (`gemini-cli`) | Source checkout or npm / global install | `PARTIAL` | The runtime path is explicit and intentionally narrow: DiscoClaw enforces the current `streaming_text` capability boundary in code before invocation. | The path is capability-limited and also lacks a dedicated install-mode/provider-auth readiness audit, so broader 1.0 workload/readiness claims are not support-claimable yet. | `docs/audit/gemini-support-boundary.md`, `docs/runtime-switching.md` |
-| Claude API / direct Anthropic main-runtime path | Source checkout or npm / global install | `OUT OF SCOPE` | There is no supported `PRIMARY_RUNTIME` or `!models set chat <runtime>` path for direct Anthropic chat/main-runtime operation in 1.0. | `anthropic` is voice-only today. It is not a valid startup/chat runtime, so there is no shipped chat/startup provider/auth path to claim for 1.0. | `docs/runtime-switching.md` |
+| Gemini API (`gemini-api`) | Source checkout or npm / global install | `PARTIAL` | The canonical runtime name and config boundary are explicit: `gemini-api` is the sole Gemini runtime; the bare `gemini` alias was removed. | No dedicated install-mode/provider-auth readiness audit is locked yet, so broader 1.0 workload/readiness claims are not support-claimable from the current shipped evidence. | `docs/audit/gemini-support-boundary.md`, `docs/runtime-switching.md` |
+| Claude API / direct Anthropic main-runtime path | Source checkout or npm / global install | `OUT OF SCOPE` | There is no supported `PRIMARY_RUNTIME` or `!models set chat <runtime>` path for direct Anthropic chat/main-runtime operation in 1.0. | `claude-api` is voice-only today. It is not a valid startup/chat runtime, so there is no shipped chat/startup provider/auth path to claim for 1.0. | `docs/runtime-switching.md` |
 
 ## Classification Notes
 
@@ -41,13 +40,11 @@ DiscoClaw does ship the `openai` runtime and real proof gates for it, but the cu
 
 That means the support-safe claim is route-specific and model-specific, not "all OpenAI-compatible endpoints are 1.0-ready."
 
-### Why Gemini paths are `PARTIAL`
+### Why Gemini API is `PARTIAL`
 
 The Gemini work completed the naming and capability contract:
 
 - `gemini-api` is canonical
-- `gemini` is only a compatibility alias
-- `gemini-cli` is the limited CLI path and that limit is enforced in code
 
 What is still missing is the install-mode/provider-auth/readiness audit layer that Claude and Codex now have.
 
@@ -55,7 +52,7 @@ What is still missing is the install-mode/provider-auth/readiness audit layer th
 
 DiscoClaw does have a direct Anthropic runtime name, but only for voice placement. The operator-facing runtime contract explicitly says:
 
-- `anthropic` is voice-only
+- `claude-api` (legacy alias `anthropic`) is voice-only
 - it is not a valid `PRIMARY_RUNTIME`
 - it is not a valid chat runtime selection
 

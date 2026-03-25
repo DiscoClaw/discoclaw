@@ -1,5 +1,6 @@
-// Anthropic Messages API streaming adapter — direct HTTP, no CLI subprocess.
-// Eliminates cold-start overhead for latency-sensitive paths like voice.
+// Anthropic Messages API streaming adapter (registry key: "claude-api").
+// Direct HTTP, no CLI subprocess — eliminates cold-start overhead for
+// latency-sensitive paths like voice.
 // Auth via x-api-key header. Streams SSE events from the Messages API.
 
 import type { RuntimeAdapter, EngineEvent, RuntimeCapability, RuntimeInvokeParams } from './types.js';
@@ -35,7 +36,7 @@ export function createAnthropicRestRuntime(opts: AnthropicRestOpts): RuntimeAdap
   const defaultMaxTokens = opts.defaultMaxTokens ?? 1024;
 
   return {
-    id: 'claude_code',
+    id: 'claude_api',
     capabilities,
     defaultModel: opts.defaultModel,
     invoke(params: RuntimeInvokeParams) {

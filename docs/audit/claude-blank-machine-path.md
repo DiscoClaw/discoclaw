@@ -24,7 +24,7 @@ The run used these exact preconditions:
 - cloned `/home/davidmarsh/code/discoclaw` into `/tmp/discoclaw-test`
 - ran `pnpm install --frozen-lockfile` inside the throwaway clone
 - copied the working `.env` into the clone because secrets are not tracked in git
-- overrode the clone-local `.env` with `PRIMARY_RUNTIME=claude`
+- overrode the clone-local `.env` with `PRIMARY_RUNTIME=claude-cli`
 - overrode the clone-local `.env` with `DISCOCLAW_DATA_DIR=/tmp/discoclaw-test-data`
 - overrode the clone-local `.env` with `WORKSPACE_CWD=/tmp/discoclaw-test-data/workspace`
 - overrode the clone-local `.env` with `GROUPS_DIR=/tmp/discoclaw-test-data/workspace/groups`
@@ -52,7 +52,7 @@ This proves a fresh clone plus isolated repo/data state on this host. It is not 
 ## Hidden Prerequisites The Run Exposed
 
 - A source checkout still needs a real `.env`; a fresh clone alone is not runnable because provider secrets and Discord IDs are not in git.
-- If you reuse an existing maintainer `.env`, force `PRIMARY_RUNTIME=claude` or you may accidentally test another provider path instead of the blessed Claude path.
+- If you reuse an existing maintainer `.env`, force `PRIMARY_RUNTIME=claude-cli` or you may accidentally test another provider path instead of the blessed Claude path.
 - To get a meaningful first-login pre-auth result on a machine that already uses Claude, you need an isolated Claude home/session location; otherwise a reused logged-in shell can skip the stranger-path failure entirely.
 - `pnpm install --frozen-lockfile` is a real prerequisite for the repo-owned source helpers.
 

@@ -11,10 +11,10 @@ import { RuntimeRegistry } from './runtime/registry.js';
 import type { RuntimeAdapter } from './runtime/types.js';
 import { createOpenAICompatRuntime } from './runtime/openai-compat.js';
 import { createCodexCliRuntime } from './runtime/codex-cli.js';
-import { createGeminiCliRuntime } from './runtime/gemini-cli.js';
 import { createGeminiRestRuntime } from './runtime/gemini-rest.js';
 import { createAnthropicRestRuntime } from './runtime/anthropic-rest.js';
 import { createConcurrencyLimiter } from './runtime/concurrency-limit.js';
+import { resolvePrimaryRuntime } from './runtime/resolver.js';
 import { SessionManager } from './sessions.js';
 import { loadDiscordChannelContext, validatePaContextModules, ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './discord/channel-context.js';
 import { buildDurableMemorySection } from './discord/prompt-common.js';
@@ -778,10 +778,10 @@ if (permProbe.status === 'missing') {
 }
 
 // --- Detect MCP servers (startup health visibility) ---
-const claudeInUse = primaryRuntimeName === 'claude'
-  || fastRuntimeName === 'claude'
-  || cfg.forgeDrafterRuntime === 'claude'
-  || cfg.forgeAuditorRuntime === 'claude';
+const claudeInUse = primaryRuntimeName === 'claude-cli'
+  || fastRuntimeName === 'claude-cli'
+  || cfg.forgeDrafterRuntime === 'claude-cli'
+  || cfg.forgeAuditorRuntime === 'claude-cli';
 const mcpResult = await detectMcpServers(workspaceCwd);
 logMcpDetection(mcpResult, { claudeInUse, strictMcpConfig: cfg.strictMcpConfig }, log);
 const mcpWarnings = mcpResult.status === 'found'
@@ -1027,7 +1027,7 @@ const registerClaudeRuntime = () => {
     streamStallTimeoutMs,
     progressStallTimeoutMs,
   });
-  return registerRuntime('claude', claudeRuntime);
+  return registerRuntime('claude-cli', claudeRuntime);
 };
 
 if (cfg.openaiApiKey) {
@@ -1070,7 +1070,7 @@ const codexRuntimeRaw = createCodexCliRuntime({
   appendSystemPrompt,
   log,
 });
-registerRuntime('codex', codexRuntimeRaw);
+registerRuntime('codex-cli', codexRuntimeRaw);
 log.info(
   {
     codexBin: cfg.codexBin,
@@ -1080,11 +1080,10 @@ log.info(
     verbosePreview: cfg.codexVerbosePreview,
     itemTypeDebug: cfg.codexItemTypeDebug,
   },
-  'runtime:codex registered',
+  'runtime:codex-cli registered',
 );
 
-// Register Gemini runtimes under explicit names so selection no longer depends on
-// whether GEMINI_API_KEY happened to be present at startup.
+// Register Gemini REST runtime when API key is set.
 if (cfg.geminiApiKey) {
   const geminiRestRaw = createGeminiRestRuntime({
     apiKey: cfg.geminiApiKey,
@@ -1092,44 +1091,33 @@ if (cfg.geminiApiKey) {
     log,
   });
   registerRuntime('gemini-api', geminiRestRaw);
-  // Keep the legacy alias pointed at the REST adapter for compatibility.
-  registerRuntime('gemini', geminiRestRaw);
   log.info(
-    { runtimeName: 'gemini-api', adapter: 'rest', model: cfg.geminiModel, legacyAlias: 'gemini' },
+    { runtimeName: 'gemini-api', adapter: 'rest', model: cfg.geminiModel },
     'runtime:gemini-api registered (REST API)',
   );
 }
 
-const geminiCliRaw = createGeminiCliRuntime({
-  geminiBin: cfg.geminiBin,
-  defaultModel: cfg.geminiModel,
-  log,
-});
-registerRuntime('gemini-cli', geminiCliRaw);
-log.info(
-  { runtimeName: 'gemini-cli', adapter: 'cli', geminiBin: cfg.geminiBin, model: cfg.geminiModel },
-  'runtime:gemini-cli registered (CLI)',
-);
-
-const claudeRequested = primaryRuntimeName === 'claude'
-  || fastRuntimeName === 'claude'
-  || cfg.forgeDrafterRuntime === 'claude'
-  || cfg.forgeAuditorRuntime === 'claude';
+const claudeRequested = primaryRuntimeName === 'claude-cli'
+  || fastRuntimeName === 'claude-cli'
+  || cfg.forgeDrafterRuntime === 'claude-cli'
+  || cfg.forgeAuditorRuntime === 'claude-cli';
 if (claudeRequested) {
   registerClaudeRuntime();
 }
 
-const runtime = runtimeRegistry.get(primaryRuntimeName);
-if (!runtime) {
+const resolved = resolvePrimaryRuntime(primaryRuntimeName, runtimeRegistry);
+if (!resolved.ok) {
   log.error(
     {
       primaryRuntime: primaryRuntimeName,
-      availableRuntimes: runtimeRegistry.list(),
+      availableRuntimes: resolved.available,
+      migrationHint: resolved.hint?.kind ?? null,
     },
-    'PRIMARY_RUNTIME is not available. Check configuration (OPENAI_API_KEY, Claude CLI, runtime name).',
+    resolved.message,
   );
   process.exit(1);
 }
+const runtime = resolved.adapter;
 const limitedRuntime = runtime;
 let fastRuntime = resolveFastRuntime({
   primaryRuntimeName,
@@ -1154,7 +1142,7 @@ const voiceRuntimeRef: { runtime: RuntimeAdapter; name: string } = { runtime: li
  *
  * Priority:
  *  1. Explicit override on voiceModelRef (set by auto-wiring or runtime-overrides.json)
- *  2. The 'anthropic' adapter from the registry (zero cold-start, ideal for voice)
+ *  2. The 'claude-api' adapter from the registry (zero cold-start, ideal for voice)
  *  3. The primary limited runtime (fallback)
  */
 export function resolveVoiceRuntime(
@@ -1163,10 +1151,10 @@ export function resolveVoiceRuntime(
   fallback: RuntimeAdapter,
 ): RuntimeAdapter {
   if (voiceRef.runtime) return voiceRef.runtime;
-  return registry.get('anthropic') ?? fallback;
+  return registry.get('claude-api') ?? fallback;
 }
 
-// Register Anthropic REST adapter when ANTHROPIC_API_KEY is set (direct HTTP, zero cold-start).
+// Register Anthropic REST adapter as 'claude-api' when ANTHROPIC_API_KEY is set (direct HTTP, zero cold-start).
 // Used as the default voice runtime to eliminate CLI subprocess overhead.
 if (cfg.anthropicApiKey) {
   const anthropicRestRaw = createAnthropicRestRuntime({
@@ -1174,21 +1162,21 @@ if (cfg.anthropicApiKey) {
     defaultModel: 'claude-opus-4-6',
     log,
   });
-  const anthropicRuntime = registerRuntime('anthropic', anthropicRestRaw);
-  log.info({ adapter: 'rest', model: 'claude-opus-4-6' }, 'runtime:anthropic registered (Messages API)');
+  const claudeApiRuntime = registerRuntime('claude-api', anthropicRestRaw);
+  log.info({ adapter: 'rest', model: 'claude-opus-4-6' }, 'runtime:claude-api registered (Messages API)');
 
   // Auto-wire as voice runtime to eliminate CLI cold-start latency
   if (cfg.voiceEnabled) {
-    voiceModelRef.runtime = anthropicRuntime;
-    voiceModelRef.runtimeName = 'anthropic';
+    voiceModelRef.runtime = claudeApiRuntime;
+    voiceModelRef.runtimeName = 'claude-api';
     // Re-resolve the voice model against the Anthropic adapter's tier mapping
-    const reResolved = resolveModel(cfg.voiceModel, anthropicRuntime.id);
-    voiceModelRef.model = reResolved || anthropicRuntime.defaultModel || voiceModelRef.model;
-    voiceRuntimeRef.runtime = anthropicRuntime;
-    voiceRuntimeRef.name = 'anthropic';
+    const reResolved = resolveModel(cfg.voiceModel, claudeApiRuntime.id);
+    voiceModelRef.model = reResolved || claudeApiRuntime.defaultModel || voiceModelRef.model;
+    voiceRuntimeRef.runtime = claudeApiRuntime;
+    voiceRuntimeRef.name = 'claude-api';
     log.info(
-      { voiceRuntime: 'anthropic', voiceModel: voiceModelRef.model },
-      'voice: auto-wired to Anthropic REST adapter (zero cold-start)',
+      { voiceRuntime: 'claude-api', voiceModel: voiceModelRef.model },
+      'voice: auto-wired to claude-api REST adapter (zero cold-start)',
     );
   }
 }

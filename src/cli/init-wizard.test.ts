@@ -51,7 +51,7 @@ describe('init wizard helpers', () => {
         DISCORD_ALLOW_USER_IDS: '1000000000000000001',
         DISCOCLAW_TASKS_FORUM: '1000000000000000002',
         DISCOCLAW_CRON_FORUM: '1000000000000000003',
-        PRIMARY_RUNTIME: 'claude',
+        PRIMARY_RUNTIME: 'claude-cli',
         CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS: '1',
         CLAUDE_OUTPUT_FORMAT: 'stream-json',
         DISCORD_GUILD_ID: '1000000000000000004',
@@ -61,7 +61,7 @@ describe('init wizard helpers', () => {
     );
 
     expect(content).toContain('# REQUIRED');
-    expect(content).toContain('PRIMARY_RUNTIME=claude');
+    expect(content).toContain('PRIMARY_RUNTIME=claude-cli');
     expect(content).toContain('CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1');
     expect(content).toContain('# CORE');
     expect(content).toContain('DISCORD_GUILD_ID=1000000000000000004');
@@ -121,9 +121,8 @@ describe('init wizard helpers', () => {
   });
 
   it('selects provider defaults in expected precedence order', () => {
-    expect(selectDefaultProvider(['codex'])).toBe('4');
-    expect(selectDefaultProvider(['gemini', 'codex'])).toBe('2');
-    expect(selectDefaultProvider(['claude', 'gemini', 'codex'])).toBe('1');
+    expect(selectDefaultProvider(['codex'])).toBe('3');
+    expect(selectDefaultProvider(['claude', 'codex'])).toBe('1');
     expect(selectDefaultProvider([])).toBe('1');
   });
 
@@ -162,7 +161,7 @@ describe('init wizard helpers', () => {
       {
         DISCORD_TOKEN: 'a.b.c',
         DISCORD_ALLOW_USER_IDS: '1000000000000000001',
-        PRIMARY_RUNTIME: 'codex',
+        PRIMARY_RUNTIME: 'codex-cli',
         OPENAI_API_KEY: 'sk-fast-key',
         DISCOCLAW_FAST_RUNTIME: 'openai',
         DISCOCLAW_TIER_OPENAI_FAST: 'gpt-5-mini',
@@ -170,7 +169,7 @@ describe('init wizard helpers', () => {
       new Date('2026-03-04T00:00:00.000Z'),
     );
 
-    expect(content).toContain('PRIMARY_RUNTIME=codex');
+    expect(content).toContain('PRIMARY_RUNTIME=codex-cli');
     expect(content).toContain('OPENAI_API_KEY=sk-fast-key');
     expect(content).toContain('DISCOCLAW_FAST_RUNTIME=openai');
     expect(content).toContain('DISCOCLAW_TIER_OPENAI_FAST=gpt-5-mini');
@@ -302,16 +301,14 @@ describe('init wizard copy contract', () => {
     );
   });
 
-  it('uses the explicit Gemini CLI wording instead of a generic Gemini path', () => {
-    expect(initWizardSource).toContain("  2) Gemini CLI");
+  it('offers Gemini API (not Gemini CLI) as a provider option', () => {
+    expect(initWizardSource).toContain("  5) Gemini API");
+    expect(initWizardSource).not.toContain("Gemini CLI");
     expect(initWizardSource).toContain(
-      'Note: this selects the limited Gemini CLI path; auth is handled by the gemini binary itself (run `gemini` to authenticate).',
+      'Note: the Gemini API adapter is HTTP-only.',
     );
     expect(initWizardSource).toContain(
-      'This wizard selected the limited Gemini CLI path (`PRIMARY_RUNTIME=gemini-cli`).',
-    );
-    expect(initWizardSource).toContain(
-      'If you want the API-backed Gemini path instead, set `PRIMARY_RUNTIME=gemini-api` and `GEMINI_API_KEY` manually.',
+      '`discoclaw init` only writes the existing `GEMINI_API_KEY` env-key path; it does not prove broader Gemini API readiness.',
     );
   });
 });
@@ -384,7 +381,7 @@ describe('runInitWizard', () => {
 
     const newEnv = fs.readFileSync(path.join(tmpDir, '.env'), 'utf8');
     expect(newEnv).toContain('DISCORD_TOKEN=a.b.c');
-    expect(newEnv).toContain('PRIMARY_RUNTIME=claude');
+    expect(newEnv).toContain('PRIMARY_RUNTIME=claude-cli');
     expect(newEnv).toContain('CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS=1');
     expect(newEnv).toContain('CLAUDE_OUTPUT_FORMAT=stream-json');
     expect(newEnv).toContain('DISCORD_GUILD_ID=5000000000000000001');
@@ -393,7 +390,7 @@ describe('runInitWizard', () => {
     expect(ensureWorkspaceBootstrapFiles).toHaveBeenCalledWith(path.join(tmpDir, 'workspace'));
   });
 
-  it('writes openrouter config when provider 5 is selected', async () => {
+  it('writes openrouter config when provider 4 is selected', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
     const previousCwd = process.cwd();
     const answers = [
@@ -404,7 +401,7 @@ describe('runInitWizard', () => {
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
       '5000000000000000001', // DISCORD_GUILD_ID
-      '5', // provider selection -> OpenRouter
+      '4', // provider selection -> OpenRouter
       'sk-or-test-key', // OPENROUTER_API_KEY
       'n', // enable voice -> no
     ];
@@ -438,7 +435,7 @@ describe('runInitWizard', () => {
     );
   });
 
-  it('writes codex fast-runtime split config when provider 4 and OpenAI key are provided', async () => {
+  it('writes codex-cli fast-runtime split config when provider 3 and OpenAI key are provided', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
     const previousCwd = process.cwd();
     const answers = [
@@ -448,7 +445,7 @@ describe('runInitWizard', () => {
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
       '5000000000000000001', // DISCORD_GUILD_ID
-      '4', // provider selection -> Codex
+      '3', // provider selection -> Codex CLI
       'sk-fast-key', // optional fast OpenAI API key
       'n', // enable voice -> no
     ];
@@ -469,13 +466,13 @@ describe('runInitWizard', () => {
     }
 
     const newEnv = fs.readFileSync(path.join(tmpDir, '.env'), 'utf8');
-    expect(newEnv).toContain('PRIMARY_RUNTIME=codex');
+    expect(newEnv).toContain('PRIMARY_RUNTIME=codex-cli');
     expect(newEnv).toContain('OPENAI_API_KEY=sk-fast-key');
     expect(newEnv).toContain('DISCOCLAW_FAST_RUNTIME=openai');
     expect(newEnv).toContain('DISCOCLAW_TIER_OPENAI_FAST=gpt-5-mini');
   });
 
-  it('writes gemini-cli config when provider 2 is selected', async () => {
+  it('writes gemini-api config when provider 5 is selected', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discoclaw-init-test-'));
     const previousCwd = process.cwd();
     const answers = [
@@ -485,7 +482,8 @@ describe('runInitWizard', () => {
       'a.b.c', // DISCORD_TOKEN
       '1000000000000000001', // DISCORD_ALLOW_USER_IDS
       '5000000000000000001', // DISCORD_GUILD_ID
-      '2', // provider selection -> Gemini CLI
+      '5', // provider selection -> Gemini API
+      'gemini-test-key', // GEMINI_API_KEY
       'n', // enable voice -> no
     ];
 
@@ -505,14 +503,13 @@ describe('runInitWizard', () => {
     }
 
     const newEnv = fs.readFileSync(path.join(tmpDir, '.env'), 'utf8');
-    expect(newEnv).toContain('PRIMARY_RUNTIME=gemini-cli');
-    expect(newEnv).toContain('GEMINI_BIN=gemini');
-    expect(newEnv).toContain('GEMINI_MODEL=gemini-2.5-pro');
+    expect(newEnv).toContain('PRIMARY_RUNTIME=gemini-api');
+    expect(newEnv).toContain('GEMINI_API_KEY=gemini-test-key');
     expect(logSpy).toHaveBeenCalledWith(
-      '  1. This wizard selected the limited Gemini CLI path (`PRIMARY_RUNTIME=gemini-cli`).',
+      '  1. `discoclaw init` only writes the existing `GEMINI_API_KEY` env-key path; it does not prove broader Gemini API readiness.',
     );
     expect(logSpy).toHaveBeenCalledWith(
-      '  3. If you want the API-backed Gemini path instead, set `PRIMARY_RUNTIME=gemini-api` and `GEMINI_API_KEY` manually.',
+      '  2. Start discoclaw and confirm `!status` (or the startup credential report) shows `gemini-key: ok`.',
     );
   });
 

@@ -42,7 +42,6 @@ export type RuntimeFailureCode =
   | 'RUNTIME_TIMEOUT'
   | 'DISCORD_MISSING_PERMISSIONS'
   | 'CLAUDE_CLI_NOT_FOUND'
-  | 'GEMINI_CLI_NOT_FOUND'
   | 'GEMINI_AUTH_MISSING'
   | 'CLAUDE_AUTH_MISSING'
   | 'CODEX_MODEL_UNSUPPORTED'
@@ -137,7 +136,7 @@ export type RuntimeCapability =
   | 'mcp'
   | 'multi_turn';
 
-export type RuntimeId = 'claude_code' | 'openai' | 'openrouter' | 'codex' | 'gemini' | 'other';
+export type RuntimeId = 'claude_code' | 'claude_api' | 'codex' | 'openai' | 'openrouter' | 'gemini' | 'other';
 
 export type RuntimeSupervisorLimitsOverride = {
   maxCycles?: number;

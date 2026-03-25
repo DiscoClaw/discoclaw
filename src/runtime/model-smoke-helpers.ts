@@ -4,17 +4,16 @@
  * model tier through the full RuntimeAdapter.invoke() → EngineEvent pipeline.
  *
  * Runtime factories:
- *   buildSmokeRuntime        — Claude Code CLI (CLAUDE_BIN, CLAUDE_OUTPUT_FORMAT, …)
- *   buildGeminiSmokeRuntime  — Gemini CLI      (GEMINI_BIN, GEMINI_MODEL)
- *   buildOpenAISmokeRuntime  — OpenAI API      (OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL)
- *   buildCodexSmokeRuntime   — Codex CLI       (CODEX_BIN, CODEX_MODEL)
+ *   buildSmokeRuntime        — Claude CLI  (CLAUDE_BIN, CLAUDE_OUTPUT_FORMAT, …)
+ *   buildOpenAISmokeRuntime  — OpenAI API  (OPENAI_API_KEY, OPENAI_BASE_URL, OPENAI_MODEL)
+ *   buildCodexSmokeRuntime   — Codex CLI   (CODEX_BIN, CODEX_MODEL)
  */
 
 import type { EngineEvent, RuntimeAdapter } from './types.js';
 import { createClaudeCliRuntime } from './claude-code-cli.js';
-import { createGeminiCliRuntime } from './gemini-cli.js';
 import { createOpenAICompatRuntime } from './openai-compat.js';
 import { createCodexCliRuntime } from './codex-cli.js';
+import { createGeminiRestRuntime } from './gemini-rest.js';
 
 // ---------------------------------------------------------------------------
 // Prompt definitions
@@ -144,12 +143,6 @@ export type SmokeRuntime = {
   claudeBin: string;
 };
 
-export type GeminiSmokeRuntime = {
-  runtime: RuntimeAdapter;
-  /** Resolved binary path/name, for beforeAll availability checks. */
-  geminiBin: string;
-};
-
 /**
  * Build a RuntimeAdapter from env vars, applying the same normalization rules
  * as `parseConfig` in src/config.ts:
@@ -199,19 +192,6 @@ export function buildSmokeRuntime(env: NodeJS.ProcessEnv = process.env): SmokeRu
 }
 
 /**
- * Build a Gemini RuntimeAdapter from env vars.
- * Reads `GEMINI_BIN` (default: `gemini`) and `GEMINI_MODEL` (default: `gemini-2.5-flash`).
- */
-export function buildGeminiSmokeRuntime(env: NodeJS.ProcessEnv = process.env): GeminiSmokeRuntime {
-  const geminiBin = env.GEMINI_BIN?.trim() || 'gemini';
-  const defaultModel = env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
-
-  const runtime = createGeminiCliRuntime({ geminiBin, defaultModel });
-
-  return { runtime, geminiBin };
-}
-
-/**
  * Build an OpenAI RuntimeAdapter from env vars.
  * Reads `OPENAI_API_KEY`, `OPENAI_BASE_URL` (default: `https://api.openai.com/v1`),
  * and `OPENAI_MODEL` (default: `gpt-4o`).
@@ -237,4 +217,18 @@ export function buildCodexSmokeRuntime(env: NodeJS.ProcessEnv = process.env) {
   const runtime = createCodexCliRuntime({ codexBin, defaultModel });
 
   return { runtime, codexBin };
+}
+
+/**
+ * Build a Gemini REST RuntimeAdapter from env vars.
+ * Reads `GEMINI_API_KEY`, `GEMINI_BASE_URL`, and `GEMINI_MODEL` (default: `gemini-2.5-flash`).
+ */
+export function buildGeminiSmokeRuntime(env: NodeJS.ProcessEnv = process.env) {
+  const apiKey = env.GEMINI_API_KEY?.trim() || '';
+  const baseUrl = env.GEMINI_BASE_URL?.trim() || undefined;
+  const defaultModel = env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
+
+  const runtime = createGeminiRestRuntime({ apiKey, defaultModel, baseUrl });
+
+  return { runtime, apiKey };
 }

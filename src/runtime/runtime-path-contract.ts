@@ -1,11 +1,10 @@
 import type { RuntimeId } from './types.js';
 
 export type RuntimePathCanonicalName =
-  | 'anthropic'
-  | 'claude'
-  | 'codex'
+  | 'claude-api'
+  | 'claude-cli'
+  | 'codex-cli'
   | 'gemini-api'
-  | 'gemini-cli'
   | 'openai'
   | 'openrouter';
 
@@ -49,37 +48,31 @@ export type RuntimePathPlacementDefinition = {
 };
 
 const RUNTIME_PATH_DEFINITIONS: Readonly<Record<RuntimePathCanonicalName, RuntimePathDefinition>> = {
-  anthropic: {
-    canonicalName: 'anthropic',
-    acceptedAliases: ['anthropic'],
-    registryKeys: ['anthropic'],
-    runtimeId: 'claude_code',
+  'claude-api': {
+    canonicalName: 'claude-api',
+    acceptedAliases: ['claude-api', 'anthropic'],
+    registryKeys: ['claude-api'],
+    runtimeId: 'claude_api',
     providerSecretEnvKey: 'ANTHROPIC_API_KEY',
   },
-  claude: {
-    canonicalName: 'claude',
-    acceptedAliases: ['claude', 'claude_code'],
-    registryKeys: ['claude', 'claude_code'],
+  'claude-cli': {
+    canonicalName: 'claude-cli',
+    acceptedAliases: ['claude-cli', 'claude', 'claude_code'],
+    registryKeys: ['claude-cli'],
     runtimeId: 'claude_code',
   },
-  codex: {
-    canonicalName: 'codex',
-    acceptedAliases: ['codex'],
-    registryKeys: ['codex'],
+  'codex-cli': {
+    canonicalName: 'codex-cli',
+    acceptedAliases: ['codex-cli', 'codex'],
+    registryKeys: ['codex-cli'],
     runtimeId: 'codex',
   },
   'gemini-api': {
     canonicalName: 'gemini-api',
-    acceptedAliases: ['gemini-api', 'gemini'],
-    registryKeys: ['gemini-api', 'gemini'],
+    acceptedAliases: ['gemini-api'],
+    registryKeys: ['gemini-api'],
     runtimeId: 'gemini',
     providerSecretEnvKey: 'GEMINI_API_KEY',
-  },
-  'gemini-cli': {
-    canonicalName: 'gemini-cli',
-    acceptedAliases: ['gemini-cli'],
-    registryKeys: ['gemini-cli'],
-    runtimeId: 'gemini',
   },
   openai: {
     canonicalName: 'openai',
@@ -98,17 +91,16 @@ const RUNTIME_PATH_DEFINITIONS: Readonly<Record<RuntimePathCanonicalName, Runtim
 };
 
 const STARTUP_RUNTIME_NAMES: readonly RuntimePathCanonicalName[] = [
-  'claude',
-  'codex',
+  'claude-cli',
+  'codex-cli',
   'gemini-api',
-  'gemini-cli',
   'openai',
   'openrouter',
 ];
 
 const VOICE_RUNTIME_NAMES: readonly RuntimePathCanonicalName[] = [
   ...STARTUP_RUNTIME_NAMES,
-  'anthropic',
+  'claude-api',
 ];
 
 const RUNTIME_PATH_PLACEMENTS: Readonly<Record<RuntimePathPlacement, RuntimePathPlacementDefinition>> = {

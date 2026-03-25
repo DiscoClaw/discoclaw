@@ -88,12 +88,10 @@ export type DoctorContext = {
 };
 
 export const KNOWN_RUNTIMES = new Set([
-  'anthropic',
-  'claude',
-  'codex',
-  'gemini',
+  'claude-api',
+  'claude-cli',
+  'codex-cli',
   'gemini-api',
-  'gemini-cli',
   'openai',
   'openrouter',
 ]);
@@ -286,14 +284,14 @@ function buildEnvDefaults(env: EnvMap): ModelConfig {
 function defaultFastRuntime(env: EnvMap): string {
   const fastRuntime = parseRuntimePlacementValue(env.DISCOCLAW_FAST_RUNTIME, 'startup:DISCOCLAW_FAST_RUNTIME');
   if (fastRuntime) return fastRuntime;
-  return parseRuntimePlacementValue(env.PRIMARY_RUNTIME, 'startup:PRIMARY_RUNTIME') ?? 'claude';
+  return parseRuntimePlacementValue(env.PRIMARY_RUNTIME, 'startup:PRIMARY_RUNTIME') ?? 'claude-cli';
 }
 
 function defaultVoiceRuntime(env: EnvMap): string {
-  const primaryRuntime = parseRuntimePlacementValue(env.PRIMARY_RUNTIME, 'startup:PRIMARY_RUNTIME') ?? 'claude';
+  const primaryRuntime = parseRuntimePlacementValue(env.PRIMARY_RUNTIME, 'startup:PRIMARY_RUNTIME') ?? 'claude-cli';
   const voiceEnabled = parseBoolean(env.DISCOCLAW_VOICE_ENABLED, false);
   if (voiceEnabled && trimValue(env.ANTHROPIC_API_KEY)) {
-    return 'anthropic';
+    return 'claude-api';
   }
   return primaryRuntime;
 }
@@ -403,7 +401,7 @@ export function detectNpmManagedRuntimeSupportBoundary(ctx: DoctorContext): Doct
   const proofGates: string[] = [];
   const recommendations: string[] = [];
 
-  if (configuredRuntimes.has('codex')) {
+  if (configuredRuntimes.has('codex-cli')) {
     proofGates.push('Codex CLI session auth for the Codex path');
     recommendations.push(
       'For Codex paths, no shipped `discoclaw codex auth-smoke` exists yet; use `codex exec --skip-git-repo-check -- "Reply with OK"` before and after `codex` login to prove the session in the same host shell.',
@@ -424,7 +422,7 @@ export function detectNpmManagedRuntimeSupportBoundary(ctx: DoctorContext): Doct
     );
   }
 
-  if (configuredRuntimes.has('claude')) {
+  if (configuredRuntimes.has('claude-cli')) {
     proofGates.push('Claude auth, first useful reply, or daemon/restart parity for the Claude path');
     recommendations.push(
       'Use `discoclaw claude auth-smoke` for shell-level Claude validation. For daemon installs, keep runtime parity as a manual check: `discoclaw init` does not persist `CLAUDE_BIN`, and the service installers still pin `/usr/bin/node` plus a fixed `PATH`.',
@@ -492,8 +490,8 @@ export function detectUnsupportedRuntimePlacements(ctx: DoctorContext): DoctorFi
     if (parseRuntimePlacementValue(rawValue, target.placement)) continue;
 
     const supportedRuntimeNames = renderSupportedRuntimeNames(target.placement);
-    const message = canonicalName === 'anthropic'
-      ? `${target.label}="${rawValue}" uses the voice-only runtime "anthropic", which is not supported in this placement.`
+    const message = canonicalName === 'claude-api'
+      ? `${target.label}="${rawValue}" uses the voice-only runtime "claude-api", which is not supported in this placement.`
       : `${target.label}="${rawValue}" resolves to "${canonicalName}", but that runtime is not supported in this placement.`;
     const recommendation = target.placement.startsWith('runtime-overrides:')
       ? `Remove ${target.label} or change it to one of: ${supportedRuntimeNames}.`

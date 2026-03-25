@@ -388,7 +388,7 @@ export function executeConfigAction(
                 const owningRuntimeId = findRuntimeForModel(model);
                 const currentVoiceRuntimeId = bp.voiceModelCtx.runtime?.id ?? configCtx.runtime.id;
                 if (owningRuntimeId && owningRuntimeId !== currentVoiceRuntimeId) {
-                  // Tier-map keys (e.g. 'claude_code') may differ from registry keys (e.g. 'claude').
+                  // Tier-map keys (e.g. 'claude_code') may differ from registry keys (e.g. 'claude-cli').
                   // Scan registry entries by adapter.id to find the matching key.
                   let matchedKey: string | undefined;
                   let matchedAdapter: RuntimeAdapter | undefined;
