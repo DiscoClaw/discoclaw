@@ -18,10 +18,15 @@ import {
 import { DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT, formatDashboardUrl } from './options.js';
 import { renderDashboardPage } from './page.js';
 import { buildSnapshotResponse, type DashboardSnapshotApiResponse } from './api/snapshot.js';
+import {
+  buildSettingsGetResponse,
+  buildSettingsPostResponse,
+  type DashboardSettingsGetResponse,
+  type DashboardSettingsPostResponse,
+} from './api/settings.js';
 import type { LiveRuntimeSnapshot, LiveSnapshotProvider } from './snapshot.js';
 import type { AuthProbeReport } from './auth-probe.js';
 import { hasErrorCode, mapListenError } from './server-errors.js';
-import { ALLOWED_SETTING_KEYS, SETTING_DEFINITIONS } from './settings-keys.js';
 import type { DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext, updateEnvKey } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
@@ -56,6 +61,7 @@ const DNS_REBIND_ERROR = 'Dashboard requests must use a loopback Host header.';
 type KnownRuntimesType = typeof KNOWN_RUNTIMES;
 
 export type { DashboardSnapshotApiResponse } from './api/snapshot.js';
+export type { DashboardSettingsGetResponse, DashboardSettingsPostResponse } from './api/settings.js';
 
 /**
  * Result of a live model change applied to the running bot's in-memory state.
@@ -897,18 +903,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
       }
 
       if (method === 'GET' && pathname === '/api/settings') {
-        const grouped: Record<string, Array<{ key: string; label: string; type: string; default: boolean | number; value: string | undefined }>> = {};
-        for (const def of SETTING_DEFINITIONS) {
-          if (!grouped[def.category]) grouped[def.category] = [];
-          grouped[def.category].push({
-            key: def.key,
-            label: def.label,
-            type: def.type,
-            default: def.default,
-            value: inspectOpts.env[def.key],
-          });
-        }
-        respondJson(res, 200, { ok: true, categories: grouped });
+        respondJson(res, 200, buildSettingsGetResponse(inspectOpts.env));
         return;
       }
 
@@ -924,37 +919,11 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
         const body = await readJsonBody(req);
         const key = typeof body.key === 'string' ? body.key.trim() : '';
         const value = typeof body.value === 'string' ? body.value.trim() : '';
-        if (!key) throw new Error('Setting key is required.');
-        if (!ALLOWED_SETTING_KEYS.has(key)) throw new Error(`Unknown setting key: ${key}`);
-        if (value === '') throw new Error('Setting value is required.');
 
-        const def = SETTING_DEFINITIONS.find((d) => d.key === key);
-        if (def?.type === 'boolean' && value !== 'true' && value !== 'false' && value !== '1' && value !== '0') {
-          throw new Error(`Setting value must be "true"/"false" or "1"/"0" for ${key}.`);
-        }
-        if (def?.type === 'number') {
-          const n = Number(value);
-          if (!Number.isFinite(n) || n < 0) {
-            throw new Error(`Setting value must be a non-negative number for ${key}.`);
-          }
-        }
-
-        const ctx = await deps.loadDoctorContext(inspectOpts);
-        await deps.updateEnvKey(ctx.configPaths.env, key, value);
+        const response = await buildSettingsPostResponse(inspectOpts, deps, key, value);
         pendingRestart = true;
 
-        const grouped: Record<string, Array<{ key: string; label: string; type: string; default: boolean | number; value: string | undefined }>> = {};
-        for (const d of SETTING_DEFINITIONS) {
-          if (!grouped[d.category]) grouped[d.category] = [];
-          grouped[d.category].push({
-            key: d.key,
-            label: d.label,
-            type: d.type,
-            default: d.default,
-            value: d.key === key ? value : inspectOpts.env[d.key],
-          });
-        }
-        respondJson(res, 200, { ok: true, message: `Updated ${key}. Restart the service to apply.`, categories: grouped });
+        respondJson(res, 200, response);
         return;
       }
 
