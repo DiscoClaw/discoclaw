@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { ChannelType } from 'discord.js';
 
 vi.mock('./parser.js', () => {
-  return { parseCronDefinition: vi.fn() };
+  return { parseCronDefinition: vi.fn(), parseStarterContent: vi.fn() };
 });
 
 // Mock ensureStatusMessage and detectCadence to avoid side effects.
@@ -71,12 +71,14 @@ function makeScheduler() {
 describe('initCronForum', () => {
   let initCronForum: typeof import('./forum-sync.js').initCronForum;
   let parseCronDefinition: typeof import('./parser.js').parseCronDefinition;
+  let parseStarterContent: typeof import('./parser.js').parseStarterContent;
 
   beforeEach(async () => {
     // Dynamic import after mocks are registered.
     ({ initCronForum } = await import('./forum-sync.js'));
-    ({ parseCronDefinition } = await import('./parser.js'));
+    ({ parseCronDefinition, parseStarterContent } = await import('./parser.js'));
     vi.mocked(parseCronDefinition).mockReset();
+    vi.mocked(parseStarterContent).mockReset();
   });
 
   it('does not register when starter author is not allowlisted', async () => {
@@ -153,7 +155,7 @@ describe('initCronForum', () => {
     expect(scheduler.disable).not.toHaveBeenCalled();
   });
 
-  it('disables and reports when parsing fails', async () => {
+  it('soft-fails on boot re-parse (isNew: false) when both parsers return null — no disable, no error post', async () => {
     const thread = makeThread();
     thread.fetchStarterMessage.mockResolvedValue({
       id: 'm1',
@@ -180,8 +182,9 @@ describe('initCronForum', () => {
     });
 
     expect(scheduler.register).not.toHaveBeenCalled();
-    expect(scheduler.disable).toHaveBeenCalledOnce();
-    expect(thread.send).toHaveBeenCalledOnce();
+    // Boot re-parse: soft failure — no disable, no error message.
+    expect(scheduler.disable).not.toHaveBeenCalled();
+    expect(thread.send).not.toHaveBeenCalled();
   });
 
   it('registers when parsing succeeds and author is allowlisted', async () => {
@@ -682,16 +685,147 @@ describe('initCronForum', () => {
     // Should disable the job because stats record says disabled: true.
     expect(scheduler.disable).toHaveBeenCalledWith('thread-1');
   });
+
+  it('uses deterministic parser when no stats record exists (AI parser not called)', async () => {
+    const thread = makeThread();
+    const botContent = [
+      '**Schedule:** `0 7 * * 1-5` (America/Los_Angeles)',
+      '**Channel:** #general',
+      '**Input:** prompt-only',
+      '',
+      'Check the weather.',
+    ].join('\n');
+    thread.fetchStarterMessage.mockResolvedValue({
+      id: 'm1',
+      content: botContent,
+      author: { id: 'bot-user-1' },
+      react: vi.fn().mockResolvedValue(undefined),
+    });
+    thread.messages.fetch = vi.fn().mockResolvedValue(new Map());
+
+    const forum = makeForum([thread]);
+    const client = makeClient(forum);
+    const scheduler = makeScheduler();
+    scheduler.register.mockReturnValue({ cron: { nextRun: () => new Date() } });
+
+    // No stats store — fast path is skipped, falls into loadThreadAsCron.
+    // Deterministic parser returns a valid def.
+    vi.mocked(parseStarterContent).mockReturnValue({
+      triggerType: 'schedule',
+      schedule: '0 7 * * 1-5',
+      timezone: 'America/Los_Angeles',
+      channel: 'general',
+      prompt: 'Check the weather.',
+    });
+
+    await initCronForum({
+      client: client as any,
+      forumChannelNameOrId: 'forum-1',
+      allowUserIds: new Set(['u-allowed']),
+      scheduler: scheduler as any,
+      runtime: {} as any,
+      cronModel: 'haiku',
+      cwd: '/tmp',
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    // Deterministic parser was called, AI parser was NOT called.
+    expect(parseStarterContent).toHaveBeenCalledWith(botContent);
+    expect(parseCronDefinition).not.toHaveBeenCalled();
+    expect(scheduler.register).toHaveBeenCalledOnce();
+  });
+
+  it('falls through to AI parser when deterministic parse returns null', async () => {
+    const thread = makeThread();
+    thread.fetchStarterMessage.mockResolvedValue({
+      id: 'm1',
+      content: 'Every weekday at 7am Pacific, check the weather and post to #general',
+      author: { id: 'u-allowed' },
+      react: vi.fn().mockResolvedValue(undefined),
+    });
+    thread.messages.fetch = vi.fn().mockResolvedValue(new Map());
+
+    const forum = makeForum([thread]);
+    const client = makeClient(forum);
+    const scheduler = makeScheduler();
+    scheduler.register.mockReturnValue({ cron: { nextRun: () => new Date() } });
+
+    // Deterministic parser returns null (freeform text).
+    vi.mocked(parseStarterContent).mockReturnValue(null);
+    vi.mocked(parseCronDefinition).mockResolvedValue({
+      triggerType: 'schedule',
+      schedule: '0 7 * * 1-5',
+      timezone: 'America/Los_Angeles',
+      channel: 'general',
+      prompt: 'Check the weather.',
+    });
+
+    await initCronForum({
+      client: client as any,
+      forumChannelNameOrId: 'forum-1',
+      allowUserIds: new Set(['u-allowed']),
+      scheduler: scheduler as any,
+      runtime: {} as any,
+      cronModel: 'haiku',
+      cwd: '/tmp',
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    // Deterministic parser was called first, then AI parser.
+    expect(parseStarterContent).toHaveBeenCalled();
+    expect(parseCronDefinition).toHaveBeenCalled();
+    expect(scheduler.register).toHaveBeenCalledOnce();
+  });
+
+  it('new thread (isNew: true) still posts error when both parsers fail', async () => {
+    // This test uses the threadCreate listener which passes isNew: true.
+    const forum = makeForum([]);
+    const client = makeClient(forum);
+    const scheduler = makeScheduler();
+    scheduler.getJob.mockReturnValue(undefined);
+
+    await initCronForum({
+      client: client as any,
+      forumChannelNameOrId: 'forum-1',
+      allowUserIds: new Set(['u-allowed']),
+      scheduler: scheduler as any,
+      runtime: {} as any,
+      cronModel: 'haiku',
+      cwd: '/tmp',
+      log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+
+    const threadCreateCallbacks = (client as any)._listeners['threadCreate'] ?? [];
+    const listener = threadCreateCallbacks[0];
+
+    vi.mocked(parseStarterContent).mockReturnValue(null);
+    vi.mocked(parseCronDefinition).mockResolvedValue(null);
+
+    const thread = makeThread({ id: 'thread-new-fail', parentId: 'forum-1' });
+    thread.fetchStarterMessage.mockResolvedValue({
+      id: 'm1',
+      content: 'total nonsense',
+      author: { id: 'bot-user-1' },
+      react: vi.fn().mockResolvedValue(undefined),
+    });
+    await listener(thread);
+
+    // isNew: true — should disable and post error message.
+    expect(scheduler.disable).toHaveBeenCalledWith('thread-new-fail');
+    expect(thread.send).toHaveBeenCalledWith(expect.stringContaining('Could not parse'));
+  });
 });
 
 describe('threadCreate listener', () => {
   let initCronForum: typeof import('./forum-sync.js').initCronForum;
   let parseCronDefinition: typeof import('./parser.js').parseCronDefinition;
+  let parseStarterContent: typeof import('./parser.js').parseStarterContent;
 
   beforeEach(async () => {
     ({ initCronForum } = await import('./forum-sync.js'));
-    ({ parseCronDefinition } = await import('./parser.js'));
+    ({ parseCronDefinition, parseStarterContent } = await import('./parser.js'));
     vi.mocked(parseCronDefinition).mockReset();
+    vi.mocked(parseStarterContent).mockReset();
   });
 
   async function setupAndGetListener(opts: { scheduler?: any; pendingThreadIds?: Set<string> } = {}) {
@@ -831,11 +965,13 @@ describe('threadCreate listener', () => {
 describe('threadUpdate listener', () => {
   let initCronForum: typeof import('./forum-sync.js').initCronForum;
   let parseCronDefinition: typeof import('./parser.js').parseCronDefinition;
+  let parseStarterContent: typeof import('./parser.js').parseStarterContent;
 
   beforeEach(async () => {
     ({ initCronForum } = await import('./forum-sync.js'));
-    ({ parseCronDefinition } = await import('./parser.js'));
+    ({ parseCronDefinition, parseStarterContent } = await import('./parser.js'));
     vi.mocked(parseCronDefinition).mockReset();
+    vi.mocked(parseStarterContent).mockReset();
   });
 
   async function setupAndGetListener(opts: { scheduler?: any; statsStore?: any } = {}) {
