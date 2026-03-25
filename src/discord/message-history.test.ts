@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { AttachmentLike } from './image-download.js';
-import { fetchMessageHistory } from './message-history.js';
+import { fetchMessageHistory, formatRelativeTime } from './message-history.js';
 
 /** Helper: create a fake Discord message. */
 function fakeMsg(
@@ -10,11 +10,13 @@ function fakeMsg(
   username: string,
   bot = false,
   attachments?: AttachmentLike[],
+  createdTimestamp?: number,
 ) {
   return {
     id,
     content,
     author: { username, displayName: username, bot },
+    ...(createdTimestamp !== undefined ? { createdTimestamp } : {}),
     ...(attachments
       ? { attachments: new Map(attachments.map((a, i) => [String(i), a])) }
       : {}),
@@ -229,5 +231,133 @@ describe('fetchMessageHistory', () => {
     // Attachments: newest-first
     expect(result.historyAttachments[0]).toBe(newAtt);
     expect(result.historyAttachments[1]).toBe(oldAtt);
+  });
+
+  // --- Temporal signal tests ---
+
+  it('includes relative timestamps when createdTimestamp is present', async () => {
+    const now = 1700000000000;
+    const ch = fakeChannel([
+      fakeMsg('2', 'recent msg', 'Alice', false, undefined, now - 5 * 60_000),  // 5m ago
+      fakeMsg('1', 'old msg', 'Bob', false, undefined, now - 3 * 86_400_000),   // 3d ago
+    ]);
+
+    const result = await fetchMessageHistory(ch, '3', { budgetChars: 5000, now });
+    const lines = result.text.split('\n');
+    expect(lines[0]).toBe('[Bob, 3d ago]: old msg');
+    expect(lines[1]).toBe('[Alice, 5m ago]: recent msg');
+  });
+
+  it('shows "just now" for messages under 60 seconds old', async () => {
+    const now = 1700000000000;
+    const ch = fakeChannel([
+      fakeMsg('1', 'fresh', 'User', false, undefined, now - 10_000), // 10s ago
+    ]);
+
+    const result = await fetchMessageHistory(ch, '2', { budgetChars: 5000, now });
+    expect(result.text).toBe('[User, just now]: fresh');
+  });
+
+  it('omits age label when createdTimestamp is missing', async () => {
+    const ch = fakeChannel([
+      fakeMsg('1', 'no timestamp', 'User'),
+    ]);
+
+    const result = await fetchMessageHistory(ch, '2', { budgetChars: 5000 });
+    expect(result.text).toBe('[User]: no timestamp');
+  });
+
+  it('includes age label on bot messages too', async () => {
+    const now = 1700000000000;
+    const ch = fakeChannel([
+      fakeMsg('1', 'bot reply', 'Discoclaw', true, undefined, now - 2 * 3600_000), // 2h ago
+    ]);
+
+    const result = await fetchMessageHistory(ch, '2', { budgetChars: 5000, now });
+    expect(result.text).toBe('[Discoclaw, 2h ago]: bot reply');
+  });
+
+  it('shows hours correctly at boundary', async () => {
+    const now = 1700000000000;
+    const ch = fakeChannel([
+      fakeMsg('1', 'msg', 'User', false, undefined, now - 23 * 3600_000), // 23h ago
+    ]);
+
+    const result = await fetchMessageHistory(ch, '2', { budgetChars: 5000, now });
+    expect(result.text).toBe('[User, 23h ago]: msg');
+  });
+
+  it('filters out messages older than maxAgeMs', async () => {
+    const now = 1700000000000;
+    const ch = fakeChannel([
+      fakeMsg('3', 'recent', 'User', false, undefined, now - 60_000),          // 1m ago
+      fakeMsg('2', 'stale', 'User', false, undefined, now - 25 * 3600_000),    // 25h ago
+      fakeMsg('1', 'ancient', 'User', false, undefined, now - 72 * 3600_000),  // 3d ago
+    ]);
+
+    // maxAgeMs = 24h — only the 1m-ago message should survive
+    const result = await fetchMessageHistory(ch, '4', { budgetChars: 5000, now, maxAgeMs: 24 * 3600_000 });
+    const lines = result.text.split('\n');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toBe('[User, 1m ago]: recent');
+  });
+
+  it('returns empty when all messages exceed maxAgeMs', async () => {
+    const now = 1700000000000;
+    const ch = fakeChannel([
+      fakeMsg('1', 'old', 'User', false, undefined, now - 48 * 3600_000),
+    ]);
+
+    const result = await fetchMessageHistory(ch, '2', { budgetChars: 5000, now, maxAgeMs: 24 * 3600_000 });
+    expect(result.text).toBe('');
+    expect(result.historyAttachments).toEqual([]);
+  });
+
+  it('does not filter by age when maxAgeMs is 0', async () => {
+    const now = 1700000000000;
+    const ch = fakeChannel([
+      fakeMsg('1', 'ancient', 'User', false, undefined, now - 100 * 86_400_000),
+    ]);
+
+    const result = await fetchMessageHistory(ch, '2', { budgetChars: 5000, now, maxAgeMs: 0 });
+    expect(result.text).toContain('ancient');
+  });
+
+  it('shows weeks for messages older than 30 days', async () => {
+    const now = 1700000000000;
+    const ch = fakeChannel([
+      fakeMsg('1', 'ancient', 'User', false, undefined, now - 45 * 86_400_000), // 45d ago
+    ]);
+
+    const result = await fetchMessageHistory(ch, '2', { budgetChars: 5000, now });
+    expect(result.text).toBe('[User, 6w ago]: ancient');
+  });
+});
+
+describe('formatRelativeTime', () => {
+  it('returns "just now" for < 60s', () => {
+    expect(formatRelativeTime(0)).toBe('just now');
+    expect(formatRelativeTime(30_000)).toBe('just now');
+    expect(formatRelativeTime(59_999)).toBe('just now');
+  });
+
+  it('returns minutes', () => {
+    expect(formatRelativeTime(60_000)).toBe('1m ago');
+    expect(formatRelativeTime(45 * 60_000)).toBe('45m ago');
+  });
+
+  it('returns hours', () => {
+    expect(formatRelativeTime(3600_000)).toBe('1h ago');
+    expect(formatRelativeTime(5 * 3600_000)).toBe('5h ago');
+  });
+
+  it('returns days', () => {
+    expect(formatRelativeTime(86_400_000)).toBe('1d ago');
+    expect(formatRelativeTime(7 * 86_400_000)).toBe('7d ago');
+  });
+
+  it('returns weeks for >= 30 days', () => {
+    expect(formatRelativeTime(30 * 86_400_000)).toBe('4w ago');
+    expect(formatRelativeTime(60 * 86_400_000)).toBe('8w ago');
   });
 });

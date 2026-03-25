@@ -498,6 +498,8 @@ const discordActionsForge = cfg.discordActionsForge;
 const discordActionsPlan = cfg.discordActionsPlan;
 const discordActionsMemory = cfg.discordActionsMemory;
 const messageHistoryBudget = cfg.messageHistoryBudget;
+const messageHistoryFetchLimit = cfg.messageHistoryFetchLimit;
+const messageHistoryMaxAgeMs = cfg.messageHistoryMaxAgeMs;
 const summaryEnabled = cfg.summaryEnabled;
 let summaryModel = cfg.summaryModel;
 const summaryMaxChars = cfg.summaryMaxChars;
@@ -1451,6 +1453,8 @@ const botParams = {
   configCtx: undefined as import('./discord/actions-config.js').ConfigContext | undefined,
   deferOpts: undefined as ConfigureDeferredSchedulerOpts | undefined,
   messageHistoryBudget,
+  messageHistoryFetchLimit,
+  messageHistoryMaxAgeMs,
   summaryEnabled,
   summaryModel,
   summaryMaxChars,

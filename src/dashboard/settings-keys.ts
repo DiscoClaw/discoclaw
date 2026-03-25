@@ -62,6 +62,8 @@ export const SETTING_DEFINITIONS: readonly SettingDefinition[] = [
 
   // Numeric
   { key: 'DISCOCLAW_MESSAGE_HISTORY_BUDGET', category: 'Numeric', label: 'Message history budget', type: 'number', default: 3000 },
+  { key: 'DISCOCLAW_MESSAGE_HISTORY_FETCH_LIMIT', category: 'Numeric', label: 'Message history fetch limit', type: 'number', default: 10 },
+  { key: 'DISCOCLAW_MESSAGE_HISTORY_MAX_AGE_HOURS', category: 'Numeric', label: 'Message history max age (hours)', type: 'number', default: 48 },
   { key: 'DISCOCLAW_MULTI_TURN_MAX_PROCESSES', category: 'Numeric', label: 'Multi-turn max processes', type: 'number', default: 5 },
   { key: 'DISCOCLAW_MAX_CONCURRENT_INVOCATIONS', category: 'Numeric', label: 'Max concurrent invocations', type: 'number', default: 0 },
   { key: 'DISCOCLAW_ACTION_FOLLOWUP_DEPTH', category: 'Numeric', label: 'Action followup depth', type: 'number', default: 2 },
