@@ -21,6 +21,7 @@ import { buildSnapshotResponse, type DashboardSnapshotApiResponse } from './api/
 import type { LiveRuntimeSnapshot, LiveSnapshotProvider } from './snapshot.js';
 import type { AuthProbeReport } from './auth-probe.js';
 import { hasErrorCode, mapListenError } from './server-errors.js';
+import { ALLOWED_SETTING_KEYS, SETTING_DEFINITIONS } from './settings-keys.js';
 import type { DoctorReport, FixResult, InspectOptions } from '../health/config-doctor.js';
 import { applyFixes, inspect, KNOWN_RUNTIMES, loadDoctorContext, updateEnvKey } from '../health/config-doctor.js';
 import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModelConfig } from '../model-config.js';
@@ -604,6 +605,10 @@ function isDashboardBadRequest(message: string): boolean {
     || message === 'Secret key is required.'
     || message === 'Secret value is required.'
     || message.startsWith('Unknown secret key:')
+    || message === 'Setting key is required.'
+    || message === 'Setting value is required.'
+    || message.startsWith('Unknown setting key:')
+    || message.startsWith('Setting value must be')
   );
 }
 
@@ -888,6 +893,68 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           message = failed.map((r) => `${r.provider}: ${r.message ?? 'failed'}`).join('; ');
         }
         respondJson(res, 200, { ok: true, status, message, results: report.results } satisfies DashboardAuthCheckApiResponse);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/settings') {
+        const grouped: Record<string, Array<{ key: string; label: string; type: string; default: boolean | number; value: string | undefined }>> = {};
+        for (const def of SETTING_DEFINITIONS) {
+          if (!grouped[def.category]) grouped[def.category] = [];
+          grouped[def.category].push({
+            key: def.key,
+            label: def.label,
+            type: def.type,
+            default: def.default,
+            value: inspectOpts.env[def.key],
+          });
+        }
+        respondJson(res, 200, { ok: true, categories: grouped });
+        return;
+      }
+
+      if (pathname === '/api/settings') {
+        if (method !== 'POST') {
+          respondJson(res, 405, { ok: false, message: 'Method Not Allowed' });
+          return;
+        }
+        if (!hasSafeDashboardOrigin(req, trustedHosts)) {
+          respondJson(res, 403, { ok: false, message: CROSS_ORIGIN_MUTATION_ERROR });
+          return;
+        }
+        const body = await readJsonBody(req);
+        const key = typeof body.key === 'string' ? body.key.trim() : '';
+        const value = typeof body.value === 'string' ? body.value.trim() : '';
+        if (!key) throw new Error('Setting key is required.');
+        if (!ALLOWED_SETTING_KEYS.has(key)) throw new Error(`Unknown setting key: ${key}`);
+        if (value === '') throw new Error('Setting value is required.');
+
+        const def = SETTING_DEFINITIONS.find((d) => d.key === key);
+        if (def?.type === 'boolean' && value !== 'true' && value !== 'false' && value !== '1' && value !== '0') {
+          throw new Error(`Setting value must be "true"/"false" or "1"/"0" for ${key}.`);
+        }
+        if (def?.type === 'number') {
+          const n = Number(value);
+          if (!Number.isFinite(n) || n < 0) {
+            throw new Error(`Setting value must be a non-negative number for ${key}.`);
+          }
+        }
+
+        const ctx = await deps.loadDoctorContext(inspectOpts);
+        await deps.updateEnvKey(ctx.configPaths.env, key, value);
+        pendingRestart = true;
+
+        const grouped: Record<string, Array<{ key: string; label: string; type: string; default: boolean | number; value: string | undefined }>> = {};
+        for (const d of SETTING_DEFINITIONS) {
+          if (!grouped[d.category]) grouped[d.category] = [];
+          grouped[d.category].push({
+            key: d.key,
+            label: d.label,
+            type: d.type,
+            default: d.default,
+            value: d.key === key ? value : inspectOpts.env[d.key],
+          });
+        }
+        respondJson(res, 200, { ok: true, message: `Updated ${key}. Restart the service to apply.`, categories: grouped });
         return;
       }
 

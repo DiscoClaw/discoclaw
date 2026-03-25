@@ -535,6 +535,70 @@ export function renderDashboardPage(): string {
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     }
 
+    .settings-categories {
+      display: grid;
+      gap: 14px;
+    }
+
+    .settings-category-title {
+      color: var(--text-secondary);
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 2px;
+    }
+
+    .settings-rows {
+      display: grid;
+      gap: 0;
+    }
+
+    .setting-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 10px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .setting-row:last-child {
+      border-bottom: none;
+    }
+
+    .setting-label {
+      flex: 1;
+      font-family: var(--sans);
+      font-size: 13px;
+      color: var(--text);
+      min-width: 0;
+    }
+
+    .setting-key {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-secondary);
+      display: block;
+    }
+
+    .setting-row input[type="checkbox"] {
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+      accent-color: var(--accent);
+      min-height: auto;
+      padding: 0;
+    }
+
+    .setting-row input[type="number"] {
+      width: 90px;
+      flex-shrink: 0;
+      text-align: right;
+      padding: 4px 8px;
+      min-height: 28px;
+    }
+
     .empty {
       color: var(--text-secondary);
       padding: 4px 0;
@@ -763,6 +827,21 @@ export function renderDashboardPage(): string {
       <section class="card span-12">
         <div class="card-header">
           <div>
+            <h2>Settings</h2>
+          </div>
+        </div>
+        <details>
+          <summary>Open Settings</summary>
+          <div class="details-body">
+            <div id="settings-container" class="settings-categories"></div>
+            <div id="settings-status" class="status"></div>
+          </div>
+        </details>
+      </section>
+
+      <section class="card span-12">
+        <div class="card-header">
+          <div>
             <h2>Advanced</h2>
           </div>
         </div>
@@ -874,6 +953,8 @@ export function renderDashboardPage(): string {
     const secretPanel = document.getElementById('secret-panel');
     const secretKeySelect = document.getElementById('secret-key-select');
     const secretValueInput = document.getElementById('secret-value-input');
+    const settingsContainer = document.getElementById('settings-container');
+    const settingsStatus = document.getElementById('settings-status');
     const ROLE_LABELS = {
       chat: 'Chat',
       'plan-run': 'Plan Run',
@@ -1350,6 +1431,109 @@ export function renderDashboardPage(): string {
       setStatus(doctorSummary, summary, tone);
     }
 
+    function renderSettings(data) {
+      clearNode(settingsContainer);
+      if (!data || !data.categories) {
+        settingsContainer.textContent = 'No settings data.';
+        return;
+      }
+      var categories = data.categories;
+      Object.keys(categories).forEach(function (catName) {
+        var catTitle = document.createElement('div');
+        catTitle.className = 'settings-category-title';
+        catTitle.textContent = catName;
+        settingsContainer.append(catTitle);
+
+        var rows = document.createElement('div');
+        rows.className = 'settings-rows';
+
+        categories[catName].forEach(function (setting) {
+          var row = document.createElement('div');
+          row.className = 'setting-row';
+
+          var label = document.createElement('div');
+          label.className = 'setting-label';
+          label.textContent = setting.label;
+          var keySpan = document.createElement('span');
+          keySpan.className = 'setting-key';
+          keySpan.textContent = setting.key;
+          label.append(keySpan);
+
+          row.append(label);
+
+          if (setting.type === 'boolean') {
+            var cb = document.createElement('input');
+            cb.type = 'checkbox';
+            cb.dataset.settingKey = setting.key;
+            var raw = setting.value;
+            if (raw === undefined || raw === null || raw === '') {
+              cb.checked = !!setting.default;
+            } else {
+              cb.checked = raw === 'true' || raw === '1';
+            }
+            row.append(cb);
+          } else {
+            var num = document.createElement('input');
+            num.type = 'number';
+            num.min = '0';
+            num.dataset.settingKey = setting.key;
+            var rawVal = setting.value;
+            if (rawVal === undefined || rawVal === null || rawVal === '') {
+              num.value = String(setting.default);
+            } else {
+              num.value = rawVal;
+            }
+            row.append(num);
+          }
+
+          rows.append(row);
+        });
+
+        settingsContainer.append(rows);
+      });
+    }
+
+    async function postSetting(key, value) {
+      try {
+        var response = await fetchJson('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: key, value: value })
+        });
+        renderSettings(response);
+        setStatus(settingsStatus, response.message, 'ok');
+      } catch (error) {
+        setStatus(settingsStatus, String(error), 'error');
+      }
+    }
+
+    settingsContainer.addEventListener('change', function (event) {
+      var target = event.target;
+      if (target.tagName !== 'INPUT') return;
+      var key = target.dataset.settingKey;
+      if (!key) return;
+      if (target.type === 'checkbox') {
+        postSetting(key, target.checked ? 'true' : 'false');
+      }
+    });
+
+    settingsContainer.addEventListener('blur', function (event) {
+      var target = event.target;
+      if (target.tagName !== 'INPUT' || target.type !== 'number') return;
+      var key = target.dataset.settingKey;
+      if (!key) return;
+      postSetting(key, target.value);
+    }, true);
+
+    async function loadSettings() {
+      try {
+        var response = await fetchJson('/api/settings');
+        renderSettings(response);
+      } catch (error) {
+        setStatus(settingsStatus, String(error), 'error');
+      }
+    }
+
     async function refreshSnapshot(showMessage) {
       const response = await fetchJson('/api/snapshot');
       renderSnapshot(response.snapshot);
@@ -1578,7 +1762,7 @@ export function renderDashboardPage(): string {
       syncSecondaryModelOptions(roleSelect.value, '');
     });
 
-    Promise.all([refreshSnapshot(false), refreshDoctor(false)]).then(function () {
+    Promise.all([refreshSnapshot(false), refreshDoctor(false), loadSettings()]).then(function () {
       setStatus(heroStatus, 'Dashboard ready.', 'ok');
       if (lastSnapshot) {
         populateSecondaryRoleForm('', '');
