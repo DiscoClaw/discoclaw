@@ -1,8 +1,7 @@
 # TOOLS.md - Local Tools & Environment
 
-> This file is the canonical tracked tools instruction source used by DiscoClaw.
-> It is injected at runtime after `templates/instructions/SYSTEM_DEFAULTS.md`.
-> If `workspace/TOOLS.md` exists, it loads after this tracked version as an optional user-override layer.
+> This is the canonical tracked tools instruction source, injected at runtime after `templates/instructions/SYSTEM_DEFAULTS.md`.
+> User overrides: `workspace/TOOLS.md`.
 
 ## Runtime Instruction Precedence
 
@@ -134,32 +133,17 @@ If the user separately asks for a restart, only then execute `systemctl --user r
 
 ## Webhook Server
 
-Inbound webhook server — lets external services (GitHub, monitoring, etc.) trigger AI-powered responses in Discord channels via `POST /webhook/<source>` with HMAC-SHA256 verification.
-Enable with `DISCOCLAW_WEBHOOK_ENABLED=1`, `DISCOCLAW_WEBHOOK_PORT=9400`, and `DISCOCLAW_WEBHOOK_CONFIG=<path-to-webhooks.json>`.
+Inbound webhook server — external services trigger AI responses in Discord via `POST /webhook/<source>` (HMAC-SHA256 verified).
 Dispatches through the same cron execution pipeline as automations; webhook jobs run without Discord action permissions or tool access.
-See `docs/webhook-exposure.md` for full config format, security details, and external exposure setup (Tailscale Funnel, ngrok, Caddy).
+See `docs/webhook-exposure.md` for config and setup.
 
 ## Plan-Audit-Implement Workflow
 
-A structured dev workflow for producing audited plans before writing code. Use this for any non-trivial change — features, bug fixes, refactors. Triggered by **"plan this"**, **"let's plan"**, or the `!plan` / `!forge` Discord commands.
-
-**Pipeline stages:** DRAFT → REVIEW → REVISE (loop) → APPROVED → IMPLEMENTING → AUDITING → DONE
-
-Plans are stored in `workspace/plans/plan-NNN-slug.md`. Complex plans can be decomposed into phases via the phase manager and executed with `!forge`.
-
-**Canonical reference:** See `docs/plan-and-forge.md` for full command syntax, the forge orchestration loop, phase manager details, configuration options, and end-to-end workflows.
+Structured dev workflow for audited plans before writing code. Triggered by "plan this", "let's plan", `!plan`, or `!forge`. Stages: DRAFT → REVIEW → REVISE → APPROVED → IMPLEMENTING → AUDITING → DONE. Plans stored in `workspace/plans/plan-NNN-slug.md`. See `docs/plan-and-forge.md`.
 
 ## Task Management
 
-Discoclaw has a built-in task tracker backed by Discord forum threads. Use `taskCreate` for tracking work items — not GitHub issues and not manual thread creation.
-
-**When to create a task:**
-- TODOs or action items that come up in conversation
-- Follow-up work the user mentions but isn't ready to start
-- Bug reports, feature requests, or things to revisit later
-- Any work item the user wants tracked
-
-After creating a task, always post a link to its Discord thread so the user can jump straight to it.
+Built-in task tracker backed by Discord forum threads. Use `taskCreate` for work items (TODOs, follow-ups, bugs, feature requests). Always post a link to the task's Discord thread after creating one.
 
 ## Discord Action Types
 

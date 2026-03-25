@@ -56,7 +56,7 @@ describe('buildPromptSafeTrackedToolsContent', () => {
     const trackedToolsContent = await fs.readFile(resolveTrackedToolsPath(), 'utf-8');
     const sanitized = buildPromptSafeTrackedToolsContent(trackedToolsContent);
 
-    expect(sanitized).toContain('## Runtime Instruction Precedence');
+    expect(sanitized).not.toContain('## Runtime Instruction Precedence');
     expect(sanitized).not.toContain('## Browser Automation (agent-browser)');
     expect(sanitized).not.toContain('## Service Operations (discoclaw)');
     expect(sanitized).toContain('## Webhook Server');

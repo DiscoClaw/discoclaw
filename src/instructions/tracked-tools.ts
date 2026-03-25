@@ -34,6 +34,7 @@ export type TrackedToolsRuntimeContext = {
 const DROPPED_TOP_LEVEL_SECTIONS = new Set([
   'Browser Automation (agent-browser)',
   'Service Operations (discoclaw)',
+  'Runtime Instruction Precedence',
 ]);
 
 const WEBHOOK_TOOL_ACCESS_SENTENCE = 'webhook jobs run without Discord action permissions or tool access.';
