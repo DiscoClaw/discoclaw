@@ -270,8 +270,8 @@ describe('detectStaleRuntimeAndModelOverrides', () => {
       'stale-runtime-override:fastRuntime',
       'stale-runtime-override:voiceRuntime',
     ]);
-    expect(findings[0]?.message).toContain('Supported names: claude, codex, gemini-api, gemini-cli, openai, openrouter');
-    expect(findings[1]?.message).toContain('Supported names: claude, codex, gemini-api, gemini-cli, openai, openrouter, anthropic');
+    expect(findings[0]?.message).toContain('Supported names: claude-cli, codex-cli, gemini-api, openai, openrouter');
+    expect(findings[1]?.message).toContain('Supported names: claude-cli, codex-cli, gemini-api, openai, openrouter, claude-api');
   });
 });
 
@@ -293,7 +293,7 @@ describe('detectUnsupportedRuntimePlacements', () => {
       'unsupported-runtime-placement:PRIMARY_RUNTIME',
       'unsupported-runtime-placement:runtime-overrides.fastRuntime',
     ]);
-    expect(findings.every((finding) => finding.message.includes('voice-only runtime "anthropic"'))).toBe(true);
+    expect(findings.every((finding) => finding.message.includes('voice-only runtime "claude-api"'))).toBe(true);
   });
 });
 
@@ -328,12 +328,10 @@ describe('detectMissingSecrets', () => {
     expect(findings.every((finding) => finding.severity === 'error')).toBe(true);
   });
 
-  it('maps gemini-api to GEMINI_API_KEY, accepts gemini-cli without a secret, and canonicalizes the legacy gemini alias', async () => {
+  it('maps gemini-api to GEMINI_API_KEY when key is missing', async () => {
     const cwd = await makeTempInstall('doctor-missing-secrets-gemini');
     await writeEnv(cwd, [
       'PRIMARY_RUNTIME=gemini-api',
-      'DISCOCLAW_FAST_RUNTIME=gemini',
-      'FORGE_DRAFTER_RUNTIME=gemini-cli',
     ]);
 
     const ctx = await loadDoctorContext({ cwd });
@@ -341,11 +339,8 @@ describe('detectMissingSecrets', () => {
 
     expect(findings.map((finding) => finding.id)).toEqual([
       'missing-secret:PRIMARY_RUNTIME:GEMINI_API_KEY',
-      'missing-secret:DISCOCLAW_FAST_RUNTIME:GEMINI_API_KEY',
     ]);
-    expect(findings.some((finding) => finding.message.includes('gemini-cli'))).toBe(false);
     expect(findings[0]?.message).toContain('PRIMARY_RUNTIME selects gemini-api');
-    expect(findings[1]?.message).toContain('DISCOCLAW_FAST_RUNTIME selects gemini-api');
   });
 });
 
@@ -358,8 +353,8 @@ describe('detectInvalidPersistedModelAssignments', () => {
     ]);
     await writeJson(path.join(cwd, 'data', 'models.json'), {
       chat: 'gemini-api',
-      voice: 'gemini',
-      fast: 'gemini-cli',
+      voice: 'claude-api',
+      fast: 'codex-cli',
       summary: 'anthropic',
     });
 

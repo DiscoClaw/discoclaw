@@ -27,7 +27,7 @@ describe('parseConfig', () => {
     expect(config.allowUserIds.has('123')).toBe(true);
     expect(config.allowBotIds).toEqual(new Set());
     expect(config.botMessageMemoryWriteEnabled).toBe(false);
-    expect(config.primaryRuntime).toBe('claude');
+    expect(config.primaryRuntime).toBe('claude-cli');
     expect(config.fastRuntime).toBeUndefined();
     expect(config.runtimeModel).toBe('capable');
     expect(config.planRunModel).toBe('capable');
@@ -129,12 +129,12 @@ describe('parseConfig', () => {
 
   it('parses PRIMARY_RUNTIME and normalizes claude_code alias', () => {
     const { config } = parseConfig(env({ PRIMARY_RUNTIME: 'claude_code' }));
-    expect(config.primaryRuntime).toBe('claude');
+    expect(config.primaryRuntime).toBe('claude-cli');
   });
 
   it('parses DISCOCLAW_FAST_RUNTIME and normalizes claude_code alias', () => {
     const { config } = parseConfig(env({ DISCOCLAW_FAST_RUNTIME: 'claude_code' }));
-    expect(config.fastRuntime).toBe('claude');
+    expect(config.fastRuntime).toBe('claude-cli');
   });
 
   it('parses PRIMARY_RUNTIME=gemini-api explicitly', () => {
@@ -142,27 +142,7 @@ describe('parseConfig', () => {
     expect(config.primaryRuntime).toBe('gemini-api');
   });
 
-  it('parses DISCOCLAW_FAST_RUNTIME=gemini-cli explicitly', () => {
-    const { config } = parseConfig(env({ DISCOCLAW_FAST_RUNTIME: 'gemini-cli' }));
-    expect(config.fastRuntime).toBe('gemini-cli');
-  });
-
-  it('does not warn when PRIMARY_RUNTIME=gemini-cli without GEMINI_API_KEY', () => {
-    const { warnings } = parseConfig(env({ PRIMARY_RUNTIME: 'gemini-cli', GEMINI_API_KEY: undefined }));
-    expect(warnings.some((w) => w.includes('PRIMARY_RUNTIME=gemini'))).toBe(false);
-  });
-
-  it('normalizes PRIMARY_RUNTIME=gemini to the legacy gemini-api alias', () => {
-    const { config } = parseConfig(env({ PRIMARY_RUNTIME: 'gemini', GEMINI_API_KEY: 'gemini-key' }));
-    expect(config.primaryRuntime).toBe('gemini-api');
-  });
-
-  it('normalizes DISCOCLAW_FAST_RUNTIME=gemini to the legacy gemini-api alias', () => {
-    const { config } = parseConfig(env({ DISCOCLAW_FAST_RUNTIME: 'gemini', GEMINI_API_KEY: 'gemini-key' }));
-    expect(config.fastRuntime).toBe('gemini-api');
-  });
-
-  it('throws when PRIMARY_RUNTIME=anthropic because anthropic is not supported at startup', () => {
+  it('throws when PRIMARY_RUNTIME=anthropic because claude-api is not supported at startup', () => {
     expect(() => parseConfig(env({ PRIMARY_RUNTIME: 'anthropic', ANTHROPIC_API_KEY: 'anthropic-key' })))
       .toThrow(/PRIMARY_RUNTIME does not support runtime "anthropic"/);
   });
@@ -543,19 +523,9 @@ describe('parseConfig', () => {
     expect(config.forgeDrafterRuntime).toBe('openai');
   });
 
-  it('normalizes FORGE_DRAFTER_RUNTIME claude_code to claude', () => {
+  it('normalizes FORGE_DRAFTER_RUNTIME claude_code to claude-cli', () => {
     const { config } = parseConfig(env({ FORGE_DRAFTER_RUNTIME: 'claude_code' }));
-    expect(config.forgeDrafterRuntime).toBe('claude');
-  });
-
-  it('parses FORGE_AUDITOR_RUNTIME=gemini-cli explicitly', () => {
-    const { config } = parseConfig(env({ FORGE_AUDITOR_RUNTIME: 'gemini-cli' }));
-    expect(config.forgeAuditorRuntime).toBe('gemini-cli');
-  });
-
-  it('normalizes FORGE_DRAFTER_RUNTIME=gemini to the legacy gemini-api alias', () => {
-    const { config } = parseConfig(env({ FORGE_DRAFTER_RUNTIME: 'gemini', GEMINI_API_KEY: 'gemini-key' }));
-    expect(config.forgeDrafterRuntime).toBe('gemini-api');
+    expect(config.forgeDrafterRuntime).toBe('claude-cli');
   });
 
   it('throws when FORGE_DRAFTER_RUNTIME=anthropic because anthropic is not supported at startup', () => {
@@ -871,17 +841,7 @@ describe('parseConfig', () => {
     expect(config.reactionRemoveHandlerEnabled).toBe(true);
   });
 
-  // --- Gemini CLI adapter ---
-  it('defaults geminiBin to "gemini"', () => {
-    const { config } = parseConfig(env());
-    expect(config.geminiBin).toBe('gemini');
-  });
-
-  it('parses GEMINI_BIN when set', () => {
-    const { config } = parseConfig(env({ GEMINI_BIN: '/usr/local/bin/gemini' }));
-    expect(config.geminiBin).toBe('/usr/local/bin/gemini');
-  });
-
+  // --- Gemini adapter ---
   it('defaults geminiModel to "gemini-2.5-pro"', () => {
     const { config } = parseConfig(env());
     expect(config.geminiModel).toBe('gemini-2.5-pro');

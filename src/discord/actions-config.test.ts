@@ -221,7 +221,7 @@ describe('modelShow', () => {
       workspaceCwd: '/tmp/workspace',
       runtime: codexRuntime,
       runtimeRegistry: makeRegistry(),
-      runtimeName: 'codex',
+      runtimeName: 'codex-cli',
     };
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
@@ -241,7 +241,7 @@ describe('modelShow', () => {
       workspaceCwd: '/tmp/workspace',
       runtime: codexRuntime,
       runtimeRegistry: makeRegistry(),
-      runtimeName: 'codex',
+      runtimeName: 'codex-cli',
     };
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
@@ -561,65 +561,17 @@ describe('modelSet runtime swap', () => {
     expect(show.summary).toContain('**runtime**: `gemini-api`');
   });
 
-  it('maps the legacy gemini alias to gemini-api for runtime switching', () => {
-    const ctx = makeCtx();
-    ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime]);
-    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'gemini' }, ctx);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(ctx.botParams.runtime).toBe(geminiRuntime);
-    expect(ctx.runtime).toBe(geminiRuntime);
-    expect(ctx.runtimeName).toBe('gemini-api');
-    expect(result.summary).toContain('runtime → gemini-api');
-
-    const show = executeConfigAction({ type: 'modelShow' }, ctx);
-    expect(show.ok).toBe(true);
-    if (!show.ok) return;
-    expect(show.summary).toContain('**runtime**: `gemini-api`');
-    expect(show.summary).not.toContain('**runtime**: `gemini`');
-  });
-
-  it('errors instead of storing gemini alias as a plain chat model when the runtime is unavailable', () => {
-    const ctx = makeCtx();
-    ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
-    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'gemini' }, ctx);
-    expect(result).toEqual({
-      ok: false,
-      error: 'Runtime "gemini-api" is not configured in the registry',
-    });
-    expect(ctx.botParams.runtime).toBe(stubRuntime);
-    expect(ctx.runtime).toBe(stubRuntime);
-    expect(ctx.botParams.runtimeModel).toBe('capable');
-  });
-
   it('rejects voice-only runtimes for chat with an explicit error', () => {
     const ctx = makeCtx();
-    ctx.runtimeRegistry = makeRegistry(['anthropic', anthropicRuntime]);
+    ctx.runtimeRegistry = makeRegistry(['claude-api', anthropicRuntime]);
     const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'anthropic' }, ctx);
     expect(result).toEqual({
       ok: false,
-      error: 'Runtime "anthropic" is voice-only; use it with the voice role',
+      error: 'Runtime "claude-api" is voice-only; use it with the voice role',
     });
     expect(ctx.botParams.runtime).toBe(stubRuntime);
     expect(ctx.runtime).toBe(stubRuntime);
     expect(ctx.botParams.runtimeModel).toBe('capable');
-  });
-
-  it('keeps gemini-cli as an explicit runtime selection', () => {
-    const ctx = makeCtx();
-    ctx.runtimeRegistry = makeRegistry(['gemini-cli', geminiCliRuntime]);
-    const result = executeConfigAction({ type: 'modelSet', role: 'chat', model: 'gemini-cli' }, ctx);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(ctx.botParams.runtime).toBe(geminiCliRuntime);
-    expect(ctx.runtime).toBe(geminiCliRuntime);
-    expect(ctx.runtimeName).toBe('gemini-cli');
-    expect(result.summary).toContain('runtime → gemini-cli');
-
-    const show = executeConfigAction({ type: 'modelShow' }, ctx);
-    expect(show.ok).toBe(true);
-    if (!show.ok) return;
-    expect(show.summary).toContain('**runtime**: `gemini-cli`');
   });
 
   it('does not swap runtime for a plain model name like opus', () => {
@@ -783,45 +735,45 @@ describe('modelShow runtime line', () => {
 // ---------------------------------------------------------------------------
 
 describe('modelSet voice runtime swap', () => {
-  it('accepts the voice-only anthropic runtime when it is registered', () => {
+  it('accepts the voice-only claude-api runtime when it is registered', () => {
     let persistVoiceRuntimeName: string | undefined;
     const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
-    ctx.runtimeRegistry = makeRegistry(['anthropic', anthropicRuntime]);
+    ctx.runtimeRegistry = makeRegistry(['claude-api', anthropicRuntime]);
     ctx.persistVoiceRuntime = (name) => { persistVoiceRuntimeName = name; };
 
-    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'anthropic' }, ctx);
+    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'claude-api' }, ctx);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(ctx.botParams.voiceModelCtx!.runtime).toBe(anthropicRuntime);
-    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('anthropic');
+    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('claude-api');
     expect(ctx.botParams.voiceModelCtx!.model).toBe('claude-sonnet-4-6');
-    expect(ctx.voiceRuntimeName).toBe('anthropic');
-    expect(persistVoiceRuntimeName).toBe('anthropic');
-    expect(result.summary).toContain('voice runtime → anthropic');
+    expect(ctx.voiceRuntimeName).toBe('claude-api');
+    expect(persistVoiceRuntimeName).toBe('claude-api');
+    expect(result.summary).toContain('voice runtime → claude-api');
   });
 
-  it('canonicalizes the legacy gemini alias for voice runtime swaps', () => {
+  it('canonicalizes the anthropic alias to claude-api for voice runtime swaps', () => {
     const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
-    ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime]);
-    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'gemini' }, ctx);
+    ctx.runtimeRegistry = makeRegistry(['claude-api', anthropicRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'anthropic' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(ctx.botParams.voiceModelCtx!.runtime).toBe(geminiRuntime);
-    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('gemini-api');
-    expect(ctx.botParams.voiceModelCtx!.model).toBe('gemini-2.5-flash');
-    expect(ctx.voiceRuntimeName).toBe('gemini-api');
-    expect(result.summary).toContain('voice runtime → gemini-api');
+    expect(ctx.botParams.voiceModelCtx!.runtime).toBe(anthropicRuntime);
+    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('claude-api');
+    expect(ctx.botParams.voiceModelCtx!.model).toBe('claude-sonnet-4-6');
+    expect(ctx.voiceRuntimeName).toBe('claude-api');
+    expect(result.summary).toContain('voice runtime → claude-api');
     expect(result.summary).toContain('adapter default');
   });
 
-  it('errors instead of storing gemini alias as a plain voice model when the runtime is unavailable', () => {
+  it('errors when claude-api runtime is unavailable', () => {
     const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
     ctx.runtimeRegistry = makeRegistry(['openrouter', openrouterRuntime]);
-    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'gemini' }, ctx);
+    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'claude-api' }, ctx);
     expect(result).toEqual({
       ok: false,
-      error: 'Runtime "gemini-api" is not configured in the registry',
+      error: 'Runtime "claude-api" is not configured in the registry',
     });
     expect(ctx.botParams.voiceModelCtx!.runtime).toBeUndefined();
     expect(ctx.botParams.voiceModelCtx!.runtimeName).toBeUndefined();
@@ -830,7 +782,7 @@ describe('modelSet voice runtime swap', () => {
 
   it('does not swap runtime for a plain model name', () => {
     const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
-    ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime]);
+    ctx.runtimeRegistry = makeRegistry(['gemini-api', geminiRuntime]);
     const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'sonnet' }, ctx);
     expect(result.ok).toBe(true);
     expect(ctx.botParams.voiceModelCtx!.runtime).toBeUndefined();
@@ -846,24 +798,24 @@ describe('modelSet voice runtime swap', () => {
         runtimeName: 'gemini-api',
       },
     });
-    ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime], ['claude', stubRuntime]);
+    ctx.runtimeRegistry = makeRegistry(['gemini-api', geminiRuntime], ['claude-cli', stubRuntime]);
     const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'sonnet' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(ctx.botParams.voiceModelCtx!.runtime).toBe(stubRuntime);
-    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('claude');
+    expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('claude-cli');
     expect(ctx.botParams.voiceModelCtx!.model).toBe('sonnet');
-    expect(result.summary).toContain('voice runtime → claude (auto-switched)');
+    expect(result.summary).toContain('voice runtime → claude-cli (auto-switched)');
   });
 
   it('calls persistVoiceRuntime (not persistOverride) for runtime swaps', () => {
     let persistOverrideCalled = false;
     let persistVoiceRuntimeName: string | undefined;
     const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
-    ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime]);
+    ctx.runtimeRegistry = makeRegistry(['gemini-api', geminiRuntime]);
     ctx.persistOverride = () => { persistOverrideCalled = true; };
     ctx.persistVoiceRuntime = (name) => { persistVoiceRuntimeName = name; };
-    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'gemini' }, ctx);
+    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'gemini-api' }, ctx);
     expect(result.ok).toBe(true);
     expect(persistOverrideCalled).toBe(false);
     expect(persistVoiceRuntimeName).toBe('gemini-api');
@@ -883,8 +835,8 @@ describe('modelSet voice runtime swap', () => {
 
   it('case-insensitive matching keeps the canonical gemini-api voice runtime name', () => {
     const ctx = makeCtx({ voiceModelCtx: { model: 'fast' } });
-    ctx.runtimeRegistry = makeRegistry(['gemini', geminiRuntime]);
-    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'Gemini' }, ctx);
+    ctx.runtimeRegistry = makeRegistry(['gemini-api', geminiRuntime]);
+    const result = executeConfigAction({ type: 'modelSet', role: 'voice', model: 'Gemini-API' }, ctx);
     expect(result.ok).toBe(true);
     expect(ctx.botParams.voiceModelCtx!.runtime).toBe(geminiRuntime);
     expect(ctx.botParams.voiceModelCtx!.runtimeName).toBe('gemini-api');
@@ -971,16 +923,16 @@ describe('modelShow voice runtime display', () => {
     expect(voiceLine).toContain('gemini-2.5-flash');
   });
 
-  it('canonicalizes a legacy gemini voice runtime name in modelShow output', () => {
-    const ctx = makeCtx({ voiceModelCtx: { model: 'gemini-2.5-flash', runtime: geminiRuntime, runtimeName: 'gemini' } });
-    ctx.voiceRuntimeName = 'gemini';
+  it('canonicalizes the anthropic alias to claude-api in modelShow output', () => {
+    const ctx = makeCtx({ voiceModelCtx: { model: 'claude-sonnet-4-6', runtime: anthropicRuntime, runtimeName: 'anthropic' } });
+    ctx.voiceRuntimeName = 'anthropic';
     const result = executeConfigAction({ type: 'modelShow' }, ctx);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const lines = result.summary.split('\n');
     const voiceLine = lines.find(l => l.includes('**voice**'));
-    expect(voiceLine).toContain('[runtime: gemini-api]');
-    expect(voiceLine).not.toContain('[runtime: gemini]');
+    expect(voiceLine).toContain('[runtime: claude-api]');
+    expect(voiceLine).not.toContain('[runtime: anthropic]');
   });
 
   it('does not annotate voice runtime when it matches chat', () => {
@@ -1068,8 +1020,7 @@ describe('configActionsPromptSection', () => {
     expect(section).toContain('runtime-overrides.json');
     expect(section).toContain('Chat runtime swaps are live-only');
     expect(section).toContain('`gemini-api`');
-    expect(section).toContain('`gemini-cli`');
-    expect(section).toContain('`anthropic`');
+    expect(section).toContain('`claude-api`');
     expect(section).toContain('aliases');
     expect(section).toContain('modelReset');
     expect(section).not.toContain('Changes are **persisted** to `models.json` and survive restart.');

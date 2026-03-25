@@ -140,9 +140,9 @@ describe('loadOverrides', () => {
 
 describe('normalizeRuntimeOverrides', () => {
   it('canonicalizes accepted voice runtime aliases', () => {
-    const result = normalizeRuntimeOverrides({ voiceRuntime: 'Gemini' });
+    const result = normalizeRuntimeOverrides({ voiceRuntime: 'Anthropic' });
     expect(result).toEqual({
-      overrides: { voiceRuntime: 'gemini-api' },
+      overrides: { voiceRuntime: 'claude-api' },
       changed: true,
     });
   });
@@ -150,20 +150,20 @@ describe('normalizeRuntimeOverrides', () => {
   it('canonicalizes accepted fast runtime aliases', () => {
     const result = normalizeRuntimeOverrides({ fastRuntime: 'claude_code' });
     expect(result).toEqual({
-      overrides: { fastRuntime: 'claude' },
+      overrides: { fastRuntime: 'claude-cli' },
       changed: true,
     });
   });
 
   it('leaves invalid or already-canonical runtime values unchanged', () => {
     const result = normalizeRuntimeOverrides({
-      voiceRuntime: 'anthropic',
+      voiceRuntime: 'claude-api',
       fastRuntime: 'not-a-runtime',
       ttsVoice: 'aura-2-asteria-en',
     });
     expect(result).toEqual({
       overrides: {
-        voiceRuntime: 'anthropic',
+        voiceRuntime: 'claude-api',
         fastRuntime: 'not-a-runtime',
         ttsVoice: 'aura-2-asteria-en',
       },

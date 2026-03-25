@@ -183,7 +183,6 @@ export type DiscoclawConfig = {
 
   // Gemini adapter config
   geminiApiKey?: string;
-  geminiBin: string;
   geminiModel: string;
 
   // Codex CLI adapter config
@@ -866,7 +865,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     tasksForum = undefined;
   }
 
-  const primaryRuntime = parseRuntimeName(env, 'PRIMARY_RUNTIME', 'startup:PRIMARY_RUNTIME') ?? 'claude';
+  const primaryRuntime = parseRuntimeName(env, 'PRIMARY_RUNTIME', 'startup:PRIMARY_RUNTIME') ?? 'claude-cli';
   const fastRuntime = parseRuntimeName(env, 'DISCOCLAW_FAST_RUNTIME', 'startup:DISCOCLAW_FAST_RUNTIME');
   if (fastRuntime) {
     warnings.push(
@@ -897,16 +896,16 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     warnings.push('FORGE_AUDITOR_RUNTIME=openai but OPENAI_API_KEY is not set; auditor will fall back to the primary runtime.');
   }
   if (primaryRuntime === 'gemini-api' && !geminiApiKey) {
-    warnings.push('PRIMARY_RUNTIME=gemini-api but GEMINI_API_KEY is not set; startup will fail unless another runtime is selected. Use gemini-cli explicitly for the limited Gemini CLI runtime.');
+    warnings.push('PRIMARY_RUNTIME=gemini-api but GEMINI_API_KEY is not set; startup will fail unless another runtime is selected.');
   }
   if (fastRuntime === 'gemini-api' && !geminiApiKey) {
-    warnings.push('DISCOCLAW_FAST_RUNTIME=gemini-api but GEMINI_API_KEY is not set; fast-tier invocations will fall back to PRIMARY_RUNTIME. Use gemini-cli explicitly for the limited Gemini CLI runtime.');
+    warnings.push('DISCOCLAW_FAST_RUNTIME=gemini-api but GEMINI_API_KEY is not set; fast-tier invocations will fall back to PRIMARY_RUNTIME.');
   }
   if (forgeDrafterRuntime === 'gemini-api' && !geminiApiKey) {
-    warnings.push('FORGE_DRAFTER_RUNTIME=gemini-api but GEMINI_API_KEY is not set; drafter will fall back to the primary runtime. Use gemini-cli explicitly for the limited Gemini CLI runtime.');
+    warnings.push('FORGE_DRAFTER_RUNTIME=gemini-api but GEMINI_API_KEY is not set; drafter will fall back to the primary runtime.');
   }
   if (forgeAuditorRuntime === 'gemini-api' && !geminiApiKey) {
-    warnings.push('FORGE_AUDITOR_RUNTIME=gemini-api but GEMINI_API_KEY is not set; auditor will fall back to the primary runtime. Use gemini-cli explicitly for the limited Gemini CLI runtime.');
+    warnings.push('FORGE_AUDITOR_RUNTIME=gemini-api but GEMINI_API_KEY is not set; auditor will fall back to the primary runtime.');
   }
   if (discordActionsImagegen && !openaiApiKey && !imagegenGeminiApiKey) {
     warnings.push('DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1 but neither OPENAI_API_KEY nor IMAGEGEN_GEMINI_API_KEY is set; imagegen will fail at runtime.');
@@ -1192,7 +1191,6 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       openrouterProviderPreferences,
 
       geminiApiKey,
-      geminiBin: parseTrimmedString(env, 'GEMINI_BIN') ?? 'gemini',
       geminiModel: parseTrimmedString(env, 'GEMINI_MODEL') ?? 'gemini-2.5-pro',
 
       codexBin: parseTrimmedString(env, 'CODEX_BIN') ?? 'codex',
