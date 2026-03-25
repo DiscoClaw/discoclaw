@@ -54,11 +54,11 @@ import { parseCapsuleBlock } from './capsule.js';
 import type { ContinuationCapsule } from './capsule.js';
 import { parseMemoryCommand, handleMemoryCommand } from './memory-commands.js';
 import { parseSecretCommand, handleSecretCommand } from './secret-commands.js';
-import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, closePlanIfComplete, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId } from './plan-commands.js';
+import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, closePlanIfComplete, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId, PLAN_DISABLED_NUDGE } from './plan-commands.js';
 import { handlePlanAudit } from './audit-handler.js';
 import type { PlanAuditResult } from './audit-handler.js';
 import type { PreparePlanRunResult } from './plan-commands.js';
-import { parseForgeCommand, ForgeOrchestrator, buildPlanImplementationMessage } from './forge-commands.js';
+import { parseForgeCommand, ForgeOrchestrator, buildPlanImplementationMessage, FORGE_DISABLED_NUDGE } from './forge-commands.js';
 import type { ForgeOrchestratorOpts, ForgeResult } from './forge-commands.js';
 import { runNextPhase, resolveProjectCwd, readPhasesFile, buildPostRunSummary, checkStaleness } from './plan-manager.js';
 import type { PlanRunEvent, PlanPhases } from './plan-manager.js';
@@ -1008,8 +1008,8 @@ function buildActionSelectionUserText(msgs: CoordinatorMessage[]): string {
 function isQueueLevelCommand(m: CoordinatorMessage, params: Omit<BotParams, 'token'>): boolean {
   const content = String(m.content ?? '');
   if (params.memoryCommandsEnabled && parseMemoryCommand(content)) return true;
-  if (params.planCommandsEnabled && parsePlanCommand(content)) return true;
-  if (params.forgeCommandsEnabled && parseForgeCommand(content)) return true;
+  if (parsePlanCommand(content)) return true;
+  if (parseForgeCommand(content)) return true;
   if (parseConfirmToken(content)) return true;
   if (parseSecretCommand(content)) return true;
   return false;
@@ -2022,6 +2022,18 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
+          // Nudge when !plan is used but plan commands are disabled.
+          if (!isBotMessage && !params.planCommandsEnabled) {
+            const planCmd = parsePlanCommand(String(msg.content ?? ''));
+            if (planCmd) {
+              await msg.reply({
+                content: PLAN_DISABLED_NUDGE,
+                allowedMentions: NO_MENTIONS,
+              });
+              return;
+            }
+          }
+
           // Handle !plan commands before session creation.
           if (!isBotMessage && params.planCommandsEnabled) {
             const planCmd = parsePlanCommand(String(msg.content ?? ''));
@@ -2681,6 +2693,18 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
               const response = await handlePlanCommand(effectivePlanCmd, planOpts);
               await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
+              return;
+            }
+          }
+
+          // Nudge when !forge is used but forge commands are disabled.
+          if (!isBotMessage && !params.forgeCommandsEnabled) {
+            const forgeCmd = parseForgeCommand(String(msg.content ?? ''));
+            if (forgeCmd) {
+              await msg.reply({
+                content: FORGE_DISABLED_NUDGE,
+                allowedMentions: NO_MENTIONS,
+              });
               return;
             }
           }

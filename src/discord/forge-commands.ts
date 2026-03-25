@@ -151,6 +151,14 @@ function resolveForgePhaseLiveness(timeoutMs: number | undefined): {
 }
 
 // ---------------------------------------------------------------------------
+// Feature-disabled nudge
+// ---------------------------------------------------------------------------
+
+/** Friendly nudge shown when `!forge` is used but forge commands are disabled. */
+export const FORGE_DISABLED_NUDGE =
+  'Forge commands aren\'t enabled on this instance. To turn them on, add `DISCOCLAW_FORGE_COMMANDS_ENABLED=1` to your `.env` and restart. For AI-initiated forge workflows, also add `DISCOCLAW_DISCORD_ACTIONS_FORGE=1`.';
+
+// ---------------------------------------------------------------------------
 // Parsing
 // ---------------------------------------------------------------------------
 

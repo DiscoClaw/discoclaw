@@ -10,7 +10,7 @@ export function buildPlanForgeAvailabilityNote(input: PlanForgeAvailabilityInput
 
   if (!input.planCommandsEnabled && !input.planActionsEnabled) {
     notes.push(
-      'Plan workflows are disabled for this instance. When a user asks for a plan, respond in normal chat with an outline or next steps instead of invoking or suggesting the plan workflow.',
+      'Plan workflows are disabled for this instance. When a user asks for a plan, respond in normal chat with an outline or next steps instead of invoking or suggesting the plan workflow. If the user explicitly says `!plan` or asks how to enable planning, mention they can enable it by setting `DISCOCLAW_PLAN_COMMANDS_ENABLED=1` in `.env` and restarting.',
     );
   } else if (input.planCommandsEnabled && !input.planActionsEnabled) {
     notes.push(
@@ -24,7 +24,7 @@ export function buildPlanForgeAvailabilityNote(input: PlanForgeAvailabilityInput
 
   if (!input.forgeCommandsEnabled && !input.forgeActionsEnabled) {
     notes.push(
-      'Forge workflows are disabled for this instance. Do not invoke or suggest the forge workflow.',
+      'Forge workflows are disabled for this instance. Do not invoke or suggest the forge workflow. If the user explicitly says `!forge` or asks how to enable forging, mention they can enable it by setting `DISCOCLAW_FORGE_COMMANDS_ENABLED=1` in `.env` and restarting.',
     );
   } else if (input.forgeCommandsEnabled && !input.forgeActionsEnabled) {
     notes.push(

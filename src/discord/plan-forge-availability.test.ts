@@ -11,7 +11,9 @@ describe('buildPlanForgeAvailabilityNote', () => {
     });
 
     expect(note).toContain('Plan workflows are disabled for this instance.');
+    expect(note).toContain('DISCOCLAW_PLAN_COMMANDS_ENABLED=1');
     expect(note).toContain('Forge workflows are disabled for this instance.');
+    expect(note).toContain('DISCOCLAW_FORGE_COMMANDS_ENABLED=1');
   });
 
   it('distinguishes commands-only plan availability from fully disabled plan flow', () => {

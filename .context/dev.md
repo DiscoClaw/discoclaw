@@ -171,18 +171,18 @@ Two setup paths:
 ### Plan & Forge
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DISCOCLAW_PLAN_COMMANDS_ENABLED` | `1` | Enable plan commands (`!plan`, `!plan phase`, etc.) |
-| `PLAN_PHASES_ENABLED` | `1` | Enable phase-by-phase plan execution |
+| `DISCOCLAW_PLAN_COMMANDS_ENABLED` | `0` | Enable plan commands (`!plan`, `!plan phase`, etc.) |
+| `PLAN_PHASES_ENABLED` | `0` | Enable phase-by-phase plan execution |
 | `PLAN_PHASE_MAX_CONTEXT_FILES` | `5` | Max `.context/` files injected per plan phase |
 | `PLAN_PHASE_TIMEOUT_MS` | `1800000` | Per-phase timeout in milliseconds |
 | `PLAN_PHASE_AUDIT_FIX_MAX` | `3` | Max audit-fix attempts per phase before giving up |
-| `DISCOCLAW_FORGE_COMMANDS_ENABLED` | `1` | Enable forge commands (`!forge`) |
+| `DISCOCLAW_FORGE_COMMANDS_ENABLED` | `0` | Enable forge commands (`!forge`) |
 | `FORGE_MAX_AUDIT_ROUNDS` | `5` | Max audit rounds before forge accepts the draft |
 | `FORGE_DRAFTER_MODEL` | *(empty — uses `RUNTIME_MODEL`)* | Override model for the forge drafter step |
 | `FORGE_AUDITOR_MODEL` | *(empty — uses `RUNTIME_MODEL`)* | Override model for the forge auditor step |
 | `FORGE_TIMEOUT_MS` | `1800000` | Per-forge-session timeout in milliseconds |
 | `FORGE_PROGRESS_THROTTLE_MS` | `3000` | Min ms between forge progress Discord updates |
-| `FORGE_AUTO_IMPLEMENT` | `1` | Automatically implement the approved forge plan without a separate confirm step |
+| `FORGE_AUTO_IMPLEMENT` | `0` | Automatically implement the approved forge plan without a separate confirm step |
 | `FORGE_DRAFTER_RUNTIME` | *(empty — uses `PRIMARY_RUNTIME`)* | Runtime adapter for the forge drafter (e.g. `openai`, `claude`) |
 | `FORGE_AUDITOR_RUNTIME` | *(empty — uses `PRIMARY_RUNTIME`)* | Runtime adapter for the forge auditor |
 

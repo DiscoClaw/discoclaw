@@ -333,9 +333,9 @@ describe('parseConfig', () => {
     expect(config.discordActionsBotProfile).toBe(true);
   });
 
-  it('defaults discordActionsPlan to true', () => {
+  it('defaults discordActionsPlan to false', () => {
     const { config } = parseConfig(env());
-    expect(config.discordActionsPlan).toBe(true);
+    expect(config.discordActionsPlan).toBe(false);
   });
 
   it('defaults discordActionsEnabled to true', () => {
@@ -606,9 +606,9 @@ describe('parseConfig', () => {
   });
 
   // --- Forge auto-implement ---
-  it('defaults forgeAutoImplement to true', () => {
+  it('defaults forgeAutoImplement to false', () => {
     const { config } = parseConfig(env());
-    expect(config.forgeAutoImplement).toBe(true);
+    expect(config.forgeAutoImplement).toBe(false);
   });
 
   it('parses FORGE_AUTO_IMPLEMENT=0 as false', () => {

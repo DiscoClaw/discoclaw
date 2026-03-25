@@ -45,6 +45,14 @@ export type PlanFileHeader = {
 };
 
 // ---------------------------------------------------------------------------
+// Feature-disabled nudge
+// ---------------------------------------------------------------------------
+
+/** Friendly nudge shown when `!plan` is used but plan commands are disabled. */
+export const PLAN_DISABLED_NUDGE =
+  'Plan commands aren\'t enabled on this instance. To turn them on, add `DISCOCLAW_PLAN_COMMANDS_ENABLED=1` to your `.env` and restart. For AI-initiated plan workflows, also add `DISCOCLAW_DISCORD_ACTIONS_PLAN=1`.';
+
+// ---------------------------------------------------------------------------
 // Parsing
 // ---------------------------------------------------------------------------
 

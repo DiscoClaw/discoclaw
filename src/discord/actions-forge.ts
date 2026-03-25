@@ -660,6 +660,14 @@ export async function executeForgeAction(
 }
 
 // ---------------------------------------------------------------------------
+// Feature-disabled nudge (for NL action routing)
+// ---------------------------------------------------------------------------
+
+/** Friendly nudge returned when the AI attempts a forge action but forge actions are disabled. */
+export const FORGE_ACTIONS_DISABLED_NUDGE =
+  'Forge workflows aren\'t enabled on this instance. To enable AI-initiated forge actions, add `DISCOCLAW_DISCORD_ACTIONS_FORGE=1` and `DISCOCLAW_FORGE_COMMANDS_ENABLED=1` to your `.env` and restart.';
+
+// ---------------------------------------------------------------------------
 // Prompt section
 // ---------------------------------------------------------------------------
 
