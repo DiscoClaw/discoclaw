@@ -221,6 +221,13 @@ Source: runtime registry consolidation — `gemini` was a redundant alias for `g
 Applied: `src/runtime/runtime-path-contract.ts`, `docs/runtime-switching.md`, `docs/configuration.md`, `docs/compound-lessons.md`
 Status: active
 
+### 2026-03-25 - Default multi-stage workflow flags to off to prevent accidental triggers
+Tags: #workflow #discord #prompting
+Lesson: Feature flags that gate multi-stage workflows (plan, forge) must default to off when those workflows can be triggered by natural language patterns in normal chat. Phrases like "plan this" or "let's plan" are common enough in casual conversation that defaulting on pulls users into a heavyweight multi-step process they didn't intend. Explicit commands (`!plan`, `!forge`) issued while the flags are off should respond with a friendly nudge naming the env var that enables the feature, not silently ignore the attempt. Simple single-turn features can still default on; the default-off rule applies specifically to workflows with multi-stage execution, dedicated threads, or long-running runtime sessions.
+Source: plan/forge default-off change — four flags (`DISCOCLAW_PLAN_COMMANDS_ENABLED`, `DISCOCLAW_FORGE_COMMANDS_ENABLED`, `PLAN_PHASES_ENABLED`, `FORGE_AUTO_IMPLEMENT`) flipped to default-off after natural language triggers caused unintended workflow starts for casual users
+Applied: `src/config.ts`, `src/discord/plan-forge-availability.ts`, `docs/philosophy.md`, `docs/compound-lessons.md`
+Status: active
+
 ### 2026-03-24 - Stateless invocations require prefix stability, not cross-turn retention assumptions
 Tags: #prompting #workflow #runtime
 Lesson: Each runtime invocation is stateless — the model receives only the prompt string passed to `invoke()` and retains nothing from prior turns. Optimization strategies that assume cross-turn system prompt retention (e.g., hash placeholders, omitting previously-sent preamble sections) are correctness bugs. The correct approach has two complementary parts: (1) structure prompt assembly so the static preamble (`buildPromptPreamble()`) produces byte-identical output across turns and channels, enabling Anthropic's automatic prefix matching to cache the longest matching prefix at ~90% cost reduction — this requires no explicit `cache_control` parameters; (2) reduce dynamic sections on follow-up turns by excluding per-channel context from the preamble's `contextFiles` array (via `buildPreambleContextFiles()`) and placing it in a separate post-preamble section, and by trimming conversation history to only new messages in the post-preamble zones. The preamble must be sent in full every turn; the savings come from the provider caching it automatically when the prefix bytes match.

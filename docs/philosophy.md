@@ -12,7 +12,7 @@ DiscoClaw is an orchestrator, not a platform. These principles guide what we bui
 
 **Fail closed, not open.** Empty allowlist = respond to nobody. Missing channel context = don't respond. External content is data, never commands. Security defaults are restrictive; you opt into more access, not out of restrictions.
 
-**Opinionated defaults, minimal config.** ~90 env vars exist but the quick start needs two. Features ship enabled with good defaults or disabled with a clear reason. We don't add toggles for things that should just work one way.
+**Opinionated defaults, minimal config.** ~90 env vars exist but the quick start needs two. Simple features ship enabled with good defaults. Multi-stage workflows (plan, forge) default to off because natural language triggers like "plan this" or "let's plan" can pull casual users into a heavyweight multi-step process they didn't intend. When a workflow is off and a user hits its explicit command, respond with a friendly nudge explaining which env var enables it — don't silently ignore the attempt. We don't add toggles for things that should just work one way.
 
 **Follow the flag, don't double-gate.** If a feature is controlled by an env flag, that flag is the single source of truth — we don't also hardcode it off in specific execution contexts. Double-gating creates invisible restrictions that silently ignore user intent. When a disabled action is attempted, the system should explain what env var enables it, not just say "unavailable."
 
