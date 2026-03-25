@@ -1008,8 +1008,8 @@ function buildActionSelectionUserText(msgs: CoordinatorMessage[]): string {
 function isQueueLevelCommand(m: CoordinatorMessage, params: Omit<BotParams, 'token'>): boolean {
   const content = String(m.content ?? '');
   if (params.memoryCommandsEnabled && parseMemoryCommand(content)) return true;
-  if (params.planCommandsEnabled && parsePlanCommand(content)) return true;
-  if (params.forgeCommandsEnabled && parseForgeCommand(content)) return true;
+  if (parsePlanCommand(content)) return true;
+  if (parseForgeCommand(content)) return true;
   if (parseConfirmToken(content)) return true;
   if (parseSecretCommand(content)) return true;
   return false;
@@ -2022,6 +2022,18 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             }
           }
 
+          // Nudge when !plan is used but plan commands are disabled.
+          if (!isBotMessage && !params.planCommandsEnabled) {
+            const planCmd = parsePlanCommand(String(msg.content ?? ''));
+            if (planCmd) {
+              await msg.reply({
+                content: 'Plan commands are currently disabled. To enable them, set `DISCOCLAW_PLAN_COMMANDS_ENABLED=true` in your environment and restart.',
+                allowedMentions: NO_MENTIONS,
+              });
+              return;
+            }
+          }
+
           // Handle !plan commands before session creation.
           if (!isBotMessage && params.planCommandsEnabled) {
             const planCmd = parsePlanCommand(String(msg.content ?? ''));
@@ -2681,6 +2693,18 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
               }
               const response = await handlePlanCommand(effectivePlanCmd, planOpts);
               await msg.reply({ content: response, allowedMentions: NO_MENTIONS });
+              return;
+            }
+          }
+
+          // Nudge when !forge is used but forge commands are disabled.
+          if (!isBotMessage && !params.forgeCommandsEnabled) {
+            const forgeCmd = parseForgeCommand(String(msg.content ?? ''));
+            if (forgeCmd) {
+              await msg.reply({
+                content: 'Forge commands are currently disabled. To enable them, set `DISCOCLAW_FORGE_COMMANDS_ENABLED=true` in your environment and restart.',
+                allowedMentions: NO_MENTIONS,
+              });
               return;
             }
           }

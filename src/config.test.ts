@@ -606,9 +606,9 @@ describe('parseConfig', () => {
   });
 
   // --- Forge auto-implement ---
-  it('defaults forgeAutoImplement to true', () => {
+  it('defaults forgeAutoImplement to false', () => {
     const { config } = parseConfig(env());
-    expect(config.forgeAutoImplement).toBe(true);
+    expect(config.forgeAutoImplement).toBe(false);
   });
 
   it('parses FORGE_AUTO_IMPLEMENT=0 as false', () => {
