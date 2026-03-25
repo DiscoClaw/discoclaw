@@ -109,6 +109,8 @@ export type DiscoclawConfig = {
   loopMaxConcurrent: number;
 
   messageHistoryBudget: number;
+  messageHistoryFetchLimit: number;
+  messageHistoryMaxAgeMs: number;
   summaryEnabled: boolean;
   summaryModel: string;
   summaryMaxChars: number;
@@ -1120,6 +1122,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       loopMaxConcurrent,
 
       messageHistoryBudget: parseNonNegativeInt(env, 'DISCOCLAW_MESSAGE_HISTORY_BUDGET', 3000),
+      messageHistoryFetchLimit: parsePositiveInt(env, 'DISCOCLAW_MESSAGE_HISTORY_FETCH_LIMIT', 10),
+      messageHistoryMaxAgeMs: parsePositiveInt(env, 'DISCOCLAW_MESSAGE_HISTORY_MAX_AGE_HOURS', 48) * 3_600_000,
       summaryEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_ENABLED', true),
       summaryModel: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_MODEL') ?? fastModel,
       summaryMaxChars: parseNonNegativeInt(env, 'DISCOCLAW_SUMMARY_MAX_CHARS', 2000),
