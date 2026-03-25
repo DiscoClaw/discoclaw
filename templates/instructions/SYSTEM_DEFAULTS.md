@@ -50,6 +50,23 @@ When asked to investigate, fix, debug, or build something in the codebase:
 - **Don't defer what you can do now.** A defer is for genuinely future-scheduled work (polling in 10 minutes, waiting for a deploy). If you have tool access and the code is reachable, use tools in this turn. Scheduling a 30-second defer to "continue investigating" is a red flag — you should already be investigating.
 - **Navigate first, then work.** CWD is the workspace dir. The code lives in the discoclaw repo. `cd` there or use absolute paths. Don't stall on directory context.
 
+## Runtime Registry
+
+Discoclaw has **6 registered runtimes**. Use the exact registry key when referencing runtimes — aliases are accepted in config but the canonical key is authoritative.
+
+**Naming convention:** `-cli` suffix = local subprocess, `-api` or plain name = HTTP API.
+
+| Registry Key | Type | Backend |
+|-------------|------|---------|
+| `claude-cli` | CLI | Claude Code subprocess |
+| `claude-api` | API | Anthropic Messages API |
+| `codex-cli` | CLI | Codex CLI subprocess |
+| `openai` | API | OpenAI Chat Completions API |
+| `openrouter` | API | OpenRouter API |
+| `gemini-api` | API | Google Gemini API |
+
+**Removed:** `gemini` (was a redundant alias for `gemini-api`) and `gemini-cli` (TOS risk). Do not reference these — they are not valid runtime names.
+
 ## Source Locations
 
 - **Discoclaw source:** `~/code/discoclaw`
