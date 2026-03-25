@@ -61,8 +61,8 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
 
   if (vals.PRIMARY_RUNTIME) {
     const providerSpecificKeys = [
-      'GEMINI_BIN',
-      'GEMINI_MODEL',
+      'ANTHROPIC_API_KEY',
+      'GEMINI_API_KEY',
       'OPENAI_API_KEY',
       'DISCOCLAW_FAST_RUNTIME',
       'DISCOCLAW_TIER_OPENAI_FAST',
@@ -125,10 +125,9 @@ export function buildEnvContent(vals: Record<string, string>, now = new Date()):
   return lines.join('\n');
 }
 
-export function selectDefaultProvider(detected: string[]): '1' | '2' | '4' {
+export function selectDefaultProvider(detected: string[]): '1' | '3' {
   if (detected.includes('claude')) return '1';
-  if (detected.includes('gemini')) return '2';
-  if (detected.includes('codex')) return '4';
+  if (detected.includes('codex')) return '3';
   return '1';
 }
 
@@ -332,7 +331,6 @@ export async function runInitWizard(): Promise<void> {
 
   const detected: string[] = [];
   if (which('claude')) detected.push('claude');
-  if (which('gemini')) detected.push('gemini');
   if (which('codex')) detected.push('codex');
 
   if (detected.length > 0) {
@@ -345,11 +343,11 @@ export async function runInitWizard(): Promise<void> {
   // ── Provider selection ────────────────────────────────────────────────────
 
   console.log('\nSelect your AI provider:');
-  console.log('  1) Claude' + (detected.includes('claude') ? ' (detected)' : ''));
-  console.log('  2) Gemini CLI' + (detected.includes('gemini') ? ' (detected)' : ''));
-  console.log('  3) OpenAI');
-  console.log('  4) Codex' + (detected.includes('codex') ? ' (detected)' : ''));
-  console.log('  5) OpenRouter');
+  console.log('  1) Claude CLI' + (detected.includes('claude') ? ' (detected)' : ''));
+  console.log('  2) OpenAI');
+  console.log('  3) Codex CLI' + (detected.includes('codex') ? ' (detected)' : ''));
+  console.log('  4) OpenRouter');
+  console.log('  5) Gemini API');
 
   const defaultProvider = selectDefaultProvider(detected);
 
@@ -363,23 +361,18 @@ export async function runInitWizard(): Promise<void> {
   const finalChoice = providerChoice || defaultProvider;
 
   if (finalChoice === '1') {
-    values.PRIMARY_RUNTIME = 'claude';
+    values.PRIMARY_RUNTIME = 'claude-cli';
     values.CLAUDE_DANGEROUSLY_SKIP_PERMISSIONS = '1';
     values.CLAUDE_OUTPUT_FORMAT = 'stream-json';
   } else if (finalChoice === '2') {
-    values.PRIMARY_RUNTIME = 'gemini-cli';
-    console.log('  Note: this selects the limited Gemini CLI path; auth is handled by the gemini binary itself (run `gemini` to authenticate).');
-    values.GEMINI_BIN = 'gemini';
-    values.GEMINI_MODEL = 'gemini-2.5-pro';
-  } else if (finalChoice === '3') {
     values.PRIMARY_RUNTIME = 'openai';
     console.log('  Note: the OpenAI adapter is HTTP-only.');
     values.OPENAI_API_KEY = await askValidated(
       'OpenAI API key: ',
       (val) => (val ? null : 'API key is required'),
     );
-  } else if (finalChoice === '4') {
-    values.PRIMARY_RUNTIME = 'codex';
+  } else if (finalChoice === '3') {
+    values.PRIMARY_RUNTIME = 'codex-cli';
     const openaiFastKey = await askOptional(
       'Optional OpenAI API key for fast tier (gpt-5-mini) [leave empty to skip]: ',
       () => null,
@@ -388,9 +381,9 @@ export async function runInitWizard(): Promise<void> {
       values.OPENAI_API_KEY = openaiFastKey;
       values.DISCOCLAW_FAST_RUNTIME = 'openai';
       values.DISCOCLAW_TIER_OPENAI_FAST = 'gpt-5-mini';
-      console.log('  Fast-tier split enabled: chat=codex, fast=openai (gpt-5-mini).');
+      console.log('  Fast-tier split enabled: chat=codex-cli, fast=openai (gpt-5-mini).');
     }
-  } else if (finalChoice === '5') {
+  } else if (finalChoice === '4') {
     values.PRIMARY_RUNTIME = 'openrouter';
     console.log('  Note: the OpenRouter adapter is HTTP-only.');
     values.OPENROUTER_API_KEY = await askValidated(
@@ -398,6 +391,13 @@ export async function runInitWizard(): Promise<void> {
       (val) => (val ? null : 'API key is required'),
     );
     values.OPENROUTER_MODEL = OPENROUTER_DEFAULT_MODEL;
+  } else if (finalChoice === '5') {
+    values.PRIMARY_RUNTIME = 'gemini-api';
+    console.log('  Note: the Gemini API adapter is HTTP-only.');
+    values.GEMINI_API_KEY = await askValidated(
+      'Gemini API key: ',
+      (val) => (val ? null : 'API key is required'),
+    );
   }
 
   values.DISCOCLAW_DISCORD_ACTIONS = '1';
@@ -454,7 +454,7 @@ export async function runInitWizard(): Promise<void> {
   console.log('Next steps:');
   console.log('  Note: The bot will auto-create its forum channels on first connect.');
   console.log('  Tip: To add API keys or secrets later, DM the bot: !secret set KEY=value');
-  if (values.PRIMARY_RUNTIME === 'claude') {
+  if (values.PRIMARY_RUNTIME === 'claude-cli') {
     console.log('  Claude login is handled by the `claude` CLI itself; `discoclaw init` does not auto-check login state or ship the repo source-checkout helpers.');
     console.log('  1. Before logging in, run `claude -p -- "Reply with OK"` and confirm it fails with an auth/login error.');
     console.log('  2. Log in with `claude`.');
@@ -462,16 +462,11 @@ export async function runInitWizard(): Promise<void> {
     console.log('  4. For global installs, that raw Claude prompt is the current equivalent of the repo `pnpm claude:auth-smoke` check.');
     console.log('  5. Review docs/audit/claude-blank-machine-readiness.md if you need the source-checkout audit details.');
     console.log(`  6. ${daemonHint}`);
-  } else if (values.PRIMARY_RUNTIME === 'gemini-cli') {
-    console.log('  1. This wizard selected the limited Gemini CLI path (`PRIMARY_RUNTIME=gemini-cli`).');
-    console.log('  2. Authenticate: run `gemini` and follow the prompts.');
-    console.log('  3. If you want the API-backed Gemini path instead, set `PRIMARY_RUNTIME=gemini-api` and `GEMINI_API_KEY` manually.');
-    console.log(`  4. ${daemonHint}`);
   } else if (values.PRIMARY_RUNTIME === 'openai') {
     console.log('  1. `pnpm preflight`, `pnpm preflight:blank-machine`, and `discoclaw doctor` stay config-only; they do not prove the OpenAI key.');
     console.log('  2. Start discoclaw and confirm `!status` (or the startup credential report) shows `openai-key: ok`.');
     console.log(`  3. ${daemonHint}`);
-  } else if (values.PRIMARY_RUNTIME === 'codex') {
+  } else if (values.PRIMARY_RUNTIME === 'codex-cli') {
     console.log('  1. Source checkouts: `pnpm preflight` / `pnpm preflight:blank-machine` are config-only, and the repo does not ship a Codex auth-smoke helper yet.');
     console.log('  2. npm/global installs: `discoclaw doctor` is also config-only, and no shipped `discoclaw codex auth-smoke` exists yet.');
     console.log('  3. Before logging in, run `codex exec --skip-git-repo-check -- "Reply with OK"` and confirm it fails with a Codex auth/session error.');
@@ -488,6 +483,10 @@ export async function runInitWizard(): Promise<void> {
   } else if (values.PRIMARY_RUNTIME === 'openrouter') {
     console.log('  1. `discoclaw init` only writes the existing `OPENROUTER_API_KEY` env-key path; it does not prove broader OpenRouter readiness.');
     console.log('  2. Start discoclaw and confirm `!status` (or the startup credential report) shows `openrouter-key: ok`.');
+    console.log(`  3. ${daemonHint}`);
+  } else if (values.PRIMARY_RUNTIME === 'gemini-api') {
+    console.log('  1. `discoclaw init` only writes the existing `GEMINI_API_KEY` env-key path; it does not prove broader Gemini API readiness.');
+    console.log('  2. Start discoclaw and confirm `!status` (or the startup credential report) shows `gemini-key: ok`.');
     console.log(`  3. ${daemonHint}`);
   }
   console.log('');
