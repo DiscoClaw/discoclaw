@@ -333,9 +333,9 @@ describe('parseConfig', () => {
     expect(config.discordActionsBotProfile).toBe(true);
   });
 
-  it('defaults discordActionsPlan to true', () => {
+  it('defaults discordActionsPlan to false', () => {
     const { config } = parseConfig(env());
-    expect(config.discordActionsPlan).toBe(true);
+    expect(config.discordActionsPlan).toBe(false);
   });
 
   it('defaults discordActionsEnabled to true', () => {

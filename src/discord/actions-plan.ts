@@ -733,6 +733,14 @@ export async function executePlanAction(
 }
 
 // ---------------------------------------------------------------------------
+// Feature-disabled nudge (for NL action routing)
+// ---------------------------------------------------------------------------
+
+/** Friendly nudge returned when the AI attempts a plan action but plan actions are disabled. */
+export const PLAN_ACTIONS_DISABLED_NUDGE =
+  'Plan workflows aren\'t enabled on this instance. To enable AI-initiated plan actions, add `DISCOCLAW_DISCORD_ACTIONS_PLAN=1` and `DISCOCLAW_PLAN_COMMANDS_ENABLED=1` to your `.env` and restart.';
+
+// ---------------------------------------------------------------------------
 // Prompt section
 // ---------------------------------------------------------------------------
 

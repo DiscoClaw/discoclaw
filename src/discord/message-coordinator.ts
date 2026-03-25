@@ -54,11 +54,11 @@ import { parseCapsuleBlock } from './capsule.js';
 import type { ContinuationCapsule } from './capsule.js';
 import { parseMemoryCommand, handleMemoryCommand } from './memory-commands.js';
 import { parseSecretCommand, handleSecretCommand } from './secret-commands.js';
-import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, closePlanIfComplete, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId } from './plan-commands.js';
+import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, closePlanIfComplete, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId, PLAN_DISABLED_NUDGE } from './plan-commands.js';
 import { handlePlanAudit } from './audit-handler.js';
 import type { PlanAuditResult } from './audit-handler.js';
 import type { PreparePlanRunResult } from './plan-commands.js';
-import { parseForgeCommand, ForgeOrchestrator, buildPlanImplementationMessage } from './forge-commands.js';
+import { parseForgeCommand, ForgeOrchestrator, buildPlanImplementationMessage, FORGE_DISABLED_NUDGE } from './forge-commands.js';
 import type { ForgeOrchestratorOpts, ForgeResult } from './forge-commands.js';
 import { runNextPhase, resolveProjectCwd, readPhasesFile, buildPostRunSummary, checkStaleness } from './plan-manager.js';
 import type { PlanRunEvent, PlanPhases } from './plan-manager.js';
@@ -2027,7 +2027,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             const planCmd = parsePlanCommand(String(msg.content ?? ''));
             if (planCmd) {
               await msg.reply({
-                content: 'Plan commands are currently disabled. To enable them, set `DISCOCLAW_PLAN_COMMANDS_ENABLED=true` in your environment and restart.',
+                content: PLAN_DISABLED_NUDGE,
                 allowedMentions: NO_MENTIONS,
               });
               return;
@@ -2702,7 +2702,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             const forgeCmd = parseForgeCommand(String(msg.content ?? ''));
             if (forgeCmd) {
               await msg.reply({
-                content: 'Forge commands are currently disabled. To enable them, set `DISCOCLAW_FORGE_COMMANDS_ENABLED=true` in your environment and restart.',
+                content: FORGE_DISABLED_NUDGE,
                 allowedMentions: NO_MENTIONS,
               });
               return;
