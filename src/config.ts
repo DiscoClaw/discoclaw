@@ -1137,7 +1137,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       memoryConsolidationModel: parseTrimmedString(env, 'DISCOCLAW_MEMORY_CONSOLIDATION_MODEL') ?? fastModel,
       memoryCommandsEnabled: parseBoolean(env, 'DISCOCLAW_MEMORY_COMMANDS_ENABLED', true),
       planCommandsEnabled: parseBoolean(env, 'DISCOCLAW_PLAN_COMMANDS_ENABLED', false),
-      planPhasesEnabled: parseBoolean(env, 'PLAN_PHASES_ENABLED', false),
+      planPhasesEnabled: parseBoolean(
+        env,
+        'PLAN_PHASES_ENABLED',
+        parseBoolean(env, 'DISCOCLAW_PLAN_COMMANDS_ENABLED', false),
+      ),
       planPhaseMaxContextFiles: parsePositiveInt(env, 'PLAN_PHASE_MAX_CONTEXT_FILES', 5),
       planPhaseTimeoutMs: parsePositiveNumber(env, 'PLAN_PHASE_TIMEOUT_MS', DEFAULT_THIRTY_MINUTES_MS),
       planPhaseMaxAuditFixAttempts: parseNonNegativeInt(env, 'PLAN_PHASE_AUDIT_FIX_MAX', 3),
@@ -1152,7 +1156,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       forgeAuditorModel: parseTrimmedString(env, 'FORGE_AUDITOR_MODEL'),
       forgeTimeoutMs: parsePositiveNumber(env, 'FORGE_TIMEOUT_MS', DEFAULT_THIRTY_MINUTES_MS),
       forgeProgressThrottleMs: parseNonNegativeInt(env, 'FORGE_PROGRESS_THROTTLE_MS', 3000),
-      forgeAutoImplement: parseBoolean(env, 'FORGE_AUTO_IMPLEMENT', false),
+      forgeAutoImplement: parseBoolean(
+        env,
+        'FORGE_AUTO_IMPLEMENT',
+        parseBoolean(env, 'DISCOCLAW_FORGE_COMMANDS_ENABLED', false),
+      ),
 
       completionNotifyEnabled: parseBoolean(env, 'DISCOCLAW_COMPLETION_NOTIFY', true),
       completionNotifyThresholdMs: parseNonNegativeInt(env, 'DISCOCLAW_COMPLETION_NOTIFY_THRESHOLD_MS', 30000),
