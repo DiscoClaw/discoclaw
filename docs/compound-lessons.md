@@ -234,3 +234,10 @@ Lesson: Each runtime invocation is stateless — the model receives only the pro
 Source: task/chat context — multi-turn follow-up token cost analysis; `buildPreambleContextFiles()` in `src/discord/prompt-common.ts` separates channel context from the preamble prefix; `docs/prompt-token-audit.md` and `docs/prompt-ordering.md` document the static vs dynamic section split
 Applied: `src/discord/prompt-common.ts` (`buildPreambleContextFiles()`), `docs/compound-lessons.md`
 Status: active
+
+### 2026-03-25 - Decouple cron scheduling state from Discord thread archive state
+Tags: #cron #discord #state #architecture
+Lesson: Discord thread lifecycle events (auto-archive from inactivity, manual archive/unarchive) must not mutate cron scheduling state. Only explicit operator commands (`cronPause`/`cronResume`) should persist `disabled: true` to the canonical stats store. The `threadUpdate` handler must treat archive events as a UI-layer change — the cron keeps firing to its target channel because Discord threads are a synchronized projection, not the authority. Persisting `disabled: true` on auto-archive makes the flag sticky: unarchiving the thread and rebooting the bot cannot recover the cron because the stats store still reads `disabled: true` on next load. Use `pauseSource` (`'user'` vs `'system'`) to distinguish intentional pauses from automated disables so reconciliation logic can reason about recoverability.
+Source: task/chat context — Discord auto-archive permanently disabled crons because `threadUpdate` persisted `disabled: true` to the stats store without distinguishing auto-archive from explicit `cronPause`; dedup search on 2026-03-25 against the existing cron-state lesson (2026-03-10) and the canonical-persistence lesson (2026-03-15) concluded this is materially distinct: those lessons address state schema drift and projection authority respectively, while this lesson addresses the specific boundary between Discord lifecycle events and scheduling state mutation
+Applied: `src/cron/forum-sync.ts`, `docs/compound-lessons.md`
+Status: active
