@@ -106,7 +106,7 @@ Direct HTTP adapter for the Anthropic Messages API — no CLI subprocess, no col
 - Factory: `createAnthropicRestRuntime(opts)`
 - Auth: `x-api-key` header (from `ANTHROPIC_API_KEY` env var)
 - Streaming: SSE (`stream: true`) — emits `text_delta`, `usage`, `text_final`, `done` engine events
-- Runtime ID: `claude_code` (same as CLI adapter so model tier resolution is compatible)
+- Runtime ID: `claude_api` (distinct from CLI adapter's `claude_code`)
 - Default model: `claude-sonnet-4-6` (set at registration time in `src/index.ts`)
 - Capabilities: `streaming_text` only (no tools, no sessions)
 - Conditional registration: only registered as `'claude-api'` in the runtime registry when `ANTHROPIC_API_KEY` is set

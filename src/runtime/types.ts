@@ -136,7 +136,7 @@ export type RuntimeCapability =
   | 'mcp'
   | 'multi_turn';
 
-export type RuntimeId = 'claude_cli' | 'claude_api' | 'codex_cli' | 'openai' | 'openrouter' | 'gemini_api';
+export type RuntimeId = 'claude_code' | 'claude_api' | 'codex' | 'openai' | 'openrouter' | 'gemini';
 
 export type RuntimeSupervisorLimitsOverride = {
   maxCycles?: number;

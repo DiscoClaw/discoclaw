@@ -52,7 +52,7 @@ const RUNTIME_PATH_DEFINITIONS: Readonly<Record<RuntimePathCanonicalName, Runtim
     canonicalName: 'claude-api',
     acceptedAliases: ['claude-api', 'anthropic'],
     registryKeys: ['claude-api'],
-    runtimeId: 'claude_code',
+    runtimeId: 'claude_api',
     providerSecretEnvKey: 'ANTHROPIC_API_KEY',
   },
   'claude-cli': {

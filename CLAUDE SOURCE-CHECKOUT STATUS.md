@@ -34,7 +34,7 @@ What that status means today:
 - Exact repro: from `/home/davidmarsh/code/discoclaw`, with the current repo-local `.env` unchanged, run `RELEASE_REHEARSAL_CHECKOUT_PROVENANCE=reused-checkout pnpm release:rehearsal`; observe successful command steps through `pnpm build`, then `Starting Run pnpm dev...` with no later harness output, and after `SIGINT` observe exit code `130` plus the leftover rehearsal root `/tmp/discoclaw-release-rehearsal/rr-20260323-051920-vsa0`
 - Durable closeout: none written for `rr-20260323-051920-vsa0`; the latest durable harness artifacts still on disk are the earlier provenance-blocked runs under `docs/release-audit/claude-release-rehearsal-rr-20260323-043611-gau1.{json,md}`
 
-This path is not `release-ready`. That label remains unavailable until `pnpm release:rehearsal` completes the live Discord checkpoints from a source checkout whose repo-local `.env` already sets `PRIMARY_RUNTIME=claude` and `DISCORD_GUILD_ID`, and returns from cleanup with a clean baseline for rehearsal-owned artifacts. The recorded checkout provenance is useful operator context, but it is not a separate harness pass/fail gate.
+This path is not `release-ready`. That label remains unavailable until `pnpm release:rehearsal` completes the live Discord checkpoints from a source checkout whose repo-local `.env` already sets `PRIMARY_RUNTIME=claude-cli` and `DISCORD_GUILD_ID`, and returns from cleanup with a clean baseline for rehearsal-owned artifacts. The recorded checkout provenance is useful operator context, but it is not a separate harness pass/fail gate.
 
 ## What Actually Happened
 
@@ -95,14 +95,14 @@ That means this memo proves the fresh-clone install path and the Claude auth beh
 1. Create a throwaway clone and run `pnpm install --frozen-lockfile`.
 2. Supply a real clone-local `.env` with the required Discord and runtime values.
 3. If auditing from a machine with existing DiscoClaw state, isolate `DISCOCLAW_DATA_DIR`, `WORKSPACE_CWD`, `GROUPS_DIR`, and `BEADS_DIR` to throwaway paths.
-4. Force `PRIMARY_RUNTIME=claude` for this audit.
+4. Force `PRIMARY_RUNTIME=claude-cli` for this audit.
 5. Run `pnpm preflight:blank-machine` and treat it as config/bootstrap evidence only.
 6. From a shell or account with no active Claude session, run `pnpm claude:auth-smoke`.
 7. Confirm the expected pre-login result contains `Claude CLI appears installed but not authenticated.`
 8. Run `claude` and complete login in that same shell or account.
 9. Rerun `pnpm claude:auth-smoke` in that same shell or account.
 10. Confirm the expected post-login result contains `Claude CLI answered the minimal prompt.`
-11. Run `pnpm release:rehearsal` from that same checkout once the repo-local `.env` is ready with `PRIMARY_RUNTIME=claude`.
+11. Run `pnpm release:rehearsal` from that same checkout once the repo-local `.env` is ready with `PRIMARY_RUNTIME=claude-cli`.
 12. Record in the closeout whether the checkout was a throwaway clone or a reused maintainer checkout; treat that as provenance/context, not as a separate harness gate.
 13. Treat any non-empty rehearsal-owned cleanup leftovers as a `BLOCKED` verdict even if all earlier live steps passed.
 14. Only call the path `release-ready` when the rehearsal completed the live Discord checkpoints and cleanup returned to a clean baseline for rehearsal-owned artifacts.

@@ -49,7 +49,7 @@ describe('runtime-path-contract', () => {
       canonicalName: 'claude-api',
       acceptedAliases: ['claude-api', 'anthropic'],
       registryKeys: ['claude-api'],
-      runtimeId: 'claude_code',
+      runtimeId: 'claude_api',
       providerSecretEnvKey: 'ANTHROPIC_API_KEY',
     });
 

@@ -36,7 +36,7 @@ export function createAnthropicRestRuntime(opts: AnthropicRestOpts): RuntimeAdap
   const defaultMaxTokens = opts.defaultMaxTokens ?? 1024;
 
   return {
-    id: 'claude_code',
+    id: 'claude_api',
     capabilities,
     defaultModel: opts.defaultModel,
     invoke(params: RuntimeInvokeParams) {

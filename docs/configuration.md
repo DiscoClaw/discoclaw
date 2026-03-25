@@ -60,7 +60,7 @@ For the operator workflow that explains startup defaults vs. overrides, install-
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PRIMARY_RUNTIME` | `claude` | Runtime adapter: `claude`, `openai`, `openrouter`, `gemini-api`, `gemini-cli`, `codex` (`gemini` remains a compatibility alias for `gemini-api`) |
+| `PRIMARY_RUNTIME` | `claude-cli` | Runtime adapter: `claude-cli`, `openai`, `openrouter`, `gemini-api`, `codex-cli` (legacy aliases `claude`, `codex` still accepted) |
 | `RUNTIME_MODEL` | `capable` | **Deprecated** — use `models.json`. Startup-default model tier for chat invocations |
 | `DISCOCLAW_PLAN_RUN_MODEL` | `capable` | **Deprecated** — use `models.json`. Startup-default model tier for the dedicated `plan-run` role |
 | `DISCOCLAW_FAST_RUNTIME` | — | **Deprecated** — use `!models set fast <model>` instead, which auto-detects and switches the fast-tier runtime. Legacy startup-only runtime override for fast-tier workloads (summary, cron auto-tag/model classify, task auto-tag); ignored by `!models reset` |
@@ -199,27 +199,12 @@ Run this checklist before adopting any new OpenAI-compatible/OpenRouter model:
 
 If any check fails consistently, treat the model as unsupported for DiscoClaw runtime use.
 
-### Gemini runtimes
-
-DiscoClaw has two explicit Gemini runtime names:
-
-- `gemini-api` is the full Gemini API path. It uses `GEMINI_API_KEY`, and the legacy runtime name `gemini` normalizes to this path for compatibility.
-- `gemini-cli` is the Gemini CLI path. It uses `GEMINI_BIN` and is intentionally limited: `src/runtime/strategies/gemini-strategy.ts` only advertises `streaming_text`, and DiscoClaw enforces that by running `resolveEffectiveTools()` in `src/discord/prompt-common.ts`, which calls `filterToolsByCapabilities()` in `src/runtime/tool-capabilities.ts` to drop unsupported tools before invocation.
-
-Do not describe Gemini API-key and Gemini CLI selection as interchangeable support stories. API-key presence only proves the `gemini-api` path is configured; CLI binary presence only proves the `gemini-cli` path is configured, and that CLI path is currently the limited runtime above.
-
 ### Gemini API
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GEMINI_API_KEY` | — | Gemini API key for the explicit `gemini-api` runtime |
-
-### Gemini CLI
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GEMINI_BIN` | `gemini` | Path to Gemini CLI binary for the explicit `gemini-cli` runtime |
-| `GEMINI_MODEL` | `gemini-2.5-pro` | Default Gemini model ID used by both `gemini-api` and `gemini-cli` unless a role override selects another model |
+| `GEMINI_API_KEY` | — | Gemini API key for the `gemini-api` runtime |
+| `GEMINI_MODEL` | `gemini-2.5-pro` | Default Gemini model ID used by `gemini-api` unless a role override selects another model |
 
 ### Codex CLI
 

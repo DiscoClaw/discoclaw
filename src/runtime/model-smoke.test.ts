@@ -112,7 +112,7 @@ if (
 // ---------------------------------------------------------------------------
 
 describe.each(SMOKE_TIERS)('claude_cli / %s', (tierOrModel) => {
-  const model = resolveModel(tierOrModel, 'claude_cli');
+  const model = resolveModel(tierOrModel, 'claude_code');
   const { runtime, claudeBin } = smokeState!;
 
   beforeAll(() => {
@@ -181,7 +181,7 @@ describe.each(OPENAI_SMOKE_TIERS)('openai / %s', (tierOrModel) => {
 // ---------------------------------------------------------------------------
 
 describe.each(CODEX_SMOKE_TIERS)('codex_cli / %s', (tierOrModel) => {
-  const model = resolveModel(tierOrModel, 'codex_cli');
+  const model = resolveModel(tierOrModel, 'codex');
   const { runtime, codexBin } = codexSmokeState!;
 
   beforeAll(() => {
@@ -217,7 +217,7 @@ describe.each(CODEX_SMOKE_TIERS)('codex_cli / %s', (tierOrModel) => {
 // ---------------------------------------------------------------------------
 
 describe.each(GEMINI_SMOKE_TIERS)('gemini / %s', (tierOrModel) => {
-  const model = resolveModel(tierOrModel, 'gemini_api');
+  const model = resolveModel(tierOrModel, 'gemini');
   const { runtime, apiKey } = geminiSmokeState!;
 
   beforeAll(() => {

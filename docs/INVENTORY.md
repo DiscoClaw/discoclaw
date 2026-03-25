@@ -50,7 +50,6 @@ Legend: **done** | *stub* | ~~cut~~
 | Runtime registry (name → adapter lookup) | `src/runtime/registry.ts` | **done** |
 | Adapter selection via env (`FORGE_AUDITOR_RUNTIME`) | `src/index.ts` | **done** |
 | Gemini API runtime (REST adapter; explicit `gemini-api` path, legacy `gemini` alias normalizes here) | `src/runtime/gemini-rest.ts`, `src/config.ts`, `src/index.ts` | **done** |
-| Gemini CLI runtime (subprocess; explicit `gemini-cli` path, limited to `streaming_text` and enforced through runtime tool-capability filtering) | `src/runtime/gemini-cli.ts`, `src/runtime/strategies/gemini-strategy.ts`, `src/runtime/tool-capabilities.ts`, `src/discord/prompt-common.ts`, `src/index.ts` | **done** |
 | Universal CLI adapter factory (spawns any CLI runtime via strategy) | `src/runtime/cli-adapter.ts` | **done** |
 | CLI strategy interface (contract for Claude/Codex/Gemini strategies) | `src/runtime/cli-strategy.ts` | **done** |
 | Template strategy (documents how to add a new CLI runtime) | `src/runtime/strategies/template-strategy.ts` | **done** |
@@ -396,7 +395,7 @@ Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DEEPGRAM_STT_MODEL
 
 - [x] **OpenAI-compatible runtime adapter** — `src/runtime/openai-compat.ts` with registry and forge auditor routing via `FORGE_AUDITOR_RUNTIME`.
 - [x] **Codex CLI runtime adapter** — `src/runtime/codex-cli.ts` shells out to `codex exec` for models that aren't available on the public completions API (e.g., `gpt-5.4`). Selectable via `FORGE_AUDITOR_RUNTIME=codex`. Supports session persistence (`sessions` capability) — maps session keys to Codex thread IDs in memory, using `codex exec resume` for multi-turn conversations within a forge run. Uses `codex exec` exclusively.
-- [x] **Additional runtime adapters** — Gemini now ships as two explicit runtime paths: `gemini-api` via `src/runtime/gemini-rest.ts` and the limited `gemini-cli` path via `src/runtime/gemini-cli.ts`.
+- [x] **Additional runtime adapters** — Gemini ships as `gemini-api` via `src/runtime/gemini-rest.ts`. The `gemini-cli` path was removed (TOS risk).
 - [ ] **Full runtime selection for all roles** — currently only the forge auditor can be routed to a non-Claude runtime. The Codex CLI adapter now supports read-only tools (`tools_fs`), but extending to drafter/reviser would require write tool support. Cron executor and message handler still need evaluation.
 - [ ] Discord-native dashboard (status embeds, config commands, health checks in a dedicated channel)
 - [x] Shareable PRD packs — `docs/discoclaw-recipe-spec.md`, `templates/recipes/integration.discoclaw-recipe.md`, and `skills/discoclaw-recipe-{generator,consumer}/` define exchangeable `recipes/*.discoclaw-recipe.md` artifacts
