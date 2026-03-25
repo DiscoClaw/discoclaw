@@ -12,6 +12,70 @@ export const TRACKED_DEFAULTS_SECTION_LABEL = 'SYSTEM_DEFAULTS.md (tracked defau
 let cachedPath: string | null = null;
 let cachedPreamble: string | null = null;
 
+type MarkdownSection = {
+  heading: string;
+  lines: string[];
+};
+
+/**
+ * Sections dropped from the tracked defaults because they are
+ * duplicated, unreachable after bootstrap, or rarely needed.
+ */
+const DROPPED_DEFAULTS_SECTIONS = new Set([
+  'Runtime Instruction Precedence',
+  'First Run',
+  'Runtime Registry',
+  'Bot Setup Assistance',
+  'Knowledge Cutoff Awareness',
+]);
+
+function splitTopLevelSections(content: string): { prelude: string[]; sections: MarkdownSection[] } {
+  const prelude: string[] = [];
+  const sections: MarkdownSection[] = [];
+  let current: MarkdownSection | null = null;
+
+  for (const line of content.trimEnd().split('\n')) {
+    if (line.startsWith('## ')) {
+      current = { heading: line.slice(3).trim(), lines: [line] };
+      sections.push(current);
+      continue;
+    }
+
+    if (current) {
+      current.lines.push(line);
+    } else {
+      prelude.push(line);
+    }
+  }
+
+  return { prelude, sections };
+}
+
+function joinDefaultsContent(parts: string[]): string {
+  return parts
+    .map((part) => part.trimEnd())
+    .filter((part) => part.length > 0)
+    .join('\n\n')
+    .trimEnd();
+}
+
+/**
+ * Filter tracked defaults content by dropping rarely-needed sections
+ * and stripping meta-descriptive blockquotes from the prelude.
+ */
+export function buildPromptSafeDefaultsContent(content: string): string {
+  const { prelude, sections } = splitTopLevelSections(content);
+  const filteredPrelude = prelude.filter((line) => !line.startsWith('> '));
+  const filteredSections = sections.filter(
+    (section) => !DROPPED_DEFAULTS_SECTIONS.has(section.heading),
+  );
+
+  return joinDefaultsContent([
+    filteredPrelude.join('\n'),
+    ...filteredSections.map((section) => section.lines.join('\n')),
+  ]);
+}
+
 /**
  * Resolve the tracked system-default file path from this module's location.
  * Works in both src/* and dist/* layouts.
@@ -45,7 +109,7 @@ export function loadTrackedDefaultsPreamble(opts?: {
   let defaultsPreamble = '';
   try {
     const content = fsSync.readFileSync(trackedDefaultsPath, 'utf-8');
-    defaultsPreamble = renderTrackedDefaultsSection(content);
+    defaultsPreamble = renderTrackedDefaultsSection(buildPromptSafeDefaultsContent(content));
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     defaultsPreamble = renderTrackedDefaultsSection(
