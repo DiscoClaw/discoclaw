@@ -259,8 +259,7 @@ describe('handleModelsCommand', () => {
     expect(result).toContain('!models set chat sonnet');
     expect(result).toContain('!models set chat gemini-api');
     expect(result).toContain('!models set voice gemini-api');
-    expect(result).toContain('!models set voice gemini-cli');
-    expect(result).toContain('!models set voice anthropic');
+    expect(result).toContain('!models set voice claude-api');
   });
 
   it('help documents persistence and reset semantics explicitly', () => {
@@ -275,11 +274,8 @@ describe('handleModelsCommand', () => {
 
   it('help documents canonical runtime names and provider boundaries', () => {
     const result = handleModelsCommand({ action: 'help' }, enabled);
-    expect(result).toContain('`claude`, `codex`, `gemini-api`, `gemini-cli`, `openai`, `openrouter`');
-    expect(result).toContain('`gemini` remains a compatibility alias for `gemini-api`');
-    expect(result).toContain('`anthropic` is voice-only');
-    expect(result).toContain('only advertises `streaming_text`');
-    expect(result).toContain('filtering out tools the runtime does not advertise');
+    expect(result).toContain('`claude-cli`, `claude-api`, `codex-cli`, `gemini-api`, `openai`, `openrouter`');
+    expect(result).toContain('`claude-api` is voice-only');
   });
 
   it('help documents the OpenRouter env-key path and proof boundary', () => {

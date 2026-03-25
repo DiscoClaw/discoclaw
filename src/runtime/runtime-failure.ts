@@ -509,17 +509,6 @@ function classifyRawRuntimeFailure(rawMessage: string): RuntimeFailure {
     });
   }
 
-  if (mentionsGemini && (lc.includes('not found') || lc.includes('enoent') || lc.includes('spawn'))) {
-    return createRuntimeFailure({
-      source: 'runtime',
-      code: 'GEMINI_CLI_NOT_FOUND',
-      message,
-      rawMessage,
-      userMessage: 'Gemini CLI was not found. Install it and set GEMINI_BIN (or fix PATH), then restart.',
-      retryable: false,
-    });
-  }
-
   if (mentionsGemini && (lc.includes('unauthorized') || lc.includes('authentication') || lc.includes('not logged in'))) {
     return createRuntimeFailure({
       source: 'runtime',
