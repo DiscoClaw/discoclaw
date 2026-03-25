@@ -169,6 +169,40 @@ describe('createAutoCheckpoint', () => {
     expect(mockClientInstance.once).toHaveBeenCalledWith('ready', expect.any(Function));
     ctx.dispose();
   });
+
+  it('logs in with observerToken when provided and extracts bot ID from discordToken', async () => {
+    // Encode 'bot-123' as base64 for the discordToken first segment
+    const encodedBotId = Buffer.from(BOT_USER_ID).toString('base64');
+    const botToken = `${encodedBotId}.fake.fake`;
+    const observerToken = 'observer-token-value';
+
+    // Observer client has a different user ID
+    setupMockClient();
+    mockClientInstance.user = { id: 'observer-789', tag: 'Observer#0002' };
+
+    const cfg = {
+      ...baseConfig(),
+      discordToken: botToken,
+      observerToken,
+    };
+    const ctx = await createAutoCheckpoint(cfg);
+
+    // Should log in with observer token, not bot token
+    expect(mockClientInstance.login).toHaveBeenCalledWith(observerToken);
+
+    // Probe messages should @-mention the bot-under-test
+    mockChannel.enqueueReply(makeMessage('reply-obs', BOT_USER_ID, 'Hello!'));
+    await ctx.promptCheckpoint({
+      id: 'checkpoint-message-handling',
+      label: 'Verify Message Handling',
+      instructions: ['Send a probe.'],
+    });
+
+    const sentContent = mockChannel.send.mock.calls[0]![0] as string;
+    expect(sentContent).toContain(`<@${BOT_USER_ID}>`);
+
+    ctx.dispose();
+  });
 });
 
 describe('promptCheckpoint dispatch', () => {
@@ -240,8 +274,8 @@ describe('promptCheckpoint dispatch', () => {
   });
 
   describe('checkpoint-task-sync', () => {
-    it('passes when bot replies to task creation request', async () => {
-      mockChannel.enqueueReply(makeMessage('reply-3', BOT_USER_ID, 'Task created'));
+    it('passes when bot replies with task title', async () => {
+      mockChannel.enqueueReply(makeMessage('reply-3', BOT_USER_ID, 'Created task: rehearsal-task-1'));
       const { promptCheckpoint, dispose } = await getCheckpoint();
 
       const status = await promptCheckpoint({
@@ -253,6 +287,20 @@ describe('promptCheckpoint dispatch', () => {
       expect(status).toBe('pass');
       // Probe message should reference the task title
       expect(mockChannel.send.mock.calls[0]![0]).toContain('rehearsal-task-1');
+      dispose();
+    });
+
+    it('fails when reply does not mention task title', async () => {
+      mockChannel.enqueueReply(makeMessage('reply-3b', BOT_USER_ID, 'Done!'));
+      const { promptCheckpoint, dispose } = await getCheckpoint();
+
+      const status = await promptCheckpoint({
+        id: 'checkpoint-task-sync',
+        label: 'Verify Task Sync',
+        instructions: ['Create a task.'],
+      });
+
+      expect(status).toBe('fail');
       dispose();
     });
 
@@ -271,8 +319,8 @@ describe('promptCheckpoint dispatch', () => {
   });
 
   describe('checkpoint-cron-execution', () => {
-    it('passes when bot replies to cron creation request', async () => {
-      mockChannel.enqueueReply(makeMessage('reply-4', BOT_USER_ID, 'Cron created'));
+    it('passes when bot replies with cron name', async () => {
+      mockChannel.enqueueReply(makeMessage('reply-4', BOT_USER_ID, 'Created cron: rehearsal-cron-1'));
       const { promptCheckpoint, dispose } = await getCheckpoint();
 
       const status = await promptCheckpoint({
@@ -283,6 +331,20 @@ describe('promptCheckpoint dispatch', () => {
 
       expect(status).toBe('pass');
       expect(mockChannel.send.mock.calls[0]![0]).toContain('rehearsal-cron-1');
+      dispose();
+    });
+
+    it('fails when reply does not mention cron name', async () => {
+      mockChannel.enqueueReply(makeMessage('reply-4b', BOT_USER_ID, 'OK'));
+      const { promptCheckpoint, dispose } = await getCheckpoint();
+
+      const status = await promptCheckpoint({
+        id: 'checkpoint-cron-execution',
+        label: 'Verify Cron Execution',
+        instructions: ['Create a cron.'],
+      });
+
+      expect(status).toBe('fail');
       dispose();
     });
 

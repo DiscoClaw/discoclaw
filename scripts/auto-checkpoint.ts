@@ -24,8 +24,15 @@ import type {
 // ---------------------------------------------------------------------------
 
 export type AutoCheckpointConfig = {
-  /** Discord bot token (same one the rehearsal dev process uses). */
+  /** Discord bot token for the bot-under-test. */
   discordToken: string;
+  /**
+   * Separate Discord bot token for the observer client.
+   * Required to avoid the bot-under-test's self-message guard, which silently
+   * drops messages from its own user ID.  When omitted, falls back to
+   * `discordToken` (probes will be blocked by the self-message guard).
+   */
+  observerToken?: string;
   /** Text-channel ID used for sending probe messages. */
   channelId: string;
   /** Rehearsal slug — embedded in probes so replies can be correlated. */
@@ -48,6 +55,18 @@ export type AutoCheckpointConfig = {
 
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
 const DEFAULT_POLL_TIMEOUT_MS = 120_000;
+
+/**
+ * Extract the user ID encoded in a Discord bot token.
+ * Discord bot tokens are structured as base64(userId).timestamp.hmac.
+ */
+function extractUserIdFromToken(token: string): string {
+  const firstSegment = token.split('.')[0];
+  if (!firstSegment) {
+    throw new Error('Invalid Discord token format: cannot extract user ID.');
+  }
+  return Buffer.from(firstSegment, 'base64').toString();
+}
 
 async function pollForReply(
   channel: TextBasedChannel,
@@ -98,8 +117,9 @@ async function verifyMessageHandling(
   timeoutMs: number,
   intervalMs: number,
   log: (line: string) => void,
+  botMention = '',
 ): Promise<{ status: ReleaseRehearsalCheckpointStatus; lastProbeId?: string }> {
-  const content = `Release rehearsal auto-check: ${slug} — please confirm you can read this.`;
+  const content = `${botMention}Release rehearsal auto-check: ${slug} — please confirm you can read this.`;
   const { probe, reply } = await sendAndWaitForReply(
     channel, content, botUserId, timeoutMs, intervalMs, log,
   );
@@ -117,8 +137,9 @@ async function verifyFollowUpReply(
   timeoutMs: number,
   intervalMs: number,
   log: (line: string) => void,
+  botMention = '',
 ): Promise<{ status: ReleaseRehearsalCheckpointStatus }> {
-  const content = `Follow-up for ${slug} — does the prior context still hold?`;
+  const content = `${botMention}Follow-up for ${slug} — does the prior context still hold?`;
   const { reply } = await sendAndWaitForReply(
     channel, content, botUserId, timeoutMs, intervalMs, log,
   );
@@ -136,16 +157,21 @@ async function verifyTaskSync(
   timeoutMs: number,
   intervalMs: number,
   log: (line: string) => void,
+  botMention = '',
 ): Promise<{ status: ReleaseRehearsalCheckpointStatus }> {
-  const content = `Please create a task titled "${taskTitle}".`;
+  const content = `${botMention}Please create a task titled "${taskTitle}".`;
   const { reply } = await sendAndWaitForReply(
     channel, content, botUserId, timeoutMs, intervalMs, log,
   );
 
-  if (reply && reply.content.length > 0) {
-    return { status: 'pass' };
+  if (!reply || reply.content.length === 0) {
+    return { status: 'fail' };
   }
-  return { status: 'fail' };
+  if (!reply.content.toLowerCase().includes(taskTitle.toLowerCase())) {
+    log(`  Reply did not mention task title "${taskTitle}".`);
+    return { status: 'fail' };
+  }
+  return { status: 'pass' };
 }
 
 async function verifyCronExecution(
@@ -155,16 +181,21 @@ async function verifyCronExecution(
   timeoutMs: number,
   intervalMs: number,
   log: (line: string) => void,
+  botMention = '',
 ): Promise<{ status: ReleaseRehearsalCheckpointStatus }> {
-  const content = `Please create a cron named "${cronName}" that runs once immediately.`;
+  const content = `${botMention}Please create a cron named "${cronName}" that runs once immediately.`;
   const { reply } = await sendAndWaitForReply(
     channel, content, botUserId, timeoutMs, intervalMs, log,
   );
 
-  if (reply && reply.content.length > 0) {
-    return { status: 'pass' };
+  if (!reply || reply.content.length === 0) {
+    return { status: 'fail' };
   }
-  return { status: 'fail' };
+  if (!reply.content.toLowerCase().includes(cronName.toLowerCase())) {
+    log(`  Reply did not mention cron name "${cronName}".`);
+    return { status: 'fail' };
+  }
+  return { status: 'pass' };
 }
 
 async function verifyRestartRecovery(
@@ -174,8 +205,9 @@ async function verifyRestartRecovery(
   timeoutMs: number,
   intervalMs: number,
   log: (line: string) => void,
+  botMention = '',
 ): Promise<{ status: ReleaseRehearsalCheckpointStatus }> {
-  const content = `Post-restart check for ${slug} — confirm the bot reconnected cleanly.`;
+  const content = `${botMention}Post-restart check for ${slug} — confirm the bot reconnected cleanly.`;
   const { reply } = await sendAndWaitForReply(
     channel, content, botUserId, timeoutMs, intervalMs, log,
   );
@@ -209,6 +241,10 @@ export async function createAutoCheckpoint(config: AutoCheckpointConfig): Promis
   const pollIntervalMs = config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const pollTimeoutMs = config.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS;
 
+  // Use a separate observer token if provided to avoid the bot-under-test's
+  // self-message guard (which drops messages from its own user ID).
+  const loginToken = config.observerToken ?? config.discordToken;
+
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -217,14 +253,24 @@ export async function createAutoCheckpoint(config: AutoCheckpointConfig): Promis
     ],
   });
 
-  await client.login(config.discordToken);
+  await client.login(loginToken);
   await new Promise<void>((resolve) => {
     if (client.isReady()) resolve();
     else client.once('ready', () => resolve());
   });
 
-  const botUserId = client.user!.id;
-  log(`[auto-checkpoint] Observer client ready as ${client.user!.tag} (${botUserId})`);
+  // When using a separate observer token, extract the bot-under-test's user ID
+  // from the main discordToken so we can poll for its replies and @-mention it.
+  let botUserId: string;
+  let botMention = '';
+  if (config.observerToken) {
+    botUserId = extractUserIdFromToken(config.discordToken);
+    botMention = `<@${botUserId}> `;
+    log(`[auto-checkpoint] Observer client ready as ${client.user!.tag}; bot-under-test ID: ${botUserId}`);
+  } else {
+    botUserId = client.user!.id;
+    log(`[auto-checkpoint] Observer client ready as ${client.user!.tag} (${botUserId})`);
+  }
 
   const rawChannel = await client.channels.fetch(config.channelId);
   if (
@@ -248,35 +294,35 @@ export async function createAutoCheckpoint(config: AutoCheckpointConfig): Promis
       switch (prompt.id) {
         case 'checkpoint-message-handling': {
           const result = await verifyMessageHandling(
-            channel, botUserId, config.slug, pollTimeoutMs, pollIntervalMs, log,
+            channel, botUserId, config.slug, pollTimeoutMs, pollIntervalMs, log, botMention,
           );
           return result.status;
         }
 
         case 'checkpoint-follow-up-reply': {
           const result = await verifyFollowUpReply(
-            channel, botUserId, config.slug, pollTimeoutMs, pollIntervalMs, log,
+            channel, botUserId, config.slug, pollTimeoutMs, pollIntervalMs, log, botMention,
           );
           return result.status;
         }
 
         case 'checkpoint-task-sync': {
           const result = await verifyTaskSync(
-            channel, botUserId, config.artifacts.taskTitle, pollTimeoutMs, pollIntervalMs, log,
+            channel, botUserId, config.artifacts.taskTitle, pollTimeoutMs, pollIntervalMs, log, botMention,
           );
           return result.status;
         }
 
         case 'checkpoint-cron-execution': {
           const result = await verifyCronExecution(
-            channel, botUserId, config.artifacts.cronName, pollTimeoutMs, pollIntervalMs, log,
+            channel, botUserId, config.artifacts.cronName, pollTimeoutMs, pollIntervalMs, log, botMention,
           );
           return result.status;
         }
 
         case 'checkpoint-restart-recovery': {
           const result = await verifyRestartRecovery(
-            channel, botUserId, config.slug, pollTimeoutMs, pollIntervalMs, log,
+            channel, botUserId, config.slug, pollTimeoutMs, pollIntervalMs, log, botMention,
           );
           return result.status;
         }

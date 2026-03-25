@@ -234,6 +234,7 @@ function usage(): string[] {
     'Flags:',
     '  --auto                      Replace TTY checkpoints with programmatic Discord API verification.',
     '  --auto-channel=<id>         Text-channel ID for auto-checkpoint probe messages (required with --auto).',
+    '  --auto-token=<token>        Separate Discord bot token for the observer (avoids self-message guard).',
     '  --auto-poll-interval=<ms>   Milliseconds between polls for a bot reply (default: 2000).',
     '  --auto-poll-timeout=<ms>    Maximum milliseconds to wait for a bot reply (default: 120000).',
   ];
@@ -1170,6 +1171,7 @@ export async function runReleaseRehearsal(options: {
   const randomSuffix = deps.randomSuffix ?? defaultRandomSuffix;
   const autoMode = readArgvFlag(argv, '--auto');
   const autoChannelId = readArgvValue(argv, '--auto-channel');
+  const autoToken = readArgvValue(argv, '--auto-token');
   const autoPollIntervalMs = readArgvInt(argv, '--auto-poll-interval');
   const autoPollTimeoutMs = readArgvInt(argv, '--auto-poll-timeout');
 
@@ -1338,6 +1340,7 @@ export async function runReleaseRehearsal(options: {
     try {
       const autoCtx = await createAutoCheckpoint({
         discordToken,
+        observerToken: autoToken ?? undefined,
         channelId: autoChannelId,
         slug,
         artifacts,
