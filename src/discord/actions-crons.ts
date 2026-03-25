@@ -762,7 +762,9 @@ export async function executeCronAction(
         const job = cronCtx.scheduler.getJob(rec.threadId);
         const name = job?.name ?? cronId;
         const schedule = rec.schedule ?? job?.def.schedule ?? '?';
-        const status = rec.disabled ? 'paused' : (rec.lastRunStatus ?? 'pending');
+        const status = rec.disabled
+          ? rec.pauseSource === 'system' ? 'paused:sys' : 'paused'
+          : (rec.lastRunStatus ?? 'pending');
         const displayStatus = job?.running ? `${status} \uD83D\uDD04` : status;
         const model = rec.modelOverride ?? rec.model ?? '?';
         const runs = rec.runCount ?? 0;
@@ -797,7 +799,10 @@ export async function executeCronAction(
       }
       const nextRun = job?.cron?.nextRun() ?? null;
       lines.push(`Next run: ${nextRun ? `<t:${Math.floor(nextRun.getTime() / 1000)}:F>` : 'N/A'}`);
-      lines.push(`Status: ${record.disabled ? 'paused' : 'active'}`);
+      const pauseLabel = record.disabled
+        ? record.pauseSource === 'user' ? 'paused (user)' : record.pauseSource === 'system' ? 'paused (system)' : 'paused'
+        : 'active';
+      lines.push(`Status: ${pauseLabel}`);
       if (job?.running) {
         lines.push(`Runtime: \uD83D\uDD04 running`);
       }
@@ -851,7 +856,9 @@ export async function executeCronAction(
       }
 
       // --- Canonical local write FIRST (commit point) ---
-      await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, { disabled: true });
+      // Mark as user-paused so the system distinguishes explicit pause from
+      // auto-archive or system disables — only 'user' pauses are sticky.
+      await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, { disabled: true, pauseSource: 'user' });
 
       // --- Scheduler disable (best-effort — job may not be registered if projection is missing) ---
       const disabled = cronCtx.scheduler.disable(record.threadId);
@@ -885,7 +892,8 @@ export async function executeCronAction(
       }
 
       // --- Canonical local write FIRST (commit point) ---
-      await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, { disabled: false });
+      // Clear both disabled flag and pauseSource so the cron is fully active.
+      await cronCtx.statsStore.upsertRecord(action.cronId, record.threadId, { disabled: false, pauseSource: undefined });
 
       // --- Scheduler enable (best-effort — job may not be registered if projection is missing) ---
       const enabled = cronCtx.scheduler.enable(record.threadId);
@@ -1058,6 +1066,7 @@ export async function executeCronAction(
         channel: rec.channel ?? null,
         prompt: rec.prompt ?? null,
         disabled: rec.disabled,
+        pauseSource: rec.pauseSource ?? null,
         model: rec.modelOverride ?? rec.model ?? null,
         inputMode: normalizeCronInputMode(rec.inputMode, rec.inputShell),
         inputShell: rec.inputShell ?? null,
