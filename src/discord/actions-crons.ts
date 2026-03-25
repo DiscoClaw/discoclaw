@@ -114,11 +114,11 @@ export type CronContext = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function normalizeCronInputMode(inputMode?: 'prompt' | 'shell', inputShell?: string): 'prompt' | 'shell' {
+export function normalizeCronInputMode(inputMode?: 'prompt' | 'shell', inputShell?: string): 'prompt' | 'shell' {
   return inputMode === 'shell' || Boolean(inputShell?.trim()) ? 'shell' : 'prompt';
 }
 
-function describeCronInputMode(inputMode?: 'prompt' | 'shell', inputShell?: string): string {
+export function describeCronInputMode(inputMode?: 'prompt' | 'shell', inputShell?: string): string {
   return normalizeCronInputMode(inputMode, inputShell) === 'shell' ? 'shell-input' : 'prompt-only';
 }
 
@@ -142,12 +142,27 @@ function validateCronInputConfig(
   return { inputShell };
 }
 
-function truncateProjectionText(text: string, limit: number, continuation: string): string {
+export function truncateProjectionText(text: string, limit: number, continuation: string): string {
   if (text.length <= limit) return text;
   return `${text.slice(0, limit)}${continuation}`;
 }
 
-function buildStarterContent(
+/** Discord message hard limit. */
+const DISCORD_MESSAGE_LIMIT = 2000;
+
+/** Continuation marker appended when the prompt is truncated. */
+const PROMPT_CONTINUATION = '… *(full prompt pinned below)*';
+
+/**
+ * Build the bot-formatted starter message for a cron thread.
+ *
+ * The output has a deterministic structure that `parseStarterContent` in
+ * `src/cron/parser.ts` can recover without an LLM call.  To maximize the
+ * prompt content available for deterministic recovery (e.g. after a data-dir
+ * reset), the prompt is truncated dynamically to fill the remaining space
+ * within the Discord 2000-char message limit rather than using a fixed cap.
+ */
+export function buildStarterContent(
   schedule: string,
   timezone: string,
   channel: string,
@@ -155,9 +170,6 @@ function buildStarterContent(
   inputMode?: 'prompt' | 'shell',
   inputShell?: string,
 ): string {
-  const truncatedPrompt = prompt.length > 200
-    ? `${prompt.slice(0, 200)}… *(full prompt pinned below)*`
-    : prompt;
   const lines = [
     `**Schedule:** \`${schedule}\` (${timezone})`,
     `**Channel:** #${channel}`,
@@ -171,6 +183,15 @@ function buildStarterContent(
       '```',
     );
   }
+
+  // Calculate how much room remains for the prompt within the Discord limit.
+  // The metadata block is joined with '\n', then a blank line ('\n'), then the prompt.
+  const metadataBlock = lines.join('\n') + '\n';
+  const promptBudget = DISCORD_MESSAGE_LIMIT - metadataBlock.length - PROMPT_CONTINUATION.length;
+
+  const truncatedPrompt = prompt.length > promptBudget
+    ? `${prompt.slice(0, Math.max(0, promptBudget))}${PROMPT_CONTINUATION}`
+    : prompt;
 
   lines.push('', truncatedPrompt);
   return lines.join('\n');
