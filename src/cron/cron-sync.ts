@@ -8,7 +8,7 @@ import type { ParsedCronDef } from './types.js';
 import type { CronScheduler } from './scheduler.js';
 import { detectCadence } from './cadence.js';
 import { autoTagCron, classifyCronModel } from './auto-tag.js';
-import { buildCronThreadName, ensureStatusMessage, resolveForumChannel } from './discord-sync.js';
+import { buildCronThreadName, ensureStatusMessage, resolveForumChannel, tryUnpinMessage } from './discord-sync.js';
 import type { TagMap } from './discord-sync.js';
 
 // ---------------------------------------------------------------------------
@@ -451,6 +451,49 @@ export async function runCronSync(opts: CronSyncOptions): Promise<CronSyncResult
             await ensureStatusMessage(client, liveRecord.threadId, cronId, liveRecord, statsStore, { log });
           } catch {
             // Thread may not exist; status message update is best-effort.
+          }
+
+          // Refresh prompt message for drifted projections — unpin stale before pinning replacement.
+          if (liveRecord.prompt && liveRecord.promptMessageId) {
+            try {
+              let thread: ThreadChannel | null = null;
+              const cached = client.channels.cache.get(liveRecord.threadId);
+              if (cached && cached.isThread()) {
+                thread = cached as ThreadChannel;
+              } else {
+                try {
+                  const fetched = await client.channels.fetch(liveRecord.threadId);
+                  if (fetched && fetched.isThread()) thread = fetched as ThreadChannel;
+                } catch { /* thread may not exist */ }
+              }
+
+              if (thread) {
+                const embed = new EmbedBuilder()
+                  .setTitle('\uD83D\uDCCB Cron Prompt')
+                  .setDescription(buildPromptMessageDescription(liveRecord))
+                  .setColor(0x5865F2);
+
+                let edited = false;
+                try {
+                  const existing = await thread.messages.fetch(liveRecord.promptMessageId);
+                  if (existing) {
+                    await existing.edit({ embeds: [embed], allowedMentions: { parse: [] } });
+                    edited = true;
+                  }
+                } catch {
+                  // Edit failed — unpin old message before creating replacement.
+                  await tryUnpinMessage(thread, liveRecord.promptMessageId, log);
+                }
+
+                if (!edited) {
+                  const msg = await thread.send({ embeds: [embed], allowedMentions: { parse: [] } });
+                  try { await msg.pin(); } catch { /* non-fatal */ }
+                  await statsStore.upsertRecord(cronId, liveRecord.threadId, { promptMessageId: msg.id });
+                }
+              }
+            } catch (err) {
+              log?.warn({ err, cronId }, 'cron-sync:phase5 prompt message refresh failed');
+            }
           }
 
           await statsStore.upsertRecord(cronId, liveRecord.threadId, {

@@ -154,6 +154,8 @@ export class CronRunStats {
   private threadIndex = new Map<string, string>();
   // Secondary index: statusMessageId → cronId for O(1) recovery lookups.
   private statusMessageIndex = new Map<string, string>();
+  // Secondary index: promptMessageId → cronId for O(1) lookups.
+  private promptMessageIndex = new Map<string, string>();
   // Secondary index: webhookSourceId → cronId for O(1) webhook routing.
   private sourceIndex = new Map<string, string>();
 
@@ -166,11 +168,15 @@ export class CronRunStats {
   private rebuildThreadIndex(): void {
     this.threadIndex.clear();
     this.statusMessageIndex.clear();
+    this.promptMessageIndex.clear();
     this.sourceIndex.clear();
     for (const rec of Object.values(this.store.jobs)) {
       this.threadIndex.set(rec.threadId, rec.cronId);
       if (rec.statusMessageId) {
         this.statusMessageIndex.set(rec.statusMessageId, rec.cronId);
+      }
+      if (rec.promptMessageId) {
+        this.promptMessageIndex.set(rec.promptMessageId, rec.cronId);
       }
       if (rec.webhookSourceId) {
         this.sourceIndex.set(rec.webhookSourceId, rec.cronId);
@@ -196,6 +202,11 @@ export class CronRunStats {
     return cronId ? this.store.jobs[cronId] : undefined;
   }
 
+  getRecordByPromptMessageId(promptMessageId: string): CronRunRecord | undefined {
+    const cronId = this.promptMessageIndex.get(promptMessageId);
+    return cronId ? this.store.jobs[cronId] : undefined;
+  }
+
   getRecordBySourceId(sourceId: string): CronRunRecord | undefined {
     const cronId = this.sourceIndex.get(sourceId);
     return cronId ? this.store.jobs[cronId] : undefined;
@@ -216,6 +227,7 @@ export class CronRunStats {
       const existing = this.store.jobs[cronId];
       if (existing) {
         const prevStatusMessageId = existing.statusMessageId;
+        const prevPromptMessageId = existing.promptMessageId;
         const prevSourceId = existing.webhookSourceId;
         // If threadId changed, remove old index entry.
         if (existing.threadId !== threadId) {
@@ -241,6 +253,9 @@ export class CronRunStats {
         if (prevStatusMessageId && prevStatusMessageId !== existing.statusMessageId) {
           this.statusMessageIndex.delete(prevStatusMessageId);
         }
+        if (prevPromptMessageId && prevPromptMessageId !== existing.promptMessageId) {
+          this.promptMessageIndex.delete(prevPromptMessageId);
+        }
         if (prevSourceId && prevSourceId !== existing.webhookSourceId) {
           this.sourceIndex.delete(prevSourceId);
         }
@@ -252,6 +267,9 @@ export class CronRunStats {
       this.threadIndex.set(threadId, cronId);
       if (record.statusMessageId) {
         this.statusMessageIndex.set(record.statusMessageId, cronId);
+      }
+      if (record.promptMessageId) {
+        this.promptMessageIndex.set(record.promptMessageId, cronId);
       }
       if (record.webhookSourceId) {
         this.sourceIndex.set(record.webhookSourceId, cronId);
@@ -314,6 +332,7 @@ export class CronRunStats {
       if (rec) {
         this.threadIndex.delete(rec.threadId);
         if (rec.statusMessageId) this.statusMessageIndex.delete(rec.statusMessageId);
+        if (rec.promptMessageId) this.promptMessageIndex.delete(rec.promptMessageId);
         if (rec.webhookSourceId) this.sourceIndex.delete(rec.webhookSourceId);
         delete this.store.jobs[cronId];
         this.store.updatedAt = Date.now();
@@ -331,6 +350,7 @@ export class CronRunStats {
         if (rec.threadId === threadId) {
           this.threadIndex.delete(threadId);
           if (rec.statusMessageId) this.statusMessageIndex.delete(rec.statusMessageId);
+          if (rec.promptMessageId) this.promptMessageIndex.delete(rec.promptMessageId);
           if (rec.webhookSourceId) this.sourceIndex.delete(rec.webhookSourceId);
           delete this.store.jobs[cronId];
           removed = true;
