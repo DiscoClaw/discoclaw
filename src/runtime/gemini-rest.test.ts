@@ -29,7 +29,7 @@ function makeGeminiSSEData(text: string): string {
   })}`;
 }
 
-function makeGeminiSSEDataWithUsage(text: string, usage: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number }): string {
+function makeGeminiSSEDataWithUsage(text: string, usage: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number; cachedContentTokenCount?: number }): string {
   return `data: ${JSON.stringify({
     candidates: [{ content: { parts: [{ text }] } }],
     usageMetadata: usage,
@@ -170,6 +170,35 @@ describe('Gemini REST runtime adapter', () => {
     expect(usage).toBeDefined();
     expect((usage as { inputTokens: number }).inputTokens).toBe(10);
     expect((usage as { outputTokens: number }).outputTokens).toBe(5);
+  });
+
+  it('emits cachedInputTokens when usageMetadata includes cachedContentTokenCount', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      makeSSEResponse([
+        makeGeminiSSEDataWithUsage('ok', {
+          promptTokenCount: 100,
+          candidatesTokenCount: 20,
+          totalTokenCount: 120,
+          cachedContentTokenCount: 80,
+        }),
+      ]),
+    );
+
+    const runtime = createGeminiRestRuntime({
+      apiKey: 'test-key',
+      defaultModel: 'gemini-2.5-flash',
+    });
+
+    const events = await collectEvents(
+      runtime.invoke({ prompt: 'test', model: '', cwd: '/tmp' }),
+    );
+
+    const usage = events.find((e) => e.type === 'usage');
+    expect(usage).toBeDefined();
+    expect((usage as { inputTokens: number }).inputTokens).toBe(100);
+    expect((usage as { outputTokens: number }).outputTokens).toBe(20);
+    expect((usage as { cachedInputTokens: number }).cachedInputTokens).toBe(80);
+    expect((usage as { cacheSupported: boolean }).cacheSupported).toBe(true);
   });
 
   it('emits error event on non-200 response', async () => {

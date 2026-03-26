@@ -137,6 +137,7 @@ export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
                   promptTokenCount?: number;
                   candidatesTokenCount?: number;
                   totalTokenCount?: number;
+                  cachedContentTokenCount?: number;
                 };
               };
 
@@ -164,6 +165,9 @@ export function createGeminiRestRuntime(opts: GeminiRestOpts): RuntimeAdapter {
                   inputTokens: usage.promptTokenCount,
                   outputTokens: usage.candidatesTokenCount,
                   totalTokens: usage.totalTokenCount,
+                  ...(usage.cachedContentTokenCount != null
+                    ? { cachedInputTokens: usage.cachedContentTokenCount, cacheSupported: true }
+                    : {}),
                 };
               }
             } catch {

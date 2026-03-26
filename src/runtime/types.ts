@@ -120,7 +120,7 @@ export type EngineEvent =
     }
   | { type: 'tool_start'; name: string; input?: unknown }
   | { type: 'tool_end'; name: string; output?: unknown; ok: boolean }
-  | { type: 'usage'; inputTokens?: number; outputTokens?: number; totalTokens?: number; costUsd?: number }
+  | { type: 'usage'; inputTokens?: number; outputTokens?: number; totalTokens?: number; costUsd?: number; cachedInputTokens?: number; cacheSupported?: boolean }
   | RuntimeErrorEvent
   | RuntimeFailureEvent
   | { type: 'finish_metadata'; truncated: boolean; finishReason?: string }
