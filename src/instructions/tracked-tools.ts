@@ -34,6 +34,9 @@ export type TrackedToolsRuntimeContext = {
 const DROPPED_TOP_LEVEL_SECTIONS = new Set([
   'Browser Automation (agent-browser)',
   'Service Operations (discoclaw)',
+  'Runtime Instruction Precedence',
+  'Webhook Server',
+  'Plan-Audit-Implement Workflow',
 ]);
 
 const WEBHOOK_TOOL_ACCESS_SENTENCE = 'webhook jobs run without Discord action permissions or tool access.';
@@ -180,8 +183,10 @@ export function buildPromptSafeTrackedToolsContent(
     }
   }
 
+  const filteredPrelude = prelude.filter((line) => !line.startsWith('> '));
+
   return joinTrackedToolsContent([
-    prelude.join('\n'),
+    filteredPrelude.join('\n'),
     ...filteredSections.map((section) => section.lines.join('\n')),
   ]);
 }

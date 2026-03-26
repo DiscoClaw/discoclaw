@@ -7,6 +7,7 @@ import {
   TRACKED_DEFAULTS_FILE_NAME,
   TRACKED_DEFAULTS_SECTION_LABEL,
   _resetTrackedDefaultsCacheForTests,
+  buildPromptSafeDefaultsContent,
   loadTrackedDefaultsPreamble,
   renderTrackedDefaultsSection,
   resolveTrackedDefaultsPath,
@@ -39,6 +40,35 @@ describe('renderTrackedDefaultsSection', () => {
 
   it('returns empty string for blank content', () => {
     expect(renderTrackedDefaultsSection('\n   \n')).toBe('');
+  });
+});
+
+describe('buildPromptSafeDefaultsContent', () => {
+  it('drops rarely-needed sections from the tracked defaults template', async () => {
+    const content = await fs.readFile(resolveTrackedDefaultsPath(), 'utf-8');
+    const sanitized = buildPromptSafeDefaultsContent(content);
+
+    // Dropped sections
+    expect(sanitized).not.toContain('## Runtime Instruction Precedence');
+    expect(sanitized).not.toContain('## First Run');
+    expect(sanitized).not.toContain('## Runtime Registry');
+    expect(sanitized).not.toContain('## Bot Setup Assistance');
+    expect(sanitized).not.toContain('## Knowledge Cutoff Awareness');
+
+    // Sections that should survive filtering
+    expect(sanitized).toContain('## Search Before Asking');
+    expect(sanitized).toContain('## Tool Use First');
+    expect(sanitized).toContain('## Discord Action Grounding');
+    expect(sanitized).toContain('## Response Economy');
+    expect(sanitized).toContain('## Landing the Plane');
+  });
+
+  it('strips blockquote lines from the prelude', () => {
+    const content = '# Title\n\n> Meta description\n> Second line\n\n## Kept\nContent';
+    const sanitized = buildPromptSafeDefaultsContent(content);
+    expect(sanitized).not.toContain('> Meta description');
+    expect(sanitized).toContain('# Title');
+    expect(sanitized).toContain('## Kept');
   });
 });
 
@@ -99,6 +129,20 @@ describe('loadTrackedDefaultsPreamble', () => {
     const reloaded = loadTrackedDefaultsPreamble({ trackedDefaultsPath, forceReload: true });
     expect(reloaded).toContain('second version');
     expect(reloaded).not.toBe(first);
+  });
+
+  it('sanitizes the default tracked template before rendering it into the preamble', () => {
+    const preamble = loadTrackedDefaultsPreamble({
+      trackedDefaultsPath: resolveTrackedDefaultsPath(),
+      forceReload: true,
+    });
+
+    expect(preamble).toContain(`--- ${TRACKED_DEFAULTS_SECTION_LABEL} ---`);
+    expect(preamble).not.toContain('## Runtime Instruction Precedence');
+    expect(preamble).not.toContain('## Runtime Registry');
+    expect(preamble).not.toContain('## Bot Setup Assistance');
+    expect(preamble).toContain('## Search Before Asking');
+    expect(preamble).toContain('## Tool Use First');
   });
 
   it('invalidates cache when the tracked defaults path changes', async () => {

@@ -56,12 +56,14 @@ describe('buildPromptSafeTrackedToolsContent', () => {
     const trackedToolsContent = await fs.readFile(resolveTrackedToolsPath(), 'utf-8');
     const sanitized = buildPromptSafeTrackedToolsContent(trackedToolsContent);
 
-    expect(sanitized).toContain('## Runtime Instruction Precedence');
+    expect(sanitized).not.toContain('## Runtime Instruction Precedence');
     expect(sanitized).not.toContain('## Browser Automation (agent-browser)');
     expect(sanitized).not.toContain('## Service Operations (discoclaw)');
-    expect(sanitized).toContain('## Webhook Server');
-    expect(sanitized).toContain('Dispatches through the same cron execution pipeline as automations.');
-    expect(sanitized).not.toContain('webhook jobs run without Discord action permissions or tool access');
+    expect(sanitized).not.toContain('## Webhook Server');
+    expect(sanitized).not.toContain('## Plan-Audit-Implement Workflow');
+    // Sections that should survive filtering
+    expect(sanitized).toContain('## Task Management');
+    expect(sanitized).toContain('## Discord Action Types');
   });
 });
 
@@ -208,6 +210,8 @@ describe('loadTrackedToolsPreamble', () => {
     expect(preamble).toContain(`--- ${TRACKED_TOOLS_SECTION_LABEL} ---`);
     expect(preamble).not.toContain('## Browser Automation (agent-browser)');
     expect(preamble).not.toContain('## Service Operations (discoclaw)');
+    expect(preamble).not.toContain('## Webhook Server');
+    expect(preamble).not.toContain('## Plan-Audit-Implement Workflow');
     expect(preamble).not.toContain('webhook jobs run without Discord action permissions or tool access');
   });
 
