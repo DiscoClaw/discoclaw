@@ -170,6 +170,23 @@ async function fetchThreadChannel(client: Client, threadId: string): Promise<Thr
   }
 }
 
+/**
+ * Best-effort unpin of a message by ID within a thread.
+ * Silently swallows errors (message already deleted, missing permissions, etc.).
+ */
+export async function tryUnpinMessage(
+  thread: ThreadChannel,
+  messageId: string,
+  log?: LoggerLike,
+): Promise<void> {
+  try {
+    const msg = await thread.messages.fetch(messageId);
+    if (msg?.pinned) await msg.unpin();
+  } catch {
+    // Message gone or unpin failed — non-fatal.
+  }
+}
+
 export async function ensureStatusMessage(
   client: Client,
   threadId: string,
@@ -192,8 +209,17 @@ export async function ensureStatusMessage(
     try {
       const msg = await thread.messages.fetch(record.statusMessageId);
       if (msg) {
-        await msg.edit({ content, allowedMentions: { parse: [] } });
-        return record.statusMessageId;
+        try {
+          await msg.edit({ content, allowedMentions: { parse: [] } });
+          return record.statusMessageId;
+        } catch {
+          // Edit failed but message exists — unpin before replacing.
+          try {
+            if (msg.pinned) await msg.unpin();
+          } catch {
+            // Non-fatal if unpin fails.
+          }
+        }
       }
     } catch {
       // Message may have been deleted; fall through to create.
