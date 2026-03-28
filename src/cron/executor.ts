@@ -314,6 +314,11 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
   activeCronRunKeys.add(runKey);
   ctx.runControl?.register(job.id, requestCancel);
 
+  // Pre-fetch the silent flag before the try block so the catch block can gate
+  // channel error posts. Without this, errors (e.g. shell timeouts) spam the
+  // channel even when the cron is configured as silent.
+  const isSilent = Boolean(ctx.statsStore && job.cronId && ctx.statsStore.getRecord(job.cronId)?.silent);
+
   try {
     // Best-effort: write running status to persistent store before execution begins.
     if (ctx.statsStore && job.cronId) {
@@ -739,7 +744,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       `Cron "${job.name}": ${msg}`,
     );
 
-    if (ctx.client) {
+    if (!isSilent && ctx.client) {
       const guild = ctx.client.guilds.cache.get(job.guildId);
       const targetChannel = guild ? resolveChannel(guild, job.def.channel) : null;
       if (targetChannel) {
