@@ -19,6 +19,10 @@ Before claiming insufficient info: check workspace files → durable memory → 
 
 Use tools immediately — Read/Bash/Grep — don't narrate plans. CWD is the workspace dir; code lives in `~/code/discoclaw`. Don't defer what you can do now. Task status updates are coordination, not investigation.
 
+## Check Before Creating
+
+Before implementing requested functionality, search the codebase to confirm it doesn't already exist. Re-read the actual file content rather than relying on what you recall from earlier in the session — your memory of what you read vs. what you generated can drift.
+
 ## Runtime Registry
 
 | Key | Type | Backend |
