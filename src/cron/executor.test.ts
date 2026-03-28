@@ -1390,9 +1390,10 @@ describe('executeCronJob shell input mode', () => {
     expect(statsStore.getRecord('cron-test0001')?.lastRunStatus).toBe('error');
     expect(statsStore.getRecord('cron-test0001')?.lastErrorMessage).toContain('code 23');
 
+    // Silent crons should NOT post errors to the channel (only log + stats).
     const guild = (ctx.client as any).guilds.cache.get('guild-1');
     const channel = guild.channels.cache.get('general');
-    expect(channel.send).toHaveBeenCalled();
+    expect(channel.send).not.toHaveBeenCalled();
   });
 
   it('suppresses posting when the AI returns a single valid structured no-post block', async () => {
