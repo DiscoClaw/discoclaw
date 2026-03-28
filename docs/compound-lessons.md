@@ -255,3 +255,10 @@ Lesson: When the system produces structured output (starter messages, status emb
 Source: task/chat context — `initCronForum` boot path fell through to `parseCronDefinition` (an LLM call) when the stats store had no record for a cron thread, causing timeout and API failures that hard-disabled crons with a scary error; dedup search on 2026-03-25 against existing lessons for cron state authority (2026-03-15), state schema drift (2026-03-10), and archive-state decoupling (2026-03-25) confirmed none address parser fallback ordering for bot-generated content — this is materially distinct
 Applied: `docs/compound-lessons.md`
 Status: active
+
+### 2026-03-28 - Do not inject history images as raw content blocks into AI prompts
+Tags: #prompting #discord #workflow
+Lesson: When assembling the AI prompt from conversation history, do not extract and inject images from earlier turns as raw image content blocks. Unlabeled stale images cause the model to analyze or act on old media unprompted — hallucinating relevance where there is none. The text history already notes `[attachment/embed]` when media was present, which is sufficient context. When the user explicitly wants the model to see an older image, the reply-reference mechanism handles that case by downloading only the referenced message's attachments. Keep the current-message image download path (source #1: direct attachments on the triggering message) and the reply-reference path (source #2: user explicitly replies to an older message), but do not add a third path that bulk-injects history images.
+Source: task/chat context — history images from earlier conversation turns were extracted and included alongside the current prompt with no labeling, causing the model to analyze stale images unprompted; the fix removed the history image download block in `message-coordinator.ts`
+Applied: `src/discord/message-coordinator.ts`, `docs/compound-lessons.md`
+Status: active

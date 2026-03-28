@@ -1,6 +1,3 @@
-import type { ImageData } from '../runtime/types.js';
-import type { AttachmentLike } from './image-download.js';
-import { downloadMessageImages } from './image-download.js';
 import type { LoggerLike } from '../logging/logger-like.js';
 import { countPinnedMessages, normalizePinnedMessages } from './pinned-message-utils.js';
 
@@ -11,8 +8,6 @@ import { countPinnedMessages, normalizePinnedMessages } from './pinned-message-u
 export type ThreadContextResult = {
   /** Formatted context string ready for injection into forge/plan descriptions. */
   section: string;
-  /** Downloaded images from thread history messages. */
-  images: ImageData[];
 };
 
 /** Minimal shape for a Discord thread channel. */
@@ -32,7 +27,7 @@ export type ThreadMessage = {
   id: string;
   author: { bot?: boolean; displayName?: string; username: string };
   content?: string | null;
-  attachments?: { size: number } | Map<string, AttachmentLike> | { values(): Iterable<AttachmentLike>; size: number };
+  attachments?: { size: number } | { values(): Iterable<unknown>; size: number };
   embeds?: { length: number } | unknown[];
 };
 
@@ -45,8 +40,6 @@ export type ThreadContextOpts = {
   botDisplayName?: string;
   /** Include pinned-thread posts in the context output. */
   includePinned?: boolean;
-  /** Max number of images to download from thread history. */
-  historyImageBudget?: number;
   log?: LoggerLike;
 };
 
@@ -61,14 +54,6 @@ function hasMedia(m: ThreadMessage): boolean {
   const attSize = m.attachments && ('size' in m.attachments ? m.attachments.size : 0);
   const embLen = m.embeds && ('length' in m.embeds ? m.embeds.length : 0);
   return (attSize ?? 0) > 0 || (embLen ?? 0) > 0;
-}
-
-function extractAttachmentLikes(attachments: ThreadMessage['attachments']): AttachmentLike[] {
-  if (!attachments) return [];
-  if (typeof (attachments as Record<string, unknown>).values === 'function') {
-    return [...(attachments as { values(): Iterable<AttachmentLike> }).values()];
-  }
-  return [];
 }
 
 function formatMessageLine(m: ThreadMessage, botName: string, suffix?: string): string | null {
@@ -197,10 +182,7 @@ export async function resolveThreadContext(
   }
 
   // 4. Recent thread messages (before the current command message)
-  const historyImageBudget = opts.historyImageBudget ?? 0;
-  let fetchedRecent: ThreadMessage[] = [];
-
-  if (recentLimit > 0 && (remaining > 50 || historyImageBudget > 0)) {
+  if (recentLimit > 0 && remaining > 50) {
     try {
       const messages = await channel.messages.fetch({
         before: currentMessageId,
@@ -211,34 +193,31 @@ export async function resolveThreadContext(
         // Sort by snowflake ID (ascending = chronological).
         const sorted = Array.from(messages.values())
           .sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-        fetchedRecent = sorted;
 
-        if (remaining > 50) {
-          const lines: string[] = [];
-          for (const m of sorted) {
-            // Deduplicate: skip the starter message if it appears in recent messages
-            if (m.id && seenMessageIds.has(m.id)) continue;
+        const lines: string[] = [];
+        for (const m of sorted) {
+          // Deduplicate: skip the starter message if it appears in recent messages
+          if (m.id && seenMessageIds.has(m.id)) continue;
 
-            const line = formatMessageLine(m, botName);
-            if (!line) continue;
+          const line = formatMessageLine(m, botName);
+          if (!line) continue;
 
-            if (line.length <= remaining) {
-              lines.push(line);
-              remaining -= line.length + 1;
-              if (m.id) seenMessageIds.add(m.id);
-            } else if (remaining > 50 && m.author.bot) {
-              lines.push(line.slice(0, remaining - 3) + '...');
-              remaining = 0;
-              break;
-            } else {
-              break;
-            }
+          if (line.length <= remaining) {
+            lines.push(line);
+            remaining -= line.length + 1;
+            if (m.id) seenMessageIds.add(m.id);
+          } else if (remaining > 50 && m.author.bot) {
+            lines.push(line.slice(0, remaining - 3) + '...');
+            remaining = 0;
+            break;
+          } else {
+            break;
           }
+        }
 
-          if (lines.length > 0) {
-            sections.push('Recent thread messages:');
-            sections.push(...lines);
-          }
+        if (lines.length > 0) {
+          sections.push('Recent thread messages:');
+          sections.push(...lines);
         }
       }
     } catch (err) {
@@ -246,28 +225,7 @@ export async function resolveThreadContext(
     }
   }
 
-  // 5. Download images from thread history (newest-first)
-  const images: ImageData[] = [];
-  if (historyImageBudget > 0 && fetchedRecent.length > 0) {
-    const candidates: AttachmentLike[] = [];
-    for (let i = fetchedRecent.length - 1; i >= 0; i--) {
-      candidates.push(...extractAttachmentLikes(fetchedRecent[i]!.attachments));
-    }
+  if (sections.length === 0) return null;
 
-    if (candidates.length > 0) {
-      try {
-        const dlResult = await downloadMessageImages(candidates, historyImageBudget);
-        images.push(...dlResult.images);
-        if (dlResult.errors.length > 0) {
-          opts.log?.warn({ errors: dlResult.errors }, 'thread-context: image download errors');
-        }
-      } catch (err) {
-        opts.log?.warn({ err }, 'thread-context: image download failed');
-      }
-    }
-  }
-
-  if (sections.length === 0 && images.length === 0) return null;
-
-  return { section: sections.join('\n'), images };
+  return { section: sections.join('\n') };
 }

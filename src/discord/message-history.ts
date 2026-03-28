@@ -1,7 +1,5 @@
 import type { TextBasedChannel } from 'discord.js';
 
-import type { AttachmentLike } from './image-download.js';
-
 export type MessageHistoryOpts = {
   budgetChars: number;
   fetchLimit?: number;
@@ -33,18 +31,16 @@ export function formatRelativeTime(deltaMs: number): string {
 export type MessageHistoryResult = {
   /** Formatted text transcript in chronological order. */
   text: string;
-  /** Attachments from history messages, ordered newest-first for budget trimming. */
-  historyAttachments: AttachmentLike[];
 };
 
-const EMPTY_RESULT: MessageHistoryResult = { text: '', historyAttachments: [] };
+const EMPTY_RESULT: MessageHistoryResult = { text: '' };
 
 /**
  * Fetch recent messages from a Discord channel and format them as conversation
  * history suitable for prepending to a prompt.
  *
- * Returns text in chronological order and attachments newest-first so the
- * caller can trim to an image budget starting from the most recent.
+ * Returns text in chronological order. Messages with attachments or embeds
+ * but no text content are represented as `[attachment]` / `[embed]`.
  */
 export async function fetchMessageHistory(
   channel: TextBasedChannel,
@@ -92,7 +88,21 @@ export async function fetchMessageHistory(
   for (let i = sorted.length - 1; i >= 0 && remaining > 0; i--) {
     const m = sorted[i]!;
     const author = m.author.bot ? (opts.botDisplayName ?? 'Discoclaw') : (m.author.displayName || m.author.username);
-    const content = String(m.content ?? '');
+    let content = String(m.content ?? '').trim();
+    if (!content) {
+      const atts = (m as unknown as Record<string, unknown>).attachments;
+      const hasAttachments = atts && typeof (atts as Record<string, unknown>).size === 'number'
+        && (atts as { size: number }).size > 0;
+      const embeds = (m as unknown as Record<string, unknown>).embeds;
+      const hasEmbeds = Array.isArray(embeds) && embeds.length > 0;
+      if (hasAttachments) {
+        content = '[attachment]';
+      } else if (hasEmbeds) {
+        content = '[embed]';
+      } else {
+        continue;
+      }
+    }
     const ts = typeof m.createdTimestamp === 'number' ? m.createdTimestamp : 0;
     const age = ts > 0 ? formatRelativeTime(now - ts) : '';
     const tag = age ? `${author}, ${age}` : author;
@@ -114,18 +124,6 @@ export async function fetchMessageHistory(
     }
   }
 
-  // Extract attachments newest-first for downstream image budget trimming.
-  const historyAttachments: AttachmentLike[] = [];
-  for (let i = sorted.length - 1; i >= 0; i--) {
-    const m = sorted[i]!;
-    const atts = (m as unknown as Record<string, unknown>).attachments;
-    if (atts && typeof (atts as Record<string, unknown>).values === 'function') {
-      for (const a of (atts as { values(): Iterable<AttachmentLike> }).values()) {
-        historyAttachments.push(a);
-      }
-    }
-  }
-
   const text = selected.length > 0 ? selected.join('\n') : '';
-  return { text, historyAttachments };
+  return { text };
 }

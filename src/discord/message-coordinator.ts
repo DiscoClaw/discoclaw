@@ -3229,7 +3229,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           let stopReactionRemoved = false;
           // Declared before try so they remain accessible after the finally block closes.
           let historySection = '';
-          let historyAttachments: AttachmentLike[] = [];
           let summarySection = '';
           let existingSummaryText: string | null = null;
           let existingSummaryUpdatedAt: number | undefined;
@@ -3312,7 +3311,6 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 { budgetChars: params.messageHistoryBudget, fetchLimit: params.messageHistoryFetchLimit, maxAgeMs: params.messageHistoryMaxAgeMs, botDisplayName: params.botDisplayName },
               );
               historySection = historyResult.text;
-              historyAttachments = historyResult.historyAttachments;
             } catch (err) {
               params.log?.warn({ err }, 'discord:history fetch failed');
             }
@@ -3580,7 +3578,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             'invoke:start',
           );
 
-          // Collect images across sources. Priority: direct > reply-ref > history.
+          // Collect images across sources. Priority: direct > reply-ref.
           // Each source fills the remaining MAX_IMAGES_PER_INVOCATION budget.
           let inputImages: ImageData[] | undefined;
 
@@ -3674,40 +3672,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
             params.log?.warn({ err }, 'discord:youtube transcript fetch failed');
           }
 
-          // 3. History images from thread/channel context (remaining budget).
-          // Skip for Codex runtime: `codex exec resume` does not support --image,
-          // so history images would force a session reset on every turn that has
-          // any image in recent channel history. Direct-message images (from the
-          // user's current message) still work — they trigger a fresh session.
-          const skipHistoryImages = params.runtime.id === 'codex';
-          if (!skipHistoryImages && historyAttachments.length > 0) {
-            const currentCount = inputImages?.length ?? 0;
-            const historyImageBudget = MAX_IMAGES_PER_INVOCATION - currentCount;
-            if (historyImageBudget > 0) {
-              try {
-                // Deduplicate: exclude attachment URLs already processed from the direct message.
-                const directUrls = new Set<string>();
-                if (msg.attachments) {
-                  for (const att of msg.attachments.values()) {
-                    directUrls.add(att.url);
-                  }
-                }
-                const deduped = historyAttachments.filter(a => !directUrls.has(a.url));
-                if (deduped.length > 0) {
-                  const dlResult = await downloadMessageImages(deduped, historyImageBudget);
-                  if (dlResult.images.length > 0) {
-                    inputImages = [...(inputImages ?? []), ...dlResult.images];
-                    params.log?.info({ imageCount: dlResult.images.length }, 'discord:history images downloaded');
-                  }
-                  if (dlResult.errors.length > 0) {
-                    params.log?.warn({ errors: dlResult.errors }, 'discord:history image download errors');
-                  }
-                }
-              } catch (err) {
-                params.log?.warn({ err }, 'discord:history image download failed');
-              }
-            }
-          }
+          // History images are intentionally NOT injected here. The text
+          // history already notes `[attachment/embed]` when media was present,
+          // and the reply-reference mechanism (source #2 above) handles cases
+          // where the user explicitly wants the model to see an older image.
+          // Injecting history images as raw content blocks caused the model to
+          // analyze or act on stale images unprompted.
 
           let currentPrompt = prompt;
           let followUpDepth = 0;
