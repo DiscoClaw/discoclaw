@@ -481,6 +481,13 @@ export async function buildDurableMemorySection(opts: {
  * Returns an empty string when cold storage is disabled, unavailable,
  * or no results match the query. Never throws.
  */
+/**
+ * Optional HyDE (Hypothetical Document Embedding) generator.
+ * Given a raw user query, returns a hypothetical answer whose embedding
+ * better matches stored content, or null to fall back to raw query embedding.
+ */
+export type HydeGenerator = (query: string) => Promise<string | null>;
+
 export async function buildColdStoragePromptSection(opts: {
   enabled: boolean;
   subsystem?: ColdStorageSubsystem;
@@ -490,6 +497,7 @@ export async function buildColdStoragePromptSection(opts: {
   channelFilter?: string[];
   maxChars?: number;
   searchLimit?: number;
+  hydeGenerator?: HydeGenerator;
   log?: LoggerLike;
 }): Promise<string> {
   if (!opts.enabled || !opts.subsystem || !opts.query) return '';
@@ -500,17 +508,37 @@ export async function buildColdStoragePromptSection(opts: {
   }
 
   try {
-    // Generate embedding for the query (3-second timeout — fail open on slow APIs)
+    // HyDE step: generate a hypothetical answer to embed instead of the raw query.
+    // Falls back to raw query if generator is absent, returns null, or times out.
+    let textToEmbed = opts.query;
+    if (opts.hydeGenerator) {
+      const HYDE_TIMEOUT_MS = 3_000;
+      try {
+        const hydeResult = await Promise.race([
+          opts.hydeGenerator(opts.query),
+          new Promise<null>((resolve) =>
+            setTimeout(() => resolve(null), HYDE_TIMEOUT_MS),
+          ),
+        ]);
+        if (hydeResult != null) {
+          textToEmbed = hydeResult;
+        }
+      } catch (err) {
+        opts.log?.warn({ err }, 'cold-storage HyDE generation failed, falling back to raw query');
+      }
+    }
+
+    // Generate embedding (3-second timeout — fail open on slow APIs)
     const EMBED_TIMEOUT_MS = 3_000;
     const embeddings = await Promise.race([
-      opts.subsystem.embeddings.embed([opts.query]),
+      opts.subsystem.embeddings.embed([textToEmbed]),
       new Promise<Float32Array[]>((_, reject) =>
         setTimeout(() => reject(new Error('cold-storage embedding timeout')), EMBED_TIMEOUT_MS),
       ),
     ]);
     if (embeddings.length === 0) return '';
 
-    // Search with both vector and FTS
+    // Search with both vector and FTS — raw query drives keyword leg unchanged
     const results: SearchResult[] = opts.subsystem.store.search({
       embedding: embeddings[0],
       query: opts.query,
