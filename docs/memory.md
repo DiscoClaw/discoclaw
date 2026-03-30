@@ -152,6 +152,8 @@ Bot:   You went with Reciprocal Rank Fusion (RRF) — it merges vector
        decision was made in #dev about two weeks ago.
 ```
 
+**HyDE query rewriting:** Before vector search, cold storage generates a hypothetical answer to the user's query using a fast LLM call, then embeds that hypothetical answer instead of the raw query. This bridges the vocabulary gap between short questions and stored content, improving semantic retrieval accuracy. The FTS5 keyword leg still searches against the original raw query, so exact-match recall is unaffected.
+
 Requires an embedding API (OpenAI or any OpenAI-compatible endpoint). Enable with `DISCOCLAW_COLD_STORAGE_ENABLED=true`. See [docs/configuration.md](configuration.md) for all cold storage env vars.
 
 ### 7. Workspace Files — human-curated memory
