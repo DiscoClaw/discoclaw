@@ -206,6 +206,8 @@ export type DiscoclawConfig = {
   coldStorageChannelFilter: string[];
   coldStorageInjectMaxChars: number;
   coldStorageSearchLimit: number;
+  coldStorageHydeEnabled: boolean;
+  coldStorageHydeModel?: string;
 
   summaryToDurableEnabled: boolean;
   shortTermMemoryEnabled: boolean;
@@ -1234,6 +1236,8 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       })(),
       coldStorageInjectMaxChars: parsePositiveInt(env, 'DISCOCLAW_COLD_STORAGE_INJECT_MAX_CHARS', 1500),
       coldStorageSearchLimit: parsePositiveInt(env, 'DISCOCLAW_COLD_STORAGE_SEARCH_LIMIT', 10),
+      coldStorageHydeEnabled: parseBoolean(env, 'DISCOCLAW_COLD_STORAGE_HYDE_ENABLED', false),
+      coldStorageHydeModel: parseTrimmedString(env, 'COLD_STORAGE_HYDE_MODEL'),
 
       summaryToDurableEnabled: parseBoolean(env, 'DISCOCLAW_SUMMARY_TO_DURABLE_ENABLED', true),
       shortTermMemoryEnabled: parseBoolean(env, 'DISCOCLAW_SHORTTERM_MEMORY_ENABLED', true),
