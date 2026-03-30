@@ -240,6 +240,7 @@ Semantic search over conversation history. SQLite + sqlite-vec for vector storag
 | OpenAI-compatible embedding provider (Ollama, vLLM, LM Studio, Together — no `dimensions` in request body, model prefix stripping) | `src/cold-storage/openai-compat.ts`, `src/cold-storage/openai-compat.test.ts` | **done** |
 | Store (SQLite + sqlite-vec + FTS5, hybrid vector/keyword search, RRF merge, insert/search/delete) | `src/cold-storage/store.ts`, `src/cold-storage/store.test.ts` | **done** |
 | Prompt section builder (formats search results into budget-capped prompt text) | `src/cold-storage/prompt-section.ts`, `src/cold-storage/prompt-section.test.ts` | **done** |
+| HyDE query rewriter (generates hypothetical answer, embeds it instead of raw query for vector leg; FTS5 keyword leg still uses raw query) | `src/cold-storage/hyde.ts`, `src/cold-storage/hyde.test.ts` | **done** |
 | Barrel + factory (`createColdStorage()`, re-exports) | `src/cold-storage/index.ts`, `src/cold-storage/index.test.ts` | **done** |
 
 Config: `DISCOCLAW_COLD_STORAGE_ENABLED`, `COLD_STORAGE_PROVIDER`, `COLD_STORAGE_API_KEY`, `COLD_STORAGE_MODEL`, `COLD_STORAGE_DIMENSIONS`, `COLD_STORAGE_BASE_URL`, `COLD_STORAGE_DB_PATH`, `DISCOCLAW_COLD_STORAGE_INJECT_MAX_CHARS`, `DISCOCLAW_COLD_STORAGE_SEARCH_LIMIT`.
