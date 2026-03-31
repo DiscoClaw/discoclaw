@@ -241,11 +241,13 @@ export function shouldSuppressFollowUp(
 
 const DISCORD_ACTION_INTENT_BASE_VERBS = String.raw`create|send|edit|delete|close|open|post|react|launch|remember|forget|pin|unpin|crosspost|archive|ban|kick|timeout|set`;
 const DISCORD_ACTION_INTENT_PROGRESSIVE_VERBS = String.raw`creating|sending|editing|deleting|closing|opening|posting|reacting|launching|remembering|forgetting|pinning|unpinning|crossposting|archiving|banning|kicking|setting`;
+const DISCORD_ACTION_INTENT_PAST_VERBS = String.raw`posted|sent|edited|deleted|closed|opened|created|reacted|launched|remembered|forgot|pinned|unpinned|crossposted|archived|banned|kicked|set`;
+const DISCORD_ACTION_INTENT_PAST_PARTICIPLES = String.raw`posted|sent|edited|deleted|closed|opened|created|reacted|launched|remembered|forgotten|pinned|unpinned|crossposted|archived|banned|kicked|set`;
 const DISCORD_ACTION_INTENT_RESOURCE_NOUNS = String.raw`channel|thread|message|reply|task|plan|cron|poll|reaction|pin|user|member|nickname|status|activity|canvas|image|file|attachment|memory|preference|fact|note`;
 const DISCORD_ACTION_INTENT_NEGATION_RE =
   /\b(?:i have not started yet|i haven't started yet|have not started yet|haven't started yet|not started yet|i have not begun yet|i haven't begun yet|have not begun yet|haven't begun yet|i am not starting|i'm not starting|i am not doing that yet|i'm not doing that yet|not proceeding now|not handling it now)\b/i;
 const DISCORD_ACTION_INTENT_EXPLANATION_RE =
-  /\b(?:example(?: only)?|for example|for instance|e\.g\.|i can|i could|i would|you can|you could|you would|if you want|when you're ready|would use|would emit|would send|would create|would run|do not run|don't run|not run)\b/i;
+  /\b(?:example(?: only)?|for example|for instance|e\.g\.|i can|i could|i would|you can|you could|you would|if you want|if I|when you're ready|would use|would emit|would send|would create|would run|do not run|don't run|not run)\b/i;
 const DISCORD_ACTION_INTENT_PATTERNS = [
   new RegExp(
     String.raw`\b(?:i am|i'm)\s+(?:${DISCORD_ACTION_INTENT_PROGRESSIVE_VERBS})\b[^.!?\n]{0,80}\b(?:${DISCORD_ACTION_INTENT_RESOURCE_NOUNS})s?\b(?:[^.!?\n]{0,40}\b(?:now|already)\b)?`,
@@ -263,6 +265,26 @@ const DISCORD_ACTION_INTENT_PATTERNS = [
   /\b(?:(?:i am|i'm)\s+)?already handling (?:it|that|this)(?: now)?\b/i,
   /\b(?:(?:i am|i'm)\s+)?taking the next pass(?: now)?\b/i,
   /\b(?:(?:i am|i'm)\s+)?cleaning(?: [^.!?\n]{0,40})? up now\b/i,
+  // Headless past — sentence-initial past verb + resource noun, no subject.
+  new RegExp(
+    String.raw`^(?:${DISCORD_ACTION_INTENT_PAST_VERBS})\b[^.!?\n]{0,80}\b(?:${DISCORD_ACTION_INTENT_RESOURCE_NOUNS})s?\b`,
+    'i',
+  ),
+  // First-person past — I + past verb + resource noun.
+  new RegExp(
+    String.raw`\bI\s+(?:${DISCORD_ACTION_INTENT_PAST_VERBS})\b[^.!?\n]{0,80}\b(?:${DISCORD_ACTION_INTENT_RESOURCE_NOUNS})s?\b`,
+    'i',
+  ),
+  // Perfect tense — I've / I have + past participle + resource noun.
+  new RegExp(
+    String.raw`\b(?:I've|I have)\s+(?:${DISCORD_ACTION_INTENT_PAST_PARTICIPLES})\b[^.!?\n]{0,80}\b(?:${DISCORD_ACTION_INTENT_RESOURCE_NOUNS})s?\b`,
+    'i',
+  ),
+  // Done-prefix — "Done" at sentence start followed by past verb + resource noun.
+  new RegExp(
+    String.raw`^Done\b[^a-zA-Z]{0,10}(?:${DISCORD_ACTION_INTENT_PAST_VERBS})\b[^.!?\n]{0,80}\b(?:${DISCORD_ACTION_INTENT_RESOURCE_NOUNS})s?\b`,
+    'i',
+  ),
 ];
 
 function stripCodeLikeDiscordActionText(text: string): string {
@@ -301,7 +323,7 @@ export function buildPromisedDiscordActionWithoutExecutionNotice(
 ): string {
   if (actionsCount > 0 || actionResultsCount > 0) return '';
   if (!claimsImmediateDiscordActionIntent(visibleReplyText)) return '';
-  return 'Warning: this reply says Discord-managed work is starting or being handled now, but this turn ended with zero actionable `<discord-action>` blocks and zero executed action results. If work has not started yet, say that clearly instead.';
+  return 'Warning: this reply says Discord-managed work was performed or is being performed, but this turn ended with zero actionable `<discord-action>` blocks and zero executed action results. If work has not started yet, say that clearly instead.';
 }
 
 export function appendPromisedDiscordActionWithoutExecutionNotice(
