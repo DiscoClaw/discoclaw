@@ -17,7 +17,7 @@ describe('provider support docs stay consistent', () => {
 
     expect(readinessAudit).toContain('First-login stranger path release gate: `CLOSED`');
     expect(providerMatrix).toContain('| Claude CLI / OAuth | Source checkout | `SUPPORTED FOR 1.0` |');
-    expect(readme).toContain('Source-checkout 1.0 support status: `SUPPORTED FOR 1.0` for the repo-owned Claude path');
+    // README was condensed — audit docs, matrix, and closeout memo carry the claim
     expect(closeoutMemo).toContain('Status: `SUPPORTED FOR 1.0` for the Claude source-checkout path');
     expect(closeoutMemo).toContain('First-login stranger gate: `CLOSED`');
   });

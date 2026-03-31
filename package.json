@@ -3,6 +3,21 @@
   "version": "1.2.1",
   "description": "Personal AI orchestrator that turns Discord into a persistent workspace",
   "license": "MIT",
+  "keywords": [
+    "discord",
+    "bot",
+    "ai",
+    "assistant",
+    "orchestrator",
+    "automation",
+    "claude",
+    "openai",
+    "memory",
+    "tasks",
+    "voice",
+    "personal-ai"
+  ],
+  "homepage": "https://discoclaw.ai",
   "repository": {
     "type": "git",
     "url": "https://github.com/DiscoClaw/discoclaw.git"
