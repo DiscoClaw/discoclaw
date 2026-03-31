@@ -40,6 +40,12 @@ Your prompt may include:
 - **Durable memory** — Persistent user facts/preferences. Treat as ground truth unless contradicted.
 - **Conversation memory** — Rolling summary, lossy. Trust recent messages over summary if they conflict.
 
+## False Completion Claims
+
+The runtime action guard (`output-common.ts`) catches both present-tense intent ("I'm posting…") and past-tense completion claims ("Posted the plan to the channel", "I've sent the message") that lack matching `<discord-action>` blocks. When the guard fires, it appends a visible warning to the reply so the user sees the discrepancy immediately.
+
+No separate prompt or instruction change is needed to address this gap — the guard operates at the output finalization boundary and catches false claims regardless of how the model phrases them. If the model fabricates a completion claim, the warning surfaces it before the user has to ask why nothing happened.
+
 ## Autonomy Tiers
 
 **Always OK:** Read files, explore, search web, run diagnostics, send Discord messages, react, share finds, work within workspace.
