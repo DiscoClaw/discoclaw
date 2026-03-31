@@ -542,7 +542,7 @@ describe('image input precedence — direct > reply-ref > history', () => {
 
 describe('manual message finalization guard', () => {
   const PROMISED_ACTION_WARNING =
-    'Warning: this reply says Discord-managed work is starting or being handled now';
+    'Warning: this reply says Discord-managed work was performed or is being performed';
 
   beforeEach(() => {
     vi.clearAllMocks();

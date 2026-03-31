@@ -216,6 +216,45 @@ describe('claimsImmediateDiscordActionIntent', () => {
     expect(claimsImmediateDiscordActionIntent("I'm reading that now.")).toBe(false);
     expect(claimsImmediateDiscordActionIntent("I'm listing that now.")).toBe(false);
   });
+
+  it('matches headless past-tense claims (no subject)', () => {
+    expect(claimsImmediateDiscordActionIntent('Posted the plan to the channel')).toBe(true);
+  });
+
+  it('matches first-person past-tense claims', () => {
+    expect(claimsImmediateDiscordActionIntent('I posted the SEO plan to #website')).toBe(true);
+    expect(claimsImmediateDiscordActionIntent('I sent the message')).toBe(true);
+  });
+
+  it('matches perfect-tense claims', () => {
+    expect(claimsImmediateDiscordActionIntent("I've posted it to the channel")).toBe(true);
+    expect(claimsImmediateDiscordActionIntent('I have created the task')).toBe(true);
+  });
+
+  it('matches done-prefix past-tense claims', () => {
+    expect(claimsImmediateDiscordActionIntent('Done. Sent the message.')).toBe(true);
+    expect(claimsImmediateDiscordActionIntent('Done — posted the reply')).toBe(true);
+  });
+
+  it('does not match past-tense without a resource noun', () => {
+    expect(claimsImmediateDiscordActionIntent('I posted about this on my blog')).toBe(false);
+  });
+
+  it('does not match third-person past-tense (no "I" subject)', () => {
+    expect(claimsImmediateDiscordActionIntent('The user posted a message earlier')).toBe(false);
+  });
+
+  it('does not match conditional past-tense', () => {
+    expect(claimsImmediateDiscordActionIntent('If I posted the task, it would appear in the thread')).toBe(false);
+  });
+
+  it('does not match capability phrasing with past-tense resource nouns (regression)', () => {
+    expect(claimsImmediateDiscordActionIntent("I can post the message when you're ready")).toBe(false);
+  });
+
+  it('does not match example-prefixed past-tense claims', () => {
+    expect(claimsImmediateDiscordActionIntent('Example: I posted the reply')).toBe(false);
+  });
 });
 
 describe('buildPromisedDiscordActionWithoutExecutionNotice', () => {
@@ -230,19 +269,26 @@ describe('buildPromisedDiscordActionWithoutExecutionNotice', () => {
 
   it('returns a warning when the reply promises current work but nothing ran', () => {
     const out = buildPromisedDiscordActionWithoutExecutionNotice("I'm creating that task now.", 0, 0);
-    expect(out).toContain('Discord-managed work is starting or being handled now');
+    expect(out).toContain('Discord-managed work was performed or is being performed');
     expect(out).toContain('zero actionable `<discord-action>` blocks');
     expect(out).toContain('zero executed action results');
   });
 
   it('returns a warning for progress phrases the prompt guidance already forbids without actions', () => {
     const out = buildPromisedDiscordActionWithoutExecutionNotice('Taking the next pass now.', 0, 0);
-    expect(out).toContain('Discord-managed work is starting or being handled now');
+    expect(out).toContain('Discord-managed work was performed or is being performed');
   });
 
   it('returns empty string for generic assistant prose without Discord-action intent', () => {
     expect(buildPromisedDiscordActionWithoutExecutionNotice('Let me check that now.', 0, 0)).toBe('');
     expect(buildPromisedDiscordActionWithoutExecutionNotice("I'll show you that now.", 0, 0)).toBe('');
+  });
+
+  it('returns a warning for a past-tense claim with zero actions/results', () => {
+    const out = buildPromisedDiscordActionWithoutExecutionNotice('I posted the plan to the channel.', 0, 0);
+    expect(out).toContain('Discord-managed work was performed or is being performed');
+    expect(out).toContain('zero actionable `<discord-action>` blocks');
+    expect(out).toContain('zero executed action results');
   });
 });
 
