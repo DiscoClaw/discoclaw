@@ -11,7 +11,6 @@ export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   'readMessages',
   'fetchMessage',
   'listPins',
-  'downloadAttachment',
   // Guild
   'memberInfo',
   'roleInfo',
@@ -45,6 +44,14 @@ export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   'archiveList',
 ]);
 
+// Actions that are not pure queries but still need a follow-up on success
+// because they produce data the bot needs to act on (e.g. a downloaded file).
+// Unlike QUERY_ACTION_TYPES, these also trigger follow-up on failure so the
+// bot can report the error.
+export const ALWAYS_FOLLOW_UP_TYPES: ReadonlySet<string> = new Set([
+  'downloadAttachment',
+]);
+
 export function hasQueryAction(actionTypes: string[]): boolean {
   return actionTypes.some((t) => QUERY_ACTION_TYPES.has(t));
 }
@@ -52,6 +59,7 @@ export function hasQueryAction(actionTypes: string[]): boolean {
 /**
  * Returns true when a follow-up AI invocation should be triggered:
  * - any query action succeeded (to process returned data), OR
+ * - any ALWAYS_FOLLOW_UP action ran (success or failure), OR
  * - any non-query action failed (so the bot can explain the failure).
  *
  * Query action failures are excluded because there is no useful result data
@@ -66,6 +74,11 @@ export function shouldTriggerFollowUp(
   );
   if (anyQuerySucceeded) return true;
 
+  const anyAlwaysFollowUp = actions.some(
+    (a) => ALWAYS_FOLLOW_UP_TYPES.has(a.type),
+  );
+  if (anyAlwaysFollowUp) return true;
+
   const anyNonQueryActionFailed = results.some(
     (r, i) => r && !r.ok && !QUERY_ACTION_TYPES.has(actions[i]?.type ?? ''),
   );
@@ -73,8 +86,8 @@ export function shouldTriggerFollowUp(
 }
 
 /**
- * Returns true when the follow-up was triggered exclusively by a non-query
- * action failure — i.e. no query action succeeded in this round.
+ * Returns true when the follow-up was triggered exclusively by a failure
+ * — i.e. no query action succeeded and no ALWAYS_FOLLOW_UP action succeeded.
  *
  * Use this to select a failure-specific placeholder message and prompt suffix
  * rather than the generic "following up..." variants.
@@ -87,6 +100,12 @@ export function isFailureFollowUp(
     (a, i) => QUERY_ACTION_TYPES.has(a.type) && results[i]?.ok,
   );
   if (anyQuerySucceeded) return false;
+  const anyAlwaysFollowUpSucceeded = actions.some(
+    (a, i) => ALWAYS_FOLLOW_UP_TYPES.has(a.type) && results[i]?.ok,
+  );
+  if (anyAlwaysFollowUpSucceeded) return false;
+  // ALWAYS_FOLLOW_UP types are not in QUERY_ACTION_TYPES, so their failures
+  // are caught here alongside regular non-query failures.
   return results.some(
     (r, i) => r && !r.ok && !QUERY_ACTION_TYPES.has(actions[i]?.type ?? ''),
   );
