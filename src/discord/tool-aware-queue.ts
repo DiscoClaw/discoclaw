@@ -94,7 +94,10 @@ export class ToolAwareQueue {
     switch (this.state) {
       case 'idle':
       case 'buffering_text':
-        // Discard buffered narration text.
+        // Flush buffered narration text before switching to tool_active.
+        if (this.buffer) {
+          this.emit({ type: 'stream_text', text: this.buffer });
+        }
         this.buffer = '';
         this.state = 'tool_active';
         this.emit({ type: 'show_activity', label });

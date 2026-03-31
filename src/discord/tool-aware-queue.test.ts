@@ -126,17 +126,18 @@ describe('ToolAwareQueue', () => {
     taq.dispose();
   });
 
-  it('text then tool: narration discarded, activity shown', () => {
+  it('text then tool: narration flushed as stream_text, then activity shown', () => {
     const { actions, emit } = collect();
     const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
 
     taq.handleEvent({ type: 'text_delta', text: 'Let me read the file...' });
     taq.handleEvent({ type: 'tool_start', name: 'Read', input: { file_path: '/tmp/foo.ts' } });
 
-    // Narration was discarded, only show_activity emitted.
-    expect(actions).toHaveLength(1);
-    expect(actions[0]).toMatchObject({ type: 'show_activity' });
-    expect((actions[0] as any).label).toContain('Reading');
+    // Narration flushed as stream_text, then show_activity emitted.
+    expect(actions).toHaveLength(2);
+    expect(actions[0]).toEqual({ type: 'stream_text', text: 'Let me read the file...' });
+    expect(actions[1]).toMatchObject({ type: 'show_activity' });
+    expect((actions[1] as any).label).toContain('Reading');
 
     taq.dispose();
   });
@@ -238,7 +239,7 @@ describe('ToolAwareQueue', () => {
     expect(actions).toHaveLength(0);
   });
 
-  it('post-tool delay prevents flashing narration between tools', () => {
+  it('inter-tool narration is flushed before second tool activity', () => {
     const { actions, emit } = collect();
     const taq = new ToolAwareQueue(emit, { flushDelayMs: 800, postToolDelayMs: 500 });
 
@@ -252,8 +253,12 @@ describe('ToolAwareQueue', () => {
     vi.advanceTimersByTime(200);
     taq.handleEvent({ type: 'tool_start', name: 'Bash' });
 
-    // The narration text should not have been streamed.
-    expect(actions.filter((a) => a.type === 'stream_text')).toHaveLength(0);
+    // Inter-tool narration flushed as stream_text before second tool.
+    expect(actions.filter((a) => a.type === 'stream_text')).toHaveLength(1);
+    expect(actions.filter((a) => a.type === 'stream_text')[0]).toEqual({
+      type: 'stream_text',
+      text: 'Now let me run...',
+    });
     // Two show_activity actions.
     expect(actions.filter((a) => a.type === 'show_activity')).toHaveLength(2);
 
