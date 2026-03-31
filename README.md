@@ -77,6 +77,14 @@ Voice is **off by default**. Enable with `DISCOCLAW_VOICE_ENABLED=1` plus API ke
 
 Full setup guide: [docs/voice.md](docs/voice.md)
 
+## Self-management — the bot maintains itself
+
+- **Self-update** — `!update` checks for new npm versions; `!update apply` downloads, installs, and restarts without leaving Discord
+- **Health checks** — `!health`, `!doctor`, `!status` for diagnostics
+- **Secret management** — `!secret` manages `.env` entries from DMs
+- **Model switching** — `!models` swaps AI models per role at runtime
+- **Restart** — `!restart` restarts the service on demand
+
 ## How it works
 
 DiscoClaw orchestrates the flow between Discord and AI runtimes (Claude Code by default, with `gemini-api`, OpenAI, Codex, and OpenRouter adapters available via `PRIMARY_RUNTIME`). For 1.0, `Claude CLI` on a source checkout is the explicitly supported default path, and `Codex CLI` on a source checkout is the explicitly supported secondary path. See [docs/audit/provider-auth-1.0-matrix.md](docs/audit/provider-auth-1.0-matrix.md) for the full consolidated matrix. The OpenAI-compatible and OpenRouter adapters can expose optional tool use when `OPENAI_COMPAT_TOOLS_ENABLED=1` is set, but OpenRouter support claims stop at the narrower audited boundary described below. It doesn't contain intelligence itself — it decides *when* to call the AI, *what context* to give it, and *what to do* with the output. When you send a message, the orchestrator:
@@ -406,15 +414,22 @@ Do not treat `codex --version`, `OPENAI_API_KEY` presence, `pnpm preflight*`, or
 
 ## Updating
 
-**Global install:**
+DiscoClaw can check for and apply updates from inside Discord — no SSH or terminal needed.
 
-If DiscoClaw is running, update from Discord:
+| Command | Description |
+|---------|-------------|
+| `!update` | Check if a newer version is available on npm |
+| `!update apply` | Download the update, reinstall, and restart the service |
+| `!update audit` | Show npm-managed runtime audit details |
+| `!update help` | Show usage |
+
+**Global install (from Discord):**
 
 ```
 !update apply
 ```
 
-Or from the command line:
+**Global install (from the command line):**
 
 ```bash
 npm update -g discoclaw
