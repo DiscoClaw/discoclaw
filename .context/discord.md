@@ -96,6 +96,8 @@ Notes:
 - `generateImage` supports two providers: **OpenAI** (models: `dall-e-3`, `gpt-image-1`) and **Gemini** (models: `imagen-4.0-generate-001`, `imagen-4.0-fast-generate-001`, `imagen-4.0-ultra-generate-001`). Provider is auto-detected from the model prefix (`dall-e-*`/`gpt-image-*` → openai, `imagen-*` → gemini) or set explicitly via the `provider` field. OpenAI provider uses `OPENAI_API_KEY` (required) and optional `OPENAI_BASE_URL`. Gemini provider uses `IMAGEGEN_GEMINI_API_KEY`. At least one key must be set when `DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1`. Default model is auto-detected: if only `IMAGEGEN_GEMINI_API_KEY` is set, defaults to `imagen-4.0-generate-001`; otherwise defaults to `dall-e-3`. Override with `IMAGEGEN_DEFAULT_MODEL`.
 - `spawnAgent` is enabled by default (`DISCOCLAW_DISCORD_ACTIONS_SPAWN=1`; set to 0 to disable). Spawned agents run fire-and-forget: each agent runs its prompt via the configured runtime and posts its output directly to the target channel. Multiple `spawnAgent` actions in a single response run in parallel (bounded by `DISCOCLAW_DISCORD_ACTIONS_SPAWN_MAX_CONCURRENT`, default 8). Spawn is disabled for bot-originated messages and excluded from cron flows to prevent recursive agent chains. Spawned agents run at recursion depth 1 and cannot themselves spawn further agents.
 
+Action guard (false completion detection): When a reply's visible text claims Discord-managed work was performed or is being performed — in any tense (present progressive, future intent, past tense, or perfect tense) — but the turn produced zero actionable `<discord-action>` blocks and zero executed action results, the finalizer appends a visible warning. This catches fabricated completion claims ("Posted the plan", "I've sent the message") at the output boundary so the user sees the discrepancy immediately. The guard is implemented in `output-common.ts` (`claimsImmediateDiscordActionIntent` + `appendPromisedDiscordActionWithoutExecutionNotice`) and requires no prompt-layer changes — it operates purely on the finalized reply text and action execution counts.
+
 Auto-follow-up: When query actions (channelList, channelInfo, threadListArchived, forumTagList, readMessages, fetchMessage, listPins, memberInfo, roleInfo, searchMessages, eventList, taskList, taskShow, cronList, cronShow, planList, planShow, memoryShow, modelShow, forgeStatus) succeed, DiscoClaw automatically re-invokes Claude with the results. This allows Claude to reason about query results without requiring the user to send a follow-up message. Controlled by `DISCOCLAW_ACTION_FOLLOWUP_DEPTH` (default `3`, `0` disables). Mutation-only responses do not trigger follow-ups. Trivially short follow-up responses (<50 chars with no actions) are suppressed.
 
 Requirements:
@@ -234,6 +236,18 @@ grep DISCOCLAW_STATUS_CHANNEL .env
 
 # Check bot logs for status channel errors (these are logged but non-fatal)
 journalctl --user -u discoclaw.service --since "5 min ago" --no-pager | grep -i "status"
+```
+
+### Bot claims it performed a Discord action but nothing happened
+**Symptom:** Bot says "Posted the plan to #general" or "I've sent the message" but no message appears in the target channel.
+**Cause:** The model fabricated a completion claim without emitting a `<discord-action>` block. The action guard should append a visible warning to the reply.
+**Verification:**
+1. Check whether the reply ends with a warning starting with `Warning: this reply says Discord-managed work was performed`.
+2. If the warning is present, the guard is working — the model hallucinated the action. No code fix needed; the warning tells the user.
+3. If no warning is present but the action still didn't execute, check whether the action block was parsed but failed during execution (look for "Action Failed" in the status channel or bot logs).
+```bash
+# Check recent action failures
+journalctl --user -u discoclaw.service --since "5 min ago" --no-pager | grep -i "action.*fail\|warning.*discord-action"
 ```
 
 ### Messages split awkwardly across Discord's 2000-char limit
