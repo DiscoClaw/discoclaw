@@ -11,6 +11,7 @@ export const QUERY_ACTION_TYPES: ReadonlySet<string> = new Set([
   'readMessages',
   'fetchMessage',
   'listPins',
+  'downloadAttachment',
   // Guild
   'memberInfo',
   'roleInfo',
