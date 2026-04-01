@@ -256,6 +256,13 @@ Source: task/chat context — `initCronForum` boot path fell through to `parseCr
 Applied: `docs/compound-lessons.md`
 Status: active
 
+### 2026-04-01 - Gate capsule injection on idle detection and TTL expiry at read time, not save time
+Tags: #prompting #workflow #state #architecture
+Lesson: Continuation capsules must be validated at injection time (before `buildConversationMemorySection`) rather than at save time, using two independent checks ordered by cost: (1) idle detection — skip injection when `currentFocus` matches an idle/awaiting/none pattern, since the capsule carries no useful state to continue; (2) TTL-based expiry — skip injection when the parent summary's `updatedAt` exceeds a configurable staleness threshold (`DISCOCLAW_CAPSULE_TTL_MS`, default 2 hours), even if the capsule appears active. Capsules remain persisted regardless of validation outcome so they are available for debugging and tracing. Both checks are pure functions in `capsule-invalidation.ts` composed via `validateCapsuleForInjection`, and the caller in `message-coordinator.ts` nullifies the capsule before prompt assembly when validation fails, logging the skip reason.
+Source: task/chat context — stale continuation capsules from prior conversations bled into unrelated new conversations because there was no injection-time gate; idle capsules with focus values like "idle", "none", or "awaiting input" injected irrelevant state, and capsules from hours-old sessions persisted active-looking focus text that no longer applied
+Applied: `src/discord/capsule-invalidation.ts`, `src/discord/capsule-invalidation.test.ts`, `src/discord/message-coordinator.ts`, `.env.example`, `docs/compound-lessons.md`
+Status: active
+
 ### 2026-03-28 - Do not inject history images as raw content blocks into AI prompts
 Tags: #prompting #discord #workflow
 Lesson: When assembling the AI prompt from conversation history, do not extract and inject images from earlier turns as raw image content blocks. Unlabeled stale images cause the model to analyze or act on old media unprompted — hallucinating relevance where there is none. The text history already notes `[attachment/embed]` when media was present, which is sufficient context. When the user explicitly wants the model to see an older image, the reply-reference mechanism handles that case by downloading only the referenced message's attachments. Keep the current-message image download path (source #1: direct attachments on the triggering message) and the reply-reference path (source #2: user explicitly replies to an older message), but do not add a third path that bulk-injects history images.

@@ -52,6 +52,7 @@ import {
 } from './summarizer.js';
 import { parseCapsuleBlock } from './capsule.js';
 import type { ContinuationCapsule } from './capsule.js';
+import { validateCapsuleForInjection } from './capsule-invalidation.js';
 import { parseMemoryCommand, handleMemoryCommand } from './memory-commands.js';
 import { parseSecretCommand, handleSecretCommand } from './secret-commands.js';
 import { parsePlanCommand, handlePlanCommand, preparePlanRun, handlePlanSkip, closePlanIfComplete, NO_PHASES_SENTINEL, findPlanFile, looksLikePlanId, PLAN_DISABLED_NUDGE } from './plan-commands.js';
@@ -407,6 +408,7 @@ export type BotParams = {
   summaryTargetRatio?: number;
   summaryDataDir: string;
   summaryArchiveDir?: string;
+  capsuleTtlMs?: number;
   durableMemoryEnabled: boolean;
   durableDataDir: string;
   durableInjectMaxChars: number;
@@ -3324,6 +3326,13 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 existingSummaryUpdatedAt = existing.updatedAt;
                 existingSummaryRegeneratedAt = existing.regeneratedAt;
                 existingContinuationCapsule = existing.continuationCapsule;
+                if (existingContinuationCapsule) {
+                  const capsuleCheck = validateCapsuleForInjection(existingContinuationCapsule, existing.updatedAt, { ttlMs: params.capsuleTtlMs });
+                  if (!capsuleCheck.valid) {
+                    params.log?.info({ reason: capsuleCheck.reason, sessionKey }, 'discord:capsule skipped at injection');
+                    existingContinuationCapsule = undefined;
+                  }
+                }
                 summarySection = buildConversationMemorySection(existingSummaryText, {
                   turnsSinceUpdate: existing.turnsSinceUpdate,
                   regeneratedAt: existing.regeneratedAt,
