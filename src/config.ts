@@ -119,6 +119,7 @@ export type DiscoclawConfig = {
   summaryTargetRatio: number;
   summaryDataDirOverride?: string;
   summaryArchiveDirOverride?: string;
+  capsuleTtlMs: number;
   durableMemoryEnabled: boolean;
   durableDataDirOverride?: string;
   durableInjectMaxChars: number;
@@ -1134,6 +1135,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       summaryTargetRatio: parseZeroToOneExclusive(env, 'DISCOCLAW_SUMMARY_TARGET_RATIO', 0.65),
       summaryDataDirOverride: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_DATA_DIR'),
       summaryArchiveDirOverride: parseTrimmedString(env, 'DISCOCLAW_SUMMARY_ARCHIVE_DIR'),
+      capsuleTtlMs: parseNonNegativeInt(env, 'DISCOCLAW_CAPSULE_TTL_MS', 7_200_000),
       durableMemoryEnabled: parseBoolean(env, 'DISCOCLAW_DURABLE_MEMORY_ENABLED', true),
       durableDataDirOverride: parseTrimmedString(env, 'DISCOCLAW_DURABLE_DATA_DIR'),
       durableInjectMaxChars: parsePositiveInt(env, 'DISCOCLAW_DURABLE_INJECT_MAX_CHARS', 2000),

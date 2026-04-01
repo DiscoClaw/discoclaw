@@ -77,6 +77,16 @@ describe('isCapsuleExpired', () => {
     expect(isCapsuleExpired(96_000, now, 5_000)).toBe(false); // 4s < 5s TTL
   });
 
+  it('returns false when ttlMs is 0 (TTL disabled)', () => {
+    const now = 100_000;
+    expect(isCapsuleExpired(1, now, 0)).toBe(false);
+  });
+
+  it('returns false when ttlMs is negative (TTL disabled)', () => {
+    const now = 100_000;
+    expect(isCapsuleExpired(1, now, -1)).toBe(false);
+  });
+
   it('DEFAULT_CAPSULE_TTL_MS is 2 hours', () => {
     expect(DEFAULT_CAPSULE_TTL_MS).toBe(2 * 60 * 60 * 1000);
   });

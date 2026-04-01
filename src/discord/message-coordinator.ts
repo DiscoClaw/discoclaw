@@ -408,6 +408,7 @@ export type BotParams = {
   summaryTargetRatio?: number;
   summaryDataDir: string;
   summaryArchiveDir?: string;
+  capsuleTtlMs?: number;
   durableMemoryEnabled: boolean;
   durableDataDir: string;
   durableInjectMaxChars: number;
@@ -3326,7 +3327,7 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
                 existingSummaryRegeneratedAt = existing.regeneratedAt;
                 existingContinuationCapsule = existing.continuationCapsule;
                 if (existingContinuationCapsule) {
-                  const capsuleCheck = validateCapsuleForInjection(existingContinuationCapsule, existing.updatedAt);
+                  const capsuleCheck = validateCapsuleForInjection(existingContinuationCapsule, existing.updatedAt, { ttlMs: params.capsuleTtlMs });
                   if (!capsuleCheck.valid) {
                     params.log?.info({ reason: capsuleCheck.reason, sessionKey }, 'discord:capsule skipped at injection');
                     existingContinuationCapsule = undefined;

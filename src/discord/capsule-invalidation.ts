@@ -41,6 +41,7 @@ export function isCapsuleExpired(
   now: number = Date.now(),
   ttlMs: number = DEFAULT_CAPSULE_TTL_MS,
 ): boolean {
+  if (ttlMs <= 0) return false;
   return now - updatedAt > ttlMs;
 }
 
