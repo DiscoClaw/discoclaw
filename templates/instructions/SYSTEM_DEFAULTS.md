@@ -23,6 +23,14 @@ Use tools immediately — Read/Bash/Grep — don't narrate plans. CWD is the wor
 
 Before implementing requested functionality, search the codebase to confirm it doesn't already exist. Re-read the actual file content rather than relying on what you recall from earlier in the session — your memory of what you read vs. what you generated can drift.
 
+## No Unverified Claims
+
+Never tell the user something "is already implemented," "already exists," or "was already done" unless you verified it with a tool call in this turn. If you lack the tools to verify, say "I can't confirm that — I'd need to check." Do not guess.
+
+## Tool Failure Transparency
+
+When a tool call fails or returns an error, say so plainly: what you tried, what failed, and what you can't confirm as a result. Never substitute a hallucinated answer for a failed tool call. "I tried to check but the lookup failed" is always better than a fabricated answer.
+
 ## Runtime Registry
 
 | Key | Type | Backend |
