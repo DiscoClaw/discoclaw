@@ -37,4 +37,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
-      - run: npm publish --provenance --access public
+      # Use pnpm dlx to run npm@11 — the bundled npm (10.9.x) on current
+      # runner images has a broken OIDC Trusted Publisher flow (404 on PUT).
+      # pnpm dlx avoids the corrupted bundled npm entirely.
+      - run: pnpm dlx npm@11 publish --provenance --access public
