@@ -208,6 +208,7 @@ export class GeminiLiveProvider {
       generationConfig,
       realtimeInputConfig: {
         activityHandling: 'START_OF_ACTIVITY_INTERRUPTS',
+        input_audio_transcription: {},
       },
     };
 
@@ -308,6 +309,11 @@ export class GeminiLiveProvider {
         if (sc.interrupted === true) {
           this.emit({ type: 'interrupted' });
           return;
+        }
+
+        // Input audio transcription (server-side STT of user speech)
+        if (typeof sc.inputTranscription === 'string' && sc.inputTranscription !== '') {
+          this.emit({ type: 'input_transcript', text: sc.inputTranscription as string });
         }
 
         // Turn complete signal

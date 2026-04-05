@@ -124,7 +124,7 @@ describe('GeminiLiveProvider', () => {
     expect(url.searchParams.get('key')).toBe('my-api-key');
   });
 
-  it('sends setup message with model, default config, compression, and activity handling on open', async () => {
+  it('sends setup message with model, default config, compression, activity handling, and input_audio_transcription on open', async () => {
     const provider = makeProvider();
     await connectWithSetup(provider);
 
@@ -137,6 +137,7 @@ describe('GeminiLiveProvider', () => {
     });
     expect(setupMsg.setup.realtimeInputConfig).toEqual({
       activityHandling: 'START_OF_ACTIVITY_INTERRUPTS',
+      input_audio_transcription: {},
     });
   });
 
@@ -374,6 +375,37 @@ describe('GeminiLiveProvider', () => {
     });
 
     expect(events).toContainEqual({ type: 'interrupted' });
+  });
+
+  it('emits input_transcript event from serverContent with inputTranscription', async () => {
+    const provider = makeProvider();
+    const events = collectEvents(provider);
+    await connectWithSetup(provider);
+
+    lastCreatedWs!._receiveMessage({
+      serverContent: {
+        inputTranscription: 'Hello from the user',
+      },
+    });
+
+    const transcriptEvents = events.filter((e) => e.type === 'input_transcript');
+    expect(transcriptEvents).toHaveLength(1);
+    expect((transcriptEvents[0] as { type: 'input_transcript'; text: string }).text).toBe('Hello from the user');
+  });
+
+  it('ignores empty inputTranscription in serverContent', async () => {
+    const provider = makeProvider();
+    const events = collectEvents(provider);
+    await connectWithSetup(provider);
+
+    lastCreatedWs!._receiveMessage({
+      serverContent: {
+        inputTranscription: '',
+      },
+    });
+
+    const transcriptEvents = events.filter((e) => e.type === 'input_transcript');
+    expect(transcriptEvents).toHaveLength(0);
   });
 
   it('emits error event from server error message', async () => {
