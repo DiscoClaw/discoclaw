@@ -167,6 +167,7 @@ export type DiscoclawConfig = {
   voiceSystemPrompt?: string;
   voiceSttProvider: 'deepgram' | 'whisper' | 'openai';
   voiceTtsProvider: 'cartesia' | 'deepgram' | 'kokoro' | 'openai';
+  voicePipelineProvider: 'pipeline' | 'gemini-live';
   voiceHomeChannel?: string;
   voiceLogChannel?: string;
   deepgramApiKey?: string;
@@ -929,6 +930,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const voiceAutoJoin = parseBoolean(env, 'DISCOCLAW_VOICE_AUTO_JOIN', false);
   const voiceSttProvider = parseEnum(env, 'DISCOCLAW_STT_PROVIDER', ['deepgram', 'whisper', 'openai'] as const, 'deepgram')!;
   const voiceTtsProvider = parseEnum(env, 'DISCOCLAW_TTS_PROVIDER', ['cartesia', 'deepgram', 'kokoro', 'openai'] as const, 'cartesia')!;
+  const voicePipelineProvider = parseEnum(env, 'DISCOCLAW_VOICE_PIPELINE_PROVIDER', ['pipeline', 'gemini-live'] as const, 'pipeline')!;
   let voiceHomeChannel = parseTrimmedString(env, 'DISCOCLAW_VOICE_HOME_CHANNEL');
   if (!voiceHomeChannel) {
     const legacy = parseTrimmedString(env, 'DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL');
@@ -980,6 +982,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   }
   if (voiceEnabled && !voiceHomeChannel) {
     warnings.push('DISCOCLAW_VOICE_ENABLED=1 but DISCOCLAW_VOICE_HOME_CHANNEL is not set; voice actions will be disabled (no target channel for action execution).');
+  }
+  if (voiceEnabled && voicePipelineProvider === 'gemini-live' && !geminiApiKey) {
+    warnings.push('DISCOCLAW_VOICE_PIPELINE_PROVIDER=gemini-live but GEMINI_API_KEY is not set; voice pipeline will fail at runtime.');
   }
 
   const coldStorageEnabled = parseBoolean(env, 'DISCOCLAW_COLD_STORAGE_ENABLED', false);
@@ -1190,6 +1195,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       voiceSystemPrompt,
       voiceSttProvider,
       voiceTtsProvider,
+      voicePipelineProvider,
       voiceHomeChannel,
       voiceLogChannel,
       deepgramApiKey,

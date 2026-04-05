@@ -16,14 +16,16 @@ All are listed in `package.json` and installed via `pnpm install`. If `@discordj
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `DISCOCLAW_VOICE_ENABLED` | No | `0` | Master switch — enables the voice subsystem |
+| `DISCOCLAW_VOICE_PIPELINE_PROVIDER` | No | `pipeline` | Voice pipeline mode: `pipeline` (separate STT/TTS) or `gemini-live` (Gemini Live WebSocket). See [Voice Provider Modes](#voice-provider-modes) |
 | `DISCOCLAW_DISCORD_ACTIONS_VOICE` | No | `0` | Enables voice action types (join/leave/status/mute/deafen); requires `DISCOCLAW_VOICE_ENABLED=1` |
 | `DISCOCLAW_VOICE_AUTO_JOIN` | No | `0` | Auto-join voice channels when an allowlisted user enters |
-| `DISCOCLAW_STT_PROVIDER` | No | `deepgram` | Speech-to-text provider: `deepgram` or `whisper` |
-| `DISCOCLAW_TTS_PROVIDER` | No | `cartesia` | Text-to-speech provider: `cartesia`, `deepgram`, `openai`, or `kokoro` |
+| `DISCOCLAW_STT_PROVIDER` | No | `deepgram` | Speech-to-text provider: `deepgram` or `whisper` (used in `pipeline` mode only) |
+| `DISCOCLAW_TTS_PROVIDER` | No | `cartesia` | Text-to-speech provider: `cartesia`, `deepgram`, `openai`, or `kokoro` (used in `pipeline` mode only) |
 | `DISCOCLAW_VOICE_HOME_CHANNEL` | No | — | Voice audio channel name or ID used for action execution context and transcript mirroring |
 | `DISCOCLAW_VOICE_LOG_CHANNEL` | No | `voice-log` | Text channel name or ID where the transcript mirror posts conversation records |
-| `DISCOCLAW_VOICE_MODEL` | No | follows startup chat model | AI model override for voice response invocations |
-| `DISCOCLAW_VOICE_SYSTEM_PROMPT` | No | — | System prompt override for voice response invocations |
+| `DISCOCLAW_VOICE_MODEL` | No | follows startup chat model | AI model override for voice response invocations (used in `pipeline` mode only) |
+| `DISCOCLAW_VOICE_SYSTEM_PROMPT` | No | — | System prompt override for voice response invocations (used in `pipeline` mode only) |
+| `GEMINI_API_KEY` | Yes* | — | Gemini API key (*required when `DISCOCLAW_VOICE_PIPELINE_PROVIDER=gemini-live`) |
 | `DEEPGRAM_STT_MODEL` | No | `nova-3-conversationalai` | Deepgram STT model to use (see [STT Models](#deepgram-stt-models)) |
 | `DEEPGRAM_TTS_VOICE` | No | `aura-2-asteria-en` | Deepgram TTS voice to use (see [TTS Voices](#deepgram-tts-voices-aura-2)) |
 | `DEEPGRAM_TTS_SPEED` | No | `1.3` | Deepgram TTS playback speed multiplier (range: 0.5–1.5) |
@@ -69,6 +71,73 @@ The TTS provider uses Cartesia's Sonic-3 model via WebSocket (`wss://api.cartesi
 | TTS | `kokoro` | Stub — not yet implemented |
 
 Provider selection is handled by factory functions in `src/voice/stt-factory.ts` and `src/voice/tts-factory.ts`. Selecting a stub provider will throw an error at startup.
+
+## Voice Provider Modes
+
+`DISCOCLAW_VOICE_PIPELINE_PROVIDER` selects between two fundamentally different voice architectures. The default is `pipeline`.
+
+### `pipeline` (default)
+
+The traditional pipeline uses separate STT, AI, and TTS stages connected in sequence:
+
+```
+User audio → STT (Deepgram) → transcript → AI runtime → response text → TTS (Cartesia/Deepgram/OpenAI) → Discord playback
+```
+
+Each stage is independently configurable via `DISCOCLAW_STT_PROVIDER`, `DISCOCLAW_TTS_PROVIDER`, `DISCOCLAW_VOICE_MODEL`, and their associated settings. This is the mature, fully-featured path with support for conversation history, voice actions, barge-in, `!voice set` runtime voice switching, and all STT/TTS provider combinations.
+
+### `gemini-live`
+
+Gemini Live replaces the separate STT/TTS/AI stages with a single bidirectional WebSocket session to the Gemini Multimodal Live API. Speech recognition, reasoning, and speech synthesis all happen server-side in one round trip:
+
+```
+User audio → Gemini Live WebSocket → (server-side STT + reasoning + TTS) → audio + text events → Discord playback
+```
+
+**Requirements:**
+- `GEMINI_API_KEY` must be set (the same key used for `gemini-api` runtime)
+- `DISCOCLAW_VOICE_ENABLED=1`
+
+**What changes in `gemini-live` mode:**
+- `DISCOCLAW_STT_PROVIDER` and `DISCOCLAW_TTS_PROVIDER` are **ignored** — Gemini handles both
+- `DISCOCLAW_VOICE_MODEL`, `DISCOCLAW_VOICE_SYSTEM_PROMPT`, and the telegraphic style directive are **not used** — the Gemini Live session manages its own model and instructions
+- `DEEPGRAM_*` and `CARTESIA_*` settings have **no effect**
+- `!voice set` voice switching is a **no-op** (TTS is server-side)
+- The conversation ring buffer and voice-log backfill are **not used** — Gemini maintains its own session context
+
+**What stays the same:**
+- Audio capture path: `AudioReceiver` still handles Opus decode and 48→16 kHz downsampling
+- Transcript mirror: bot responses are posted to the voice-log channel via `TranscriptMirror`
+- Voice actions (`voiceJoin`, `voiceLeave`, etc.) work normally
+- Auto-join/leave presence handling is unaffected
+- Allowlist gating remains enforced
+
+**Switching between modes:**
+
+```bash
+# Default pipeline mode (explicit)
+DISCOCLAW_VOICE_PIPELINE_PROVIDER=pipeline
+
+# Gemini Live mode
+DISCOCLAW_VOICE_PIPELINE_PROVIDER=gemini-live
+```
+
+Changing the provider requires a service restart. Active voice connections will be torn down and re-established with the new pipeline mode.
+
+**Model:** Gemini Live uses `gemini-2.0-flash-live-001` by default (hardcoded in the provider). This is the model optimized for low-latency bidirectional streaming.
+
+### Quick Comparison
+
+| Feature | `pipeline` | `gemini-live` |
+|---------|-----------|---------------|
+| STT provider | Configurable (Deepgram, Whisper) | Gemini (server-side) |
+| TTS provider | Configurable (Cartesia, Deepgram, OpenAI) | Gemini (server-side) |
+| AI model | Any configured runtime | `gemini-2.0-flash-live-001` |
+| Conversation history | Ring buffer (10 turns) + backfill | Server-side session state |
+| Barge-in | STT-confirmed | Gemini `interrupted` event |
+| `!voice set` | Switches TTS voice at runtime | No-op |
+| Required API keys | Deepgram + TTS provider key | `GEMINI_API_KEY` |
+| Latency profile | Additive (STT + AI + TTS) | Single round trip |
 
 ## Deepgram STT Models
 
@@ -264,7 +333,9 @@ When the bot leaves or is disconnected from a voice channel, the guild's ring bu
 
 ## Architecture Overview
 
-The voice system is composed of several cooperating modules:
+The voice system is composed of several cooperating modules. `AudioPipelineManager` selects between two pipeline modes based on `DISCOCLAW_VOICE_PIPELINE_PROVIDER`:
+
+### `pipeline` mode (default)
 
 ```
 User speaks
@@ -275,16 +346,39 @@ User speaks
           -> TtsProvider (Cartesia Sonic-3 WebSocket | Deepgram Aura REST)
             -> AudioPlayer (24kHz->48kHz upsample, Discord playback)
 
-TranscriptMirror posts text records to the log channel (DISCOCLAW_VOICE_LOG_CHANNEL / voice-log) at each stage.
+TranscriptMirror posts text records to the log channel at each stage.
 ```
 
+### `gemini-live` mode
+
+```
+User speaks
+  -> AudioReceiver (Opus decode, 48kHz->16kHz downsample)
+    -> SttProvider shim -> GeminiLiveProvider.sendAudio() (WebSocket)
+      -> Gemini Live: STT + reasoning + TTS (server-side)
+        <- audio events (24kHz mono PCM) + text events
+          -> GeminiLiveResponder: upsample -> AudioPlayer -> Discord playback
+          -> onBotResponse callback -> TranscriptMirror
+```
+
+### Shared modules
+
 - **ConnectionManager** (`connection-manager.ts`) — manages per-guild voice connections with reconnect logic
-- **AudioPipelineManager** (`audio-pipeline.ts`) — orchestrates per-guild STT/TTS/responder lifecycle, auto-starts on connection Ready, auto-stops on Destroyed
-- **AudioReceiver** (`audio-receiver.ts`) — subscribes to allowlisted users' Opus streams, decodes to PCM, downsamples to 16 kHz mono, feeds STT
+- **AudioPipelineManager** (`audio-pipeline.ts`) — orchestrates per-guild pipeline lifecycle, auto-starts on connection Ready, auto-stops on Destroyed. Branches on `voiceProvider` to create either the STT/TTS pipeline or the Gemini Live pipeline.
+- **AudioReceiver** (`audio-receiver.ts`) — subscribes to allowlisted users' Opus streams, decodes to PCM, downsamples to 16 kHz mono. Used by both modes.
 - **OpusDecoder** (`opus.ts`) — wraps `@discordjs/opus` for Opus-to-PCM decode
-- **VoiceResponder** (`voice-responder.ts`) — AI invoke -> TTS synthesis -> audio playback pipeline with generation-based cancellation
 - **TranscriptMirror** (`transcript-mirror.ts`) — posts user transcriptions and bot responses to a text channel
 - **PresenceHandler** (`presence-handler.ts`) — auto-join/leave based on user voice presence
+
+### `pipeline`-only modules
+
+- **VoiceResponder** (`voice-responder.ts`) — AI invoke -> TTS synthesis -> audio playback pipeline with generation-based cancellation
+- **ConversationBuffer** (`conversation-buffer.ts`) — per-guild ring buffer for conversation history
+
+### `gemini-live`-only modules
+
+- **GeminiLiveProvider** (`providers/gemini-live-provider.ts`) — bidirectional WebSocket session wrapper for the Gemini Multimodal Live API. Manages connection lifecycle, audio I/O, and reconnection with exponential backoff.
+- **GeminiLiveResponder** (`providers/gemini-live-responder.ts`) — Discord audio output bridge. Receives audio/text events from the provider, upsamples to 48 kHz stereo, manages AudioPlayer playback, and handles barge-in via Gemini's `interrupted`/`turn_complete` events.
 
 ## Telegraphic Style (Built-In Voice Directive)
 
@@ -348,6 +442,20 @@ The connection manager will attempt up to 5 reconnect retries with automatic rej
 - Check that the speaking user's Discord ID is in `DISCORD_ALLOW_USER_IDS`
 - Verify `DISCOCLAW_VOICE_ENABLED=1` is set
 - Check logs for `audio receiver started` and `subscribed to user audio` messages
+
+### Gemini Live Connection Failures
+
+```
+Error: geminiApiKey is required for gemini-live voice provider
+```
+
+Set `GEMINI_API_KEY` in `.env`. This is the same key used by the `gemini-api` runtime — no additional key is needed.
+
+If the Gemini Live WebSocket disconnects unexpectedly, the provider retries up to 3 times with exponential backoff (starting at 500 ms). Check logs for `gemini-live` prefixed messages. Common causes:
+
+- Invalid or expired `GEMINI_API_KEY`
+- Network/firewall blocking outbound WebSocket to `wss://generativelanguage.googleapis.com`
+- Gemini API quota exhaustion
 
 ### Cartesia WebSocket Requires Node 22+
 

@@ -29,6 +29,10 @@ Two native npm packages power the Discord voice integration:
 | `src/voice/transcript-mirror.ts` | Posts user transcriptions and bot responses to a text channel |
 | `src/voice/voice-action-flags.ts` | Restricted action subset for voice invocations (messaging + tasks + memory only) |
 | `src/voice/conversation-buffer.ts` | Per-guild conversation ring buffer (10 turns) — stores user/model exchanges in memory; backfills from voice-log channel on join |
+| `src/voice/providers/gemini-live-types.ts` | TypeScript interfaces for Gemini Live: `GeminiLiveOpts`, `GeminiLiveEvent`, `GeminiLiveState` |
+| `src/voice/providers/gemini-live-provider.ts` | Bidirectional WebSocket session wrapper for the Gemini Multimodal Live API — connect/disconnect, audio send/receive, reconnect with exponential backoff |
+| `src/voice/providers/gemini-live-responder.ts` | Bridges `GeminiLiveProvider` audio/text events to Discord `AudioPlayer` playback and `TranscriptMirror` logging |
+| `src/voice/providers/index.ts` | Barrel re-export for Gemini Live provider modules |
 | `src/discord/actions-voice.ts` | Discord action types: `voiceJoin`, `voiceLeave`, `voiceStatus`, `voiceMute`, `voiceDeafen` |
 
 ## Audio Data Flow
@@ -98,8 +102,9 @@ When `voiceEnabled=true`, the post-connect block in `src/index.ts` initializes t
 | `DISCOCLAW_VOICE_ENABLED` | `0` | Master switch |
 | `DISCOCLAW_DISCORD_ACTIONS_VOICE` | `0` | Enable voice action types |
 | `DISCOCLAW_VOICE_AUTO_JOIN` | `0` | Auto-join when allowlisted user enters |
-| `DISCOCLAW_STT_PROVIDER` | `deepgram` | STT backend |
-| `DISCOCLAW_TTS_PROVIDER` | `cartesia` | TTS backend (`cartesia`, `deepgram`, `openai`, `kokoro`) |
+| `DISCOCLAW_VOICE_PIPELINE_PROVIDER` | `pipeline` | Voice pipeline mode: `pipeline` (separate STT/AI/TTS stages) or `gemini-live` (single bidirectional Gemini WebSocket). Requires `GEMINI_API_KEY` when set to `gemini-live`. |
+| `DISCOCLAW_STT_PROVIDER` | `deepgram` | STT backend (used in `pipeline` mode only; ignored in `gemini-live` mode) |
+| `DISCOCLAW_TTS_PROVIDER` | `cartesia` | TTS backend (`cartesia`, `deepgram`, `openai`, `kokoro`) (used in `pipeline` mode only; ignored in `gemini-live` mode) |
 | `DISCOCLAW_VOICE_HOME_CHANNEL` | — | Voice audio channel name/ID used for prompt context (not transcript mirroring) |
 | `DISCOCLAW_VOICE_LOG_CHANNEL` | — | Text channel name/ID where `TranscriptMirror` posts user transcriptions and bot responses; falls back to bootstrap-provided `voiceLogChannelId` if unset |
 | `DISCOCLAW_VOICE_MODEL` | `capable` | AI model tier for voice responses |
@@ -109,5 +114,6 @@ When `voiceEnabled=true`, the post-connect block in `src/index.ts` initializes t
 | `DEEPGRAM_TTS_VOICE` | `aura-2-asteria-en` | Deepgram TTS voice name |
 | `DEEPGRAM_TTS_SPEED` | `1.3` | Deepgram TTS playback speed (range 0.5–1.5) |
 | `CARTESIA_API_KEY` | — | Required for cartesia TTS |
+| `GEMINI_API_KEY` | — | Required when `DISCOCLAW_VOICE_PIPELINE_PROVIDER=gemini-live`. Authenticates the Gemini Multimodal Live WebSocket session. Also used by the `gemini-api` runtime adapter (see `runtime.md`). |
 | `ANTHROPIC_API_KEY` | — | Enables the Anthropic REST adapter; when set and voice is enabled, voice auto-wires to the direct Messages API path (zero CLI cold-start). See `runtime.md § Anthropic REST Runtime`. |
 | *(built-in)* | — | Telegraphic style instruction hardcoded into every voice AI invocation — front-loads the answer, strips preambles/markdown/filler, keeps responses short for TTS latency. Not an env var; not overridable by `DISCOCLAW_VOICE_SYSTEM_PROMPT`. |
