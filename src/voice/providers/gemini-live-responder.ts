@@ -38,6 +38,10 @@ export type GeminiLiveResponderOpts = {
   onToolCall?: (calls: GeminiFunctionCall[]) => void;
   /** Called when the session terminally fails (all reconnect retries exhausted). */
   onSessionTerminated?: () => void;
+  /** Called when the provider recommends falling back to the pipeline voice mode. */
+  onFallbackRecommended?: (reason: string) => void;
+  /** Called when token usage approaches the context window limit. */
+  onTokenWarning?: (estimatedTokens: number, threshold: 'warn' | 'compress') => void;
   /** Override for testing — supply a custom AudioPlayer factory. */
   createPlayer?: () => AudioPlayer;
 };
@@ -53,6 +57,8 @@ export class GeminiLiveResponder {
   private readonly onBotResponse?: (text: string) => void;
   private readonly onToolCall?: (calls: GeminiFunctionCall[]) => void;
   private readonly onSessionTerminated?: () => void;
+  private readonly onFallbackRecommended?: (reason: string) => void;
+  private readonly onTokenWarning?: (estimatedTokens: number, threshold: 'warn' | 'compress') => void;
   private readonly playerFactory: () => AudioPlayer;
 
   private player: AudioPlayer | null = null;
@@ -67,6 +73,8 @@ export class GeminiLiveResponder {
     this.onBotResponse = opts.onBotResponse;
     this.onToolCall = opts.onToolCall;
     this.onSessionTerminated = opts.onSessionTerminated;
+    this.onFallbackRecommended = opts.onFallbackRecommended;
+    this.onTokenWarning = opts.onTokenWarning;
     this.playerFactory = opts.createPlayer ?? (() => createAudioPlayer());
   }
 
@@ -149,6 +157,12 @@ export class GeminiLiveResponder {
         break;
       case 'reconnect_failed':
         this.handleReconnectFailed(event.attempts);
+        break;
+      case 'token_warning':
+        this.handleTokenWarning(event.estimatedTokens, event.threshold);
+        break;
+      case 'fallback_recommended':
+        this.handleFallbackRecommended(event.reason);
         break;
       default:
         // setup_complete, error — not handled here
@@ -239,6 +253,34 @@ export class GeminiLiveResponder {
         this.onSessionTerminated();
       } catch (err) {
         this.log.warn({ err }, 'gemini-live-responder: onSessionTerminated callback error');
+      }
+    }
+  }
+
+  private handleTokenWarning(estimatedTokens: number, threshold: 'warn' | 'compress'): void {
+    this.log.warn(
+      { estimatedTokens, threshold },
+      'gemini-live-responder: token usage approaching context window limit',
+    );
+    if (this.onTokenWarning) {
+      try {
+        this.onTokenWarning(estimatedTokens, threshold);
+      } catch (err) {
+        this.log.warn({ err }, 'gemini-live-responder: onTokenWarning callback error');
+      }
+    }
+  }
+
+  private handleFallbackRecommended(reason: string): void {
+    this.log.warn(
+      { reason },
+      'gemini-live-responder: fallback to pipeline voice mode recommended',
+    );
+    if (this.onFallbackRecommended) {
+      try {
+        this.onFallbackRecommended(reason);
+      } catch (err) {
+        this.log.warn({ err }, 'gemini-live-responder: onFallbackRecommended callback error');
       }
     }
   }

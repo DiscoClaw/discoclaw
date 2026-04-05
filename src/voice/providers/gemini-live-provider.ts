@@ -21,6 +21,7 @@ import WebSocket from 'ws';
 import type { LoggerLike } from '../../logging/logger-like.js';
 import type { GeminiFunctionCall, GeminiLiveEvent, GeminiLiveOpts, GeminiLiveState } from './gemini-live-types.js';
 import type { GeminiToolsConfig } from './gemini-tool-mapper.js';
+import { GeminiLiveTokenEstimator } from './gemini-live-token-estimator.js';
 
 export type { GeminiFunctionCall, GeminiLiveEvent, GeminiLiveOpts, GeminiLiveState } from './gemini-live-types.js';
 
@@ -60,6 +61,9 @@ export class GeminiLiveProvider {
   private listener: ((event: GeminiLiveEvent) => void) | null = null;
   private sessionStartedAt = 0;
   private rotationTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly tokenEstimator: GeminiLiveTokenEstimator;
+  /** Tool call IDs dispatched in the current session but not yet responded to. */
+  private readonly inflightToolCalls = new Set<string>();
 
   constructor(opts: GeminiLiveOpts) {
     this.apiKey = opts.apiKey;
@@ -71,6 +75,7 @@ export class GeminiLiveProvider {
     this.tools = opts.tools;
     this.wsFactory = opts.wsFactory ?? ((url) => new WebSocket(url));
     this.sessionRotationMs = opts.sessionRotationMs ?? DEFAULT_SESSION_ROTATION_MS;
+    this.tokenEstimator = new GeminiLiveTokenEstimator(opts.tokenBudget);
   }
 
   /** Current connection state. */
@@ -99,6 +104,8 @@ export class GeminiLiveProvider {
     if (this._state !== 'open') {
       throw new Error('Cannot sendAudio before connect() completes or after disconnect()');
     }
+    this.tokenEstimator.addInputAudio(pcm.length);
+    this.checkTokenThreshold();
     this.ws!.send(JSON.stringify({
       realtimeInput: {
         media: {
@@ -114,6 +121,8 @@ export class GeminiLiveProvider {
     if (this._state !== 'open') {
       throw new Error('Cannot sendText before connect() completes or after disconnect()');
     }
+    this.tokenEstimator.addText(text);
+    this.checkTokenThreshold();
     this.ws!.send(JSON.stringify({
       clientContent: {
         turns: [{ role: 'user', parts: [{ text }] }],
@@ -125,14 +134,31 @@ export class GeminiLiveProvider {
   /**
    * Send tool execution results back to the session.
    * Each response is matched to its original function call by `id`.
+   * Silently drops responses for IDs that are no longer in-flight
+   * (e.g. from a previous session after rotation).
    */
   sendToolResponse(responses: Array<{ id: string; output: string }>): void {
     if (this._state !== 'open') {
       throw new Error('Cannot sendToolResponse before connect() completes or after disconnect()');
     }
+
+    // Filter to only in-flight calls — stale responses from a previous session are dropped
+    const valid = responses.filter((r) => {
+      if (this.inflightToolCalls.has(r.id)) {
+        this.inflightToolCalls.delete(r.id);
+        this.tokenEstimator.addToolResponse(r.output);
+        return true;
+      }
+      this.log.warn({ id: r.id }, 'Gemini Live: dropping stale tool response (not in-flight)');
+      return false;
+    });
+
+    if (valid.length === 0) return;
+
+    this.checkTokenThreshold();
     this.ws!.send(JSON.stringify({
       toolResponse: {
-        functionResponses: responses.map((r) => ({
+        functionResponses: valid.map((r) => ({
           id: r.id,
           response: { output: r.output },
         })),
@@ -145,10 +171,17 @@ export class GeminiLiveProvider {
     if (this._state === 'stopped' || this._state === 'idle') return;
     this._state = 'stopped';
     this.cancelRotationTimer();
+    this.inflightToolCalls.clear();
+    this.tokenEstimator.reset();
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.close(1000, 'client disconnect');
     }
     this.ws = null;
+  }
+
+  /** Number of tool calls currently in-flight (dispatched but not yet responded). */
+  get inflightToolCallCount(): number {
+    return this.inflightToolCalls.size;
   }
 
   // -----------------------------------------------------------------------
@@ -255,6 +288,8 @@ export class GeminiLiveProvider {
         this._state = 'open';
         this.retryCount = 0;
         this.sessionStartedAt = Date.now();
+        this.tokenEstimator.reset();
+        this.inflightToolCalls.clear();
         this.scheduleRotation();
         this.log.info('Gemini Live session setup complete');
         if (wasReconnect) {
@@ -287,13 +322,17 @@ export class GeminiLiveProvider {
             if (part.inlineData != null) {
               const inline = part.inlineData as { data?: string };
               if (inline.data) {
-                this.emit({ type: 'audio', data: Buffer.from(inline.data, 'base64') });
+                const buf = Buffer.from(inline.data, 'base64');
+                this.tokenEstimator.addOutputAudio(buf.length);
+                this.emit({ type: 'audio', data: buf });
               }
             }
             if (typeof part.text === 'string') {
+              this.tokenEstimator.addText(part.text as string);
               this.emit({ type: 'text', text: part.text as string });
             }
           }
+          this.checkTokenThreshold();
         }
         return;
       }
@@ -307,8 +346,13 @@ export class GeminiLiveProvider {
             name: String(fc.name ?? ''),
             args: (fc.args as Record<string, unknown>) ?? {},
           }));
+          // Track in-flight IDs and estimate tokens
+          for (const call of calls) {
+            this.inflightToolCalls.add(call.id);
+            this.tokenEstimator.addToolCall(call.name, call.args);
+          }
           this.log.info(
-            { count: calls.length, names: calls.map((c) => c.name).join(',') },
+            { count: calls.length, names: calls.map((c) => c.name).join(','), inflight: this.inflightToolCalls.size },
             'Gemini Live tool call received',
           );
           this.emit({ type: 'tool_call', functionCalls: calls });
@@ -348,6 +392,7 @@ export class GeminiLiveProvider {
 
   private handleUnexpectedClose(): void {
     this.cancelRotationTimer();
+    this.inflightToolCalls.clear();
     if (this.retryCount >= MAX_RETRIES) {
       this.log.error(
         { retries: this.retryCount },
@@ -355,6 +400,7 @@ export class GeminiLiveProvider {
       );
       this._state = 'stopped';
       this.emit({ type: 'reconnect_failed', attempts: this.retryCount });
+      this.emit({ type: 'fallback_recommended', reason: 'exhausted reconnect retries' });
       this.emit({ type: 'error', error: 'exhausted reconnect retries' });
       return;
     }
@@ -406,6 +452,26 @@ export class GeminiLiveProvider {
     // Close the WebSocket; handleUnexpectedClose will reconnect with the resume handle.
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.close(1000, 'session rotation');
+    }
+  }
+
+  /** Check token thresholds and emit warnings when newly crossed. */
+  private checkTokenThreshold(): void {
+    const threshold = this.tokenEstimator.checkThreshold();
+    if (threshold) {
+      const est = this.tokenEstimator.estimate;
+      this.log.warn(
+        { threshold, estimatedTokens: est.total, text: est.textTokens, audio: est.audioTokens, tool: est.toolTokens },
+        'Gemini Live token threshold crossed',
+      );
+      this.emit({ type: 'token_warning', estimatedTokens: est.total, threshold });
+
+      // At the compress threshold, proactively trigger session rotation
+      // to prevent server-side sliding window from silently dropping context.
+      if (threshold === 'compress' && this._state === 'open') {
+        this.log.info({ estimatedTokens: est.total }, 'Gemini Live: compress threshold reached — initiating proactive rotation');
+        this.initiateGracefulReconnect();
+      }
     }
   }
 

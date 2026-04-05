@@ -8,6 +8,7 @@
 import type WebSocket from 'ws';
 import type { LoggerLike } from '../../logging/logger-like.js';
 import type { GeminiToolsConfig } from './gemini-tool-mapper.js';
+import type { TokenBudget } from './gemini-live-token-estimator.js';
 
 // ---------------------------------------------------------------------------
 // Connection state
@@ -37,7 +38,9 @@ export type GeminiLiveEvent =
   | { type: 'reconnecting'; attempt: number; maxRetries: number; hasResumeHandle: boolean }
   | { type: 'reconnected'; attempt: number }
   | { type: 'reconnect_failed'; attempts: number }
-  | { type: 'session_rotating'; sessionAgeMs: number };
+  | { type: 'session_rotating'; sessionAgeMs: number }
+  | { type: 'token_warning'; estimatedTokens: number; threshold: 'warn' | 'compress' }
+  | { type: 'fallback_recommended'; reason: string };
 
 // ---------------------------------------------------------------------------
 // Constructor options
@@ -60,4 +63,6 @@ export type GeminiLiveOpts = {
   tools?: GeminiToolsConfig;
   /** Session rotation threshold in ms. Defaults to 780000 (13 min). Set to 0 to disable. */
   sessionRotationMs?: number;
+  /** Token budget overrides for compression safety warnings. */
+  tokenBudget?: Partial<TokenBudget>;
 };

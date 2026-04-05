@@ -258,19 +258,50 @@ describe('GeminiLiveProvider', () => {
 
   it('sendToolResponse sends functionResponses message', async () => {
     const provider = makeProvider();
+    collectEvents(provider);
     await connectWithSetup(provider);
+
+    // Simulate server sending tool calls so the IDs are registered as in-flight
+    lastCreatedWs!._receiveMessage({
+      toolCall: {
+        functionCalls: [
+          { id: 'call-1', name: 'bash', args: {} },
+          { id: 'call-2', name: 'read_file', args: {} },
+        ],
+      },
+    });
 
     provider.sendToolResponse([
       { id: 'call-1', output: '{"result":"ok"}' },
       { id: 'call-2', output: 'done' },
     ]);
 
+    // sent[0] is setup, sent[1] is the tool response
     const msg = JSON.parse(lastCreatedWs!.sent[1] as string);
     expect(msg.toolResponse).toBeDefined();
     expect(msg.toolResponse.functionResponses).toEqual([
       { id: 'call-1', response: { output: '{"result":"ok"}' } },
       { id: 'call-2', response: { output: 'done' } },
     ]);
+  });
+
+  it('sendToolResponse drops stale responses not in-flight', async () => {
+    const log = createLogger();
+    const provider = makeProvider({ log });
+    collectEvents(provider);
+    await connectWithSetup(provider);
+
+    // Send response without any tool call — should be silently dropped
+    provider.sendToolResponse([
+      { id: 'stale-1', output: 'old result' },
+    ]);
+
+    // No message sent beyond the setup
+    expect(lastCreatedWs!.sent).toHaveLength(1);
+    expect(log.warn).toHaveBeenCalledWith(
+      { id: 'stale-1' },
+      'Gemini Live: dropping stale tool response (not in-flight)',
+    );
   });
 
   it('sendToolResponse throws when not connected', () => {
