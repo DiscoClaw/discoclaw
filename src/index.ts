@@ -2388,6 +2388,8 @@ if (taskCtx) {
       },
       allowedUserIds: allowUserIds,
       createDecoder: opusDecoderFactory,
+      voiceProvider: cfg.voicePipelineProvider,
+      geminiApiKey: cfg.geminiApiKey,
       invokeAi: voiceInvokeAi,
       runtime: voiceRuntimeRef.runtime.id,
       runtimeModel: voiceModelRef.model,
