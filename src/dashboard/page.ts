@@ -850,6 +850,14 @@ export function renderDashboardPage(): string {
         </div>
         <div id="traces-summary" class="metrics"></div>
         <details>
+          <summary>Runtime Metrics</summary>
+          <div class="details-body">
+            <div id="metrics-counters" class="metrics"></div>
+            <div id="metrics-latencies" class="metrics"></div>
+            <div id="metrics-memory" class="metrics"></div>
+          </div>
+        </details>
+        <details>
           <summary>Recent Traces</summary>
           <div class="details-body">
             <div class="table-wrap">
@@ -997,6 +1005,9 @@ export function renderDashboardPage(): string {
     const tracesBody = document.getElementById('traces-body');
     const tracesErrors = document.getElementById('traces-errors');
     const tracesStatus = document.getElementById('traces-status');
+    const metricsCounters = document.getElementById('metrics-counters');
+    const metricsLatencies = document.getElementById('metrics-latencies');
+    const metricsMemory = document.getElementById('metrics-memory');
     const ROLE_LABELS = {
       chat: 'Chat',
       'plan-run': 'Plan Run',
@@ -1413,6 +1424,53 @@ export function renderDashboardPage(): string {
       renderTraces(response);
     }
 
+    function renderMetrics(data) {
+      var m = data.metrics || {};
+      var counters = m.counters || {};
+      var latencies = m.latencies || {};
+      var memory = m.memory;
+
+      clearNode(metricsCounters);
+      var upSince = m.startedAt ? new Date(m.startedAt).toLocaleString() : 'unknown';
+      appendMetric(metricsCounters, 'up since', upSince);
+      var counterKeys = Object.keys(counters).sort();
+      counterKeys.forEach(function (key) {
+        appendMetric(metricsCounters, key, String(counters[key]));
+      });
+      if (counterKeys.length === 0) {
+        appendMetric(metricsCounters, 'counters', 'none recorded yet');
+      }
+
+      clearNode(metricsLatencies);
+      var flows = ['message', 'reaction', 'cron', 'defer'];
+      flows.forEach(function (flow) {
+        var lat = latencies[flow];
+        if (!lat || lat.count === 0) return;
+        appendMetric(metricsLatencies, flow + ' latency',
+          'p50=' + lat.p50Ms + 'ms  p95=' + lat.p95Ms + 'ms  max=' + lat.maxMs + 'ms  (n=' + lat.count + ')');
+      });
+      if (metricsLatencies.children.length === 0) {
+        appendMetric(metricsLatencies, 'latencies', 'no samples yet');
+      }
+
+      clearNode(metricsMemory);
+      if (memory) {
+        function fmtMB(bytes) { return bytes ? (bytes / 1048576).toFixed(1) + ' MB' : 'n/a'; }
+        appendMetric(metricsMemory, 'rss', fmtMB(memory.rssBytes) + '  (hwm ' + fmtMB(memory.rssHwmBytes) + ')');
+        appendMetric(metricsMemory, 'heap used', fmtMB(memory.heapUsedBytes) + '  (hwm ' + fmtMB(memory.heapUsedHwmBytes) + ')');
+        appendMetric(metricsMemory, 'heap total', fmtMB(memory.heapTotalBytes));
+        appendMetric(metricsMemory, 'external', fmtMB(memory.externalBytes));
+        appendMetric(metricsMemory, 'samples', String(memory.sampleCount || 0));
+      } else {
+        appendMetric(metricsMemory, 'memory', 'sampler not active');
+      }
+    }
+
+    async function refreshMetrics() {
+      var response = await fetchJson('/api/metrics');
+      renderMetrics(response);
+    }
+
     function renderSnapshot(snapshot) {
       if (!snapshot.live) snapshot.live = {};
       const selectedRole = roleSelect.value;
@@ -1670,7 +1728,7 @@ export function renderDashboardPage(): string {
 
     document.getElementById('refresh-btn').addEventListener('click', async function () {
       try {
-        await Promise.all([refreshSnapshot(false), refreshDoctor(false), refreshTraces()]);
+        await Promise.all([refreshSnapshot(false), refreshDoctor(false), refreshTraces(), refreshMetrics()]);
         setStatus(heroStatus, 'Dashboard refreshed.', 'ok');
       } catch (error) {
         setStatus(heroStatus, String(error), 'error');
@@ -1679,7 +1737,7 @@ export function renderDashboardPage(): string {
 
     document.getElementById('traces-btn').addEventListener('click', async function () {
       try {
-        await refreshTraces();
+        await Promise.all([refreshTraces(), refreshMetrics()]);
         setStatus(tracesStatus, 'Traces refreshed.', 'ok');
       } catch (error) {
         setStatus(tracesStatus, String(error), 'error');
@@ -1881,7 +1939,7 @@ export function renderDashboardPage(): string {
       syncSecondaryModelOptions(roleSelect.value, '');
     });
 
-    Promise.all([refreshSnapshot(false), refreshDoctor(false), loadSettings(), refreshTraces()]).then(function () {
+    Promise.all([refreshSnapshot(false), refreshDoctor(false), loadSettings(), refreshTraces(), refreshMetrics()]).then(function () {
       setStatus(heroStatus, 'Dashboard ready.', 'ok');
       if (lastSnapshot) {
         populateSecondaryRoleForm('', '');

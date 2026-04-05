@@ -19,6 +19,8 @@ import { DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT, formatDashboardUrl } from './op
 import { renderDashboardPage } from './page.js';
 import { globalTraceStore } from '../observability/trace-store.js';
 import type { TraceSummary, RunTrace } from '../observability/trace-store.js';
+import { globalMetrics } from '../observability/metrics.js';
+import type { MetricsSnapshot } from '../observability/metrics.js';
 import { buildSnapshotResponse, type DashboardSnapshotApiResponse } from './api/snapshot.js';
 import {
   buildSettingsGetResponse,
@@ -178,6 +180,11 @@ export type DashboardTracesApiResponse = {
   ok: true;
   summary: TraceSummary;
   recentTraces: RunTrace[];
+};
+
+export type DashboardMetricsApiResponse = {
+  ok: true;
+  metrics: MetricsSnapshot;
 };
 
 function createDefaultDeps(): DashboardDeps {
@@ -942,6 +949,15 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           recentTraces: globalTraceStore.listRecent(20),
         };
         respondJson(res, 200, tracesResponse);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/metrics') {
+        const metricsResponse: DashboardMetricsApiResponse = {
+          ok: true,
+          metrics: globalMetrics.snapshot(),
+        };
+        respondJson(res, 200, metricsResponse);
         return;
       }
 
