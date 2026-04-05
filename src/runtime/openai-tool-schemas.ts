@@ -3,7 +3,14 @@
  *
  * Maps internal tool names (Read, Write, …) to OpenAI function names
  * (read_file, write_file, …) and provides JSON Schema parameter definitions.
+ *
+ * Also provides `buildGeminiToolDeclarations()` to produce Gemini-compatible
+ * function declarations for the Multimodal Live API (Phase 2.1).
  */
+
+import { toGeminiTools, type GeminiToolsConfig } from '../voice/providers/gemini-tool-mapper.js';
+
+export type { GeminiToolsConfig } from '../voice/providers/gemini-tool-mapper.js';
 
 /** Discoclaw tool name → OpenAI function names */
 const DISCO_TO_OPENAI_NAMES: Readonly<Record<string, string[]>> = {
@@ -405,4 +412,15 @@ export function buildToolSchemas(enabledTools: string[]): OpenAIFunctionTool[] {
     }
   }
   return schemas;
+}
+
+/**
+ * Build Gemini-compatible function declarations for the given enabled tools.
+ *
+ * Composes `buildToolSchemas()` → `toGeminiTools()` so callers (e.g.
+ * AudioPipelineManager) can get Gemini Live–ready declarations in one call.
+ * Returns `undefined` when no tools match (same semantics as `toGeminiTools`).
+ */
+export function buildGeminiToolDeclarations(enabledTools: string[]): GeminiToolsConfig | undefined {
+  return toGeminiTools(buildToolSchemas(enabledTools));
 }

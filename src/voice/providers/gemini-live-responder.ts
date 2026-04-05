@@ -17,7 +17,7 @@ import {
 } from '@discordjs/voice';
 import type { LoggerLike } from '../../logging/logger-like.js';
 import type { GeminiLiveProvider } from './gemini-live-provider.js';
-import type { GeminiLiveEvent } from './gemini-live-types.js';
+import type { GeminiFunctionCall, GeminiLiveEvent } from './gemini-live-types.js';
 import { upsampleToDiscord } from '../voice-responder.js';
 
 // Gemini Live returns 24 kHz mono PCM s16le
@@ -34,6 +34,8 @@ export type GeminiLiveResponderOpts = {
   provider: GeminiLiveProvider;
   /** Called with accumulated transcript text when a turn completes. */
   onBotResponse?: (text: string) => void;
+  /** Called when Gemini requests tool execution. */
+  onToolCall?: (calls: GeminiFunctionCall[]) => void;
   /** Override for testing — supply a custom AudioPlayer factory. */
   createPlayer?: () => AudioPlayer;
 };
@@ -47,6 +49,7 @@ export class GeminiLiveResponder {
   private readonly connection: VoiceConnection;
   private readonly provider: GeminiLiveProvider;
   private readonly onBotResponse?: (text: string) => void;
+  private readonly onToolCall?: (calls: GeminiFunctionCall[]) => void;
   private readonly playerFactory: () => AudioPlayer;
 
   private player: AudioPlayer | null = null;
@@ -59,6 +62,7 @@ export class GeminiLiveResponder {
     this.connection = opts.connection;
     this.provider = opts.provider;
     this.onBotResponse = opts.onBotResponse;
+    this.onToolCall = opts.onToolCall;
     this.playerFactory = opts.createPlayer ?? (() => createAudioPlayer());
   }
 
@@ -127,6 +131,9 @@ export class GeminiLiveResponder {
       case 'turn_complete':
         this.handleTurnComplete();
         break;
+      case 'tool_call':
+        this.handleToolCall(event.functionCalls);
+        break;
       default:
         // setup_complete, error — not handled here
         break;
@@ -153,6 +160,20 @@ export class GeminiLiveResponder {
     this.destroyStream();
     this.player?.stop();
     this.transcript = '';
+  }
+
+  private handleToolCall(calls: GeminiFunctionCall[]): void {
+    this.log.info(
+      { count: calls.length, names: calls.map((c) => c.name).join(',') },
+      'gemini-live-responder: tool call received',
+    );
+    if (this.onToolCall) {
+      try {
+        this.onToolCall(calls);
+      } catch (err) {
+        this.log.warn({ err }, 'gemini-live-responder: onToolCall callback error');
+      }
+    }
   }
 
   private handleTurnComplete(): void {

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { LoggerLike } from '../../logging/logger-like.js';
-import type { GeminiLiveEvent } from './gemini-live-types.js';
+import type { GeminiFunctionCall, GeminiLiveEvent } from './gemini-live-types.js';
 import { GeminiLiveResponder, type GeminiLiveResponderOpts } from './gemini-live-responder.js';
 
 // ---------------------------------------------------------------------------
@@ -445,6 +445,83 @@ describe('GeminiLiveResponder', () => {
       responder.destroy();
       responder.start();
       expect(connection.subscribe).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // tool_call events
+  // -----------------------------------------------------------------------
+
+  describe('tool_call events', () => {
+    it('forwards tool_call events to onToolCall callback', () => {
+      const onToolCall = vi.fn();
+      const { responder, provider } = createResponder({ onToolCall });
+      responder.start();
+
+      const calls: GeminiFunctionCall[] = [
+        { id: 'fc-1', name: 'web_search', args: { query: 'hello' } },
+      ];
+      provider._inject({ type: 'tool_call', functionCalls: calls });
+
+      expect(onToolCall).toHaveBeenCalledWith(calls);
+    });
+
+    it('forwards multiple function calls in a single event', () => {
+      const onToolCall = vi.fn();
+      const { responder, provider } = createResponder({ onToolCall });
+      responder.start();
+
+      const calls: GeminiFunctionCall[] = [
+        { id: 'fc-1', name: 'web_search', args: { query: 'hello' } },
+        { id: 'fc-2', name: 'read_file', args: { file_path: '/tmp/x' } },
+      ];
+      provider._inject({ type: 'tool_call', functionCalls: calls });
+
+      expect(onToolCall).toHaveBeenCalledWith(calls);
+      expect(onToolCall.mock.calls[0][0]).toHaveLength(2);
+    });
+
+    it('logs tool call receipt', () => {
+      const onToolCall = vi.fn();
+      const { responder, provider, log } = createResponder({ onToolCall });
+      responder.start();
+
+      provider._inject({
+        type: 'tool_call',
+        functionCalls: [{ id: 'fc-1', name: 'bash', args: { command: 'ls' } }],
+      });
+
+      expect(log.info).toHaveBeenCalledWith(
+        { count: 1, names: 'bash' },
+        'gemini-live-responder: tool call received',
+      );
+    });
+
+    it('does not crash when onToolCall is not provided', () => {
+      const { responder, provider } = createResponder();
+      responder.start();
+
+      // Should not throw
+      provider._inject({
+        type: 'tool_call',
+        functionCalls: [{ id: 'fc-1', name: 'bash', args: {} }],
+      });
+    });
+
+    it('does not crash when onToolCall throws', () => {
+      const onToolCall = vi.fn(() => { throw new Error('callback error'); });
+      const { responder, provider, log } = createResponder({ onToolCall });
+      responder.start();
+
+      provider._inject({
+        type: 'tool_call',
+        functionCalls: [{ id: 'fc-1', name: 'bash', args: {} }],
+      });
+
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
+        'gemini-live-responder: onToolCall callback error',
+      );
     });
   });
 
