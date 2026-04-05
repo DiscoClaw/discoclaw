@@ -64,6 +64,48 @@ vi.mock('@discordjs/voice', () => ({
   createAudioResource: vi.fn(() => ({ type: 'mock-resource' })),
 }));
 
+// ---------------------------------------------------------------------------
+// Mock Gemini Live providers
+// ---------------------------------------------------------------------------
+
+let mockGeminiProvider: {
+  connect: ReturnType<typeof vi.fn>;
+  disconnect: ReturnType<typeof vi.fn>;
+  sendAudio: ReturnType<typeof vi.fn>;
+  onEvent: ReturnType<typeof vi.fn>;
+  state: string;
+};
+
+let mockGeminiResponder: {
+  start: ReturnType<typeof vi.fn>;
+  stop: ReturnType<typeof vi.fn>;
+  destroy: ReturnType<typeof vi.fn>;
+};
+
+vi.mock('./providers/gemini-live-provider.js', () => ({
+  GeminiLiveProvider: vi.fn().mockImplementation(() => {
+    mockGeminiProvider = {
+      connect: vi.fn(async () => {}),
+      disconnect: vi.fn(async () => {}),
+      sendAudio: vi.fn(),
+      onEvent: vi.fn(),
+      state: 'open',
+    };
+    return mockGeminiProvider;
+  }),
+}));
+
+vi.mock('./providers/gemini-live-responder.js', () => ({
+  GeminiLiveResponder: vi.fn().mockImplementation(() => {
+    mockGeminiResponder = {
+      start: vi.fn(),
+      stop: vi.fn(),
+      destroy: vi.fn(),
+    };
+    return mockGeminiResponder;
+  }),
+}));
+
 // We don't want real stt-factory or audio-receiver internals — the pipeline
 // injects a createStt override and AudioReceiver is tested separately.
 // However we do import AudioReceiver for real so the wiring is exercised.
@@ -759,6 +801,155 @@ describe('AudioPipelineManager', () => {
       expect(() =>
         stt.transcriptionCb!({ text: 'hello', isFinal: false, confidence: 0.9 }),
       ).not.toThrow();
+    });
+  });
+
+  describe('gemini-live mode', () => {
+    function createGeminiOpts(overrides: Partial<AudioPipelineOpts> = {}): AudioPipelineOpts {
+      return {
+        log: createLogger(),
+        voiceConfig: baseVoiceConfig(),
+        allowedUserIds: new Set(['111']),
+        createDecoder: () => createMockDecoder(),
+        voiceProvider: 'gemini-live',
+        geminiApiKey: 'test-gemini-key',
+        ...overrides,
+      };
+    }
+
+    it('creates GeminiLiveProvider and GeminiLiveResponder, skipping STT/TTS', async () => {
+      const opts = createGeminiOpts();
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+
+      await mgr.startPipeline('g1', connection);
+
+      expect(mgr.hasPipeline('g1')).toBe(true);
+      expect(mockGeminiProvider.connect).toHaveBeenCalled();
+      expect(mockGeminiResponder.start).toHaveBeenCalled();
+    });
+
+    it('calls provider.disconnect() and responder.destroy() on stopPipeline', async () => {
+      const opts = createGeminiOpts();
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+
+      await mgr.startPipeline('g1', connection);
+      await mgr.stopPipeline('g1');
+
+      expect(mockGeminiResponder.destroy).toHaveBeenCalled();
+      expect(mockGeminiProvider.disconnect).toHaveBeenCalled();
+      expect(mgr.hasPipeline('g1')).toBe(false);
+    });
+
+    it('shim feedAudio bridges to provider.sendAudio', async () => {
+      const opts = createGeminiOpts();
+      const mgr = new AudioPipelineManager(opts);
+      const { connection, speakingEmitter, streams } = createMockConnection();
+
+      await mgr.startPipeline('g1', connection);
+
+      // Simulate a user speaking — trigger the receiver to subscribe
+      speakingEmitter.emit('start', '111');
+
+      // Feed a packet through the stream to exercise the shim
+      const stream = streams.get('111');
+      if (stream) {
+        stream.emit('data', Buffer.alloc(80));
+      }
+
+      // Allow async processing
+      await new Promise((r) => setTimeout(r, 20));
+
+      // The shim feedAudio calls provider.sendAudio
+      expect(mockGeminiProvider.sendAudio).toHaveBeenCalled();
+    });
+
+    it('shim swallows sendAudio errors without crashing', async () => {
+      const log = createLogger();
+      const opts = createGeminiOpts({ log });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection, speakingEmitter, streams } = createMockConnection();
+
+      await mgr.startPipeline('g1', connection);
+
+      // Make sendAudio throw
+      mockGeminiProvider.sendAudio.mockImplementation(() => {
+        throw new Error('WebSocket not open');
+      });
+
+      // Simulate a user speaking
+      speakingEmitter.emit('start', '111');
+      const stream = streams.get('111');
+      if (stream) {
+        stream.emit('data', Buffer.alloc(80));
+      }
+
+      await new Promise((r) => setTimeout(r, 20));
+
+      // Should have logged a warning but not thrown
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ guildId: 'g1' }),
+        'gemini-live: sendAudio error (non-fatal)',
+      );
+    });
+
+    it('throws when geminiApiKey is missing', async () => {
+      const log = createLogger();
+      const opts = createGeminiOpts({ geminiApiKey: undefined, log });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+
+      await mgr.startPipeline('g1', connection);
+
+      expect(mgr.hasPipeline('g1')).toBe(false);
+      expect(log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ guildId: 'g1' }),
+        'failed to start audio pipeline',
+      );
+    });
+
+    it('default voiceProvider unset uses standard pipeline path', async () => {
+      // No voiceProvider set — should use the normal STT path
+      const mockStt = createMockStt();
+      const opts = createPipelineOpts({ createStt: () => mockStt });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+
+      await mgr.startPipeline('g1', connection);
+
+      expect(mockStt.start).toHaveBeenCalled();
+      expect(mgr.hasPipeline('g1')).toBe(true);
+    });
+
+    it('wires onBotResponse to transcriptMirror.postBotResponse', async () => {
+      const mirror = {
+        postUserTranscription: vi.fn(async () => {}),
+        postBotResponse: vi.fn(async () => {}),
+      };
+      const opts = createGeminiOpts({
+        transcriptMirror: mirror,
+        botDisplayName: 'GeminiBot',
+      });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+
+      // Access the GeminiLiveResponder constructor mock to check the onBotResponse option
+      const { GeminiLiveResponder: ResponderMock } = await import('./providers/gemini-live-responder.js');
+
+      await mgr.startPipeline('g1', connection);
+
+      // Extract the onBotResponse callback passed to GeminiLiveResponder
+      const constructorCalls = (ResponderMock as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = constructorCalls[constructorCalls.length - 1];
+      const responderOpts = lastCall[0] as { onBotResponse?: (text: string) => void };
+
+      expect(responderOpts.onBotResponse).toBeDefined();
+      responderOpts.onBotResponse!('Hello from Gemini');
+
+      await vi.waitFor(() => {
+        expect(mirror.postBotResponse).toHaveBeenCalledWith('GeminiBot', 'Hello from Gemini');
+      });
     });
   });
 });
