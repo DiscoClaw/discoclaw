@@ -36,7 +36,8 @@ export type GeminiLiveEvent =
   | { type: 'tool_call'; functionCalls: GeminiFunctionCall[] }
   | { type: 'reconnecting'; attempt: number; maxRetries: number; hasResumeHandle: boolean }
   | { type: 'reconnected'; attempt: number }
-  | { type: 'reconnect_failed'; attempts: number };
+  | { type: 'reconnect_failed'; attempts: number }
+  | { type: 'session_rotating'; sessionAgeMs: number };
 
 // ---------------------------------------------------------------------------
 // Constructor options
@@ -57,4 +58,6 @@ export type GeminiLiveOpts = {
   wsFactory?: (url: string) => WebSocket;
   /** Gemini tools config (function declarations). Included in the setup message when provided. */
   tools?: GeminiToolsConfig;
+  /** Session rotation threshold in ms. Defaults to 780000 (13 min). Set to 0 to disable. */
+  sessionRotationMs?: number;
 };

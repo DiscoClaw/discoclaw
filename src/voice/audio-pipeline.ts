@@ -58,6 +58,8 @@ export type AudioPipelineOpts = {
   geminiApiKey?: string;
   /** Enabled tool names for Gemini Live tool use (e.g. ['Read', 'Bash']). */
   enabledTools?: string[];
+  /** Timer-based session rotation interval in ms for Gemini Live (default 13 min). */
+  sessionRotationMs?: number;
 };
 
 type GuildPipeline = {
@@ -93,6 +95,7 @@ export class AudioPipelineManager {
   private readonly voiceProvider: 'pipeline' | 'gemini-live';
   private readonly geminiApiKey?: string;
   private readonly enabledTools: string[];
+  private readonly sessionRotationMs?: number;
   private readonly pipelines = new Map<string, GuildPipeline>();
   /** Re-entrancy guard: VoiceConnection.subscribe() can synchronously fire stateChange→Ready. */
   private readonly starting = new Set<string>();
@@ -116,6 +119,7 @@ export class AudioPipelineManager {
     this.voiceProvider = opts.voiceProvider ?? 'pipeline';
     this.geminiApiKey = opts.geminiApiKey;
     this.enabledTools = opts.enabledTools ?? [];
+    this.sessionRotationMs = opts.sessionRotationMs;
 
     this.log.info({ voiceProvider: this.voiceProvider }, 'audio pipeline manager initialized');
   }
@@ -166,6 +170,7 @@ export class AudioPipelineManager {
           log: this.log,
           responseModalities: ['AUDIO', 'TEXT'],
           tools,
+          sessionRotationMs: this.sessionRotationMs,
         });
         await provider.connect();
 

@@ -168,6 +168,7 @@ export type DiscoclawConfig = {
   voiceSttProvider: 'deepgram' | 'whisper' | 'openai';
   voiceTtsProvider: 'cartesia' | 'deepgram' | 'kokoro' | 'openai';
   voicePipelineProvider: 'pipeline' | 'gemini-live';
+  geminiSessionRotationMs: number;
   voiceHomeChannel?: string;
   voiceLogChannel?: string;
   deepgramApiKey?: string;
@@ -931,6 +932,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
   const voiceSttProvider = parseEnum(env, 'DISCOCLAW_STT_PROVIDER', ['deepgram', 'whisper', 'openai'] as const, 'deepgram')!;
   const voiceTtsProvider = parseEnum(env, 'DISCOCLAW_TTS_PROVIDER', ['cartesia', 'deepgram', 'kokoro', 'openai'] as const, 'cartesia')!;
   const voicePipelineProvider = parseEnum(env, 'DISCOCLAW_VOICE_PIPELINE_PROVIDER', ['pipeline', 'gemini-live'] as const, 'pipeline')!;
+  const geminiSessionRotationMs = parseNonNegativeInt(env, 'DISCOCLAW_GEMINI_SESSION_ROTATION_MS', 780_000);
   let voiceHomeChannel = parseTrimmedString(env, 'DISCOCLAW_VOICE_HOME_CHANNEL');
   if (!voiceHomeChannel) {
     const legacy = parseTrimmedString(env, 'DISCOCLAW_VOICE_TRANSCRIPT_CHANNEL');
@@ -1196,6 +1198,7 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       voiceSttProvider,
       voiceTtsProvider,
       voicePipelineProvider,
+      geminiSessionRotationMs,
       voiceHomeChannel,
       voiceLogChannel,
       deepgramApiKey,

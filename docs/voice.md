@@ -26,6 +26,7 @@ All are listed in `package.json` and installed via `pnpm install`. If `@discordj
 | `DISCOCLAW_VOICE_MODEL` | No | follows startup chat model | AI model override for voice response invocations (used in `pipeline` mode only) |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | No | — | System prompt override for voice response invocations (used in `pipeline` mode only) |
 | `GEMINI_API_KEY` | Yes* | — | Gemini API key (*required when `DISCOCLAW_VOICE_PIPELINE_PROVIDER=gemini-live`) |
+| `DISCOCLAW_GEMINI_SESSION_ROTATION_MS` | No | `780000` (13 min) | Proactive session rotation threshold in ms for Gemini Live mode. Set to `0` to disable. See [Session Rotation](#session-rotation) |
 | `DEEPGRAM_STT_MODEL` | No | `nova-3-conversationalai` | Deepgram STT model to use (see [STT Models](#deepgram-stt-models)) |
 | `DEEPGRAM_TTS_VOICE` | No | `aura-2-asteria-en` | Deepgram TTS voice to use (see [TTS Voices](#deepgram-tts-voices-aura-2)) |
 | `DEEPGRAM_TTS_SPEED` | No | `1.3` | Deepgram TTS playback speed multiplier (range: 0.5–1.5) |
@@ -444,6 +445,36 @@ WebSocket closes unexpectedly
             → onSessionTerminated()
               → AudioPipelineManager.stopPipeline(guildId)
 ```
+
+### Session Rotation
+
+Gemini Live sessions have a server-side limit of approximately 15 minutes. Rather than waiting for the session to be terminated by the server (which would cause an uncontrolled disconnect), `GeminiLiveProvider` proactively rotates the session by initiating a graceful reconnect before the limit is reached.
+
+**How it works:**
+
+1. When a Gemini Live WebSocket session is established (`setup_complete`), the provider starts a rotation timer.
+2. When the timer fires (default: 13 minutes), the provider emits a `session_rotating` event and closes the WebSocket with a clean `1000` close code.
+3. The existing reconnect path (`handleUnexpectedClose`) takes over — it reconnects with the resume handle (if still within the 90-second TTL), preserving server-side session context.
+4. The timer resets on each successful reconnect.
+
+The `GeminiLiveResponder` handles the `session_rotating` event by pausing playback and destroying the current audio stream, identical to the `reconnecting` event behavior. From the user's perspective, a successful rotation produces a brief audio gap (~1–2 seconds) rather than a hard session termination.
+
+**Configuration:**
+
+Set `DISCOCLAW_GEMINI_SESSION_ROTATION_MS` to control the rotation threshold in milliseconds. The default is `780000` (13 minutes), leaving a 2-minute buffer before the ~15 minute server limit. Set to `0` to disable proactive rotation entirely (the session will run until the server terminates it or a network drop triggers the reconnect path).
+
+```bash
+# Default: rotate at 13 minutes
+DISCOCLAW_GEMINI_SESSION_ROTATION_MS=780000
+
+# Rotate earlier (10 minutes) for extra safety margin
+DISCOCLAW_GEMINI_SESSION_ROTATION_MS=600000
+
+# Disable proactive rotation
+DISCOCLAW_GEMINI_SESSION_ROTATION_MS=0
+```
+
+**Relationship to reconnect lifecycle:** Session rotation reuses the same reconnect infrastructure described in [Reconnect Lifecycle Events](#reconnect-lifecycle-events). The only difference is the trigger — a timer-initiated clean close rather than an unexpected WebSocket drop. The resume handle, exponential backoff, and terminal failure paths all apply identically.
 
 ## Troubleshooting
 
