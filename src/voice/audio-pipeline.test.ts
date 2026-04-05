@@ -973,6 +973,34 @@ describe('AudioPipelineManager', () => {
       });
     });
 
+    it('wires onInputTranscript to transcriptMirror.postUserTranscription', async () => {
+      const mirror = {
+        postUserTranscription: vi.fn(async () => {}),
+        postBotResponse: vi.fn(async () => {}),
+      };
+      const opts = createGeminiOpts({
+        transcriptMirror: mirror,
+      });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+
+      const { GeminiLiveResponder: ResponderMock } = await import('./providers/gemini-live-responder.js');
+
+      await mgr.startPipeline('g1', connection);
+
+      // Extract the onInputTranscript callback passed to GeminiLiveResponder
+      const constructorCalls = (ResponderMock as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = constructorCalls[constructorCalls.length - 1];
+      const responderOpts = lastCall[0] as { onInputTranscript?: (text: string) => void };
+
+      expect(responderOpts.onInputTranscript).toBeDefined();
+      responderOpts.onInputTranscript!('hello from user');
+
+      await vi.waitFor(() => {
+        expect(mirror.postUserTranscription).toHaveBeenCalledWith('User', 'hello from user');
+      });
+    });
+
     // -----------------------------------------------------------------------
     // Tool call dispatch tests
     // -----------------------------------------------------------------------
