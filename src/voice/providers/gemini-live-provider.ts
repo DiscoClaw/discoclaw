@@ -400,8 +400,9 @@ export class GeminiLiveProvider {
 
   private initiateGracefulReconnect(): void {
     if (this._state !== 'open') return;
-    this.log.info({ sessionAgeMs: Date.now() - this.sessionStartedAt }, 'Gemini Live session rotation — initiating graceful reconnect');
-    this.emit({ type: 'session_rotating', sessionAgeMs: Date.now() - this.sessionStartedAt });
+    const sessionAgeMs = Date.now() - this.sessionStartedAt;
+    this.log.info({ sessionAgeMs }, 'Gemini Live session rotation — initiating graceful reconnect');
+    this.emit({ type: 'session_rotating', sessionAgeMs });
     // Close the WebSocket; handleUnexpectedClose will reconnect with the resume handle.
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.close(1000, 'session rotation');

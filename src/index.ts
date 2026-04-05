@@ -2396,6 +2396,7 @@ if (taskCtx) {
       runtimeModel: voiceModelRef.model,
       runtimeCwd: workspaceCwd,
       runtimeTimeoutMs,
+      sessionRotationMs: cfg.geminiSessionRotationMs,
       transcriptMirror,
       botDisplayName,
       backfill,
