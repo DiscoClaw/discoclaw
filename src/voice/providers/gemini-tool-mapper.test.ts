@@ -180,6 +180,29 @@ describe('toGeminiTools', () => {
     expect(result?.functionDeclarations[1].name).toBe('bash');
   });
 
+  it('marks configured Gemini declarations as NON_BLOCKING', () => {
+    const openai = [{
+      type: 'function' as const,
+      function: {
+        name: 'read_file',
+        description: 'Read a file.',
+        parameters: {
+          type: 'object',
+          properties: {
+            file_path: { type: 'string' },
+          },
+          required: ['file_path'],
+        },
+      },
+    }];
+
+    const result = toGeminiTools(openai, { nonBlockingFunctionNames: ['read_file'] });
+    expect(result?.functionDeclarations[0]).toMatchObject({
+      name: 'read_file',
+      behavior: 'NON_BLOCKING',
+    });
+  });
+
   it('none of the declarations have additionalProperties', () => {
     const openai = buildToolSchemas(['Read', 'Write', 'Edit', 'Glob', 'Grep', 'Bash']);
     const result = toGeminiTools(openai);

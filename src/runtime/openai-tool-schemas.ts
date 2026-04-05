@@ -421,6 +421,15 @@ export function buildToolSchemas(enabledTools: string[]): OpenAIFunctionTool[] {
  * AudioPipelineManager) can get Gemini Live–ready declarations in one call.
  * Returns `undefined` when no tools match (same semantics as `toGeminiTools`).
  */
-export function buildGeminiToolDeclarations(enabledTools: string[]): GeminiToolsConfig | undefined {
-  return toGeminiTools(buildToolSchemas(enabledTools));
+export function buildGeminiToolDeclarations(
+  enabledTools: string[],
+  opts: { nonBlocking?: boolean } = {},
+): GeminiToolsConfig | undefined {
+  const schemas = buildToolSchemas(enabledTools);
+  return toGeminiTools(
+    schemas,
+    opts.nonBlocking
+      ? { nonBlockingFunctionNames: schemas.map((schema) => schema.function.name) }
+      : undefined,
+  );
 }

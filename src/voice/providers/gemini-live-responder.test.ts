@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { LoggerLike } from '../../logging/logger-like.js';
@@ -118,6 +118,10 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe('GeminiLiveResponder', () => {
   // -----------------------------------------------------------------------
   // start()
@@ -220,7 +224,8 @@ describe('GeminiLiveResponder', () => {
   // -----------------------------------------------------------------------
 
   describe('text events', () => {
-    it('accumulates transcript text', () => {
+    it('accumulates transcript text', async () => {
+      vi.useFakeTimers();
       const onBotResponse = vi.fn();
       const { responder, provider } = createResponder({ onBotResponse });
       responder.start();
@@ -229,6 +234,7 @@ describe('GeminiLiveResponder', () => {
       provider._inject({ type: 'text', text: 'world' });
       provider._inject({ type: 'turn_complete' });
 
+      await vi.runAllTimersAsync();
       expect(onBotResponse).toHaveBeenCalledWith('Hello world');
     });
   });
@@ -339,7 +345,8 @@ describe('GeminiLiveResponder', () => {
       endSpy.mockRestore();
     });
 
-    it('fires onBotResponse with accumulated transcript', () => {
+    it('fires onBotResponse with accumulated transcript', async () => {
+      vi.useFakeTimers();
       const onBotResponse = vi.fn();
       const { responder, provider } = createResponder({ onBotResponse });
       responder.start();
@@ -347,35 +354,55 @@ describe('GeminiLiveResponder', () => {
       provider._inject({ type: 'text', text: 'Hello from Gemini' });
       provider._inject({ type: 'turn_complete' });
 
+      await vi.runAllTimersAsync();
       expect(onBotResponse).toHaveBeenCalledWith('Hello from Gemini');
     });
 
-    it('does not fire onBotResponse when transcript is empty', () => {
+    it('does not fire onBotResponse when transcript is empty', async () => {
+      vi.useFakeTimers();
       const onBotResponse = vi.fn();
       const { responder, provider } = createResponder({ onBotResponse });
       responder.start();
 
       provider._inject({ type: 'turn_complete' });
 
+      await vi.runAllTimersAsync();
       expect(onBotResponse).not.toHaveBeenCalled();
     });
 
-    it('resets transcript after firing callback', () => {
+    it('resets transcript after firing callback', async () => {
+      vi.useFakeTimers();
       const onBotResponse = vi.fn();
       const { responder, provider } = createResponder({ onBotResponse });
       responder.start();
 
       provider._inject({ type: 'text', text: 'first turn' });
       provider._inject({ type: 'turn_complete' });
+      await vi.runAllTimersAsync();
       provider._inject({ type: 'text', text: 'second turn' });
       provider._inject({ type: 'turn_complete' });
+      await vi.runAllTimersAsync();
 
       expect(onBotResponse).toHaveBeenCalledTimes(2);
       expect(onBotResponse).toHaveBeenNthCalledWith(1, 'first turn');
       expect(onBotResponse).toHaveBeenNthCalledWith(2, 'second turn');
     });
 
-    it('does not crash when onBotResponse throws', () => {
+    it('flushes transcript that arrives shortly after turn_complete', async () => {
+      vi.useFakeTimers();
+      const onBotResponse = vi.fn();
+      const { responder, provider } = createResponder({ onBotResponse });
+      responder.start();
+
+      provider._inject({ type: 'turn_complete' });
+      provider._inject({ type: 'text', text: 'late transcript' });
+
+      await vi.runAllTimersAsync();
+      expect(onBotResponse).toHaveBeenCalledWith('late transcript');
+    });
+
+    it('does not crash when onBotResponse throws', async () => {
+      vi.useFakeTimers();
       const onBotResponse = vi.fn(() => { throw new Error('callback error'); });
       const { responder, provider, log } = createResponder({ onBotResponse });
       responder.start();
@@ -383,6 +410,7 @@ describe('GeminiLiveResponder', () => {
       provider._inject({ type: 'text', text: 'text' });
       provider._inject({ type: 'turn_complete' });
 
+      await vi.runAllTimersAsync();
       expect(onBotResponse).toHaveBeenCalled();
       expect(log.warn).toHaveBeenCalledWith(
         expect.objectContaining({ err: expect.any(Error) }),
@@ -452,7 +480,8 @@ describe('GeminiLiveResponder', () => {
       expect(player.stop).toHaveBeenCalled();
     });
 
-    it('clears transcript', () => {
+    it('clears transcript', async () => {
+      vi.useFakeTimers();
       const onBotResponse = vi.fn();
       const { responder, provider } = createResponder({ onBotResponse });
       responder.start();
@@ -461,6 +490,7 @@ describe('GeminiLiveResponder', () => {
       responder.stop();
       provider._inject({ type: 'turn_complete' });
 
+      await vi.runAllTimersAsync();
       expect(onBotResponse).not.toHaveBeenCalled();
     });
 

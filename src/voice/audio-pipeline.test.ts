@@ -120,11 +120,22 @@ vi.mock('../runtime/openai-tool-exec.js', () => ({
 }));
 
 vi.mock('../runtime/openai-tool-schemas.js', () => ({
-  buildGeminiToolDeclarations: vi.fn(() => [{ name: 'Read' }]),
-  buildToolSchemas: vi.fn(() => [
-    { type: 'function', function: { name: 'Read', description: 'Read a file', parameters: {} } },
-    { type: 'function', function: { name: 'Bash', description: 'Run bash', parameters: {} } },
-  ]),
+  OPENAI_TO_DISCO_NAME: {
+    Read: 'Read',
+    Bash: 'Bash',
+    MemoryQuery: 'MemoryQuery',
+    read_file: 'Read',
+    bash: 'Bash',
+  },
+  buildGeminiToolDeclarations: vi.fn((enabledTools: string[]) => ({
+    functionDeclarations: enabledTools.map((name) => ({ name })),
+  })),
+  buildToolSchemas: vi.fn((enabledTools: string[]) =>
+    enabledTools.map((name) => ({
+      type: 'function',
+      function: { name, description: `${name} tool`, parameters: {} },
+    })),
+  ),
 }));
 
 // We don't want real stt-factory or audio-receiver internals — the pipeline
@@ -233,6 +244,8 @@ function createPipelineOpts(overrides: Partial<AudioPipelineOpts> = {}): AudioPi
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockExecuteToolCall.mockReset();
+  mockExecuteToolCall.mockResolvedValue({ result: 'ok', ok: true });
   lastMockPlayer = null;
 });
 
@@ -1041,7 +1054,7 @@ describe('AudioPipelineManager', () => {
           expect.objectContaining({ enableHybridPipeline: false }),
         );
         expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
-          { id: 'tc-1', output: 'file contents here' },
+          { id: 'tc-1', name: 'Read', output: 'file contents here', scheduling: 'INTERRUPT' },
         ]);
       });
     });
@@ -1054,7 +1067,7 @@ describe('AudioPipelineManager', () => {
 
       await vi.waitFor(() => {
         expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
-          { id: 'tc-err', output: 'Error: permission denied' },
+          { id: 'tc-err', name: 'Read', output: 'Error: permission denied', scheduling: 'INTERRUPT' },
         ]);
       });
     });
@@ -1067,7 +1080,7 @@ describe('AudioPipelineManager', () => {
 
       await vi.waitFor(() => {
         expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
-          { id: 'tc-unk', output: 'Tool not allowed: UnknownTool' },
+          { id: 'tc-unk', name: 'UnknownTool', output: 'Tool not allowed: UnknownTool', scheduling: 'INTERRUPT' },
         ]);
       });
     });
@@ -1086,8 +1099,8 @@ describe('AudioPipelineManager', () => {
       await vi.waitFor(() => {
         expect(mockExecuteToolCall).toHaveBeenCalledTimes(2);
         expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
-          { id: 'tc-a', output: 'result-A' },
-          { id: 'tc-b', output: 'result-B' },
+          { id: 'tc-a', name: 'Read', output: 'result-A', scheduling: 'INTERRUPT' },
+          { id: 'tc-b', name: 'Bash', output: 'result-B', scheduling: 'INTERRUPT' },
         ]);
       });
     });
@@ -1115,7 +1128,7 @@ describe('AudioPipelineManager', () => {
     // SILENT tool scheduling
     // -----------------------------------------------------------------------
 
-    it('does not send tool response for SILENT tools', async () => {
+    it('sends SILENT-scheduled tool response for silent tools', async () => {
       mockExecuteToolCall.mockResolvedValue({ result: 'memory contents', ok: true });
       const log = createLogger();
       const opts = createGeminiOpts({
@@ -1142,12 +1155,13 @@ describe('AudioPipelineManager', () => {
       await vi.waitFor(() => {
         expect(log.info).toHaveBeenCalledWith(
           expect.objectContaining({ guildId: 'g1', count: 1 }),
-          'gemini-live: SILENT tool execution complete — results not sent to model',
+          'gemini-live: SILENT tool execution complete — results scheduled silently',
         );
       });
 
-      // sendToolResponse should NOT have been called for a silent tool
-      expect(mockGeminiProvider.sendToolResponse).not.toHaveBeenCalled();
+      expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
+        { id: 'tc-silent', name: 'MemoryQuery', output: 'memory contents', scheduling: 'SILENT' },
+      ]);
     });
 
     it('sends response only for non-silent tools in a mixed batch', async () => {
@@ -1181,9 +1195,9 @@ describe('AudioPipelineManager', () => {
 
       await vi.waitFor(() => {
         expect(mockExecuteToolCall).toHaveBeenCalledTimes(2);
-        // Only the non-silent tool response should be sent
         expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
-          { id: 'tc-read', output: 'file data' },
+          { id: 'tc-read', name: 'Read', output: 'file data', scheduling: 'INTERRUPT' },
+          { id: 'tc-mem', name: 'MemoryQuery', output: 'memory data', scheduling: 'SILENT' },
         ]);
       });
     });
@@ -1192,7 +1206,7 @@ describe('AudioPipelineManager', () => {
     // Fallback to standard pipeline
     // -----------------------------------------------------------------------
 
-    it('falls back to standard pipeline when initial gemini-live connection fails', async () => {
+    it('does not fall back when initial gemini-live connection fails (fallback disabled)', async () => {
       const { GeminiLiveProvider: ProviderMock } = await import('./providers/gemini-live-provider.js');
 
       // Make the next provider's connect() reject
@@ -1208,53 +1222,23 @@ describe('AudioPipelineManager', () => {
         return mockGeminiProvider;
       });
 
-      const stt = createMockStt();
       const log = createLogger();
-      const opts = createGeminiOpts({ log, createStt: () => stt });
+      const opts = createGeminiOpts({ log });
       const mgr = new AudioPipelineManager(opts);
       const { connection } = createMockConnection();
 
       await mgr.startPipeline('g1', connection);
 
-      expect(mgr.hasPipeline('g1')).toBe(true);
-      expect(mgr.pipelineMode('g1')).toBe('pipeline');
-      expect(stt.start).toHaveBeenCalled();
-      expect(log.warn).toHaveBeenCalledWith(
+      expect(mgr.hasPipeline('g1')).toBe(false);
+      expect(log.error).toHaveBeenCalledWith(
         expect.objectContaining({ guildId: 'g1' }),
-        'gemini-live: initial connection failed — falling back to standard pipeline',
+        'gemini-live: connection failed — no fallback (fallback disabled)',
       );
     });
 
-    it('fires onFallbackTriggered when initial connection fallback succeeds', async () => {
-      const { GeminiLiveProvider: ProviderMock } = await import('./providers/gemini-live-provider.js');
-
-      (ProviderMock as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
-        mockGeminiProvider = {
-          connect: vi.fn(async () => { throw new Error('quota exceeded'); }),
-          disconnect: vi.fn(async () => {}),
-          sendAudio: vi.fn(),
-          sendToolResponse: vi.fn(),
-          onEvent: vi.fn(),
-          state: 'idle',
-        };
-        return mockGeminiProvider;
-      });
-
-      const onFallbackTriggered = vi.fn();
-      const stt = createMockStt();
-      const opts = createGeminiOpts({ createStt: () => stt, onFallbackTriggered });
-      const mgr = new AudioPipelineManager(opts);
-      const { connection } = createMockConnection();
-
-      await mgr.startPipeline('g1', connection);
-
-      expect(onFallbackTriggered).toHaveBeenCalledWith('g1', 'pipeline');
-    });
-
-    it('falls back when onSessionTerminated is triggered', async () => {
-      const stt = createMockStt();
+    it('does not fall back when onSessionTerminated is triggered (fallback disabled)', async () => {
       const log = createLogger();
-      const opts = createGeminiOpts({ log, createStt: () => stt });
+      const opts = createGeminiOpts({ log });
       const mgr = new AudioPipelineManager(opts);
       const { connection } = createMockConnection();
 
@@ -1271,16 +1255,16 @@ describe('AudioPipelineManager', () => {
       expect(responderOpts.onSessionTerminated).toBeDefined();
       responderOpts.onSessionTerminated!();
 
-      await vi.waitFor(() => {
-        expect(mgr.hasPipeline('g1')).toBe(true);
-        expect(mgr.pipelineMode('g1')).toBe('pipeline');
-      });
+      // Pipeline should NOT switch to standard mode — it stays as gemini-live (or gets stopped)
+      expect(log.error).toHaveBeenCalledWith(
+        expect.objectContaining({ guildId: 'g1' }),
+        'gemini-live session terminally failed — no fallback (fallback disabled)',
+      );
     });
 
-    it('falls back when onFallbackRecommended is triggered', async () => {
-      const stt = createMockStt();
+    it('does not fall back when onFallbackRecommended is triggered (fallback disabled)', async () => {
       const log = createLogger();
-      const opts = createGeminiOpts({ log, createStt: () => stt });
+      const opts = createGeminiOpts({ log });
       const mgr = new AudioPipelineManager(opts);
       const { connection } = createMockConnection();
 
@@ -1295,10 +1279,11 @@ describe('AudioPipelineManager', () => {
       expect(responderOpts.onFallbackRecommended).toBeDefined();
       responderOpts.onFallbackRecommended!('exhausted reconnect retries');
 
-      await vi.waitFor(() => {
-        expect(mgr.hasPipeline('g1')).toBe(true);
-        expect(mgr.pipelineMode('g1')).toBe('pipeline');
-      });
+      // Pipeline should NOT switch to standard mode
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ guildId: 'g1', reason: 'exhausted reconnect retries' }),
+        'gemini-live: fallback recommended but fallback is disabled',
+      );
     });
   });
 });

@@ -124,21 +124,22 @@ describe('GeminiLiveProvider', () => {
     expect(url.searchParams.get('key')).toBe('my-api-key');
   });
 
-  it('sends setup message with model, default config, compression, activity handling, and input_audio_transcription on open', async () => {
+  it('sends setup message with the 3.1 model, compression, and transcription config on open', async () => {
     const provider = makeProvider();
     await connectWithSetup(provider);
 
     const setupMsg = JSON.parse(lastCreatedWs!.sent[0] as string);
     expect(setupMsg.setup).toBeDefined();
-    expect(setupMsg.setup.model).toBe('models/gemini-2.0-flash-live-001');
+    expect(setupMsg.setup.model).toBe('models/gemini-3.1-flash-live-preview');
     expect(setupMsg.setup.generationConfig.responseModalities).toEqual(['AUDIO']);
-    expect(setupMsg.setup.generationConfig.contextWindowCompression).toEqual({
+    expect(setupMsg.setup.contextWindowCompression).toEqual({
       slidingWindow: {},
     });
     expect(setupMsg.setup.realtimeInputConfig).toEqual({
       activityHandling: 'START_OF_ACTIVITY_INTERRUPTS',
-      input_audio_transcription: {},
     });
+    expect(setupMsg.setup.inputAudioTranscription).toEqual({});
+    expect(setupMsg.setup.outputAudioTranscription).toEqual({});
   });
 
   it('sends custom model, systemInstruction, and voiceName in setup', async () => {
@@ -216,9 +217,9 @@ describe('GeminiLiveProvider', () => {
     // sent[0] is setup, sent[1] is the audio
     const msg = JSON.parse(lastCreatedWs!.sent[1] as string);
     expect(msg.realtimeInput).toBeDefined();
-    expect(msg.realtimeInput.media).toBeDefined();
-    expect(msg.realtimeInput.media.mimeType).toBe('audio/pcm;rate=16000');
-    expect(msg.realtimeInput.media.data).toBe(pcm.toString('base64'));
+    expect(msg.realtimeInput.audio).toBeDefined();
+    expect(msg.realtimeInput.audio.mimeType).toBe('audio/pcm;rate=16000');
+    expect(msg.realtimeInput.audio.data).toBe(pcm.toString('base64'));
   });
 
   it('sendAudio throws when not connected', () => {
@@ -273,16 +274,16 @@ describe('GeminiLiveProvider', () => {
     });
 
     provider.sendToolResponse([
-      { id: 'call-1', output: '{"result":"ok"}' },
-      { id: 'call-2', output: 'done' },
+      { id: 'call-1', name: 'bash', output: '{"result":"ok"}', scheduling: 'INTERRUPT' },
+      { id: 'call-2', name: 'read_file', output: 'done', scheduling: 'SILENT' },
     ]);
 
     // sent[0] is setup, sent[1] is the tool response
     const msg = JSON.parse(lastCreatedWs!.sent[1] as string);
     expect(msg.toolResponse).toBeDefined();
     expect(msg.toolResponse.functionResponses).toEqual([
-      { id: 'call-1', response: { output: '{"result":"ok"}' } },
-      { id: 'call-2', response: { output: 'done' } },
+      { id: 'call-1', name: 'bash', response: { result: '{"result":"ok"}', scheduling: 'INTERRUPT' } },
+      { id: 'call-2', name: 'read_file', response: { result: 'done', scheduling: 'SILENT' } },
     ]);
   });
 
@@ -294,7 +295,7 @@ describe('GeminiLiveProvider', () => {
 
     // Send response without any tool call — should be silently dropped
     provider.sendToolResponse([
-      { id: 'stale-1', output: 'old result' },
+      { id: 'stale-1', name: 'bash', output: 'old result' },
     ]);
 
     // No message sent beyond the setup
@@ -307,7 +308,7 @@ describe('GeminiLiveProvider', () => {
 
   it('sendToolResponse throws when not connected', () => {
     const provider = makeProvider();
-    expect(() => provider.sendToolResponse([{ id: 'x', output: 'y' }])).toThrow(
+    expect(() => provider.sendToolResponse([{ id: 'x', name: 'bash', output: 'y' }])).toThrow(
       'Cannot sendToolResponse before connect()',
     );
   });
@@ -384,7 +385,7 @@ describe('GeminiLiveProvider', () => {
 
     lastCreatedWs!._receiveMessage({
       serverContent: {
-        inputTranscription: 'Hello from the user',
+        inputTranscription: { text: 'Hello from the user' },
       },
     });
 
@@ -400,12 +401,28 @@ describe('GeminiLiveProvider', () => {
 
     lastCreatedWs!._receiveMessage({
       serverContent: {
-        inputTranscription: '',
+        inputTranscription: { text: '' },
       },
     });
 
     const transcriptEvents = events.filter((e) => e.type === 'input_transcript');
     expect(transcriptEvents).toHaveLength(0);
+  });
+
+  it('emits text event from serverContent outputTranscription', async () => {
+    const provider = makeProvider();
+    const events = collectEvents(provider);
+    await connectWithSetup(provider);
+
+    lastCreatedWs!._receiveMessage({
+      serverContent: {
+        outputTranscription: { text: 'Hello from Gemini audio' },
+      },
+    });
+
+    const textEvents = events.filter((e) => e.type === 'text');
+    expect(textEvents).toHaveLength(1);
+    expect((textEvents[0] as { type: 'text'; text: string }).text).toBe('Hello from Gemini audio');
   });
 
   it('emits error event from server error message', async () => {

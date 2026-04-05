@@ -18,7 +18,7 @@ import type { TranscriptMirrorLike } from './transcript-mirror.js';
 import { ConversationBuffer, type Turn } from './conversation-buffer.js';
 import { GeminiLiveProvider } from './providers/gemini-live-provider.js';
 import { GeminiLiveResponder } from './providers/gemini-live-responder.js';
-import { buildGeminiToolDeclarations, buildToolSchemas } from '../runtime/openai-tool-schemas.js';
+import { buildGeminiToolDeclarations, buildToolSchemas, OPENAI_TO_DISCO_NAME } from '../runtime/openai-tool-schemas.js';
 import { executeToolCall } from '../runtime/openai-tool-exec.js';
 
 // ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ export type AudioPipelineOpts = {
   geminiApiKey?: string;
   /** Enabled tool names for Gemini Live tool use (e.g. ['Read', 'Bash']). */
   enabledTools?: string[];
-  /** Tool names that use SILENT scheduling — execute in background, results not sent to model. */
+  /** Tool names that use SILENT scheduling for Gemini Live function responses. */
   silentTools?: string[];
   /** Timer-based session rotation interval in ms for Gemini Live (default 13 min). */
   sessionRotationMs?: number;
@@ -176,11 +176,11 @@ export class AudioPipelineManager {
         const apiKey = this.geminiApiKey;
         if (!apiKey) throw new Error('geminiApiKey is required for gemini-live voice provider');
 
-        const tools = buildGeminiToolDeclarations(this.enabledTools);
+        const tools = buildGeminiToolDeclarations(this.enabledTools, { nonBlocking: true });
         const provider = new GeminiLiveProvider({
           apiKey,
           log: this.log,
-          responseModalities: ['AUDIO', 'TEXT'],
+          responseModalities: ['AUDIO'],
           tools,
           sessionRotationMs: this.sessionRotationMs,
         });
@@ -207,12 +207,10 @@ export class AudioPipelineManager {
               }
             : undefined,
           onSessionTerminated: () => {
-            this.log.error({ guildId }, 'gemini-live session terminally failed — attempting fallback to standard pipeline');
-            void this.fallbackToPipeline(guildId, connection);
+            this.log.error({ guildId }, 'gemini-live session terminally failed — no fallback (fallback disabled)');
           },
           onFallbackRecommended: (reason: string) => {
-            this.log.warn({ guildId, reason }, 'gemini-live: fallback recommended — switching to standard pipeline');
-            void this.fallbackToPipeline(guildId, connection);
+            this.log.warn({ guildId, reason }, 'gemini-live: fallback recommended but fallback is disabled');
           },
           onTokenWarning: (estimatedTokens: number, threshold: 'warn' | 'compress') => {
             this.log.warn({ guildId, estimatedTokens, threshold }, 'gemini-live: token usage approaching context window limit');
@@ -230,15 +228,14 @@ export class AudioPipelineManager {
                 const logFn = (msg: string) => this.log.info({ guildId }, msg);
                 const execOpts = { enableHybridPipeline: false as const, allowedToolNames };
 
-                // Identify SILENT tool calls — results not sent back to model
-                const silentCallIds = new Set(
-                  calls.filter((c) => this.silentTools.has(c.name)).map((c) => c.id),
-                );
-
-                // Fire-and-forget (NON_BLOCKING) — tools run without pausing audio
+                // Fire-and-forget (NON_BLOCKING) — Gemini 3.1 can continue speaking
+                // while the client runs tools and returns scheduled responses later.
                 void (async () => {
                   const results = await Promise.all(
                     calls.map(async (call) => {
+                      const scheduling: 'SILENT' | 'INTERRUPT' = this.isSilentTool(call.name)
+                        ? 'SILENT'
+                        : 'INTERRUPT';
                       try {
                         const res = await executeToolCall(
                           call.name,
@@ -247,26 +244,24 @@ export class AudioPipelineManager {
                           logFn,
                           execOpts,
                         );
-                        return { id: call.id, output: res.result };
+                        return { id: call.id, name: call.name, output: res.result, scheduling };
                       } catch (err) {
                         const msg = err instanceof Error ? err.message : String(err);
-                        return { id: call.id, output: `Error: ${msg}` };
+                        return { id: call.id, name: call.name, output: `Error: ${msg}`, scheduling };
                       }
                     }),
                   );
 
-                  // SILENT tools: executed but response not sent to model
-                  const nonSilentResults = results.filter((r) => !silentCallIds.has(r.id));
-                  if (silentCallIds.size > 0) {
+                  const silentCount = results.filter((r) => r.scheduling === 'SILENT').length;
+                  if (silentCount > 0) {
                     this.log.info(
-                      { guildId, count: silentCallIds.size },
-                      'gemini-live: SILENT tool execution complete — results not sent to model',
+                      { guildId, count: silentCount },
+                      'gemini-live: SILENT tool execution complete — results scheduled silently',
                     );
                   }
 
-                  if (nonSilentResults.length === 0) return;
                   try {
-                    provider.sendToolResponse(nonSilentResults);
+                    provider.sendToolResponse(results);
                   } catch (err) {
                     this.log.warn(
                       { guildId, err },
@@ -411,21 +406,9 @@ export class AudioPipelineManager {
       this.log.info({ guildId, mode: effectiveMode }, 'audio pipeline started');
     } catch (err) {
       this.log.error({ guildId, err }, 'failed to start audio pipeline');
-      // Initial gemini-live connection failure: fall back to standard pipeline
-      if (effectiveMode === 'gemini-live' && !forceMode) {
-        this.log.warn({ guildId }, 'gemini-live: initial connection failed — falling back to standard pipeline');
-        this.starting.delete(guildId);
-        try {
-          await this.startPipeline(guildId, connection, 'pipeline');
-          if (this.hasPipeline(guildId)) {
-            this.log.info({ guildId }, 'gemini-live: fallback to standard pipeline succeeded');
-            this.onFallbackTriggered?.(guildId, 'pipeline');
-          } else {
-            this.log.error({ guildId }, 'gemini-live: fallback to standard pipeline also failed');
-          }
-        } catch {
-          this.log.error({ guildId }, 'gemini-live: fallback to standard pipeline also failed');
-        }
+      // Fallback disabled — gemini-live must succeed or the pipeline stays down
+      if (effectiveMode === 'gemini-live') {
+        this.log.error({ guildId }, 'gemini-live: connection failed — no fallback (fallback disabled)');
       }
     } finally {
       this.starting.delete(guildId);
@@ -507,6 +490,10 @@ export class AudioPipelineManager {
     } else {
       this.log.error({ guildId }, 'gemini-live: fallback to standard pipeline also failed — guild has no active pipeline');
     }
+  }
+
+  private isSilentTool(toolName: string): boolean {
+    return this.silentTools.has(toolName) || this.silentTools.has(OPENAI_TO_DISCO_NAME[toolName] ?? toolName);
   }
 
   /**

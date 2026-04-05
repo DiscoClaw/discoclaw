@@ -50,7 +50,7 @@ export type GeminiLiveEvent =
 export type GeminiLiveOpts = {
   apiKey: string;
   log: LoggerLike;
-  /** Model ID. Defaults to 'gemini-2.0-flash-live-001'. */
+  /** Model ID. Defaults to 'gemini-3.1-flash-live-preview'. */
   model?: string;
   /** System instruction text. */
   systemInstruction?: string;
