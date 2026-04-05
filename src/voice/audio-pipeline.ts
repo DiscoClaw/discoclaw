@@ -18,7 +18,8 @@ import type { TranscriptMirrorLike } from './transcript-mirror.js';
 import { ConversationBuffer, type Turn } from './conversation-buffer.js';
 import { GeminiLiveProvider } from './providers/gemini-live-provider.js';
 import { GeminiLiveResponder } from './providers/gemini-live-responder.js';
-import { buildGeminiToolDeclarations } from '../runtime/openai-tool-schemas.js';
+import { buildGeminiToolDeclarations, buildToolSchemas } from '../runtime/openai-tool-schemas.js';
+import { executeToolCall } from '../runtime/openai-tool-exec.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -185,8 +186,43 @@ export class AudioPipelineManager {
             ? (calls) => {
                 this.log.info(
                   { guildId, count: calls.length, names: calls.map((c) => c.name).join(',') },
-                  'gemini-live: tool call received (execution deferred to Phase 2.2)',
+                  'gemini-live: tool call received — dispatching',
                 );
+                const allowedRoots = this.runtimeCwd ? [this.runtimeCwd] : [];
+                const allowedToolNames = new Set(
+                  buildToolSchemas(this.enabledTools).map((t) => t.function.name),
+                );
+                const logFn = (msg: string) => this.log.info({ guildId }, msg);
+                const execOpts = { enableHybridPipeline: false as const, allowedToolNames };
+
+                // Fire-and-forget (NON_BLOCKING) — tools run without pausing audio
+                void (async () => {
+                  const results = await Promise.all(
+                    calls.map(async (call) => {
+                      try {
+                        const res = await executeToolCall(
+                          call.name,
+                          call.args,
+                          allowedRoots,
+                          logFn,
+                          execOpts,
+                        );
+                        return { id: call.id, output: res.result };
+                      } catch (err) {
+                        const msg = err instanceof Error ? err.message : String(err);
+                        return { id: call.id, output: `Error: ${msg}` };
+                      }
+                    }),
+                  );
+                  try {
+                    provider.sendToolResponse(results);
+                  } catch (err) {
+                    this.log.warn(
+                      { guildId, err },
+                      'gemini-live: sendToolResponse failed (provider likely disconnected)',
+                    );
+                  }
+                })();
               }
             : undefined,
         });
