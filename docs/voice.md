@@ -89,10 +89,10 @@ Each stage is independently configurable via `DISCOCLAW_STT_PROVIDER`, `DISCOCLA
 
 ### `gemini-live`
 
-Gemini Live replaces the separate STT/TTS/AI stages with a single bidirectional WebSocket session to the Gemini Multimodal Live API. Speech recognition, reasoning, and speech synthesis all happen server-side in one round trip:
+Gemini Live replaces the separate STT/TTS/AI stages with a single bidirectional WebSocket session to the Gemini Multimodal Live API. Speech recognition, reasoning, and speech synthesis all happen server-side in one round trip. User speech transcription is provided natively via Gemini's `input_audio_transcription` capability — no separate STT pipeline is needed to mirror user speech to the transcript channel.
 
 ```
-User audio → Gemini Live WebSocket → (server-side STT + reasoning + TTS) → audio + text events → Discord playback
+User audio → Gemini Live WebSocket → (server-side STT + reasoning + TTS) → audio + text + input transcription events → Discord playback
 ```
 
 **Requirements:**
@@ -108,7 +108,7 @@ User audio → Gemini Live WebSocket → (server-side STT + reasoning + TTS) →
 
 **What stays the same:**
 - Audio capture path: `AudioReceiver` still handles Opus decode and 48→16 kHz downsampling
-- Transcript mirror: bot responses are posted to the voice-log channel via `TranscriptMirror`
+- Transcript mirror: both user speech (via native `input_audio_transcription`) and bot responses are posted to the voice-log channel via `TranscriptMirror`
 - Voice actions (`voiceJoin`, `voiceLeave`, etc.) work normally
 - Auto-join/leave presence handling is unaffected
 - Allowlist gating remains enforced
@@ -133,6 +133,7 @@ Changing the provider requires a service restart. Active voice connections will 
 |---------|-----------|---------------|
 | STT provider | Configurable (Deepgram, Whisper) | Gemini (server-side) |
 | TTS provider | Configurable (Cartesia, Deepgram, OpenAI) | Gemini (server-side) |
+| User speech transcription | Separate STT pipeline | Native via `input_audio_transcription` — no separate STT needed |
 | AI model | Any configured runtime | `gemini-2.0-flash-live-001` |
 | Conversation history | Ring buffer (10 turns) + backfill | Server-side session state |
 | Barge-in | STT-confirmed | Gemini `interrupted` event |
@@ -357,9 +358,10 @@ User speaks
   -> AudioReceiver (Opus decode, 48kHz->16kHz downsample)
     -> SttProvider shim -> GeminiLiveProvider.sendAudio() (WebSocket)
       -> Gemini Live: STT + reasoning + TTS (server-side)
-        <- audio events (24kHz mono PCM) + text events
+        <- audio events (24kHz mono PCM) + text events + input_audio_transcription
           -> GeminiLiveResponder: upsample -> AudioPlayer -> Discord playback
-          -> onBotResponse callback -> TranscriptMirror
+          -> onBotResponse callback -> TranscriptMirror (bot response text)
+          -> input_audio_transcription -> TranscriptMirror (user speech text)
 ```
 
 ### Shared modules
