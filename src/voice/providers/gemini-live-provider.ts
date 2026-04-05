@@ -19,6 +19,9 @@
 
 import WebSocket from 'ws';
 import type { LoggerLike } from '../../logging/logger-like.js';
+import type { GeminiLiveEvent, GeminiLiveOpts, GeminiLiveState } from './gemini-live-types.js';
+
+export type { GeminiLiveEvent, GeminiLiveOpts, GeminiLiveState } from './gemini-live-types.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -28,35 +31,6 @@ const GEMINI_LIVE_WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.a
 const DEFAULT_MODEL = 'gemini-2.0-flash-live-001';
 const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 500;
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-export type GeminiLiveState = 'idle' | 'connecting' | 'setup' | 'open' | 'stopped';
-
-export type GeminiLiveEvent =
-  | { type: 'audio'; data: Buffer }
-  | { type: 'text'; text: string }
-  | { type: 'turn_complete' }
-  | { type: 'interrupted' }
-  | { type: 'setup_complete' }
-  | { type: 'error'; error: string };
-
-export type GeminiLiveOpts = {
-  apiKey: string;
-  log: LoggerLike;
-  /** Model ID. Defaults to 'gemini-2.0-flash-live-001'. */
-  model?: string;
-  /** System instruction text. */
-  systemInstruction?: string;
-  /** Response modalities. Defaults to ['AUDIO']. */
-  responseModalities?: Array<'AUDIO' | 'TEXT'>;
-  /** Speech config voice name. */
-  voiceName?: string;
-  /** Override WebSocket constructor for testing. */
-  wsFactory?: (url: string) => WebSocket;
-};
 
 // ---------------------------------------------------------------------------
 // Provider
