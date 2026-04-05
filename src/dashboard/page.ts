@@ -842,6 +842,52 @@ export function renderDashboardPage(): string {
       <section class="card span-12">
         <div class="card-header">
           <div>
+            <h2>Observability</h2>
+          </div>
+          <div class="actions">
+            <button id="traces-btn" class="secondary" type="button">Refresh Traces</button>
+          </div>
+        </div>
+        <div id="traces-summary" class="metrics"></div>
+        <details>
+          <summary>Runtime Metrics</summary>
+          <div class="details-body">
+            <div id="metrics-counters" class="metrics"></div>
+            <div id="metrics-latencies" class="metrics"></div>
+            <div id="metrics-memory" class="metrics"></div>
+          </div>
+        </details>
+        <details>
+          <summary>Recent Traces</summary>
+          <div class="details-body">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Flow</th>
+                    <th>Outcome</th>
+                    <th>Duration</th>
+                    <th>Started</th>
+                    <th>Events</th>
+                  </tr>
+                </thead>
+                <tbody id="traces-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+        <details>
+          <summary>Recent Errors</summary>
+          <div class="details-body">
+            <div id="traces-errors" class="checklist"></div>
+          </div>
+        </details>
+        <div id="traces-status" class="status"></div>
+      </section>
+
+      <section class="card span-12">
+        <div class="card-header">
+          <div>
             <h2>Advanced</h2>
           </div>
         </div>
@@ -955,6 +1001,13 @@ export function renderDashboardPage(): string {
     const secretValueInput = document.getElementById('secret-value-input');
     const settingsContainer = document.getElementById('settings-container');
     const settingsStatus = document.getElementById('settings-status');
+    const tracesSummary = document.getElementById('traces-summary');
+    const tracesBody = document.getElementById('traces-body');
+    const tracesErrors = document.getElementById('traces-errors');
+    const tracesStatus = document.getElementById('traces-status');
+    const metricsCounters = document.getElementById('metrics-counters');
+    const metricsLatencies = document.getElementById('metrics-latencies');
+    const metricsMemory = document.getElementById('metrics-memory');
     const ROLE_LABELS = {
       chat: 'Chat',
       'plan-run': 'Plan Run',
@@ -1303,6 +1356,121 @@ export function renderDashboardPage(): string {
       secretKeySelect.value = recommendSecretKey(snapshot);
     }
 
+    function renderTraces(data) {
+      var summary = data.summary || {};
+      var recentTraces = data.recentTraces || [];
+      var byFlow = summary.byFlow || {};
+      clearNode(tracesSummary);
+      appendMetric(tracesSummary, 'total traces', String(summary.total || 0));
+      appendMetric(tracesSummary, 'in progress', String(summary.inProgress || 0));
+      var flows = ['message', 'reaction', 'cron', 'defer'];
+      flows.forEach(function (flow) {
+        var fs = byFlow[flow];
+        if (!fs || fs.total === 0) return;
+        var avg = fs.avgDurationMs > 0 ? ' avg ' + fs.avgDurationMs + 'ms' : '';
+        appendMetric(tracesSummary, flow, fs.succeeded + ' ok / ' + fs.failed + ' err / ' + fs.inProgress + ' running' + avg);
+      });
+
+      clearNode(tracesBody);
+      recentTraces.forEach(function (trace) {
+        var tr = document.createElement('tr');
+        var flowCell = document.createElement('td');
+        flowCell.textContent = trace.flow;
+        var outcomeCell = document.createElement('td');
+        outcomeCell.textContent = trace.outcome;
+        if (trace.outcome === 'success') outcomeCell.style.color = 'var(--green)';
+        else if (trace.outcome === 'in_progress') outcomeCell.style.color = 'var(--amber)';
+        else if (trace.outcome !== 'success') outcomeCell.style.color = 'var(--red)';
+        var durationCell = document.createElement('td');
+        durationCell.textContent = trace.outcome === 'in_progress' ? '\u2014' : trace.durationMs + 'ms';
+        var startedCell = document.createElement('td');
+        startedCell.textContent = new Date(trace.startedAt).toLocaleTimeString();
+        var eventsCell = document.createElement('td');
+        eventsCell.textContent = String((trace.events || []).length);
+        tr.append(flowCell, outcomeCell, durationCell, startedCell, eventsCell);
+        tracesBody.append(tr);
+      });
+
+      clearNode(tracesErrors);
+      var recentErrors = summary.recentErrors || [];
+      if (recentErrors.length === 0) {
+        var noErrors = document.createElement('div');
+        noErrors.className = 'card-copy';
+        noErrors.textContent = 'No recent errors.';
+        tracesErrors.append(noErrors);
+      } else {
+        recentErrors.forEach(function (err) {
+          var item = document.createElement('div');
+          item.className = 'checklist-item';
+          var top = document.createElement('div');
+          top.className = 'checklist-top';
+          var dot = document.createElement('div');
+          dot.className = 'status-dot error';
+          var label = document.createElement('div');
+          label.className = 'checklist-label';
+          label.textContent = err.flow + ': ' + err.message;
+          top.append(dot, label);
+          var body = document.createElement('div');
+          body.className = 'checklist-body';
+          body.textContent = new Date(err.at).toLocaleString();
+          item.append(top, body);
+          tracesErrors.append(item);
+        });
+      }
+    }
+
+    async function refreshTraces() {
+      var response = await fetchJson('/api/traces');
+      renderTraces(response);
+    }
+
+    function renderMetrics(data) {
+      var m = data.metrics || {};
+      var counters = m.counters || {};
+      var latencies = m.latencies || {};
+      var memory = m.memory;
+
+      clearNode(metricsCounters);
+      var upSince = m.startedAt ? new Date(m.startedAt).toLocaleString() : 'unknown';
+      appendMetric(metricsCounters, 'up since', upSince);
+      var counterKeys = Object.keys(counters).sort();
+      counterKeys.forEach(function (key) {
+        appendMetric(metricsCounters, key, String(counters[key]));
+      });
+      if (counterKeys.length === 0) {
+        appendMetric(metricsCounters, 'counters', 'none recorded yet');
+      }
+
+      clearNode(metricsLatencies);
+      var flows = ['message', 'reaction', 'cron', 'defer'];
+      flows.forEach(function (flow) {
+        var lat = latencies[flow];
+        if (!lat || lat.count === 0) return;
+        appendMetric(metricsLatencies, flow + ' latency',
+          'p50=' + lat.p50Ms + 'ms  p95=' + lat.p95Ms + 'ms  max=' + lat.maxMs + 'ms  (n=' + lat.count + ')');
+      });
+      if (metricsLatencies.children.length === 0) {
+        appendMetric(metricsLatencies, 'latencies', 'no samples yet');
+      }
+
+      clearNode(metricsMemory);
+      if (memory) {
+        function fmtMB(bytes) { return bytes ? (bytes / 1048576).toFixed(1) + ' MB' : 'n/a'; }
+        appendMetric(metricsMemory, 'rss', fmtMB(memory.rssBytes) + '  (hwm ' + fmtMB(memory.rssHwmBytes) + ')');
+        appendMetric(metricsMemory, 'heap used', fmtMB(memory.heapUsedBytes) + '  (hwm ' + fmtMB(memory.heapUsedHwmBytes) + ')');
+        appendMetric(metricsMemory, 'heap total', fmtMB(memory.heapTotalBytes));
+        appendMetric(metricsMemory, 'external', fmtMB(memory.externalBytes));
+        appendMetric(metricsMemory, 'samples', String(memory.sampleCount || 0));
+      } else {
+        appendMetric(metricsMemory, 'memory', 'sampler not active');
+      }
+    }
+
+    async function refreshMetrics() {
+      var response = await fetchJson('/api/metrics');
+      renderMetrics(response);
+    }
+
     function renderSnapshot(snapshot) {
       if (!snapshot.live) snapshot.live = {};
       const selectedRole = roleSelect.value;
@@ -1560,10 +1728,19 @@ export function renderDashboardPage(): string {
 
     document.getElementById('refresh-btn').addEventListener('click', async function () {
       try {
-        await Promise.all([refreshSnapshot(false), refreshDoctor(false)]);
+        await Promise.all([refreshSnapshot(false), refreshDoctor(false), refreshTraces(), refreshMetrics()]);
         setStatus(heroStatus, 'Dashboard refreshed.', 'ok');
       } catch (error) {
         setStatus(heroStatus, String(error), 'error');
+      }
+    });
+
+    document.getElementById('traces-btn').addEventListener('click', async function () {
+      try {
+        await Promise.all([refreshTraces(), refreshMetrics()]);
+        setStatus(tracesStatus, 'Traces refreshed.', 'ok');
+      } catch (error) {
+        setStatus(tracesStatus, String(error), 'error');
       }
     });
 
@@ -1762,7 +1939,7 @@ export function renderDashboardPage(): string {
       syncSecondaryModelOptions(roleSelect.value, '');
     });
 
-    Promise.all([refreshSnapshot(false), refreshDoctor(false), loadSettings()]).then(function () {
+    Promise.all([refreshSnapshot(false), refreshDoctor(false), loadSettings(), refreshTraces(), refreshMetrics()]).then(function () {
       setStatus(heroStatus, 'Dashboard ready.', 'ok');
       if (lastSnapshot) {
         populateSecondaryRoleForm('', '');

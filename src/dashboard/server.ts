@@ -24,6 +24,8 @@ import {
   type DashboardSettingsGetResponse,
   type DashboardSettingsPostResponse,
 } from './api/settings.js';
+import { buildMetricsResponse, type DashboardMetricsApiResponse } from './api/metrics.js';
+import { buildTracesResponse, type DashboardTracesApiResponse } from './api/traces.js';
 import type { LiveRuntimeSnapshot, LiveSnapshotProvider } from './snapshot.js';
 import type { AuthProbeReport } from './auth-probe.js';
 import { hasErrorCode, mapListenError } from './server-errors.js';
@@ -171,6 +173,9 @@ export type DashboardAuthCheckApiResponse = {
   message: string;
   results: AuthProbeReport['results'];
 };
+
+export type { DashboardTracesApiResponse } from './api/traces.js';
+export type { DashboardMetricsApiResponse } from './api/metrics.js';
 
 function createDefaultDeps(): DashboardDeps {
   return {
@@ -646,7 +651,8 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
       respondJson(res, 403, { ok: false, message: DNS_REBIND_ERROR });
       return;
     }
-    const pathname = new URL(req.url ?? '/', `http://${DASHBOARD_HOST}`).pathname;
+    const parsedUrl = new URL(req.url ?? '/', `http://${DASHBOARD_HOST}`);
+    const pathname = parsedUrl.pathname;
 
     try {
       if (method === 'GET' && pathname === '/') {
@@ -924,6 +930,16 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
         pendingRestart = true;
 
         respondJson(res, 200, response);
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/traces') {
+        respondJson(res, 200, buildTracesResponse(parsedUrl.searchParams.get('limit')));
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/api/metrics') {
+        respondJson(res, 200, buildMetricsResponse());
         return;
       }
 

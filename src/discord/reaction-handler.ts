@@ -38,6 +38,8 @@ import { downloadMessageImages, resolveMediaType } from './image-download.js';
 import { downloadTextAttachments, classifyAttachments, downloadDocumentAttachments } from './file-download.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
+import { globalTraceStore } from '../observability/trace-store.js';
+import { summarizeTraceValue } from '../observability/trace-utils.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 import { resolveGroundedToolCapabilities } from '../runtime/tool-capabilities.js';
 import { adaptRuntimeEventText } from './runtime-event-text-adapter.js';
@@ -657,6 +659,9 @@ function createReactionHandler(
           let currentPrompt = prompt;
           let pendingFollowUp: PendingActionFollowUp | null = null;
           const actionHistory: ActionHistoryEntry[] = [];
+          const traceId = `reaction_${randomUUID()}`;
+          let traceOutcome = 'success';
+          globalTraceStore.startTrace(traceId, sessionKey, 'reaction', reaction.message.channelId);
           try {
 
           // -- auto-follow-up loop --
@@ -743,8 +748,15 @@ function createReactionHandler(
           const t0 = Date.now();
           const previewMode = params.streamPreviewMode ?? 'compact';
           const debugStreamPreviewLines = Boolean(params.debugStreamPreviewLines);
+          const toolStartTimesByName = new Map<string, number[]>();
           metrics.recordInvokeStart('reaction');
           params.log?.info({ flow: 'reaction', sessionKey }, 'obs.invoke.start');
+          globalTraceStore.addEvent(traceId, {
+            type: 'invoke_start',
+            at: t0,
+            summary: followUpDepth === 0 ? 'initial invoke' : `follow-up ${followUpDepth}`,
+            promptPreview: summarizeTraceValue(currentPrompt, 220),
+          });
           let invokeError: string | null = null;
           let lastEditAt = 0;
           let streamEditTimeoutStreak = 0;
@@ -976,8 +988,37 @@ function createReactionHandler(
               lastEventAt = Date.now();
               stallWarned = false;
               lastStallProgressAt = 0;
-              if (evt.type === 'tool_start') activeToolCount++;
-              else if (evt.type === 'tool_end') activeToolCount = Math.max(0, activeToolCount - 1);
+              if (evt.type === 'tool_start') {
+                activeToolCount++;
+                const startedAt = Date.now();
+                const existingStarts = toolStartTimesByName.get(evt.name) ?? [];
+                existingStarts.push(startedAt);
+                toolStartTimesByName.set(evt.name, existingStarts);
+                globalTraceStore.addEvent(traceId, {
+                  type: 'tool_start',
+                  at: startedAt,
+                  toolName: evt.name,
+                  inputSummary: summarizeTraceValue(evt.input),
+                });
+              } else if (evt.type === 'tool_end') {
+                activeToolCount = Math.max(0, activeToolCount - 1);
+                const endedAt = Date.now();
+                const existingStarts = toolStartTimesByName.get(evt.name) ?? [];
+                const startedAt = existingStarts.shift();
+                if (existingStarts.length > 0) {
+                  toolStartTimesByName.set(evt.name, existingStarts);
+                } else {
+                  toolStartTimesByName.delete(evt.name);
+                }
+                globalTraceStore.addEvent(traceId, {
+                  type: 'tool_end',
+                  at: endedAt,
+                  toolName: evt.name,
+                  ok: evt.ok,
+                  durationMs: startedAt == null ? undefined : Math.max(0, endedAt - startedAt),
+                  outputSummary: summarizeTraceValue(evt.output),
+                });
+              }
 
               if (evt.type === 'text_final') {
                 hadTextFinal = true;
@@ -999,6 +1040,14 @@ function createReactionHandler(
                 collectedImages.push(evt.image);
               } else if (evt.type === 'error') {
                 invokeError = evt.message;
+                traceOutcome = 'error';
+                globalTraceStore.addEvent(traceId, {
+                  type: 'error',
+                  at: Date.now(),
+                  message: evt.message,
+                  stage: 'runtime',
+                  summary: followUpDepth === 0 ? 'initial invoke' : `follow-up ${followUpDepth}`,
+                });
                 metrics.recordInvokeResult('reaction', Date.now() - t0, false, evt.message);
                 params.log?.error({ sessionKey, error: evt.message }, `${logPrefix}:runtime error`);
                 params.log?.warn({ flow: 'reaction', sessionKey, error: evt.message }, 'obs.invoke.error');
@@ -1014,6 +1063,15 @@ function createReactionHandler(
             streamEditQueue = Promise.resolve();
           }
           metrics.recordInvokeResult('reaction', Date.now() - t0, !invokeError, invokeError ?? undefined);
+          if (invokeError) {
+            traceOutcome = 'error';
+          }
+          globalTraceStore.addEvent(traceId, {
+            type: 'invoke_end',
+            at: Date.now(),
+            ok: !invokeError,
+            summary: followUpDepth === 0 ? 'initial invoke' : `follow-up ${followUpDepth}`,
+          });
           params.log?.info({ flow: 'reaction', sessionKey, ms: Date.now() - t0, ok: !invokeError }, 'obs.invoke.end');
 
           let processedText = finalText || deltaText || (collectedImages.length > 0 ? '' : '(no output)');
@@ -1098,8 +1156,18 @@ function createReactionHandler(
                 spawnCtx: params.spawnCtx,
               });
               actionResults = results;
-              for (const result of results) {
+              for (let i = 0; i < results.length; i++) {
+                const result = results[i];
                 metrics.recordActionResult(result.ok);
+                globalTraceStore.addEvent(traceId, {
+                  type: 'action_result',
+                  at: Date.now(),
+                  action: parsed.actions[i]?.type ?? 'unknown',
+                  ok: result.ok,
+                  detail: result.ok
+                    ? summarizeTraceValue((result as { ok: true; summary?: string }).summary, 220)
+                    : summarizeTraceValue((result as { ok: false; error: string }).error, 220),
+                });
                 params.log?.info({ flow: 'reaction', sessionKey, ok: result.ok }, 'obs.action.result');
               }
               // Record action history for follow-up dedup.
@@ -1254,6 +1322,15 @@ function createReactionHandler(
 
           } // end while (true)
           } catch (innerErr) {
+            traceOutcome = 'error';
+            globalTraceStore.addEvent(traceId, {
+              type: 'error',
+              at: Date.now(),
+              message: innerErr instanceof Error ? innerErr.message : String(innerErr),
+              name: innerErr instanceof Error ? innerErr.name : undefined,
+              stack: innerErr instanceof Error ? summarizeTraceValue(innerErr.stack, 400) : undefined,
+              stage: 'reaction_flow',
+            });
             // Inner catch: attempt to show the error in the reply before the finally
             // block runs dispose(). Setting replyFinalized = true on success prevents
             // the finally's safety-net delete from removing the error message.
@@ -1270,6 +1347,7 @@ function createReactionHandler(
             }
             throw innerErr;
           } finally {
+            globalTraceStore.endTrace(traceId, traceOutcome);
             // Safety net runs before dispose() so cold-start recovery can still see
             // the in-flight entry if the delete fails.
             if (!replyFinalized && reply && !isShuttingDown()) {

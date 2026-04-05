@@ -2,6 +2,24 @@ import type { InvokeFlow } from './metrics.js';
 
 export type TraceOutcome = 'in_progress' | string;
 
+export type TraceFlowSummary = {
+  total: number;
+  succeeded: number;
+  failed: number;
+  inProgress: number;
+  avgDurationMs: number;
+};
+
+export type TraceSummary = {
+  total: number;
+  inProgress: number;
+  oldestAt: number | null;
+  newestAt: number | null;
+  byFlow: Record<InvokeFlow, TraceFlowSummary>;
+  byOutcome: Record<string, number>;
+  recentErrors: Array<{ traceId: string; flow: InvokeFlow; message: string; at: number }>;
+};
+
 type TraceEventBase = {
   at: number;
   summary?: string;
@@ -185,6 +203,67 @@ export class TraceStore {
       .sort((a, b) => b.startedAt - a.startedAt)
       .slice(0, limit)
       .map(cloneTrace);
+  }
+
+  get size(): number {
+    return this.traces.size;
+  }
+
+  summary(): TraceSummary {
+    const allTraces = [...this.traces.values()];
+
+    const flows: InvokeFlow[] = ['message', 'reaction', 'cron', 'defer'];
+    const byFlow = {} as Record<InvokeFlow, TraceFlowSummary>;
+    for (const flow of flows) {
+      const matching = allTraces.filter((t) => t.flow === flow);
+      const completed = matching.filter((t) => t.outcome !== 'in_progress');
+      const succeeded = completed.filter((t) => t.outcome === 'success').length;
+      const totalDuration = completed.reduce((sum, t) => sum + t.durationMs, 0);
+      byFlow[flow] = {
+        total: matching.length,
+        succeeded,
+        failed: completed.length - succeeded,
+        inProgress: matching.length - completed.length,
+        avgDurationMs: completed.length > 0 ? Math.round(totalDuration / completed.length) : 0,
+      };
+    }
+
+    const byOutcome: Record<string, number> = {};
+    for (const trace of allTraces) {
+      byOutcome[trace.outcome] = (byOutcome[trace.outcome] ?? 0) + 1;
+    }
+
+    const MAX_RECENT_ERRORS = 10;
+    const recentErrors: TraceSummary['recentErrors'] = [];
+    const sorted = [...allTraces].sort((a, b) => b.startedAt - a.startedAt);
+    for (const trace of sorted) {
+      if (recentErrors.length >= MAX_RECENT_ERRORS) break;
+      if (trace.outcome === 'success' || trace.outcome === 'in_progress') continue;
+      const lastError = [...trace.events].reverse().find((e) => e.type === 'error');
+      recentErrors.push({
+        traceId: trace.traceId,
+        flow: trace.flow,
+        message: lastError && 'message' in lastError ? lastError.message : trace.outcome,
+        at: trace.startedAt,
+      });
+    }
+
+    let oldestAt: number | null = null;
+    let newestAt: number | null = null;
+    if (allTraces.length > 0) {
+      oldestAt = Math.min(...allTraces.map((t) => t.startedAt));
+      newestAt = Math.max(...allTraces.map((t) => t.startedAt));
+    }
+
+    return {
+      total: allTraces.length,
+      inProgress: allTraces.filter((t) => t.outcome === 'in_progress').length,
+      oldestAt,
+      newestAt,
+      byFlow,
+      byOutcome,
+      recentErrors,
+    };
   }
 
   private makeRoomForNewTrace(): void {

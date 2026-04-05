@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Client, Guild } from 'discord.js';
 import { execa } from 'execa';
 import type { RuntimeAdapter, ImageData, EngineEvent } from '../runtime/types.js';
@@ -26,6 +27,7 @@ import { sendChunks, appendUnavailableActionTypesNotice, appendParseFailureNotic
 import { buildPromptPreamble, loadWorkspacePaFiles, inlineContextFiles, resolveEffectiveTools } from '../discord/prompt-common.js';
 import { ensureStatusMessage } from './discord-sync.js';
 import { globalMetrics } from '../observability/metrics.js';
+import { globalTraceStore } from '../observability/trace-store.js';
 import { mapRuntimeErrorToUserMessage } from '../discord/user-errors.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 import { cliExecaEnv, stripAnsi } from '../runtime/cli-shared.js';
@@ -310,6 +312,11 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     }
   }
 
+  const traceId = `cron_${randomUUID()}`;
+  const sessionKey = `cron:${job.cronId || job.id}`;
+  let traceOutcome = 'success';
+  globalTraceStore.startTrace(traceId, sessionKey, 'cron', undefined);
+
   job.running = true;
   activeCronRunKeys.add(runKey);
   ctx.runControl?.register(job.id, requestCancel);
@@ -333,6 +340,13 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     const guild = ctx.client.guilds.cache.get(job.guildId);
     if (!guild) {
       ctx.log?.error({ jobId: job.id, guildId: job.guildId }, 'cron:exec guild not found');
+      traceOutcome = 'error';
+      globalTraceStore.addEvent(traceId, {
+        type: 'error',
+        at: Date.now(),
+        message: `guild ${job.guildId} not found`,
+        stage: 'cron_setup',
+      });
       await ctx.status?.runtimeError({ sessionKey: `cron:${job.id}` }, `Cron "${job.name}": guild ${job.guildId} not found`);
       await recordError(ctx, job, `guild ${job.guildId} not found`);
       return;
@@ -341,6 +355,13 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     const targetChannel = resolveChannel(guild, job.def.channel);
     if (!targetChannel) {
       ctx.log?.error({ jobId: job.id, channel: job.def.channel }, 'cron:exec target channel not found');
+      traceOutcome = 'error';
+      globalTraceStore.addEvent(traceId, {
+        type: 'error',
+        at: Date.now(),
+        message: `target channel "${job.def.channel}" not found`,
+        stage: 'cron_setup',
+      });
       await ctx.status?.runtimeError(
         { sessionKey: `cron:${job.id}`, channelName: job.def.channel },
         `Cron "${job.name}": target channel "${job.def.channel}" not found`,
@@ -367,6 +388,13 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         (parentId && ctx.allowChannelIds.has(parentId));
       if (!allowed) {
         ctx.log?.error({ jobId: job.id, channel: job.def.channel }, 'cron:exec target channel not allowlisted');
+        traceOutcome = 'error';
+        globalTraceStore.addEvent(traceId, {
+          type: 'error',
+          at: Date.now(),
+          message: `target channel "${job.def.channel}" not allowlisted`,
+          stage: 'cron_setup',
+        });
         await ctx.status?.runtimeError(
           { sessionKey: `cron:${job.id}`, channelName: job.def.channel },
           `Cron "${job.name}": target channel "${job.def.channel}" is not allowlisted`,
@@ -495,6 +523,12 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     }
 
     metrics.recordInvokeStart('cron');
+    globalTraceStore.addEvent(traceId, {
+      type: 'invoke_start',
+      at: Date.now(),
+      summary: `cron job "${job.name}"`,
+      promptPreview: prompt.slice(0, 220),
+    });
     ctx.log?.info({ flow: 'cron', jobId: job.id, cronId: job.cronId }, 'obs.invoke.start');
 
     let finalText = '';
@@ -526,6 +560,13 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         } else if (evt.type === 'image_data') {
           collectedImages.push(evt.image);
         } else if (evt.type === 'error') {
+          traceOutcome = 'error';
+          globalTraceStore.addEvent(traceId, {
+            type: 'error',
+            at: Date.now(),
+            message: evt.message,
+            stage: 'runtime',
+          });
           metrics.recordInvokeResult('cron', Date.now() - t0, false, evt.message);
           metrics.increment('cron.run.error');
           ctx.log?.error({ jobId: job.id, error: evt.message }, 'cron:exec runtime error');
@@ -550,11 +591,24 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
       if (runtimeIterator?.return) {
         await runtimeIterator.return();
       }
+      traceOutcome = 'canceled';
+      globalTraceStore.addEvent(traceId, {
+        type: 'error',
+        at: Date.now(),
+        message: cancelReason,
+        stage: 'runtime',
+      });
       metrics.increment('cron.run.canceled');
       ctx.log?.warn({ jobId: job.id, cronId: job.cronId }, 'cron:exec canceled');
       await recordError(ctx, job, cancelReason);
       return;
     }
+    globalTraceStore.addEvent(traceId, {
+      type: 'invoke_end',
+      at: Date.now(),
+      ok: true,
+      summary: `completed in ${Date.now() - t0}ms`,
+    });
     metrics.recordInvokeResult('cron', Date.now() - t0, true);
     ctx.log?.info({ flow: 'cron', jobId: job.id, ms: Date.now() - t0, ok: true }, 'obs.invoke.end');
 
@@ -647,8 +701,16 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
           imagegenCtx: ctx.imagegenCtx,
           voiceCtx: ctx.voiceCtx,
         });
-        for (const result of results) {
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i];
           metrics.recordActionResult(result.ok);
+          globalTraceStore.addEvent(traceId, {
+            type: 'action_result',
+            at: Date.now(),
+            action: actions[i].type,
+            ok: result.ok,
+            detail: result.ok ? undefined : ('error' in result ? result.error : undefined),
+          });
           ctx.log?.info({ flow: 'cron', jobId: job.id, ok: result.ok }, 'obs.action.result');
         }
         const anyActionSucceeded = results.some((r) => r.ok);
@@ -737,6 +799,15 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    traceOutcome = 'error';
+    globalTraceStore.addEvent(traceId, {
+      type: 'error',
+      at: Date.now(),
+      message: msg,
+      name: err instanceof Error ? err.name : undefined,
+      stage: 'cron_flow',
+      stack: err instanceof Error ? err.stack?.slice(0, 400) : undefined,
+    });
     metrics.increment('cron.run.error');
     ctx.log?.error({ err, jobId: job.id }, 'cron:exec failed');
     await ctx.status?.runtimeError(
@@ -761,6 +832,7 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
 
     await recordError(ctx, job, msg);
   } finally {
+    globalTraceStore.endTrace(traceId, traceOutcome);
     const shouldRerun = queuedCronRerunKeys.delete(runKey);
     if (lockToken && ctx.lockDir && job.cronId) {
       await releaseCronLock(ctx.lockDir, job.cronId, lockToken).catch((err) => {
