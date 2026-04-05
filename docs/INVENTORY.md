@@ -373,6 +373,8 @@ Real-time voice chat: STT transcription, AI response generation, TTS synthesis, 
 | Transcript mirror (posts voice conversation text to Discord channel) | `src/voice/transcript-mirror.ts` | **done** |
 | Voice action flags (restricted action subset for voice invocations) | `src/voice/voice-action-flags.ts` | **done** |
 | Voice actions (join/leave/status/mute/deafen) | `src/discord/actions-voice.ts` | **done** |
+| Gemini Live provider (bidirectional WebSocket session for Multimodal Live API) | `src/voice/providers/gemini-live-provider.ts` | **done** |
+| Gemini Live responder (Discord audio output bridge, upsample + barge-in) | `src/voice/providers/gemini-live-responder.ts` | **done** |
 
 Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DEEPGRAM_STT_MODEL`, `DISCOCLAW_TTS_PROVIDER`, `DEEPGRAM_TTS_VOICE`, `DEEPGRAM_TTS_SPEED`, `DISCOCLAW_VOICE_HOME_CHANNEL`, `DEEPGRAM_API_KEY` (STT + TTS), `CARTESIA_API_KEY`.
 
