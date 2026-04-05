@@ -44,7 +44,7 @@ Legend: **done** | *stub* | ~~cut~~
 | `RuntimeAdapter` interface | `src/runtime/types.ts` | **done** |
 | Claude Code CLI adapter (text + stream-json) | `src/runtime/claude-code-cli.ts` | **done** |
 | OpenAI-compatible adapter (SSE streaming, optional function-calling tool use, API key) | `src/runtime/openai-compat.ts` | **done** |
-| OpenAI tool schemas (tool definitions & name mappings for function-calling) | `src/runtime/openai-tool-schemas.ts` | **done** |
+| OpenAI tool schemas (tool definitions & name mappings for function-calling; also exports `buildGeminiToolDeclarations()` for Gemini Live tool use) | `src/runtime/openai-tool-schemas.ts` | **done** |
 | OpenAI tool execution (server-side tool handlers with path security) | `src/runtime/openai-tool-exec.ts` | **done** |
 | Codex CLI adapter (subprocess, `tools_fs` capable) | `src/runtime/codex-cli.ts` | **done** |
 | Runtime registry (name → adapter lookup) | `src/runtime/registry.ts` | **done** |
@@ -190,6 +190,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Core (pidlock, bootstrap, permissions) | 3 tests | **done** |
 | Discord subsystem | 14 tests | **done** |
 | Runtime adapters (Claude CLI + OpenAI-compat + Codex CLI + registry + tool schemas + tool exec) | 6 tests | **done** |
+| Gemini tool mapper (schema conversion, type mapping, round-trip with `buildToolSchemas`) | `src/voice/providers/gemini-tool-mapper.test.ts` | **done** |
 | Global supervisor wrapper coverage (loop/bail semantics + runtime wiring) | `src/runtime/global-supervisor.test.ts`, `src/index.runtime.test.ts` | **done** |
 | Beads subsystem | 3 test files | **done** |
 | Tasks subsystem (`TaskStore`, migration) | 2 test files | **done** |
@@ -376,6 +377,7 @@ Real-time voice chat: STT transcription, AI response generation, TTS synthesis, 
 | Gemini Live provider (bidirectional WebSocket session for Multimodal Live API) | `src/voice/providers/gemini-live-provider.ts` | **done** |
 | Gemini Live responder (Discord audio output bridge, upsample + barge-in) | `src/voice/providers/gemini-live-responder.ts` | **done** |
 | Gemini Live pipeline integration (`gemini-live` provider wires GeminiLiveProvider + GeminiLiveResponder into AudioPipelineManager; end-to-end Discord audio → Gemini Live WebSocket → playback + transcript mirror) | `src/voice/audio-pipeline.ts`, `src/voice/providers/gemini-live-provider.ts`, `src/voice/providers/gemini-live-responder.ts` | **done** |
+| Gemini tool mapper (converts OpenAI function-calling schemas to Gemini-compatible function declarations; uppercase type names, `additionalProperties` stripping, recursive schema conversion; wired into session setup via `GeminiLiveProvider.tools`) | `src/voice/providers/gemini-tool-mapper.ts`, `src/voice/providers/gemini-tool-mapper.test.ts` | **done** |
 
 Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DEEPGRAM_STT_MODEL`, `DISCOCLAW_TTS_PROVIDER`, `DEEPGRAM_TTS_VOICE`, `DEEPGRAM_TTS_SPEED`, `DISCOCLAW_VOICE_HOME_CHANNEL`, `DEEPGRAM_API_KEY` (STT + TTS), `CARTESIA_API_KEY`.
 

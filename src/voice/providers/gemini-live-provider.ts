@@ -19,9 +19,10 @@
 
 import WebSocket from 'ws';
 import type { LoggerLike } from '../../logging/logger-like.js';
-import type { GeminiLiveEvent, GeminiLiveOpts, GeminiLiveState } from './gemini-live-types.js';
+import type { GeminiFunctionCall, GeminiLiveEvent, GeminiLiveOpts, GeminiLiveState } from './gemini-live-types.js';
+import type { GeminiToolsConfig } from './gemini-tool-mapper.js';
 
-export type { GeminiLiveEvent, GeminiLiveOpts, GeminiLiveState } from './gemini-live-types.js';
+export type { GeminiFunctionCall, GeminiLiveEvent, GeminiLiveOpts, GeminiLiveState } from './gemini-live-types.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -43,6 +44,7 @@ export class GeminiLiveProvider {
   private readonly systemInstruction?: string;
   private readonly responseModalities: Array<'AUDIO' | 'TEXT'>;
   private readonly voiceName?: string;
+  private readonly tools?: GeminiToolsConfig;
   private readonly wsFactory: (url: string) => WebSocket;
 
   private ws: WebSocket | null = null;
@@ -58,6 +60,7 @@ export class GeminiLiveProvider {
     this.systemInstruction = opts.systemInstruction;
     this.responseModalities = opts.responseModalities ?? ['AUDIO'];
     this.voiceName = opts.voiceName;
+    this.tools = opts.tools;
     this.wsFactory = opts.wsFactory ?? ((url) => new WebSocket(url));
   }
 
@@ -110,6 +113,24 @@ export class GeminiLiveProvider {
     }));
   }
 
+  /**
+   * Send tool execution results back to the session.
+   * Each response is matched to its original function call by `id`.
+   */
+  sendToolResponse(responses: Array<{ id: string; output: string }>): void {
+    if (this._state !== 'open') {
+      throw new Error('Cannot sendToolResponse before connect() completes or after disconnect()');
+    }
+    this.ws!.send(JSON.stringify({
+      toolResponse: {
+        functionResponses: responses.map((r) => ({
+          id: r.id,
+          response: { output: r.output },
+        })),
+      },
+    }));
+  }
+
   /** Disconnect the session and release resources. */
   async disconnect(): Promise<void> {
     if (this._state === 'stopped' || this._state === 'idle') return;
@@ -150,6 +171,15 @@ export class GeminiLiveProvider {
     if (this.systemInstruction) {
       setup.systemInstruction = {
         parts: [{ text: this.systemInstruction }],
+      };
+    }
+
+    if (this.tools) {
+      setup.tools = [this.tools];
+      // NON_BLOCKING: model continues generating audio/text while tools execute.
+      // The client sends toolResponse asynchronously when results are ready.
+      setup.toolConfig = {
+        functionCallingConfig: { mode: 'AUTO' },
       };
     }
 
@@ -241,6 +271,24 @@ export class GeminiLiveProvider {
               this.emit({ type: 'text', text: part.text as string });
             }
           }
+        }
+        return;
+      }
+
+      // Tool call from server — model wants to invoke a function
+      if (parsed.toolCall != null) {
+        const tc = parsed.toolCall as { functionCalls?: Array<Record<string, unknown>> };
+        if (Array.isArray(tc.functionCalls) && tc.functionCalls.length > 0) {
+          const calls: GeminiFunctionCall[] = tc.functionCalls.map((fc) => ({
+            id: String(fc.id ?? ''),
+            name: String(fc.name ?? ''),
+            args: (fc.args as Record<string, unknown>) ?? {},
+          }));
+          this.log.info(
+            { count: calls.length, names: calls.map((c) => c.name).join(',') },
+            'Gemini Live tool call received',
+          );
+          this.emit({ type: 'tool_call', functionCalls: calls });
         }
         return;
       }

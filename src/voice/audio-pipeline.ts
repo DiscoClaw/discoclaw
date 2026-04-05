@@ -18,6 +18,7 @@ import type { TranscriptMirrorLike } from './transcript-mirror.js';
 import { ConversationBuffer, type Turn } from './conversation-buffer.js';
 import { GeminiLiveProvider } from './providers/gemini-live-provider.js';
 import { GeminiLiveResponder } from './providers/gemini-live-responder.js';
+import { buildGeminiToolDeclarations } from '../runtime/openai-tool-schemas.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -54,6 +55,8 @@ export type AudioPipelineOpts = {
   voiceProvider?: 'pipeline' | 'gemini-live';
   /** API key for Gemini Live (required when voiceProvider is 'gemini-live'). */
   geminiApiKey?: string;
+  /** Enabled tool names for Gemini Live tool use (e.g. ['Read', 'Bash']). */
+  enabledTools?: string[];
 };
 
 type GuildPipeline = {
@@ -88,6 +91,7 @@ export class AudioPipelineManager {
   private readonly backfill?: () => Promise<Turn[]>;
   private readonly voiceProvider: 'pipeline' | 'gemini-live';
   private readonly geminiApiKey?: string;
+  private readonly enabledTools: string[];
   private readonly pipelines = new Map<string, GuildPipeline>();
   /** Re-entrancy guard: VoiceConnection.subscribe() can synchronously fire stateChange→Ready. */
   private readonly starting = new Set<string>();
@@ -110,6 +114,7 @@ export class AudioPipelineManager {
     this.backfill = opts.backfill;
     this.voiceProvider = opts.voiceProvider ?? 'pipeline';
     this.geminiApiKey = opts.geminiApiKey;
+    this.enabledTools = opts.enabledTools ?? [];
 
     this.log.info({ voiceProvider: this.voiceProvider }, 'audio pipeline manager initialized');
   }
@@ -154,10 +159,12 @@ export class AudioPipelineManager {
         const apiKey = this.geminiApiKey;
         if (!apiKey) throw new Error('geminiApiKey is required for gemini-live voice provider');
 
+        const tools = buildGeminiToolDeclarations(this.enabledTools);
         const provider = new GeminiLiveProvider({
           apiKey,
           log: this.log,
           responseModalities: ['AUDIO', 'TEXT'],
+          tools,
         });
         await provider.connect();
 
@@ -172,6 +179,14 @@ export class AudioPipelineManager {
                 mirror.postBotResponse(botName, text).catch((err) => {
                   this.log.warn({ guildId, err }, 'transcript-mirror: failed to post bot response');
                 });
+              }
+            : undefined,
+          onToolCall: tools
+            ? (calls) => {
+                this.log.info(
+                  { guildId, count: calls.length, names: calls.map((c) => c.name).join(',') },
+                  'gemini-live: tool call received (execution deferred to Phase 2.2)',
+                );
               }
             : undefined,
         });

@@ -7,6 +7,7 @@
 
 import type WebSocket from 'ws';
 import type { LoggerLike } from '../../logging/logger-like.js';
+import type { GeminiToolsConfig } from './gemini-tool-mapper.js';
 
 // ---------------------------------------------------------------------------
 // Connection state
@@ -18,13 +19,21 @@ export type GeminiLiveState = 'idle' | 'connecting' | 'setup' | 'open' | 'stoppe
 // Events emitted by the provider
 // ---------------------------------------------------------------------------
 
+/** A single function call from the Gemini server. */
+export type GeminiFunctionCall = {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+};
+
 export type GeminiLiveEvent =
   | { type: 'audio'; data: Buffer }
   | { type: 'text'; text: string }
   | { type: 'turn_complete' }
   | { type: 'interrupted' }
   | { type: 'setup_complete' }
-  | { type: 'error'; error: string };
+  | { type: 'error'; error: string }
+  | { type: 'tool_call'; functionCalls: GeminiFunctionCall[] };
 
 // ---------------------------------------------------------------------------
 // Constructor options
@@ -43,4 +52,6 @@ export type GeminiLiveOpts = {
   voiceName?: string;
   /** Override WebSocket constructor for testing. */
   wsFactory?: (url: string) => WebSocket;
+  /** Gemini tools config (function declarations). Included in the setup message when provided. */
+  tools?: GeminiToolsConfig;
 };

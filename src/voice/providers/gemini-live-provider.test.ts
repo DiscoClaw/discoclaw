@@ -160,6 +160,27 @@ describe('GeminiLiveProvider', () => {
     });
   });
 
+  it('includes tools in setup message when provided', async () => {
+    const tools = {
+      functionDeclarations: [
+        { name: 'web_search', description: 'Search the web.', parameters: { type: 'OBJECT', properties: { query: { type: 'STRING' } }, required: ['query'] } },
+      ],
+    };
+    const provider = makeProvider({ tools });
+    await connectWithSetup(provider);
+
+    const setupMsg = JSON.parse(lastCreatedWs!.sent[0] as string);
+    expect(setupMsg.setup.tools).toEqual([tools]);
+  });
+
+  it('omits tools from setup message when not provided', async () => {
+    const provider = makeProvider();
+    await connectWithSetup(provider);
+
+    const setupMsg = JSON.parse(lastCreatedWs!.sent[0] as string);
+    expect(setupMsg.setup.tools).toBeUndefined();
+  });
+
   it('transitions to open state after setupComplete', async () => {
     const provider = makeProvider();
     const events = collectEvents(provider);
@@ -228,6 +249,34 @@ describe('GeminiLiveProvider', () => {
     const provider = makeProvider();
     expect(() => provider.sendText('hello')).toThrow(
       'Cannot sendText before connect()',
+    );
+  });
+
+  // -----------------------------------------------------------------------
+  // Sending tool responses
+  // -----------------------------------------------------------------------
+
+  it('sendToolResponse sends functionResponses message', async () => {
+    const provider = makeProvider();
+    await connectWithSetup(provider);
+
+    provider.sendToolResponse([
+      { id: 'call-1', output: '{"result":"ok"}' },
+      { id: 'call-2', output: 'done' },
+    ]);
+
+    const msg = JSON.parse(lastCreatedWs!.sent[1] as string);
+    expect(msg.toolResponse).toBeDefined();
+    expect(msg.toolResponse.functionResponses).toEqual([
+      { id: 'call-1', response: { output: '{"result":"ok"}' } },
+      { id: 'call-2', response: { output: 'done' } },
+    ]);
+  });
+
+  it('sendToolResponse throws when not connected', () => {
+    const provider = makeProvider();
+    expect(() => provider.sendToolResponse([{ id: 'x', output: 'y' }])).toThrow(
+      'Cannot sendToolResponse before connect()',
     );
   });
 
@@ -308,6 +357,39 @@ describe('GeminiLiveProvider', () => {
     const errorEvents = events.filter((e) => e.type === 'error');
     expect(errorEvents).toHaveLength(1);
     expect((errorEvents[0] as { type: 'error'; error: string }).error).toBe('Rate limit exceeded');
+  });
+
+  it('emits tool_call events from server toolCall message', async () => {
+    const provider = makeProvider();
+    const events = collectEvents(provider);
+    await connectWithSetup(provider);
+
+    lastCreatedWs!._receiveMessage({
+      toolCall: {
+        functionCalls: [
+          { id: 'fc-1', name: 'web_search', args: { query: 'hello' } },
+          { id: 'fc-2', name: 'read_file', args: { file_path: '/tmp/x' } },
+        ],
+      },
+    });
+
+    const toolEvents = events.filter((e) => e.type === 'tool_call');
+    expect(toolEvents).toHaveLength(1);
+    const tc = toolEvents[0] as { type: 'tool_call'; functionCalls: Array<{ id: string; name: string; args: Record<string, unknown> }> };
+    expect(tc.functionCalls).toHaveLength(2);
+    expect(tc.functionCalls[0]).toEqual({ id: 'fc-1', name: 'web_search', args: { query: 'hello' } });
+    expect(tc.functionCalls[1]).toEqual({ id: 'fc-2', name: 'read_file', args: { file_path: '/tmp/x' } });
+  });
+
+  it('ignores toolCall messages with empty functionCalls', async () => {
+    const provider = makeProvider();
+    const events = collectEvents(provider);
+    await connectWithSetup(provider);
+
+    lastCreatedWs!._receiveMessage({ toolCall: { functionCalls: [] } });
+
+    const toolEvents = events.filter((e) => e.type === 'tool_call');
+    expect(toolEvents).toHaveLength(0);
   });
 
   it('handles mixed audio and text parts in a single message', async () => {
