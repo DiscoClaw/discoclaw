@@ -558,6 +558,180 @@ describe('GeminiLiveResponder', () => {
   });
 
   // -----------------------------------------------------------------------
+  // reconnecting events
+  // -----------------------------------------------------------------------
+
+  describe('reconnecting', () => {
+    it('pauses playback and destroys the stream', () => {
+      const { responder, player, provider, log } = createResponder();
+      responder.start();
+
+      // Start an audio stream
+      provider._inject({ type: 'audio', data: Buffer.alloc(4, 0x42) });
+      expect(player.play).toHaveBeenCalledTimes(1);
+
+      // Reconnecting
+      provider._inject({ type: 'reconnecting', attempt: 1, maxRetries: 3, hasResumeHandle: true });
+
+      expect(player.stop).toHaveBeenCalled();
+      expect(log.info).toHaveBeenCalledWith(
+        { attempt: 1, maxRetries: 3, hasResumeHandle: true },
+        'gemini-live-responder: session reconnecting — pausing playback',
+      );
+    });
+
+    it('is safe when no stream is active', () => {
+      const { responder, provider } = createResponder();
+      responder.start();
+      provider._inject({ type: 'reconnecting', attempt: 1, maxRetries: 3, hasResumeHandle: false });
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // reconnected events
+  // -----------------------------------------------------------------------
+
+  describe('reconnected', () => {
+    it('logs the successful reconnection', () => {
+      const { responder, provider, log } = createResponder();
+      responder.start();
+
+      provider._inject({ type: 'reconnected', attempt: 2 });
+
+      expect(log.info).toHaveBeenCalledWith(
+        { attempt: 2 },
+        'gemini-live-responder: session reconnected',
+      );
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // reconnect_failed events
+  // -----------------------------------------------------------------------
+
+  describe('reconnect_failed', () => {
+    it('stops playback and fires onSessionTerminated', () => {
+      const onSessionTerminated = vi.fn();
+      const { responder, player, provider, log } = createResponder({ onSessionTerminated });
+      responder.start();
+
+      // Start audio
+      provider._inject({ type: 'audio', data: Buffer.alloc(4, 0x42) });
+
+      provider._inject({ type: 'reconnect_failed', attempts: 3 });
+
+      expect(player.stop).toHaveBeenCalled();
+      expect(onSessionTerminated).toHaveBeenCalled();
+      expect(log.error).toHaveBeenCalledWith(
+        { attempts: 3 },
+        'gemini-live-responder: session terminally failed — all reconnect retries exhausted',
+      );
+    });
+
+    it('does not crash when onSessionTerminated is not provided', () => {
+      const { responder, provider } = createResponder();
+      responder.start();
+      provider._inject({ type: 'reconnect_failed', attempts: 3 });
+    });
+
+    it('does not crash when onSessionTerminated throws', () => {
+      const onSessionTerminated = vi.fn(() => { throw new Error('callback error'); });
+      const { responder, provider, log } = createResponder({ onSessionTerminated });
+      responder.start();
+
+      provider._inject({ type: 'reconnect_failed', attempts: 3 });
+
+      expect(onSessionTerminated).toHaveBeenCalled();
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
+        'gemini-live-responder: onSessionTerminated callback error',
+      );
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // token_warning events
+  // -----------------------------------------------------------------------
+
+  describe('token_warning', () => {
+    it('fires onTokenWarning callback', () => {
+      const onTokenWarning = vi.fn();
+      const { responder, provider } = createResponder({ onTokenWarning });
+      responder.start();
+
+      provider._inject({ type: 'token_warning', estimatedTokens: 250000, threshold: 'warn' });
+
+      expect(onTokenWarning).toHaveBeenCalledWith(250000, 'warn');
+    });
+
+    it('fires onTokenWarning with compress threshold', () => {
+      const onTokenWarning = vi.fn();
+      const { responder, provider } = createResponder({ onTokenWarning });
+      responder.start();
+
+      provider._inject({ type: 'token_warning', estimatedTokens: 500000, threshold: 'compress' });
+
+      expect(onTokenWarning).toHaveBeenCalledWith(500000, 'compress');
+    });
+
+    it('does not crash when onTokenWarning is not provided', () => {
+      const { responder, provider } = createResponder();
+      responder.start();
+      provider._inject({ type: 'token_warning', estimatedTokens: 250000, threshold: 'warn' });
+    });
+
+    it('does not crash when onTokenWarning throws', () => {
+      const onTokenWarning = vi.fn(() => { throw new Error('callback error'); });
+      const { responder, provider, log } = createResponder({ onTokenWarning });
+      responder.start();
+
+      provider._inject({ type: 'token_warning', estimatedTokens: 250000, threshold: 'warn' });
+
+      expect(onTokenWarning).toHaveBeenCalled();
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
+        'gemini-live-responder: onTokenWarning callback error',
+      );
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // fallback_recommended events
+  // -----------------------------------------------------------------------
+
+  describe('fallback_recommended', () => {
+    it('fires onFallbackRecommended callback', () => {
+      const onFallbackRecommended = vi.fn();
+      const { responder, provider } = createResponder({ onFallbackRecommended });
+      responder.start();
+
+      provider._inject({ type: 'fallback_recommended', reason: 'exhausted reconnect retries' });
+
+      expect(onFallbackRecommended).toHaveBeenCalledWith('exhausted reconnect retries');
+    });
+
+    it('does not crash when onFallbackRecommended is not provided', () => {
+      const { responder, provider } = createResponder();
+      responder.start();
+      provider._inject({ type: 'fallback_recommended', reason: 'test reason' });
+    });
+
+    it('does not crash when onFallbackRecommended throws', () => {
+      const onFallbackRecommended = vi.fn(() => { throw new Error('callback error'); });
+      const { responder, provider, log } = createResponder({ onFallbackRecommended });
+      responder.start();
+
+      provider._inject({ type: 'fallback_recommended', reason: 'test reason' });
+
+      expect(onFallbackRecommended).toHaveBeenCalled();
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
+        'gemini-live-responder: onFallbackRecommended callback error',
+      );
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // unhandled event types
   // -----------------------------------------------------------------------
 
