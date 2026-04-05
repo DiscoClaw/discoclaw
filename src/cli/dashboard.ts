@@ -246,7 +246,10 @@ function isModelRole(value: string): value is ModelRole {
 function normalizeRuntimeName(value: string | undefined): string | undefined {
   const trimmed = value?.trim().toLowerCase();
   if (!trimmed) return undefined;
-  const normalized = trimmed === 'claude_code' ? 'claude' : trimmed;
+  let normalized = trimmed === 'claude_code' ? 'claude' : trimmed;
+  if (normalized === 'claude-cli') normalized = 'claude';
+  if (normalized === 'codex-cli') normalized = 'codex';
+  if (normalized === 'claude' || normalized === 'codex') return normalized;
   return KNOWN_RUNTIMES.has(normalized) ? normalized : undefined;
 }
 

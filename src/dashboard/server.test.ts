@@ -915,8 +915,16 @@ describe('startDashboardServer', () => {
     const updateEnvKeyMock = vi.fn(async () => undefined);
     const saveModelConfigMock = vi.fn(async () => undefined);
     const saveOverridesMock = vi.fn(async () => undefined);
+    const loadDoctorContextMock = vi.fn(async (opts?: { env?: NodeJS.ProcessEnv }) => makeDoctorContext({
+      runtimeOverrides: ctx.runtimeOverrides,
+      runtimeOverridesFile: ctx.runtimeOverridesFile,
+      env: {
+        ...ctx.env,
+        ...(opts?.env ?? {}),
+      },
+    }));
     const { port } = await startServer({
-      loadDoctorContext: vi.fn(async () => ctx),
+      loadDoctorContext: loadDoctorContextMock,
       updateEnvKey: updateEnvKeyMock,
       saveModelConfig: saveModelConfigMock,
       saveOverrides: saveOverridesMock,
@@ -933,7 +941,7 @@ describe('startDashboardServer', () => {
     expect(body.ok).toBe(true);
     expect(body.message).toContain('codex');
     expect(body.message).toContain('tier defaults');
-    expect(updateEnvKeyMock).toHaveBeenCalledWith('/repo/.env', 'PRIMARY_RUNTIME', 'codex');
+    expect(updateEnvKeyMock).toHaveBeenCalledWith('/repo/.env', 'PRIMARY_RUNTIME', 'codex-cli');
     expect(saveOverridesMock).toHaveBeenCalledWith(
       '/repo/data/runtime-overrides.json',
       { ttsVoice: 'alloy' },
@@ -943,7 +951,7 @@ describe('startDashboardServer', () => {
       expect.objectContaining({}),
     );
     expect(body.snapshot).toBeDefined();
-    expect(body.snapshot.primaryRuntime).toBe('claude');
+    expect(body.snapshot.primaryRuntime).toBe('codex');
   });
 
   it('applies claude preset correctly on /api/preset', async () => {
@@ -968,7 +976,7 @@ describe('startDashboardServer', () => {
     expect(response.status).toBe(200);
     expect(body.ok).toBe(true);
     expect(body.message).toContain('claude');
-    expect(updateEnvKeyMock).toHaveBeenCalledWith('/repo/.env', 'PRIMARY_RUNTIME', 'claude');
+    expect(updateEnvKeyMock).toHaveBeenCalledWith('/repo/.env', 'PRIMARY_RUNTIME', 'claude-cli');
   });
 
   it('preserves ttsVoice when clearing overrides via /api/preset', async () => {
@@ -1318,6 +1326,120 @@ describe('startDashboardServer', () => {
     expect(body.message).toBe('Switched chat to opus (live).');
     expect(body.snapshot).toBeDefined();
     expect(liveModelHandler).toHaveBeenCalledWith('chat', 'opus');
+  });
+
+  it('persists chat runtime changes requested from /api/live-model', async () => {
+    const ctx = makeDoctorContext({
+      models: {
+        chat: 'claude-opus-4-6',
+      },
+      modelsFile: {
+        exists: true,
+        values: {
+          chat: 'claude-opus-4-6',
+        },
+      },
+    });
+    const liveModelHandler: LiveModelHandler = vi.fn(() => ({
+      ok: true as const,
+      summary: 'Model updated: runtime → codex-cli, chat → gpt-5.4 (adapter default)',
+    }));
+    const updateEnvKeyMock = vi.fn(async () => undefined);
+    const saveModelConfigMock = vi.fn(async () => undefined);
+    const loadDoctorContextMock = vi.fn(async (opts?: { env?: NodeJS.ProcessEnv }) => makeDoctorContext({
+      models: ctx.models,
+      modelsFile: ctx.modelsFile,
+      env: {
+        ...ctx.env,
+        ...(opts?.env ?? {}),
+      },
+    }));
+    const { port } = await startServer({
+      loadDoctorContext: loadDoctorContextMock,
+      updateEnvKey: updateEnvKeyMock,
+      saveModelConfig: saveModelConfigMock,
+    }, {
+      liveModelHandler,
+      liveSnapshotProvider: () => ({
+        chatRuntime: 'codex-cli',
+        chatModel: 'gpt-5.4',
+        chatThinking: 'high',
+        availableRuntimes: ['claude-cli', 'codex-cli'],
+        pendingRestart: false,
+        imagegenProvider: undefined,
+        imagegenModel: undefined,
+        imagegenOptions: [],
+        imagegenHasGeminiKey: false,
+        imagegenHasOpenaiKey: false,
+      }),
+    });
+
+    const response = await makeRequest(port, {
+      path: '/api/live-model',
+      method: 'POST',
+      body: JSON.stringify({ role: 'chat', model: 'codex-cli', persist: true }),
+    });
+    const body = parseJson<DashboardLiveModelApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.message).toContain('runtime → codex-cli');
+    expect(body.message).toContain('Saved startup chat runtime: codex-cli.');
+    expect(body.snapshot.primaryRuntime).toBe('codex');
+    expect(body.snapshot.live?.pendingRestart).toBe(true);
+    expect(updateEnvKeyMock).toHaveBeenCalledWith('/repo/.env', 'PRIMARY_RUNTIME', 'codex-cli');
+    expect(saveModelConfigMock).toHaveBeenCalledWith('/repo/data/models.json', {});
+  });
+
+  it('persists chat model changes requested from /api/live-model', async () => {
+    const ctx = makeDoctorContext({
+      env: {
+        DISCOCLAW_SERVICE_NAME: 'discoclaw-beta',
+        PRIMARY_RUNTIME: 'codex-cli',
+      },
+      models: {},
+      modelsFile: {
+        exists: true,
+        values: {},
+      },
+    });
+    const liveModelHandler: LiveModelHandler = vi.fn(() => ({
+      ok: true as const,
+      summary: 'Model updated: chat → gpt-5.4',
+    }));
+    const saveModelConfigMock = vi.fn(async () => undefined);
+    const { port } = await startServer({
+      loadDoctorContext: vi.fn(async () => ctx),
+      saveModelConfig: saveModelConfigMock,
+    }, {
+      liveModelHandler,
+      liveSnapshotProvider: () => ({
+        chatRuntime: 'codex-cli',
+        chatModel: 'gpt-5.4',
+        chatThinking: 'high',
+        availableRuntimes: ['claude-cli', 'codex-cli'],
+        pendingRestart: false,
+        imagegenProvider: undefined,
+        imagegenModel: undefined,
+        imagegenOptions: [],
+        imagegenHasGeminiKey: false,
+        imagegenHasOpenaiKey: false,
+      }),
+    });
+
+    const response = await makeRequest(port, {
+      path: '/api/live-model',
+      method: 'POST',
+      body: JSON.stringify({ role: 'chat', model: 'gpt-5.4', persist: true }),
+    });
+    const body = parseJson<DashboardLiveModelApiResponse>(response.text);
+
+    expect(response.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.message).toContain('Model updated: chat → gpt-5.4');
+    expect(body.message).toContain('Saved chat override: gpt-5.4. Changes take effect on next service restart.');
+    expect(body.snapshot.live?.pendingRestart).toBe(true);
+    expect(saveModelConfigMock).toHaveBeenCalledWith('/repo/data/models.json', { chat: 'gpt-5.4' });
   });
 
   it('returns 400 when live model handler rejects the change', async () => {
