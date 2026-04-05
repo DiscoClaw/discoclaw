@@ -526,6 +526,38 @@ describe('GeminiLiveResponder', () => {
   });
 
   // -----------------------------------------------------------------------
+  // session_rotating events
+  // -----------------------------------------------------------------------
+
+  describe('session_rotating', () => {
+    it('pauses playback and destroys the stream', () => {
+      const { responder, player, provider, log } = createResponder();
+      responder.start();
+
+      // Start an audio stream
+      provider._inject({ type: 'audio', data: Buffer.alloc(4, 0x42) });
+      expect(player.play).toHaveBeenCalledTimes(1);
+
+      // Planned rotation
+      provider._inject({ type: 'session_rotating' });
+
+      expect(player.stop).toHaveBeenCalled();
+      expect(log.info).toHaveBeenCalledWith(
+        {},
+        'gemini-live-responder: planned session rotation — pausing playback',
+      );
+    });
+
+    it('is safe when no stream is active', () => {
+      const { responder, provider } = createResponder();
+      responder.start();
+
+      // Should not throw
+      provider._inject({ type: 'session_rotating' });
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // unhandled event types
   // -----------------------------------------------------------------------
 

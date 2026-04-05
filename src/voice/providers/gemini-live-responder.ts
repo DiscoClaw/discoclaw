@@ -138,6 +138,9 @@ export class GeminiLiveResponder {
       case 'tool_call':
         this.handleToolCall(event.functionCalls);
         break;
+      case 'session_rotating':
+        this.handleSessionRotating();
+        break;
       case 'reconnecting':
         this.handleReconnecting(event.attempt, event.maxRetries, event.hasResumeHandle);
         break;
@@ -208,6 +211,12 @@ export class GeminiLiveResponder {
         this.log.warn({ err }, 'gemini-live-responder: onBotResponse callback error');
       }
     }
+  }
+
+  private handleSessionRotating(): void {
+    this.log.info({}, 'gemini-live-responder: planned session rotation — pausing playback');
+    this.destroyStream();
+    this.player?.stop();
   }
 
   private handleReconnecting(attempt: number, maxRetries: number, hasResumeHandle: boolean): void {
