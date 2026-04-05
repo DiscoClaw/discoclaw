@@ -72,6 +72,7 @@ let mockGeminiProvider: {
   connect: ReturnType<typeof vi.fn>;
   disconnect: ReturnType<typeof vi.fn>;
   sendAudio: ReturnType<typeof vi.fn>;
+  sendToolResponse: ReturnType<typeof vi.fn>;
   onEvent: ReturnType<typeof vi.fn>;
   state: string;
 };
@@ -88,6 +89,7 @@ vi.mock('./providers/gemini-live-provider.js', () => ({
       connect: vi.fn(async () => {}),
       disconnect: vi.fn(async () => {}),
       sendAudio: vi.fn(),
+      sendToolResponse: vi.fn(),
       onEvent: vi.fn(),
       state: 'open',
     };
@@ -104,6 +106,25 @@ vi.mock('./providers/gemini-live-responder.js', () => ({
     };
     return mockGeminiResponder;
   }),
+}));
+
+// ---------------------------------------------------------------------------
+// Mock tool execution
+// ---------------------------------------------------------------------------
+
+const mockExecuteToolCall = vi.fn<(...args: unknown[]) => Promise<{ result: string; ok: boolean }>>(
+  async () => ({ result: 'ok', ok: true }),
+);
+vi.mock('../runtime/openai-tool-exec.js', () => ({
+  executeToolCall: (...args: unknown[]) => mockExecuteToolCall(...args),
+}));
+
+vi.mock('../runtime/openai-tool-schemas.js', () => ({
+  buildGeminiToolDeclarations: vi.fn(() => [{ name: 'Read' }]),
+  buildToolSchemas: vi.fn(() => [
+    { type: 'function', function: { name: 'Read', description: 'Read a file', parameters: {} } },
+    { type: 'function', function: { name: 'Bash', description: 'Run bash', parameters: {} } },
+  ]),
 }));
 
 // We don't want real stt-factory or audio-receiver internals — the pipeline
@@ -949,6 +970,116 @@ describe('AudioPipelineManager', () => {
 
       await vi.waitFor(() => {
         expect(mirror.postBotResponse).toHaveBeenCalledWith('GeminiBot', 'Hello from Gemini');
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Tool call dispatch tests
+    // -----------------------------------------------------------------------
+
+    /** Helper: extract the onToolCall callback from the GeminiLiveResponder constructor mock. */
+    async function extractOnToolCall(overrides: Partial<AudioPipelineOpts> = {}) {
+      const opts = createGeminiOpts({
+        enabledTools: ['Read', 'Bash'],
+        runtimeCwd: '/fake/cwd',
+        ...overrides,
+      });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+      const { GeminiLiveResponder: ResponderMock } = await import('./providers/gemini-live-responder.js');
+
+      await mgr.startPipeline('g1', connection);
+
+      const constructorCalls = (ResponderMock as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = constructorCalls[constructorCalls.length - 1];
+      const responderOpts = lastCall[0] as {
+        onToolCall?: (calls: Array<{ id: string; name: string; args: Record<string, unknown> }>) => void;
+      };
+      return responderOpts.onToolCall!;
+    }
+
+    it('dispatches tool call to executor and sends response back via provider', async () => {
+      mockExecuteToolCall.mockResolvedValueOnce({ result: 'file contents here', ok: true });
+      const onToolCall = await extractOnToolCall();
+
+      onToolCall([{ id: 'tc-1', name: 'Read', args: { file_path: '/foo.txt' } }]);
+
+      await vi.waitFor(() => {
+        expect(mockExecuteToolCall).toHaveBeenCalledWith(
+          'Read',
+          { file_path: '/foo.txt' },
+          ['/fake/cwd'],
+          expect.any(Function),
+          expect.objectContaining({ enableHybridPipeline: false }),
+        );
+        expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
+          { id: 'tc-1', output: 'file contents here' },
+        ]);
+      });
+    });
+
+    it('returns error result string to Gemini when executor throws', async () => {
+      mockExecuteToolCall.mockRejectedValueOnce(new Error('permission denied'));
+      const onToolCall = await extractOnToolCall();
+
+      onToolCall([{ id: 'tc-err', name: 'Read', args: {} }]);
+
+      await vi.waitFor(() => {
+        expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
+          { id: 'tc-err', output: 'Error: permission denied' },
+        ]);
+      });
+    });
+
+    it('returns error for unknown tool name (executor rejects non-allowlisted tool)', async () => {
+      mockExecuteToolCall.mockResolvedValueOnce({ result: 'Tool not allowed: UnknownTool', ok: false });
+      const onToolCall = await extractOnToolCall();
+
+      onToolCall([{ id: 'tc-unk', name: 'UnknownTool', args: {} }]);
+
+      await vi.waitFor(() => {
+        expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
+          { id: 'tc-unk', output: 'Tool not allowed: UnknownTool' },
+        ]);
+      });
+    });
+
+    it('dispatches multiple function calls and sends all responses in one sendToolResponse', async () => {
+      mockExecuteToolCall
+        .mockResolvedValueOnce({ result: 'result-A', ok: true })
+        .mockResolvedValueOnce({ result: 'result-B', ok: true });
+      const onToolCall = await extractOnToolCall();
+
+      onToolCall([
+        { id: 'tc-a', name: 'Read', args: { file_path: '/a.txt' } },
+        { id: 'tc-b', name: 'Bash', args: { command: 'ls' } },
+      ]);
+
+      await vi.waitFor(() => {
+        expect(mockExecuteToolCall).toHaveBeenCalledTimes(2);
+        expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
+          { id: 'tc-a', output: 'result-A' },
+          { id: 'tc-b', output: 'result-B' },
+        ]);
+      });
+    });
+
+    it('catches and logs sendToolResponse throw without crashing', async () => {
+      mockExecuteToolCall.mockResolvedValueOnce({ result: 'ok', ok: true });
+      const log = createLogger();
+      const onToolCall = await extractOnToolCall({ log });
+
+      mockGeminiProvider.sendToolResponse.mockImplementation(() => {
+        throw new Error('WebSocket closed');
+      });
+
+      onToolCall([{ id: 'tc-disc', name: 'Read', args: {} }]);
+
+      await vi.waitFor(() => {
+        expect(log.warn).toHaveBeenCalledWith(
+          expect.objectContaining({ guildId: 'g1' }),
+          'gemini-live: sendToolResponse failed (provider likely disconnected)',
+        );
       });
     });
   });
