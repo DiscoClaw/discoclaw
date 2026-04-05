@@ -114,10 +114,10 @@ export class GeminiLiveProvider {
     }
     this.ws!.send(JSON.stringify({
       realtimeInput: {
-        mediaChunks: [{
+        media: {
           mimeType: 'audio/pcm;rate=16000',
           data: pcm.toString('base64'),
-        }],
+        },
       },
     }));
   }

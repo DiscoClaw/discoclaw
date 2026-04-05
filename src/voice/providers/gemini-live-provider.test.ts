@@ -186,9 +186,9 @@ describe('GeminiLiveProvider', () => {
     // sent[0] is setup, sent[1] is the audio
     const msg = JSON.parse(lastCreatedWs!.sent[1] as string);
     expect(msg.realtimeInput).toBeDefined();
-    expect(msg.realtimeInput.mediaChunks).toHaveLength(1);
-    expect(msg.realtimeInput.mediaChunks[0].mimeType).toBe('audio/pcm;rate=16000');
-    expect(msg.realtimeInput.mediaChunks[0].data).toBe(pcm.toString('base64'));
+    expect(msg.realtimeInput.media).toBeDefined();
+    expect(msg.realtimeInput.media.mimeType).toBe('audio/pcm;rate=16000');
+    expect(msg.realtimeInput.media.data).toBe(pcm.toString('base64'));
   });
 
   it('sendAudio throws when not connected', () => {
