@@ -34,6 +34,8 @@ export type GeminiLiveResponderOpts = {
   provider: GeminiLiveProvider;
   /** Called with accumulated transcript text when a turn completes. */
   onBotResponse?: (text: string) => void;
+  /** Called when Gemini transcribes user input audio. */
+  onInputTranscript?: (text: string) => void;
   /** Called when Gemini requests tool execution. */
   onToolCall?: (calls: GeminiFunctionCall[]) => void;
   /** Called when the session terminally fails (all reconnect retries exhausted). */
@@ -55,6 +57,7 @@ export class GeminiLiveResponder {
   private readonly connection: VoiceConnection;
   private readonly provider: GeminiLiveProvider;
   private readonly onBotResponse?: (text: string) => void;
+  private readonly onInputTranscript?: (text: string) => void;
   private readonly onToolCall?: (calls: GeminiFunctionCall[]) => void;
   private readonly onSessionTerminated?: () => void;
   private readonly onFallbackRecommended?: (reason: string) => void;
@@ -71,6 +74,7 @@ export class GeminiLiveResponder {
     this.connection = opts.connection;
     this.provider = opts.provider;
     this.onBotResponse = opts.onBotResponse;
+    this.onInputTranscript = opts.onInputTranscript;
     this.onToolCall = opts.onToolCall;
     this.onSessionTerminated = opts.onSessionTerminated;
     this.onFallbackRecommended = opts.onFallbackRecommended;
@@ -137,6 +141,9 @@ export class GeminiLiveResponder {
       case 'text':
         this.transcript += event.text;
         break;
+      case 'input_transcript':
+        this.handleInputTranscript(event.text);
+        break;
       case 'interrupted':
         this.handleInterrupted();
         break;
@@ -190,6 +197,16 @@ export class GeminiLiveResponder {
     this.destroyStream();
     this.player?.stop();
     this.transcript = '';
+  }
+
+  private handleInputTranscript(text: string): void {
+    if (this.onInputTranscript) {
+      try {
+        this.onInputTranscript(text);
+      } catch (err) {
+        this.log.warn({ err }, 'gemini-live-responder: onInputTranscript callback error');
+      }
+    }
   }
 
   private handleToolCall(calls: GeminiFunctionCall[]): void {
