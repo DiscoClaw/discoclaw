@@ -30,8 +30,10 @@ class MockWebSocket extends EventEmitter {
     this.sent.push(data);
   }
 
-  close(_code?: number, _reason?: string): void {
+  close(code?: number, reason?: string): void {
     this.readyState = MockWebSocket.CLOSED;
+    // Real WebSocket emits 'close' after close() — fire on next microtask
+    queueMicrotask(() => this.emit('close', code ?? 1000, Buffer.from(reason ?? '')));
   }
 
   // Test helpers
