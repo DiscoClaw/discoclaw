@@ -233,7 +233,9 @@ export class AudioPipelineManager {
                 void (async () => {
                   const results = await Promise.all(
                     calls.map(async (call) => {
-                      const scheduling = this.isSilentTool(call.name) ? 'SILENT' : 'INTERRUPT';
+                      const scheduling: 'SILENT' | 'INTERRUPT' = this.isSilentTool(call.name)
+                        ? 'SILENT'
+                        : 'INTERRUPT';
                       try {
                         const res = await executeToolCall(
                           call.name,
