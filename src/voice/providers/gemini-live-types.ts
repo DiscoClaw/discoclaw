@@ -37,7 +37,7 @@ export type GeminiLiveEvent =
   | { type: 'reconnecting'; attempt: number; maxRetries: number; hasResumeHandle: boolean }
   | { type: 'reconnected'; attempt: number }
   | { type: 'reconnect_failed'; attempts: number }
-  | { type: 'session_rotating' };
+  | { type: 'session_rotating'; sessionAgeMs: number };
 
 // ---------------------------------------------------------------------------
 // Constructor options

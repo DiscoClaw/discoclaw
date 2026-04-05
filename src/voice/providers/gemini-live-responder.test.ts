@@ -539,7 +539,7 @@ describe('GeminiLiveResponder', () => {
       expect(player.play).toHaveBeenCalledTimes(1);
 
       // Planned rotation
-      provider._inject({ type: 'session_rotating' });
+      provider._inject({ type: 'session_rotating', sessionAgeMs: 780000 });
 
       expect(player.stop).toHaveBeenCalled();
       expect(log.info).toHaveBeenCalledWith(
@@ -553,7 +553,7 @@ describe('GeminiLiveResponder', () => {
       responder.start();
 
       // Should not throw
-      provider._inject({ type: 'session_rotating' });
+      provider._inject({ type: 'session_rotating', sessionAgeMs: 780000 });
     });
   });
 
