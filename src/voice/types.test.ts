@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type {
   VoiceConfig,
+  VoicePipelineMode,
   AudioFrame,
   TranscriptionResult,
   SttProvider,
@@ -21,6 +22,13 @@ describe('Voice types', () => {
     };
     const cfg2: VoiceConfig = cfg;
     expect(cfg2).toBe(cfg);
+  });
+
+  it('VoicePipelineMode accepts valid values', () => {
+    const pipeline: VoicePipelineMode = 'pipeline';
+    const gemini: VoicePipelineMode = 'gemini-live';
+    expect(pipeline).toBe('pipeline');
+    expect(gemini).toBe('gemini-live');
   });
 
   it('VoiceConfig accepts minimal shape (optional fields omitted)', () => {

@@ -258,19 +258,50 @@ describe('GeminiLiveProvider', () => {
 
   it('sendToolResponse sends functionResponses message', async () => {
     const provider = makeProvider();
+    collectEvents(provider);
     await connectWithSetup(provider);
+
+    // Simulate server sending tool calls so the IDs are registered as in-flight
+    lastCreatedWs!._receiveMessage({
+      toolCall: {
+        functionCalls: [
+          { id: 'call-1', name: 'bash', args: {} },
+          { id: 'call-2', name: 'read_file', args: {} },
+        ],
+      },
+    });
 
     provider.sendToolResponse([
       { id: 'call-1', output: '{"result":"ok"}' },
       { id: 'call-2', output: 'done' },
     ]);
 
+    // sent[0] is setup, sent[1] is the tool response
     const msg = JSON.parse(lastCreatedWs!.sent[1] as string);
     expect(msg.toolResponse).toBeDefined();
     expect(msg.toolResponse.functionResponses).toEqual([
       { id: 'call-1', response: { output: '{"result":"ok"}' } },
       { id: 'call-2', response: { output: 'done' } },
     ]);
+  });
+
+  it('sendToolResponse drops stale responses not in-flight', async () => {
+    const log = createLogger();
+    const provider = makeProvider({ log });
+    collectEvents(provider);
+    await connectWithSetup(provider);
+
+    // Send response without any tool call — should be silently dropped
+    provider.sendToolResponse([
+      { id: 'stale-1', output: 'old result' },
+    ]);
+
+    // No message sent beyond the setup
+    expect(lastCreatedWs!.sent).toHaveLength(1);
+    expect(log.warn).toHaveBeenCalledWith(
+      { id: 'stale-1' },
+      'Gemini Live: dropping stale tool response (not in-flight)',
+    );
   });
 
   it('sendToolResponse throws when not connected', () => {
@@ -628,6 +659,92 @@ describe('GeminiLiveProvider', () => {
 
     const setupMsg = JSON.parse(lastCreatedWs!.sent[0] as string);
     expect(setupMsg.setup.sessionResumption).toBeUndefined();
+  });
+
+  // -----------------------------------------------------------------------
+  // Token estimation and threshold warnings
+  // -----------------------------------------------------------------------
+
+  describe('token estimation', () => {
+    it('emits token_warning at warn threshold via sendText', async () => {
+      const provider = makeProvider({ tokenBudget: { warnAt: 2, compressAt: 1000 } });
+      const events = collectEvents(provider);
+      await connectWithSetup(provider);
+
+      // 8 chars -> ceil(8/4) = 2 tokens -> crosses warn threshold
+      provider.sendText('12345678');
+
+      const warnings = events.filter((e) => e.type === 'token_warning');
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatchObject({ type: 'token_warning', threshold: 'warn' });
+    });
+
+    it('emits token_warning only once per threshold crossing', async () => {
+      const provider = makeProvider({ tokenBudget: { warnAt: 2, compressAt: 1000 } });
+      const events = collectEvents(provider);
+      await connectWithSetup(provider);
+
+      provider.sendText('12345678'); // crosses warn
+      provider.sendText('more text'); // still above warn, but already emitted
+
+      const warnings = events.filter((e) => e.type === 'token_warning');
+      expect(warnings).toHaveLength(1);
+    });
+
+    it('emits compress threshold and triggers proactive rotation', async () => {
+      vi.useFakeTimers();
+      const provider = makeProvider({ tokenBudget: { warnAt: 1, compressAt: 3 } });
+      const events = collectEvents(provider);
+
+      const connectP = provider.connect();
+      await vi.advanceTimersByTimeAsync(0);
+      lastCreatedWs!._receiveMessage({ setupComplete: {} });
+      await connectP;
+
+      // 12 chars -> ceil(12/4) = 3 tokens -> crosses compress
+      provider.sendText('123456789012');
+
+      const warnings = events.filter((e) => e.type === 'token_warning');
+      expect(warnings.some((w) => (w as { threshold: string }).threshold === 'compress')).toBe(true);
+
+      // Compress threshold should trigger session_rotating via graceful reconnect
+      const rotations = events.filter((e) => e.type === 'session_rotating');
+      expect(rotations).toHaveLength(1);
+
+      vi.useRealTimers();
+    });
+
+    it('tracks audio token usage via sendAudio', async () => {
+      const provider = makeProvider({ tokenBudget: { warnAt: 20, compressAt: 1000 } });
+      const events = collectEvents(provider);
+      await connectWithSetup(provider);
+
+      // 32000 bytes of 16kHz PCM = 1 second = 25 tokens -> crosses warn at 20
+      provider.sendAudio(Buffer.alloc(32_000));
+
+      const warnings = events.filter((e) => e.type === 'token_warning');
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatchObject({ type: 'token_warning', threshold: 'warn' });
+    });
+
+    it('tracks output audio and text tokens from server messages', async () => {
+      const provider = makeProvider({ tokenBudget: { warnAt: 20, compressAt: 1000 } });
+      const events = collectEvents(provider);
+      await connectWithSetup(provider);
+
+      // Server sends 48000 bytes of output audio (24kHz, 1 second = 25 tokens)
+      const audioBytes = Buffer.alloc(48_000);
+      lastCreatedWs!._receiveMessage({
+        serverContent: {
+          modelTurn: {
+            parts: [{ inlineData: { data: audioBytes.toString('base64') } }],
+          },
+        },
+      });
+
+      const warnings = events.filter((e) => e.type === 'token_warning');
+      expect(warnings).toHaveLength(1);
+    });
   });
 
   // -----------------------------------------------------------------------

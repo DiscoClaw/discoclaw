@@ -1082,5 +1082,195 @@ describe('AudioPipelineManager', () => {
         );
       });
     });
+
+    // -----------------------------------------------------------------------
+    // SILENT tool scheduling
+    // -----------------------------------------------------------------------
+
+    it('does not send tool response for SILENT tools', async () => {
+      mockExecuteToolCall.mockResolvedValue({ result: 'memory contents', ok: true });
+      const log = createLogger();
+      const opts = createGeminiOpts({
+        log,
+        enabledTools: ['Read', 'MemoryQuery'],
+        silentTools: ['MemoryQuery'],
+        runtimeCwd: '/fake/cwd',
+      });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+      const { GeminiLiveResponder: ResponderMock } = await import('./providers/gemini-live-responder.js');
+
+      await mgr.startPipeline('g1', connection);
+
+      const constructorCalls = (ResponderMock as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = constructorCalls[constructorCalls.length - 1];
+      const responderOpts = lastCall[0] as {
+        onToolCall?: (calls: Array<{ id: string; name: string; args: Record<string, unknown> }>) => void;
+      };
+
+      // Dispatch a SILENT tool call
+      responderOpts.onToolCall!([{ id: 'tc-silent', name: 'MemoryQuery', args: { key: 'test' } }]);
+
+      await vi.waitFor(() => {
+        expect(log.info).toHaveBeenCalledWith(
+          expect.objectContaining({ guildId: 'g1', count: 1 }),
+          'gemini-live: SILENT tool execution complete — results not sent to model',
+        );
+      });
+
+      // sendToolResponse should NOT have been called for a silent tool
+      expect(mockGeminiProvider.sendToolResponse).not.toHaveBeenCalled();
+    });
+
+    it('sends response only for non-silent tools in a mixed batch', async () => {
+      mockExecuteToolCall
+        .mockResolvedValueOnce({ result: 'file data', ok: true })
+        .mockResolvedValueOnce({ result: 'memory data', ok: true });
+      const log = createLogger();
+      const opts = createGeminiOpts({
+        log,
+        enabledTools: ['Read', 'MemoryQuery'],
+        silentTools: ['MemoryQuery'],
+        runtimeCwd: '/fake/cwd',
+      });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+      const { GeminiLiveResponder: ResponderMock } = await import('./providers/gemini-live-responder.js');
+
+      await mgr.startPipeline('g1', connection);
+
+      const constructorCalls = (ResponderMock as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = constructorCalls[constructorCalls.length - 1];
+      const responderOpts = lastCall[0] as {
+        onToolCall?: (calls: Array<{ id: string; name: string; args: Record<string, unknown> }>) => void;
+      };
+
+      // Mixed batch: one normal, one silent
+      responderOpts.onToolCall!([
+        { id: 'tc-read', name: 'Read', args: { file_path: '/foo' } },
+        { id: 'tc-mem', name: 'MemoryQuery', args: { key: 'test' } },
+      ]);
+
+      await vi.waitFor(() => {
+        expect(mockExecuteToolCall).toHaveBeenCalledTimes(2);
+        // Only the non-silent tool response should be sent
+        expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
+          { id: 'tc-read', output: 'file data' },
+        ]);
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // Fallback to standard pipeline
+    // -----------------------------------------------------------------------
+
+    it('falls back to standard pipeline when initial gemini-live connection fails', async () => {
+      const { GeminiLiveProvider: ProviderMock } = await import('./providers/gemini-live-provider.js');
+
+      // Make the next provider's connect() reject
+      (ProviderMock as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        mockGeminiProvider = {
+          connect: vi.fn(async () => { throw new Error('connection refused'); }),
+          disconnect: vi.fn(async () => {}),
+          sendAudio: vi.fn(),
+          sendToolResponse: vi.fn(),
+          onEvent: vi.fn(),
+          state: 'idle',
+        };
+        return mockGeminiProvider;
+      });
+
+      const stt = createMockStt();
+      const log = createLogger();
+      const opts = createGeminiOpts({ log, createStt: () => stt });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+
+      await mgr.startPipeline('g1', connection);
+
+      expect(mgr.hasPipeline('g1')).toBe(true);
+      expect(mgr.pipelineMode('g1')).toBe('pipeline');
+      expect(stt.start).toHaveBeenCalled();
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ guildId: 'g1' }),
+        'gemini-live: initial connection failed — falling back to standard pipeline',
+      );
+    });
+
+    it('fires onFallbackTriggered when initial connection fallback succeeds', async () => {
+      const { GeminiLiveProvider: ProviderMock } = await import('./providers/gemini-live-provider.js');
+
+      (ProviderMock as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+        mockGeminiProvider = {
+          connect: vi.fn(async () => { throw new Error('quota exceeded'); }),
+          disconnect: vi.fn(async () => {}),
+          sendAudio: vi.fn(),
+          sendToolResponse: vi.fn(),
+          onEvent: vi.fn(),
+          state: 'idle',
+        };
+        return mockGeminiProvider;
+      });
+
+      const onFallbackTriggered = vi.fn();
+      const stt = createMockStt();
+      const opts = createGeminiOpts({ createStt: () => stt, onFallbackTriggered });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+
+      await mgr.startPipeline('g1', connection);
+
+      expect(onFallbackTriggered).toHaveBeenCalledWith('g1', 'pipeline');
+    });
+
+    it('falls back when onSessionTerminated is triggered', async () => {
+      const stt = createMockStt();
+      const log = createLogger();
+      const opts = createGeminiOpts({ log, createStt: () => stt });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+
+      const { GeminiLiveResponder: ResponderMock } = await import('./providers/gemini-live-responder.js');
+      await mgr.startPipeline('g1', connection);
+
+      expect(mgr.pipelineMode('g1')).toBe('gemini-live');
+
+      // Extract onSessionTerminated callback
+      const constructorCalls = (ResponderMock as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = constructorCalls[constructorCalls.length - 1];
+      const responderOpts = lastCall[0] as { onSessionTerminated?: () => void };
+
+      expect(responderOpts.onSessionTerminated).toBeDefined();
+      responderOpts.onSessionTerminated!();
+
+      await vi.waitFor(() => {
+        expect(mgr.hasPipeline('g1')).toBe(true);
+        expect(mgr.pipelineMode('g1')).toBe('pipeline');
+      });
+    });
+
+    it('falls back when onFallbackRecommended is triggered', async () => {
+      const stt = createMockStt();
+      const log = createLogger();
+      const opts = createGeminiOpts({ log, createStt: () => stt });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+
+      const { GeminiLiveResponder: ResponderMock } = await import('./providers/gemini-live-responder.js');
+      await mgr.startPipeline('g1', connection);
+
+      // Extract onFallbackRecommended callback
+      const constructorCalls = (ResponderMock as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = constructorCalls[constructorCalls.length - 1];
+      const responderOpts = lastCall[0] as { onFallbackRecommended?: (reason: string) => void };
+
+      expect(responderOpts.onFallbackRecommended).toBeDefined();
+      responderOpts.onFallbackRecommended!('exhausted reconnect retries');
+
+      await vi.waitFor(() => {
+        expect(mgr.hasPipeline('g1')).toBe(true);
+        expect(mgr.pipelineMode('g1')).toBe('pipeline');
+      });
+    });
   });
 });
