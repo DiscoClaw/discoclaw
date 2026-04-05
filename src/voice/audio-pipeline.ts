@@ -182,6 +182,10 @@ export class AudioPipelineManager {
                 });
               }
             : undefined,
+          onSessionTerminated: () => {
+            this.log.error({ guildId }, 'gemini-live session terminally failed — tearing down pipeline');
+            void this.stopPipeline(guildId);
+          },
           onToolCall: tools
             ? (calls) => {
                 this.log.info(
