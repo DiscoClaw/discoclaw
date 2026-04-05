@@ -33,6 +33,8 @@ Two native npm packages power the Discord voice integration:
 
 ## Audio Data Flow
 
+### Default pipeline (`voiceProvider: 'pipeline'`)
+
 ```
 User speaks in Discord voice channel
   → @discordjs/voice receiver emits Opus packets per user
@@ -47,6 +49,23 @@ User speaks in Discord voice channel
                     → AudioPlayer → Discord voice connection
 ```
 
+### Gemini Live (`voiceProvider: 'gemini-live'`)
+
+Bypasses separate STT/TTS/AI stages — Gemini handles speech recognition, reasoning, and speech synthesis in a single bidirectional WebSocket session.
+
+```
+User speaks in Discord voice channel
+  → @discordjs/voice receiver emits Opus packets per user
+    → AudioReceiver: allowlist gate → OpusDecoder (48 kHz stereo PCM)
+      → downsample to 16 kHz mono
+        → SttProvider shim → GeminiLiveProvider.sendAudio() (WebSocket)
+          → Gemini Live: STT + reasoning + TTS (server-side)
+            ← audio events (24 kHz mono PCM) + text events
+              → GeminiLiveResponder: upsampleToDiscord (48 kHz stereo)
+                → AudioPlayer → Discord voice connection
+              → onBotResponse callback → TranscriptMirror (text channel)
+```
+
 ## Key Patterns
 
 - **Allowlist gating** — `AudioReceiver` only subscribes to users in `DISCORD_ALLOW_USER_IDS`. Empty allowlist = ignore everyone (fail-closed).
@@ -56,6 +75,7 @@ User speaks in Discord voice channel
 - **Generation-based cancellation** — `VoiceResponder` increments a generation counter on each new transcription. If a newer transcription arrives mid-pipeline, the older one is silently abandoned.
 - **Barge-in** — Gated on a non-empty STT transcription result, not the raw VAD `speaking.start` event. Echo from the bot's own TTS leaking through the user's mic produces empty transcriptions and is ignored. Only when `VoiceResponder.handleTranscription()` receives a non-empty transcript while the player is active does it stop playback and advance the generation counter. This eliminates false positives from echo without relying on a static grace-period timeout.
 - **Conversation ring buffer** — `ConversationBuffer` maintains a per-guild 10-turn ring buffer of user/model exchanges that gets injected into the voice prompt as formatted conversation history. Turns are appended live during a session. On voice join, the buffer backfills from recent voice-log channel messages so context carries across disconnects. The buffer is cleared when the bot leaves the voice channel.
+- **`SttProvider` shim for Gemini Live** — In `gemini-live` mode, the pipeline still uses `AudioReceiver` for Opus decode and downsampling, but replaces the real STT provider with a lightweight shim object that implements the `SttProvider` interface. The shim's `feedAudio()` forwards PCM frames directly to `GeminiLiveProvider.sendAudio()`, while its `start()`/`stop()`/`onTranscription()` are no-ops. This reuses the existing audio-receive path without duplicating Opus decode or downsample logic.
 - **Re-entrancy guard** — `AudioPipelineManager.startPipeline` uses a `starting` set because `VoiceConnection.subscribe()` synchronously fires a Ready state change.
 - **Error containment** — `VoiceConnectionManager` catches connection errors and destroys the connection to prevent process crashes (e.g. DAVE handshake failures).
 - **Deepgram TTS 2000-char limit** — Deepgram Aura REST TTS returns HTTP 413 (silent failure) for inputs exceeding ~2000 characters. `tts-deepgram.ts` truncates the input to 2000 chars before sending to prevent silent audio dropouts. If the AI response is unexpectedly long (e.g. from a missing `VOICE_STYLE_INSTRUCTION`), the user will still hear a truncated response rather than silence.

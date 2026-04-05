@@ -16,6 +16,8 @@ import { createTtsProvider } from './tts-factory.js';
 import { VoiceResponder, type InvokeAiFn } from './voice-responder.js';
 import type { TranscriptMirrorLike } from './transcript-mirror.js';
 import { ConversationBuffer, type Turn } from './conversation-buffer.js';
+import { GeminiLiveProvider } from './providers/gemini-live-provider.js';
+import { GeminiLiveResponder } from './providers/gemini-live-responder.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,6 +50,10 @@ export type AudioPipelineOpts = {
   botDisplayName?: string;
   /** Optional async callback that returns initial turn pairs for conversation history backfill on join. */
   backfill?: () => Promise<Turn[]>;
+  /** Voice provider mode: 'pipeline' (default STT/TTS) or 'gemini-live' (Gemini Live WebSocket). */
+  voiceProvider?: 'pipeline' | 'gemini-live';
+  /** API key for Gemini Live (required when voiceProvider is 'gemini-live'). */
+  geminiApiKey?: string;
 };
 
 type GuildPipeline = {
@@ -56,6 +62,8 @@ type GuildPipeline = {
   receiver: AudioReceiver;
   responder?: VoiceResponder;
   buffer?: ConversationBuffer;
+  geminiProvider?: GeminiLiveProvider;
+  geminiResponder?: GeminiLiveResponder;
 };
 
 // ---------------------------------------------------------------------------
@@ -78,6 +86,8 @@ export class AudioPipelineManager {
   private readonly transcriptMirror?: TranscriptMirrorLike;
   private readonly botDisplayName: string;
   private readonly backfill?: () => Promise<Turn[]>;
+  private readonly voiceProvider: 'pipeline' | 'gemini-live';
+  private readonly geminiApiKey?: string;
   private readonly pipelines = new Map<string, GuildPipeline>();
   /** Re-entrancy guard: VoiceConnection.subscribe() can synchronously fire stateChange→Ready. */
   private readonly starting = new Set<string>();
@@ -98,6 +108,8 @@ export class AudioPipelineManager {
     this.transcriptMirror = opts.transcriptMirror;
     this.botDisplayName = opts.botDisplayName ?? 'Bot';
     this.backfill = opts.backfill;
+    this.voiceProvider = opts.voiceProvider ?? 'pipeline';
+    this.geminiApiKey = opts.geminiApiKey;
   }
 
   /**
@@ -135,6 +147,71 @@ export class AudioPipelineManager {
     }
 
     try {
+      // ----- gemini-live mode: skip STT/TTS, use GeminiLiveProvider directly -----
+      if (this.voiceProvider === 'gemini-live') {
+        const apiKey = this.geminiApiKey;
+        if (!apiKey) throw new Error('geminiApiKey is required for gemini-live voice provider');
+
+        const provider = new GeminiLiveProvider({
+          apiKey,
+          log: this.log,
+          responseModalities: ['AUDIO', 'TEXT'],
+        });
+        await provider.connect();
+
+        const mirror = this.transcriptMirror;
+        const botName = this.botDisplayName;
+        const responder = new GeminiLiveResponder({
+          log: this.log,
+          connection,
+          provider,
+          onBotResponse: mirror
+            ? (text) => {
+                mirror.postBotResponse(botName, text).catch((err) => {
+                  this.log.warn({ guildId, err }, 'transcript-mirror: failed to post bot response');
+                });
+              }
+            : undefined,
+        });
+        responder.start();
+
+        // SttProvider shim: bridges AudioReceiver frames to GeminiLiveProvider.sendAudio
+        const sttShim: SttProvider = {
+          start: async () => {},
+          stop: async () => {},
+          onTranscription: () => {},
+          feedAudio: (frame) => {
+            try {
+              provider.sendAudio(frame.buffer);
+            } catch (err) {
+              this.log.warn({ guildId, err }, 'gemini-live: sendAudio error (non-fatal)');
+            }
+          },
+        };
+
+        const receiver = new AudioReceiver({
+          connection,
+          allowedUserIds: this.allowedUserIds,
+          sttProvider: sttShim,
+          log: this.log,
+          createDecoder: this.createDecoder,
+          onUserSpeaking: () => {},
+        });
+
+        receiver.start();
+
+        this.pipelines.set(guildId, {
+          connection,
+          sttProvider: sttShim,
+          receiver,
+          geminiProvider: provider,
+          geminiResponder: responder,
+        });
+        this.log.info({ guildId }, 'audio pipeline started (gemini-live)');
+        return;
+      }
+
+      // ----- default pipeline mode: STT/TTS/VoiceResponder -----
       const sttProvider = this.createStt(this.voiceConfig, this.log);
       const mirror = this.transcriptMirror;
 
@@ -240,6 +317,11 @@ export class AudioPipelineManager {
     if (!pipeline) return;
 
     this.pipelines.delete(guildId);
+
+    pipeline.geminiResponder?.destroy();
+    if (pipeline.geminiProvider) {
+      await pipeline.geminiProvider.disconnect();
+    }
 
     pipeline.responder?.destroy();
     pipeline.receiver.stop();
