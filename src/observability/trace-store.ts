@@ -209,19 +209,6 @@ export class TraceStore {
     return this.traces.size;
   }
 
-  listByFlow(flow: InvokeFlow, n: number): RunTrace[] {
-    const limit = Math.max(0, Math.floor(n));
-    if (limit === 0) {
-      return [];
-    }
-
-    return [...this.traces.values()]
-      .filter((trace) => trace.flow === flow)
-      .sort((a, b) => b.startedAt - a.startedAt)
-      .slice(0, limit)
-      .map(cloneTrace);
-  }
-
   summary(): TraceSummary {
     const allTraces = [...this.traces.values()];
 

@@ -172,7 +172,7 @@ In-process task store that replaced the external `bd` CLI dependency for the rea
 | Pino structured logging | throughout | **done** |
 | Per-run trace store (structured invoke/tool/action/error/outcome events keyed by `traceId`; currently instrumented for message flow with operator inspection via `!trace`) | `src/observability/trace-store.ts`, `src/observability/trace-store.test.ts`, `src/discord/trace-command.ts`, `src/discord/trace-command.test.ts`, `src/discord/message-coordinator.ts` | **done** |
 | Admin dashboard (terminal UI + loopback-by-default web UI for service state, config doctor, model overrides, MCP server detection/validation status, and service actions; supports private Tailscale access through trusted host allowlisting) | `src/cli/dashboard.ts`, `src/cli/dashboard.test.ts`, `src/dashboard/server.ts`, `src/dashboard/page.ts`, `src/service-control.ts`, `src/health/config-doctor.ts` | **done** |
-| Metrics | — | *stub — not started* |
+| Metrics (counters, latencies, memory sampling, `/api/metrics` endpoint, dashboard section) | `src/observability/metrics.ts`, `src/observability/metrics.test.ts`, `src/observability/memory-sampler.ts`, `src/dashboard/api/metrics.ts`, `src/dashboard/page.ts` | **done** |
 
 ## 13. Ops & Deploy
 
@@ -394,7 +394,7 @@ Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DEEPGRAM_STT_MODEL
 
 ### Nice-to-have before MVP
 
-- [ ] **Observability beyond status channel** — basic metrics (messages handled, errors, latency) to stdout or a simple dashboard.
+- [x] **Observability beyond status channel** — metrics (counters, latencies, memory sampling), per-run trace store across all invocation flows, `/api/metrics` and `/api/traces` dashboard endpoints, and dedicated dashboard sections.
 - [ ] **Content dir without Dropbox** — make Dropbox symlinks fully optional; default to a local `data/content/` tree.
 
 ### Post-MVP

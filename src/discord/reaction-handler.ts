@@ -39,6 +39,7 @@ import { downloadTextAttachments, classifyAttachments, downloadDocumentAttachmen
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { globalMetrics } from '../observability/metrics.js';
 import { globalTraceStore } from '../observability/trace-store.js';
+import { summarizeTraceValue } from '../observability/trace-utils.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 import { resolveGroundedToolCapabilities } from '../runtime/tool-capabilities.js';
 import { adaptRuntimeEventText } from './runtime-event-text-adapter.js';
@@ -162,23 +163,6 @@ function reactionPromptEmojiKey(
     return name ? `<:${name}:${reaction.emoji.id}>` : null;
   }
   return reaction.emoji.name ?? null;
-}
-
-function summarizeTraceText(value: string, maxChars: number): string | undefined {
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  if (!normalized) return undefined;
-  if (normalized.length <= maxChars) return normalized;
-  return `${normalized.slice(0, Math.max(1, maxChars - 1))}…`;
-}
-
-function summarizeTraceValue(value: unknown, maxChars = 160): string | undefined {
-  if (value == null) return undefined;
-  if (typeof value === 'string') return summarizeTraceText(value, maxChars);
-  try {
-    const serialized = JSON.stringify(value);
-    if (serialized) return summarizeTraceText(serialized, maxChars);
-  } catch { /* fall through */ }
-  return summarizeTraceText(String(value), maxChars);
 }
 
 function createReactionHandler(

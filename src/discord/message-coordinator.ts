@@ -130,6 +130,7 @@ import type { HealthConfigSnapshot } from './health-command.js';
 import type { MetricsRegistry } from '../observability/metrics.js';
 import { globalMetrics } from '../observability/metrics.js';
 import { globalTraceStore } from '../observability/trace-store.js';
+import { summarizeTraceValue } from '../observability/trace-utils.js';
 import { OnboardingFlow } from '../onboarding/onboarding-flow.js';
 import { completeOnboarding } from './onboarding-completion.js';
 import type { SendTarget } from './onboarding-completion.js';
@@ -174,40 +175,6 @@ async function waitForEditOrTimeout(editOp: Promise<unknown>, timeoutMs: number)
   ]);
   if (timer) clearTimeout(timer);
   return completed;
-}
-
-function summarizeTraceText(value: string, maxChars = 160): string | undefined {
-  const normalized = value.replace(/\s+/g, ' ').trim();
-  if (!normalized) {
-    return undefined;
-  }
-
-  if (normalized.length <= maxChars) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, Math.max(1, maxChars - 1))}…`;
-}
-
-function summarizeTraceValue(value: unknown, maxChars = 160): string | undefined {
-  if (value == null) {
-    return undefined;
-  }
-
-  if (typeof value === 'string') {
-    return summarizeTraceText(value, maxChars);
-  }
-
-  try {
-    const serialized = JSON.stringify(value);
-    if (serialized) {
-      return summarizeTraceText(serialized, maxChars);
-    }
-  } catch {
-    // Fall through to String(value).
-  }
-
-  return summarizeTraceText(String(value), maxChars);
 }
 
 const RELEASE_REHEARSAL_SLUG_RE = /\brr-\d{8}-\d{6}-[a-z0-9]+\b/gi;

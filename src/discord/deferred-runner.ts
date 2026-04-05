@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { ChannelType, PermissionFlagsBits } from 'discord.js';
 import type { GuildMember } from 'discord.js';
 import type { ActionContext, ActionCategoryFlags, DiscordActionResult, RequesterMemberContext } from './actions.js';
@@ -38,6 +39,7 @@ import type { InlinedContextSection } from './prompt-common.js';
 import { mapRuntimeErrorToUserMessage } from './user-errors.js';
 import { resolveModel } from '../runtime/model-tiers.js';
 import { globalMetrics } from '../observability/metrics.js';
+import { globalTraceStore } from '../observability/trace-store.js';
 import type { StatusPoster } from './status-channel.js';
 import { buildPlanForgeAvailabilityNote } from './plan-forge-availability.js';
 
@@ -173,9 +175,22 @@ export function configureDeferredScheduler(
 ): DeferScheduler<DeferActionRequest, ActionContext> {
   const handleDeferredRun = async (run: DeferredRun): Promise<void> => {
     const { action, context } = run;
+    const traceId = `defer_${randomUUID()}`;
+    const sessionKey = `defer:${action.channel}`;
+    let traceOutcome = 'success';
+    globalTraceStore.startTrace(traceId, sessionKey, 'defer', undefined);
+
+    try {
     const guild = context.guild;
     if (!guild) {
       opts.log?.warn({ flow: 'defer', run, action }, 'defer:missing-guild');
+      traceOutcome = 'error';
+      globalTraceStore.addEvent(traceId, {
+        type: 'error',
+        at: Date.now(),
+        message: 'deferred run skipped: no guild context',
+        stage: 'defer_setup',
+      });
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       opts.status?.handlerError({ sessionKey: 'defer' }, 'deferred run skipped: no guild context');
       return;
@@ -184,6 +199,13 @@ export function configureDeferredScheduler(
     const channel = resolveChannel(guild, action.channel);
     if (!channel) {
       opts.log?.warn({ flow: 'defer', run, channel: action.channel }, 'defer:target channel not found');
+      traceOutcome = 'error';
+      globalTraceStore.addEvent(traceId, {
+        type: 'error',
+        at: Date.now(),
+        message: `target channel "${action.channel}" not found`,
+        stage: 'defer_setup',
+      });
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       opts.status?.handlerError({ sessionKey: `defer:${action.channel}` }, `deferred run skipped: channel "${action.channel}" not found`);
       return;
@@ -196,6 +218,13 @@ export function configureDeferredScheduler(
         (parentId && opts.state.allowChannelIds.has(parentId));
       if (!allowed) {
         opts.log?.warn({ flow: 'defer', channelId: channel.id }, 'defer:target channel not allowlisted');
+        traceOutcome = 'error';
+        globalTraceStore.addEvent(traceId, {
+          type: 'error',
+          at: Date.now(),
+          message: `target channel "${action.channel}" not allowlisted`,
+          stage: 'defer_setup',
+        });
         // eslint-disable-next-line @typescript-eslint/no-floating-promises
         opts.status?.handlerError({ sessionKey: `defer:${channel.id}` }, `deferred run skipped: channel ${channel.id} not in allowlist`);
         return;
@@ -209,6 +238,13 @@ export function configureDeferredScheduler(
       || (requesterMember && !requesterCanAccessTargetChannel(channel, requesterMember))
     ) {
       opts.log?.warn({ flow: 'defer', channelId: channel.id, requesterId: context.requesterId }, 'defer:target channel permission denied');
+      traceOutcome = 'error';
+      globalTraceStore.addEvent(traceId, {
+        type: 'error',
+        at: Date.now(),
+        message: `requester lacks permission for channel ${channel.id}`,
+        stage: 'defer_setup',
+      });
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       opts.status?.handlerError(
         { sessionKey: `defer:${channel.id}` },
@@ -334,6 +370,12 @@ export function configureDeferredScheduler(
 
     const t0 = Date.now();
     globalMetrics.recordInvokeStart('defer');
+    globalTraceStore.addEvent(traceId, {
+      type: 'invoke_start',
+      at: t0,
+      summary: `deferred run for <#${channel.id}>`,
+      promptPreview: action.prompt.slice(0, 220),
+    });
     opts.log?.info({ flow: 'defer', channelId: channel.id }, 'obs.invoke.start');
     let finalText = '';
     let deltaText = '';
@@ -355,6 +397,13 @@ export function configureDeferredScheduler(
         } else if (evt.type === 'error') {
           runtimeError = evt.message;
           finalText = mapRuntimeErrorToUserMessage(evt.message);
+          traceOutcome = 'error';
+          globalTraceStore.addEvent(traceId, {
+            type: 'error',
+            at: Date.now(),
+            message: evt.message,
+            stage: 'runtime',
+          });
           globalMetrics.recordInvokeResult('defer', Date.now() - t0, false, evt.message);
           // eslint-disable-next-line @typescript-eslint/no-floating-promises
           opts.status?.runtimeError({ sessionKey: `defer:${channel.id}` }, evt.message);
@@ -367,6 +416,15 @@ export function configureDeferredScheduler(
       const msg = err instanceof Error ? err.message : String(err);
       runtimeError ??= msg;
       finalText = mapRuntimeErrorToUserMessage(msg);
+      traceOutcome = 'error';
+      globalTraceStore.addEvent(traceId, {
+        type: 'error',
+        at: Date.now(),
+        message: msg,
+        name: err instanceof Error ? err.name : undefined,
+        stage: 'runtime',
+        stack: err instanceof Error ? err.stack?.slice(0, 400) : undefined,
+      });
       if (!invokeResultRecorded) {
         globalMetrics.recordInvokeResult('defer', Date.now() - t0, false, msg);
         // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -376,6 +434,12 @@ export function configureDeferredScheduler(
       opts.log?.warn({ flow: 'defer', channelId: channel.id, err }, 'defer:runtime invocation failed');
     }
     if (!invokeResultRecorded) {
+      globalTraceStore.addEvent(traceId, {
+        type: 'invoke_end',
+        at: Date.now(),
+        ok: true,
+        summary: `completed in ${Date.now() - t0}ms`,
+      });
       globalMetrics.recordInvokeResult('defer', Date.now() - t0, true);
       opts.log?.info({ flow: 'defer', channelId: channel.id, ms: Date.now() - t0, ok: true }, 'obs.invoke.end');
     }
@@ -414,6 +478,13 @@ export function configureDeferredScheduler(
       for (let i = 0; i < actionResults.length; i++) {
         const result = actionResults[i];
         globalMetrics.recordActionResult(result.ok);
+        globalTraceStore.addEvent(traceId, {
+          type: 'action_result',
+          at: Date.now(),
+          action: parsed.actions[i].type,
+          ok: result.ok,
+          detail: result.ok ? undefined : ('error' in result ? result.error : undefined),
+        });
         opts.log?.info({ flow: 'defer', channelId: channel.id, ok: result.ok }, 'obs.action.result');
         if (!result.ok) {
           // eslint-disable-next-line @typescript-eslint/no-floating-promises
@@ -437,6 +508,21 @@ export function configureDeferredScheduler(
       await channel.send({ content: outgoingText, allowedMentions: NO_MENTIONS });
     } catch (err) {
       opts.log?.warn({ flow: 'defer', channelId: channel.id, err }, 'defer:failed to post follow-up');
+    }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      traceOutcome = 'error';
+      globalTraceStore.addEvent(traceId, {
+        type: 'error',
+        at: Date.now(),
+        message: msg,
+        name: err instanceof Error ? err.name : undefined,
+        stage: 'defer_flow',
+        stack: err instanceof Error ? err.stack?.slice(0, 400) : undefined,
+      });
+      opts.log?.error({ flow: 'defer', err }, 'defer:handler failed');
+    } finally {
+      globalTraceStore.endTrace(traceId, traceOutcome);
     }
   };
 
