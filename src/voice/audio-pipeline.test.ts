@@ -1112,15 +1112,14 @@ describe('AudioPipelineManager', () => {
       responderOpts.onToolCall!([{ id: 'tc-silent', name: 'MemoryQuery', args: { key: 'test' } }]);
 
       await vi.waitFor(() => {
-        expect(mockExecuteToolCall).toHaveBeenCalled();
+        expect(log.info).toHaveBeenCalledWith(
+          expect.objectContaining({ guildId: 'g1', count: 1 }),
+          'gemini-live: SILENT tool execution complete — results not sent to model',
+        );
       });
 
       // sendToolResponse should NOT have been called for a silent tool
       expect(mockGeminiProvider.sendToolResponse).not.toHaveBeenCalled();
-      expect(log.info).toHaveBeenCalledWith(
-        expect.objectContaining({ guildId: 'g1', count: 1 }),
-        'gemini-live: SILENT tool execution complete — results not sent to model',
-      );
     });
 
     it('sends response only for non-silent tools in a mixed batch', async () => {
