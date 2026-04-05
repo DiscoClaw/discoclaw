@@ -691,4 +691,141 @@ describe('GeminiLiveProvider', () => {
     );
     expect(errorCall).toBeDefined();
   });
+
+  // -----------------------------------------------------------------------
+  // Session rotation
+  // -----------------------------------------------------------------------
+
+  describe('session rotation', () => {
+    it('fires at configured threshold and triggers reconnect', async () => {
+      vi.useFakeTimers();
+      const provider = makeProvider({ sessionRotationMs: 5000 });
+      const events = collectEvents(provider);
+
+      const connectP = provider.connect();
+      await vi.advanceTimersByTimeAsync(0);
+      lastCreatedWs!._receiveMessage({ setupComplete: {} });
+      await connectP;
+
+      // Advance to just before threshold — no rotation yet
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(events.filter((e) => e.type === 'session_rotating')).toHaveLength(0);
+
+      // Advance past threshold — rotation fires, closes WS
+      await vi.advanceTimersByTimeAsync(1);
+      expect(events.filter((e) => e.type === 'session_rotating')).toHaveLength(1);
+
+      // The WS close triggers reconnect
+      await vi.advanceTimersByTimeAsync(0); // microtask for MockWebSocket close event
+      await vi.advanceTimersByTimeAsync(500); // reconnect backoff
+      await vi.advanceTimersByTimeAsync(0); // microtask for new WS open
+
+      // Complete the reconnect
+      lastCreatedWs!._receiveMessage({ setupComplete: {} });
+      expect(provider.state).toBe('open');
+      expect(events.filter((e) => e.type === 'reconnected')).toHaveLength(1);
+
+      vi.useRealTimers();
+    });
+
+    it('resets timer after successful reconnect (survives multiple rotations)', async () => {
+      vi.useFakeTimers();
+      const provider = makeProvider({ sessionRotationMs: 3000 });
+      const events = collectEvents(provider);
+
+      const connectP = provider.connect();
+      await vi.advanceTimersByTimeAsync(0);
+      lastCreatedWs!._receiveMessage({ setupComplete: {} });
+      await connectP;
+
+      for (let i = 0; i < 3; i++) {
+        // Wait for rotation
+        await vi.advanceTimersByTimeAsync(3000);
+        // Process close microtask + reconnect backoff + open microtask
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(500);
+        await vi.advanceTimersByTimeAsync(0);
+        lastCreatedWs!._receiveMessage({ setupComplete: {} });
+        expect(provider.state).toBe('open');
+      }
+
+      expect(events.filter((e) => e.type === 'session_rotating')).toHaveLength(3);
+      expect(events.filter((e) => e.type === 'reconnected')).toHaveLength(3);
+
+      vi.useRealTimers();
+    });
+
+    it('cancels timer on explicit disconnect', async () => {
+      vi.useFakeTimers();
+      const provider = makeProvider({ sessionRotationMs: 5000 });
+      const events = collectEvents(provider);
+
+      const connectP = provider.connect();
+      await vi.advanceTimersByTimeAsync(0);
+      lastCreatedWs!._receiveMessage({ setupComplete: {} });
+      await connectP;
+
+      await provider.disconnect();
+
+      // Advance well past the threshold — no rotation should fire
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(events.filter((e) => e.type === 'session_rotating')).toHaveLength(0);
+
+      vi.useRealTimers();
+    });
+
+    it('rotation with expired resume handle falls through to fresh session', async () => {
+      vi.useFakeTimers();
+      // Use a rotation threshold longer than the resume handle TTL (90s)
+      // so the handle expires before rotation fires.
+      const provider = makeProvider({ sessionRotationMs: 100_000 });
+
+      const connectP = provider.connect();
+      await vi.advanceTimersByTimeAsync(0);
+      lastCreatedWs!._receiveMessage({ setupComplete: {} });
+      await connectP;
+
+      // Server sends a resume handle
+      lastCreatedWs!._receiveMessage({
+        sessionResumptionUpdate: { newHandle: 'handle-xyz' },
+      });
+
+      // Advance past the resume handle TTL (90s) but before rotation threshold
+      await vi.advanceTimersByTimeAsync(91_000);
+
+      // Now advance to rotation threshold
+      await vi.advanceTimersByTimeAsync(9_000);
+      // Process close microtask + reconnect backoff + open microtask
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // The reconnect setup should NOT include the expired handle
+      const reconnectSetup = JSON.parse(lastCreatedWs!.sent[0] as string);
+      expect(reconnectSetup.setup.sessionResumption).toBeUndefined();
+
+      lastCreatedWs!._receiveMessage({ setupComplete: {} });
+      expect(provider.state).toBe('open');
+
+      vi.useRealTimers();
+    });
+
+    it('disables rotation when threshold is 0', async () => {
+      vi.useFakeTimers();
+      const provider = makeProvider({ sessionRotationMs: 0 });
+      const events = collectEvents(provider);
+
+      const connectP = provider.connect();
+      await vi.advanceTimersByTimeAsync(0);
+      lastCreatedWs!._receiveMessage({ setupComplete: {} });
+      await connectP;
+
+      // Advance well past default threshold — no rotation
+      await vi.advanceTimersByTimeAsync(900_000);
+      expect(events.filter((e) => e.type === 'session_rotating')).toHaveLength(0);
+      expect(provider.state).toBe('open');
+
+      vi.useRealTimers();
+    });
+  });
 });

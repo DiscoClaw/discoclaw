@@ -32,6 +32,8 @@ const GEMINI_LIVE_WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.a
 const DEFAULT_MODEL = 'gemini-2.0-flash-live-001';
 const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 500;
+/** Default session rotation threshold — 13 minutes (Gemini sessions cap at ~15 min). */
+const DEFAULT_SESSION_ROTATION_MS = 780_000;
 /** Resume handles are valid for ~2 minutes server-side; expire locally at 90s to avoid racing. */
 const RESUME_HANDLE_TTL_MS = 90_000;
 
@@ -48,6 +50,7 @@ export class GeminiLiveProvider {
   private readonly voiceName?: string;
   private readonly tools?: GeminiToolsConfig;
   private readonly wsFactory: (url: string) => WebSocket;
+  private readonly sessionRotationMs: number;
 
   private ws: WebSocket | null = null;
   private _state: GeminiLiveState = 'idle';
@@ -55,6 +58,8 @@ export class GeminiLiveProvider {
   private resumeHandle: string | null = null;
   private resumeHandleUpdatedAt = 0;
   private listener: ((event: GeminiLiveEvent) => void) | null = null;
+  private sessionStartedAt = 0;
+  private rotationTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(opts: GeminiLiveOpts) {
     this.apiKey = opts.apiKey;
@@ -65,6 +70,7 @@ export class GeminiLiveProvider {
     this.voiceName = opts.voiceName;
     this.tools = opts.tools;
     this.wsFactory = opts.wsFactory ?? ((url) => new WebSocket(url));
+    this.sessionRotationMs = opts.sessionRotationMs ?? DEFAULT_SESSION_ROTATION_MS;
   }
 
   /** Current connection state. */
@@ -138,6 +144,7 @@ export class GeminiLiveProvider {
   async disconnect(): Promise<void> {
     if (this._state === 'stopped' || this._state === 'idle') return;
     this._state = 'stopped';
+    this.cancelRotationTimer();
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.close(1000, 'client disconnect');
     }
@@ -247,6 +254,8 @@ export class GeminiLiveProvider {
         const attempt = this.retryCount;
         this._state = 'open';
         this.retryCount = 0;
+        this.sessionStartedAt = Date.now();
+        this.scheduleRotation();
         this.log.info('Gemini Live session setup complete');
         if (wasReconnect) {
           this.emit({ type: 'reconnected', attempt });
@@ -338,6 +347,7 @@ export class GeminiLiveProvider {
   }
 
   private handleUnexpectedClose(): void {
+    this.cancelRotationTimer();
     if (this.retryCount >= MAX_RETRIES) {
       this.log.error(
         { retries: this.retryCount },
@@ -370,6 +380,32 @@ export class GeminiLiveProvider {
         this.handleUnexpectedClose();
       });
     }, delay);
+  }
+
+  private scheduleRotation(): void {
+    this.cancelRotationTimer();
+    if (!this.sessionRotationMs) return;
+    this.rotationTimer = setTimeout(() => {
+      this.rotationTimer = null;
+      this.initiateGracefulReconnect();
+    }, this.sessionRotationMs);
+  }
+
+  private cancelRotationTimer(): void {
+    if (this.rotationTimer != null) {
+      clearTimeout(this.rotationTimer);
+      this.rotationTimer = null;
+    }
+  }
+
+  private initiateGracefulReconnect(): void {
+    if (this._state !== 'open') return;
+    this.log.info({ sessionAgeMs: Date.now() - this.sessionStartedAt }, 'Gemini Live session rotation — initiating graceful reconnect');
+    this.emit({ type: 'session_rotating' });
+    // Close the WebSocket; handleUnexpectedClose will reconnect with the resume handle.
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.close(1000, 'session rotation');
+    }
   }
 
   private emit(event: GeminiLiveEvent): void {
