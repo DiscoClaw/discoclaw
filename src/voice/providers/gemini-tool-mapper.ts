@@ -29,12 +29,17 @@ export type GeminiSchema = {
 export type GeminiFunctionDeclaration = {
   name: string;
   description: string;
+  behavior?: 'NON_BLOCKING';
   parameters?: GeminiSchema;
 };
 
 /** The tools block sent in the Gemini Live setup message. */
 export type GeminiToolsConfig = {
   functionDeclarations: GeminiFunctionDeclaration[];
+};
+
+export type ToGeminiToolsOpts = {
+  nonBlockingFunctionNames?: Iterable<string>;
 };
 
 /** OpenAI function tool shape (matches openai-tool-schemas.ts). */
@@ -118,8 +123,12 @@ export function convertSchema(schema: Record<string, unknown>): GeminiSchema {
  * Convert an array of OpenAI function tool schemas to a Gemini tools config.
  * Returns `undefined` when the input array is empty (no tools block needed).
  */
-export function toGeminiTools(openaiTools: OpenAIFunctionTool[]): GeminiToolsConfig | undefined {
+export function toGeminiTools(
+  openaiTools: OpenAIFunctionTool[],
+  opts: ToGeminiToolsOpts = {},
+): GeminiToolsConfig | undefined {
   if (openaiTools.length === 0) return undefined;
+  const nonBlockingFunctionNames = new Set(opts.nonBlockingFunctionNames ?? []);
 
   const declarations: GeminiFunctionDeclaration[] = openaiTools.map((tool) => {
     const decl: GeminiFunctionDeclaration = {
@@ -131,6 +140,10 @@ export function toGeminiTools(openaiTools: OpenAIFunctionTool[]): GeminiToolsCon
     const params = tool.function.parameters;
     if (params && typeof params === 'object' && Object.keys(params).length > 0) {
       decl.parameters = convertSchema(params);
+    }
+
+    if (nonBlockingFunctionNames.has(tool.function.name)) {
+      decl.behavior = 'NON_BLOCKING';
     }
 
     return decl;

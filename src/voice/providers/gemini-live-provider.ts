@@ -30,13 +30,15 @@ export type { GeminiFunctionCall, GeminiLiveEvent, GeminiLiveOpts, GeminiLiveSta
 // ---------------------------------------------------------------------------
 
 const GEMINI_LIVE_WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
-const DEFAULT_MODEL = 'gemini-2.0-flash-live-001';
+const DEFAULT_MODEL = 'gemini-3.1-flash-live-preview';
 const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 500;
 /** Default session rotation threshold — 13 minutes (Gemini sessions cap at ~15 min). */
 const DEFAULT_SESSION_ROTATION_MS = 780_000;
 /** Resume handles are valid for ~2 minutes server-side; expire locally at 90s to avoid racing. */
 const RESUME_HANDLE_TTL_MS = 90_000;
+
+type GeminiFunctionResponseScheduling = 'INTERRUPT' | 'WHEN_IDLE' | 'SILENT';
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -108,7 +110,7 @@ export class GeminiLiveProvider {
     this.checkTokenThreshold();
     this.ws!.send(JSON.stringify({
       realtimeInput: {
-        media: {
+        audio: {
           mimeType: 'audio/pcm;rate=16000',
           data: pcm.toString('base64'),
         },
@@ -137,7 +139,9 @@ export class GeminiLiveProvider {
    * Silently drops responses for IDs that are no longer in-flight
    * (e.g. from a previous session after rotation).
    */
-  sendToolResponse(responses: Array<{ id: string; output: string }>): void {
+  sendToolResponse(
+    responses: Array<{ id: string; name: string; output: string; scheduling?: GeminiFunctionResponseScheduling }>,
+  ): void {
     if (this._state !== 'open') {
       throw new Error('Cannot sendToolResponse before connect() completes or after disconnect()');
     }
@@ -160,7 +164,11 @@ export class GeminiLiveProvider {
       toolResponse: {
         functionResponses: valid.map((r) => ({
           id: r.id,
-          response: { output: r.output },
+          name: r.name,
+          response: {
+            result: r.output,
+            ...(r.scheduling ? { scheduling: r.scheduling } : {}),
+          },
         })),
       },
     }));
@@ -195,7 +203,6 @@ export class GeminiLiveProvider {
   private buildSetupMessage(): object {
     const generationConfig: Record<string, unknown> = {
       responseModalities: this.responseModalities,
-      contextWindowCompression: { slidingWindow: {} },
     };
     if (this.voiceName) {
       generationConfig.speechConfig = {
@@ -206,10 +213,12 @@ export class GeminiLiveProvider {
     const setup: Record<string, unknown> = {
       model: `models/${this.model}`,
       generationConfig,
+      contextWindowCompression: { slidingWindow: {} },
       realtimeInputConfig: {
         activityHandling: 'START_OF_ACTIVITY_INTERRUPTS',
-        input_audio_transcription: {},
       },
+      inputAudioTranscription: {},
+      outputAudioTranscription: {},
     };
 
     if (this.systemInstruction) {
@@ -220,11 +229,6 @@ export class GeminiLiveProvider {
 
     if (this.tools) {
       setup.tools = [this.tools];
-      // NON_BLOCKING: model continues generating audio/text while tools execute.
-      // The client sends toolResponse asynchronously when results are ready.
-      setup.toolConfig = {
-        functionCallingConfig: { mode: 'AUTO' },
-      };
     }
 
     if (this.resumeHandle) {
@@ -312,8 +316,16 @@ export class GeminiLiveProvider {
         }
 
         // Input audio transcription (server-side STT of user speech)
-        if (typeof sc.inputTranscription === 'string' && sc.inputTranscription !== '') {
-          this.emit({ type: 'input_transcript', text: sc.inputTranscription as string });
+        const inputTranscription = this.extractTranscriptionText(sc.inputTranscription);
+        if (inputTranscription) {
+          this.emit({ type: 'input_transcript', text: inputTranscription });
+        }
+
+        // Output transcription mirrors audio-only model replies without requiring TEXT modality.
+        // Do not count these as text tokens; the audio output is already accounted separately.
+        const outputTranscription = this.extractTranscriptionText(sc.outputTranscription);
+        if (outputTranscription) {
+          this.emit({ type: 'text', text: outputTranscription });
         }
 
         // Turn complete signal
@@ -483,5 +495,11 @@ export class GeminiLiveProvider {
 
   private emit(event: GeminiLiveEvent): void {
     this.listener?.(event);
+  }
+
+  private extractTranscriptionText(value: unknown): string | null {
+    if (value == null || typeof value !== 'object') return null;
+    const text = (value as { text?: unknown }).text;
+    return typeof text === 'string' && text !== '' ? text : null;
   }
 }

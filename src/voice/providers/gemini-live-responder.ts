@@ -23,6 +23,7 @@ import { upsampleToDiscord } from '../voice-responder.js';
 // Gemini Live returns 24 kHz mono PCM s16le
 const GEMINI_OUTPUT_RATE = 24_000;
 const GEMINI_OUTPUT_CHANNELS = 1;
+const TRANSCRIPT_FLUSH_DELAY_MS = 50;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,6 +68,8 @@ export class GeminiLiveResponder {
   private player: AudioPlayer | null = null;
   private stream: PassThrough | null = null;
   private transcript = '';
+  private transcriptFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private turnCompletePending = false;
   private started = false;
 
   constructor(opts: GeminiLiveResponderOpts) {
@@ -118,8 +121,10 @@ export class GeminiLiveResponder {
   /** Stop playback and tear down the stream. */
   stop(): void {
     this.destroyStream();
+    this.cancelTranscriptFlush();
     this.player?.stop();
     this.transcript = '';
+    this.turnCompletePending = false;
   }
 
   /** Stop and release all resources. */
@@ -140,6 +145,9 @@ export class GeminiLiveResponder {
         break;
       case 'text':
         this.transcript += event.text;
+        if (this.turnCompletePending) {
+          this.scheduleTranscriptFlush();
+        }
         break;
       case 'input_transcript':
         this.handleInputTranscript(event.text);
@@ -195,8 +203,10 @@ export class GeminiLiveResponder {
   private handleInterrupted(): void {
     this.log.info({}, 'gemini-live-responder: interrupted — stopping playback');
     this.destroyStream();
+    this.cancelTranscriptFlush();
     this.player?.stop();
     this.transcript = '';
+    this.turnCompletePending = false;
   }
 
   private handleInputTranscript(text: string): void {
@@ -233,21 +243,17 @@ export class GeminiLiveResponder {
     }
 
     // Fire the transcript callback
-    const text = this.transcript;
-    this.transcript = '';
-    if (text) {
-      try {
-        this.onBotResponse?.(text);
-      } catch (err) {
-        this.log.warn({ err }, 'gemini-live-responder: onBotResponse callback error');
-      }
-    }
+    this.turnCompletePending = true;
+    this.scheduleTranscriptFlush();
   }
 
   private handleSessionRotating(): void {
     this.log.info({}, 'gemini-live-responder: planned session rotation — pausing playback');
     this.destroyStream();
+    this.cancelTranscriptFlush();
     this.player?.stop();
+    this.transcript = '';
+    this.turnCompletePending = false;
   }
 
   private handleReconnecting(attempt: number, maxRetries: number, hasResumeHandle: boolean): void {
@@ -256,7 +262,10 @@ export class GeminiLiveResponder {
       'gemini-live-responder: session reconnecting — pausing playback',
     );
     this.destroyStream();
+    this.cancelTranscriptFlush();
     this.player?.stop();
+    this.transcript = '';
+    this.turnCompletePending = false;
   }
 
   private handleReconnectFailed(attempts: number): void {
@@ -306,6 +315,32 @@ export class GeminiLiveResponder {
     if (this.stream) {
       this.stream.destroy();
       this.stream = null;
+    }
+  }
+
+  private scheduleTranscriptFlush(): void {
+    this.cancelTranscriptFlush();
+    this.transcriptFlushTimer = setTimeout(() => {
+      this.transcriptFlushTimer = null;
+      if (!this.turnCompletePending) return;
+
+      const text = this.transcript;
+      this.transcript = '';
+      this.turnCompletePending = false;
+      if (!text) return;
+
+      try {
+        this.onBotResponse?.(text);
+      } catch (err) {
+        this.log.warn({ err }, 'gemini-live-responder: onBotResponse callback error');
+      }
+    }, TRANSCRIPT_FLUSH_DELAY_MS);
+  }
+
+  private cancelTranscriptFlush(): void {
+    if (this.transcriptFlushTimer) {
+      clearTimeout(this.transcriptFlushTimer);
+      this.transcriptFlushTimer = null;
     }
   }
 }
