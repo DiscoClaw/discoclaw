@@ -35,6 +35,8 @@ import { DEFAULTS as MODEL_DEFAULTS, type ModelConfig, type ModelRole, saveModel
 import { isModelTier } from '../runtime/model-tiers.js';
 import type { RuntimeOverrides } from '../runtime-overrides.js';
 import { saveOverrides } from '../runtime-overrides.js';
+import { findRuntimeForModel } from '../runtime/model-tiers.js';
+import { getRuntimePathDefinition } from '../runtime/runtime-path-contract.js';
 import type { CommandResult, ServiceControlDeps } from '../service-control.js';
 import {
   getPlatformCommands,
@@ -331,6 +333,10 @@ function normalizeRuntimeName(value: string | undefined, knownRuntimes: KnownRun
   return knownRuntimes.has(normalized) ? normalized : undefined;
 }
 
+function presetToPrimaryRuntime(preset: string): 'claude-cli' | 'codex-cli' {
+  return preset === 'codex' ? 'codex-cli' : 'claude-cli';
+}
+
 async function loadServiceName(
   inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
   deps: DashboardDeps,
@@ -562,13 +568,14 @@ async function applyPreset(
   preset: string,
   inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
   deps: DashboardDeps,
-): Promise<{ message: string; snapshot: DashboardSnapshot }> {
+): Promise<{ message: string; snapshot: DashboardSnapshot; primaryRuntime: 'claude-cli' | 'codex-cli' }> {
   if (!ALLOWED_PRESETS.has(preset)) {
     throw new Error(`Unknown preset: ${preset}. Allowed values: ${[...ALLOWED_PRESETS].join(', ')}`);
   }
 
   const ctx = await deps.loadDoctorContext(inspectOpts);
-  await deps.updateEnvKey(ctx.configPaths.env, 'PRIMARY_RUNTIME', preset);
+  const primaryRuntime = presetToPrimaryRuntime(preset);
+  await deps.updateEnvKey(ctx.configPaths.env, 'PRIMARY_RUNTIME', primaryRuntime);
 
   const preservedOverrides: RuntimeOverrides = {};
   if (ctx.runtimeOverrides.ttsVoice) {
@@ -579,7 +586,11 @@ async function applyPreset(
 
   return {
     message: `Preset switched to ${preset}. Models reset to tier defaults. Restart the service to apply.`,
-    snapshot: await collectDashboardSnapshot(inspectOpts, deps),
+    snapshot: await collectDashboardSnapshot(
+      { cwd: inspectOpts.cwd, env: { ...inspectOpts.env, PRIMARY_RUNTIME: primaryRuntime } },
+      deps,
+    ),
+    primaryRuntime,
   };
 }
 
@@ -594,6 +605,37 @@ async function buildPresetResponse(
   return {
     ok: true,
     ...await applyPreset(preset, inspectOpts, deps),
+  };
+}
+
+async function persistChatRuntimeSelection(
+  runtimeName: string,
+  inspectOpts: Required<Pick<InspectOptions, 'cwd' | 'env'>>,
+  deps: DashboardDeps,
+): Promise<{ message: string; snapshot: DashboardSnapshot; primaryRuntime: string }> {
+  const ctx = await deps.loadDoctorContext(inspectOpts);
+  await deps.updateEnvKey(ctx.configPaths.env, 'PRIMARY_RUNTIME', runtimeName);
+
+  let nextModels = ctx.models;
+  let clearedCrossRuntimeOverride = false;
+  const targetRuntimeId = getRuntimePathDefinition(runtimeName)?.runtimeId;
+  const savedChatModel = ctx.models['chat'];
+  const savedChatModelRuntimeId = savedChatModel ? findRuntimeForModel(savedChatModel) : undefined;
+  if (savedChatModel && targetRuntimeId && savedChatModelRuntimeId && savedChatModelRuntimeId !== targetRuntimeId) {
+    nextModels = updateModelConfig(nextModels, 'chat', null);
+    await deps.saveModelConfig(ctx.configPaths.models, nextModels);
+    clearedCrossRuntimeOverride = true;
+  }
+
+  return {
+    message: clearedCrossRuntimeOverride
+      ? `Saved startup chat runtime: ${runtimeName}. Cleared the saved chat model override because it targeted a different provider. Restart the service to apply.`
+      : `Saved startup chat runtime: ${runtimeName}. Restart the service to apply.`,
+    snapshot: await collectDashboardSnapshot(
+      { cwd: inspectOpts.cwd, env: { ...inspectOpts.env, PRIMARY_RUNTIME: runtimeName } },
+      deps,
+    ),
+    primaryRuntime: runtimeName,
   };
 }
 
@@ -643,6 +685,11 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
 
   // Mutable flag — set when a persisted config change requires a restart to take effect.
   let pendingRestart = false;
+  const previewEnvOverrides: Record<string, string> = {};
+  const configInspectOpts = (): Required<Pick<InspectOptions, 'cwd' | 'env'>> => ({
+    cwd: inspectOpts.cwd,
+    env: { ...inspectOpts.env, ...previewEnvOverrides },
+  });
 
   const server = http.createServer(async (req, res) => {
     const method = req.method ?? 'GET';
@@ -666,7 +713,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           200,
           withLiveSnapshot(
             withStartupMcpSnapshot(
-              await buildSnapshotResponse(inspectOpts, deps),
+              await buildSnapshotResponse(configInspectOpts(), deps),
               opts.startupMcpStatus,
               opts.startupMcpWarnings,
             ),
@@ -711,7 +758,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
       }
 
       if (method === 'GET' && pathname === '/api/doctor') {
-        respondJson(res, 200, await buildDoctorResponse(inspectOpts, deps));
+        respondJson(res, 200, await buildDoctorResponse(configInspectOpts(), deps));
         return;
       }
 
@@ -729,7 +776,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           200,
           withLiveSnapshot(
             withStartupMcpSnapshot(
-              await buildDoctorFixResponse(inspectOpts, deps),
+              await buildDoctorFixResponse(configInspectOpts(), deps),
               opts.startupMcpStatus,
               opts.startupMcpWarnings,
             ),
@@ -756,6 +803,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
         const body = await readJsonBody(req);
         const role = typeof body.role === 'string' ? body.role.trim() : '';
         const model = typeof body.model === 'string' ? body.model.trim() : '';
+        const persist = body.persist === true;
         if (!role) throw new Error('Model role is required.');
         if (!model) throw new Error('Model value is required.');
 
@@ -764,13 +812,28 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           respondJson(res, 400, { ok: false, message: result.error });
           return;
         }
-        const snapshot = await collectDashboardSnapshot(inspectOpts, deps);
+        let message = result.summary;
+        let snapshot = await collectDashboardSnapshot(configInspectOpts(), deps);
+        if (persist && role === 'chat') {
+          const runtimeInput = normalizeRuntimeName(model, KNOWN_RUNTIMES);
+          if (runtimeInput) {
+            const persisted = await persistChatRuntimeSelection(runtimeInput, configInspectOpts(), deps);
+            previewEnvOverrides['PRIMARY_RUNTIME'] = persisted.primaryRuntime;
+            message = `${message} ${persisted.message}`;
+            snapshot = persisted.snapshot;
+          } else {
+            const persisted = await applyModelChange({ role, model }, configInspectOpts(), deps, KNOWN_RUNTIMES);
+            message = `${message} ${persisted.message}`;
+            snapshot = persisted.snapshot;
+          }
+          pendingRestart = true;
+        }
         respondJson(
           res,
           200,
           withLiveSnapshot(
             withStartupMcpSnapshot(
-              { ok: true as const, message: result.summary, snapshot },
+              { ok: true as const, message, snapshot },
               opts.startupMcpStatus,
               opts.startupMcpWarnings,
             ),
@@ -791,7 +854,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           return;
         }
         const body = await readJsonBody(req);
-        const modelResponse = await buildModelResponse(body, inspectOpts, deps, KNOWN_RUNTIMES);
+        const modelResponse = await buildModelResponse(body, configInspectOpts(), deps, KNOWN_RUNTIMES);
         pendingRestart = true;
         respondJson(
           res,
@@ -819,7 +882,11 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
           return;
         }
         const body = await readJsonBody(req);
-        const presetResponse = await buildPresetResponse(body, inspectOpts, deps);
+        const presetResponse = await buildPresetResponse(body, configInspectOpts(), deps);
+        const preset = typeof body.preset === 'string' ? body.preset.trim().toLowerCase() : '';
+        if (preset) {
+          previewEnvOverrides['PRIMARY_RUNTIME'] = presetToPrimaryRuntime(preset);
+        }
         pendingRestart = true;
         respondJson(
           res,
@@ -853,10 +920,11 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
         if (!ALLOWED_SECRET_KEYS.has(key)) throw new Error(`Unknown secret key: ${key}`);
         if (!value) throw new Error('Secret value is required.');
 
-        const ctx = await deps.loadDoctorContext(inspectOpts);
+        const ctx = await deps.loadDoctorContext(configInspectOpts());
         await deps.updateEnvKey(ctx.configPaths.env, key, value);
+        previewEnvOverrides[key] = value;
         pendingRestart = true;
-        const snapshot = await collectDashboardSnapshot(inspectOpts, deps);
+        const snapshot = await collectDashboardSnapshot(configInspectOpts(), deps);
         respondJson(
           res,
           200,
@@ -909,7 +977,7 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
       }
 
       if (method === 'GET' && pathname === '/api/settings') {
-        respondJson(res, 200, buildSettingsGetResponse(inspectOpts.env));
+        respondJson(res, 200, buildSettingsGetResponse(configInspectOpts().env));
         return;
       }
 
@@ -926,7 +994,8 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
         const key = typeof body.key === 'string' ? body.key.trim() : '';
         const value = typeof body.value === 'string' ? body.value.trim() : '';
 
-        const response = await buildSettingsPostResponse(inspectOpts, deps, key, value);
+        const response = await buildSettingsPostResponse(configInspectOpts(), deps, key, value);
+        previewEnvOverrides[key] = value;
         pendingRestart = true;
 
         respondJson(res, 200, response);

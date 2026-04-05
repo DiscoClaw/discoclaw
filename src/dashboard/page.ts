@@ -697,7 +697,7 @@ export function renderDashboardPage(): string {
               </label>
             </div>
             <div class="actions">
-              <button id="chat-runtime-submit-btn" type="submit">Apply Runtime</button>
+              <button id="chat-runtime-submit-btn" type="submit">Apply Runtime + Save</button>
               <button id="chat-auth-btn" class="secondary" type="button">Check Auth</button>
             </div>
           </form>
@@ -709,9 +709,9 @@ export function renderDashboardPage(): string {
                 <select id="chat-model-select" name="model" required></select>
               </label>
             </div>
-            <div class="field-note">Tier options double as the practical thinking profile on runtimes that support explicit effort.</div>
+            <div class="field-note">Tier options double as the practical thinking profile on runtimes that support explicit effort. These chat controls also save the next-start default.</div>
             <div class="actions">
-              <button id="chat-model-submit-btn" type="submit">Apply Model</button>
+              <button id="chat-model-submit-btn" type="submit">Apply Model + Save</button>
             </div>
           </form>
         </div>
@@ -1318,7 +1318,9 @@ export function renderDashboardPage(): string {
       chatRuntimeSelect.value = live.chatRuntime || snapshot.primaryRuntime;
 
       clearNode(chatModelSelect);
-      (snapshot.modelOptions.chat || []).forEach(function (model) {
+      (snapshot.modelOptions.chat || []).filter(function (model) {
+        return model !== 'default';
+      }).forEach(function (model) {
         appendSelectOption(chatModelSelect, model, formatModelOptionLabel('chat', model));
       });
       if ((snapshot.modelOptions.chat || []).indexOf(live.chatModel) >= 0) {
@@ -1816,7 +1818,7 @@ export function renderDashboardPage(): string {
         const response = await fetchJson('/api/live-model', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role: 'chat', model: chatRuntimeSelect.value })
+          body: JSON.stringify({ role: 'chat', model: chatRuntimeSelect.value, persist: true })
         });
         renderSnapshot(response.snapshot);
         setStatus(chatStatus, response.message, 'ok');
@@ -1832,7 +1834,7 @@ export function renderDashboardPage(): string {
         const response = await fetchJson('/api/live-model', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ role: 'chat', model: chatModelSelect.value })
+          body: JSON.stringify({ role: 'chat', model: chatModelSelect.value, persist: true })
         });
         renderSnapshot(response.snapshot);
         setStatus(chatStatus, response.message, 'ok');
