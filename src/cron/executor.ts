@@ -340,6 +340,13 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     const guild = ctx.client.guilds.cache.get(job.guildId);
     if (!guild) {
       ctx.log?.error({ jobId: job.id, guildId: job.guildId }, 'cron:exec guild not found');
+      traceOutcome = 'error';
+      globalTraceStore.addEvent(traceId, {
+        type: 'error',
+        at: Date.now(),
+        message: `guild ${job.guildId} not found`,
+        stage: 'cron_setup',
+      });
       await ctx.status?.runtimeError({ sessionKey: `cron:${job.id}` }, `Cron "${job.name}": guild ${job.guildId} not found`);
       await recordError(ctx, job, `guild ${job.guildId} not found`);
       return;
@@ -348,6 +355,13 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
     const targetChannel = resolveChannel(guild, job.def.channel);
     if (!targetChannel) {
       ctx.log?.error({ jobId: job.id, channel: job.def.channel }, 'cron:exec target channel not found');
+      traceOutcome = 'error';
+      globalTraceStore.addEvent(traceId, {
+        type: 'error',
+        at: Date.now(),
+        message: `target channel "${job.def.channel}" not found`,
+        stage: 'cron_setup',
+      });
       await ctx.status?.runtimeError(
         { sessionKey: `cron:${job.id}`, channelName: job.def.channel },
         `Cron "${job.name}": target channel "${job.def.channel}" not found`,
@@ -374,6 +388,13 @@ export async function executeCronJob(job: CronJob, ctx: CronExecutorContext): Pr
         (parentId && ctx.allowChannelIds.has(parentId));
       if (!allowed) {
         ctx.log?.error({ jobId: job.id, channel: job.def.channel }, 'cron:exec target channel not allowlisted');
+        traceOutcome = 'error';
+        globalTraceStore.addEvent(traceId, {
+          type: 'error',
+          at: Date.now(),
+          message: `target channel "${job.def.channel}" not allowlisted`,
+          stage: 'cron_setup',
+        });
         await ctx.status?.runtimeError(
           { sessionKey: `cron:${job.id}`, channelName: job.def.channel },
           `Cron "${job.name}": target channel "${job.def.channel}" is not allowlisted`,
