@@ -842,6 +842,44 @@ export function renderDashboardPage(): string {
       <section class="card span-12">
         <div class="card-header">
           <div>
+            <h2>Observability</h2>
+          </div>
+          <div class="actions">
+            <button id="traces-btn" class="secondary" type="button">Refresh Traces</button>
+          </div>
+        </div>
+        <div id="traces-summary" class="metrics"></div>
+        <details>
+          <summary>Recent Traces</summary>
+          <div class="details-body">
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Flow</th>
+                    <th>Outcome</th>
+                    <th>Duration</th>
+                    <th>Started</th>
+                    <th>Events</th>
+                  </tr>
+                </thead>
+                <tbody id="traces-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+        <details>
+          <summary>Recent Errors</summary>
+          <div class="details-body">
+            <div id="traces-errors" class="checklist"></div>
+          </div>
+        </details>
+        <div id="traces-status" class="status"></div>
+      </section>
+
+      <section class="card span-12">
+        <div class="card-header">
+          <div>
             <h2>Advanced</h2>
           </div>
         </div>
@@ -955,6 +993,10 @@ export function renderDashboardPage(): string {
     const secretValueInput = document.getElementById('secret-value-input');
     const settingsContainer = document.getElementById('settings-container');
     const settingsStatus = document.getElementById('settings-status');
+    const tracesSummary = document.getElementById('traces-summary');
+    const tracesBody = document.getElementById('traces-body');
+    const tracesErrors = document.getElementById('traces-errors');
+    const tracesStatus = document.getElementById('traces-status');
     const ROLE_LABELS = {
       chat: 'Chat',
       'plan-run': 'Plan Run',
@@ -1303,6 +1345,74 @@ export function renderDashboardPage(): string {
       secretKeySelect.value = recommendSecretKey(snapshot);
     }
 
+    function renderTraces(data) {
+      var summary = data.summary || {};
+      var recentTraces = data.recentTraces || [];
+      var byFlow = summary.byFlow || {};
+      clearNode(tracesSummary);
+      appendMetric(tracesSummary, 'total traces', String(summary.total || 0));
+      appendMetric(tracesSummary, 'in progress', String(summary.inProgress || 0));
+      var flows = ['message', 'reaction', 'cron', 'defer'];
+      flows.forEach(function (flow) {
+        var fs = byFlow[flow];
+        if (!fs || fs.total === 0) return;
+        var avg = fs.avgDurationMs > 0 ? ' avg ' + fs.avgDurationMs + 'ms' : '';
+        appendMetric(tracesSummary, flow, fs.succeeded + ' ok / ' + fs.failed + ' err / ' + fs.inProgress + ' running' + avg);
+      });
+
+      clearNode(tracesBody);
+      recentTraces.forEach(function (trace) {
+        var tr = document.createElement('tr');
+        var flowCell = document.createElement('td');
+        flowCell.textContent = trace.flow;
+        var outcomeCell = document.createElement('td');
+        outcomeCell.textContent = trace.outcome;
+        if (trace.outcome === 'success') outcomeCell.style.color = 'var(--green)';
+        else if (trace.outcome === 'in_progress') outcomeCell.style.color = 'var(--amber)';
+        else if (trace.outcome !== 'success') outcomeCell.style.color = 'var(--red)';
+        var durationCell = document.createElement('td');
+        durationCell.textContent = trace.outcome === 'in_progress' ? '\u2014' : trace.durationMs + 'ms';
+        var startedCell = document.createElement('td');
+        startedCell.textContent = new Date(trace.startedAt).toLocaleTimeString();
+        var eventsCell = document.createElement('td');
+        eventsCell.textContent = String((trace.events || []).length);
+        tr.append(flowCell, outcomeCell, durationCell, startedCell, eventsCell);
+        tracesBody.append(tr);
+      });
+
+      clearNode(tracesErrors);
+      var recentErrors = summary.recentErrors || [];
+      if (recentErrors.length === 0) {
+        var noErrors = document.createElement('div');
+        noErrors.className = 'card-copy';
+        noErrors.textContent = 'No recent errors.';
+        tracesErrors.append(noErrors);
+      } else {
+        recentErrors.forEach(function (err) {
+          var item = document.createElement('div');
+          item.className = 'checklist-item';
+          var top = document.createElement('div');
+          top.className = 'checklist-top';
+          var dot = document.createElement('div');
+          dot.className = 'status-dot error';
+          var label = document.createElement('div');
+          label.className = 'checklist-label';
+          label.textContent = err.flow + ': ' + err.message;
+          top.append(dot, label);
+          var body = document.createElement('div');
+          body.className = 'checklist-body';
+          body.textContent = new Date(err.at).toLocaleString();
+          item.append(top, body);
+          tracesErrors.append(item);
+        });
+      }
+    }
+
+    async function refreshTraces() {
+      var response = await fetchJson('/api/traces');
+      renderTraces(response);
+    }
+
     function renderSnapshot(snapshot) {
       if (!snapshot.live) snapshot.live = {};
       const selectedRole = roleSelect.value;
@@ -1560,10 +1670,19 @@ export function renderDashboardPage(): string {
 
     document.getElementById('refresh-btn').addEventListener('click', async function () {
       try {
-        await Promise.all([refreshSnapshot(false), refreshDoctor(false)]);
+        await Promise.all([refreshSnapshot(false), refreshDoctor(false), refreshTraces()]);
         setStatus(heroStatus, 'Dashboard refreshed.', 'ok');
       } catch (error) {
         setStatus(heroStatus, String(error), 'error');
+      }
+    });
+
+    document.getElementById('traces-btn').addEventListener('click', async function () {
+      try {
+        await refreshTraces();
+        setStatus(tracesStatus, 'Traces refreshed.', 'ok');
+      } catch (error) {
+        setStatus(tracesStatus, String(error), 'error');
       }
     });
 
@@ -1762,7 +1881,7 @@ export function renderDashboardPage(): string {
       syncSecondaryModelOptions(roleSelect.value, '');
     });
 
-    Promise.all([refreshSnapshot(false), refreshDoctor(false), loadSettings()]).then(function () {
+    Promise.all([refreshSnapshot(false), refreshDoctor(false), loadSettings(), refreshTraces()]).then(function () {
       setStatus(heroStatus, 'Dashboard ready.', 'ok');
       if (lastSnapshot) {
         populateSecondaryRoleForm('', '');
