@@ -17,10 +17,6 @@ import {
 } from '../cli/dashboard.js';
 import { DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT, formatDashboardUrl } from './options.js';
 import { renderDashboardPage } from './page.js';
-import { globalTraceStore } from '../observability/trace-store.js';
-import type { TraceSummary, RunTrace } from '../observability/trace-store.js';
-import { globalMetrics } from '../observability/metrics.js';
-import type { MetricsSnapshot } from '../observability/metrics.js';
 import { buildSnapshotResponse, type DashboardSnapshotApiResponse } from './api/snapshot.js';
 import {
   buildSettingsGetResponse,
@@ -28,6 +24,8 @@ import {
   type DashboardSettingsGetResponse,
   type DashboardSettingsPostResponse,
 } from './api/settings.js';
+import { buildMetricsResponse, type DashboardMetricsApiResponse } from './api/metrics.js';
+import { buildTracesResponse, type DashboardTracesApiResponse } from './api/traces.js';
 import type { LiveRuntimeSnapshot, LiveSnapshotProvider } from './snapshot.js';
 import type { AuthProbeReport } from './auth-probe.js';
 import { hasErrorCode, mapListenError } from './server-errors.js';
@@ -176,16 +174,8 @@ export type DashboardAuthCheckApiResponse = {
   results: AuthProbeReport['results'];
 };
 
-export type DashboardTracesApiResponse = {
-  ok: true;
-  summary: TraceSummary;
-  recentTraces: RunTrace[];
-};
-
-export type DashboardMetricsApiResponse = {
-  ok: true;
-  metrics: MetricsSnapshot;
-};
+export type { DashboardTracesApiResponse } from './api/traces.js';
+export type { DashboardMetricsApiResponse } from './api/metrics.js';
 
 function createDefaultDeps(): DashboardDeps {
   return {
@@ -944,23 +934,12 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
       }
 
       if (method === 'GET' && pathname === '/api/traces') {
-        const limitParam = parsedUrl.searchParams.get('limit');
-        const limit = limitParam !== null ? Math.max(1, Math.min(200, Math.floor(Number(limitParam)))) : 50;
-        const tracesResponse: DashboardTracesApiResponse = {
-          ok: true,
-          summary: globalTraceStore.summary(),
-          recentTraces: globalTraceStore.listRecent(Number.isFinite(limit) ? limit : 50),
-        };
-        respondJson(res, 200, tracesResponse);
+        respondJson(res, 200, buildTracesResponse(parsedUrl.searchParams.get('limit')));
         return;
       }
 
       if (method === 'GET' && pathname === '/api/metrics') {
-        const metricsResponse: DashboardMetricsApiResponse = {
-          ok: true,
-          metrics: globalMetrics.snapshot(),
-        };
-        respondJson(res, 200, metricsResponse);
+        respondJson(res, 200, buildMetricsResponse());
         return;
       }
 
