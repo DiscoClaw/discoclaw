@@ -9,7 +9,7 @@
 
 import { VoiceConnectionStatus, type VoiceConnection } from '@discordjs/voice';
 import type { LoggerLike } from '../logging/logger-like.js';
-import type { SttProvider, TtsProvider, TranscriptionResult, VoiceConfig } from './types.js';
+import type { SttProvider, TtsProvider, TranscriptionResult, VoiceConfig, VoicePipelineMode } from './types.js';
 import { AudioReceiver, type OpusDecoderFactory } from './audio-receiver.js';
 import { createSttProvider } from './stt-factory.js';
 import { createTtsProvider } from './tts-factory.js';
@@ -53,13 +53,15 @@ export type AudioPipelineOpts = {
   /** Optional async callback that returns initial turn pairs for conversation history backfill on join. */
   backfill?: () => Promise<Turn[]>;
   /** Voice provider mode: 'pipeline' (default STT/TTS) or 'gemini-live' (Gemini Live WebSocket). */
-  voiceProvider?: 'pipeline' | 'gemini-live';
+  voiceProvider?: VoicePipelineMode;
   /** API key for Gemini Live (required when voiceProvider is 'gemini-live'). */
   geminiApiKey?: string;
   /** Enabled tool names for Gemini Live tool use (e.g. ['Read', 'Bash']). */
   enabledTools?: string[];
   /** Timer-based session rotation interval in ms for Gemini Live (default 13 min). */
   sessionRotationMs?: number;
+  /** Called when a guild's pipeline falls back from gemini-live to standard pipeline mode. */
+  onFallbackTriggered?: (guildId: string, toMode: VoicePipelineMode) => void;
 };
 
 type GuildPipeline = {
@@ -70,6 +72,8 @@ type GuildPipeline = {
   buffer?: ConversationBuffer;
   geminiProvider?: GeminiLiveProvider;
   geminiResponder?: GeminiLiveResponder;
+  /** Active mode — may differ from the manager's configured mode during fallback. */
+  mode: VoicePipelineMode;
 };
 
 // ---------------------------------------------------------------------------
@@ -92,10 +96,11 @@ export class AudioPipelineManager {
   private readonly transcriptMirror?: TranscriptMirrorLike;
   private readonly botDisplayName: string;
   private readonly backfill?: () => Promise<Turn[]>;
-  private readonly voiceProvider: 'pipeline' | 'gemini-live';
+  private readonly voiceProvider: VoicePipelineMode;
   private readonly geminiApiKey?: string;
   private readonly enabledTools: string[];
   private readonly sessionRotationMs?: number;
+  private readonly onFallbackTriggered?: (guildId: string, toMode: VoicePipelineMode) => void;
   private readonly pipelines = new Map<string, GuildPipeline>();
   /** Re-entrancy guard: VoiceConnection.subscribe() can synchronously fire stateChange→Ready. */
   private readonly starting = new Set<string>();
@@ -120,6 +125,7 @@ export class AudioPipelineManager {
     this.geminiApiKey = opts.geminiApiKey;
     this.enabledTools = opts.enabledTools ?? [];
     this.sessionRotationMs = opts.sessionRotationMs;
+    this.onFallbackTriggered = opts.onFallbackTriggered;
 
     this.log.info({ voiceProvider: this.voiceProvider }, 'audio pipeline manager initialized');
   }
@@ -144,8 +150,8 @@ export class AudioPipelineManager {
     });
   }
 
-  /** Start the audio receive pipeline for a guild. */
-  async startPipeline(guildId: string, connection: VoiceConnection): Promise<void> {
+  /** Start the audio receive pipeline for a guild. Pass `forceMode` to override the configured provider (used during fallback). */
+  async startPipeline(guildId: string, connection: VoiceConnection, forceMode?: VoicePipelineMode): Promise<void> {
     // Re-entrancy guard: VoiceConnection.subscribe() (called when wiring the
     // AudioPlayer) synchronously fires a stateChange→Ready event, which would
     // re-invoke startPipeline and recurse infinitely.
@@ -158,9 +164,11 @@ export class AudioPipelineManager {
       await this.stopPipeline(guildId);
     }
 
+    const effectiveMode = forceMode ?? this.voiceProvider;
+
     try {
       // ----- gemini-live mode: skip STT/TTS, use GeminiLiveProvider directly -----
-      if (this.voiceProvider === 'gemini-live') {
+      if (effectiveMode === 'gemini-live') {
         const apiKey = this.geminiApiKey;
         if (!apiKey) throw new Error('geminiApiKey is required for gemini-live voice provider');
 
@@ -188,8 +196,15 @@ export class AudioPipelineManager {
               }
             : undefined,
           onSessionTerminated: () => {
-            this.log.error({ guildId }, 'gemini-live session terminally failed — tearing down pipeline');
-            void this.stopPipeline(guildId);
+            this.log.error({ guildId }, 'gemini-live session terminally failed — attempting fallback to standard pipeline');
+            void this.fallbackToPipeline(guildId, connection);
+          },
+          onFallbackRecommended: (reason: string) => {
+            this.log.warn({ guildId, reason }, 'gemini-live: fallback recommended — switching to standard pipeline');
+            void this.fallbackToPipeline(guildId, connection);
+          },
+          onTokenWarning: (estimatedTokens: number, threshold: 'warn' | 'compress') => {
+            this.log.warn({ guildId, estimatedTokens, threshold }, 'gemini-live: token usage approaching context window limit');
           },
           onToolCall: tools
             ? (calls) => {
@@ -268,6 +283,7 @@ export class AudioPipelineManager {
           receiver,
           geminiProvider: provider,
           geminiResponder: responder,
+          mode: 'gemini-live',
         });
         this.log.info({ guildId }, 'audio pipeline started (gemini-live)');
         return;
@@ -364,8 +380,8 @@ export class AudioPipelineManager {
 
       receiver.start();
 
-      this.pipelines.set(guildId, { connection, sttProvider, receiver, responder, buffer });
-      this.log.info({ guildId }, 'audio pipeline started');
+      this.pipelines.set(guildId, { connection, sttProvider, receiver, responder, buffer, mode: 'pipeline' });
+      this.log.info({ guildId, mode: effectiveMode }, 'audio pipeline started');
     } catch (err) {
       this.log.error({ guildId, err }, 'failed to start audio pipeline');
     } finally {
@@ -413,14 +429,41 @@ export class AudioPipelineManager {
     return this.pipelines.size;
   }
 
-  /** Active voice provider mode ('pipeline' or 'gemini-live'). */
-  get activeVoiceProvider(): 'pipeline' | 'gemini-live' {
+  /** Configured voice provider mode ('pipeline' or 'gemini-live'). */
+  get activeVoiceProvider(): VoicePipelineMode {
     return this.voiceProvider;
+  }
+
+  /** Active mode for a specific guild (may differ from configured mode during fallback). */
+  pipelineMode(guildId: string): VoicePipelineMode | undefined {
+    return this.pipelines.get(guildId)?.mode;
   }
 
   /** Current Deepgram TTS voice model name. */
   get ttsVoice(): string | undefined {
     return this.voiceConfig.deepgramTtsVoice;
+  }
+
+  /**
+   * Fall back from gemini-live to the standard pipeline for a guild.
+   * Stops the current gemini-live session and starts a standard STT/AI/TTS pipeline.
+   * No-op if no pipeline exists or the guild is already in standard mode.
+   */
+  private async fallbackToPipeline(guildId: string, connection: VoiceConnection): Promise<void> {
+    const pipeline = this.pipelines.get(guildId);
+    if (!pipeline || pipeline.mode !== 'gemini-live') return;
+
+    this.log.warn({ guildId }, 'gemini-live: initiating fallback to standard pipeline');
+
+    await this.stopPipeline(guildId);
+    await this.startPipeline(guildId, connection, 'pipeline');
+
+    if (this.hasPipeline(guildId)) {
+      this.log.info({ guildId }, 'gemini-live: fallback to standard pipeline succeeded');
+      this.onFallbackTriggered?.(guildId, 'pipeline');
+    } else {
+      this.log.error({ guildId }, 'gemini-live: fallback to standard pipeline also failed — guild has no active pipeline');
+    }
   }
 
   /**

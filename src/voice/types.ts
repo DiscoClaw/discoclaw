@@ -6,6 +6,13 @@
  */
 
 // ---------------------------------------------------------------------------
+// VoicePipelineMode — pipeline variant selector
+// ---------------------------------------------------------------------------
+
+/** Voice pipeline mode: separate STT/AI/TTS stages or bidirectional Gemini Live WebSocket. */
+export type VoicePipelineMode = 'pipeline' | 'gemini-live';
+
+// ---------------------------------------------------------------------------
 // VoiceConfig — focused subset of DiscoclawConfig for the voice subsystem
 // ---------------------------------------------------------------------------
 
