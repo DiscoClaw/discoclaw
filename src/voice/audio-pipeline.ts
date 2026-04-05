@@ -110,6 +110,8 @@ export class AudioPipelineManager {
     this.backfill = opts.backfill;
     this.voiceProvider = opts.voiceProvider ?? 'pipeline';
     this.geminiApiKey = opts.geminiApiKey;
+
+    this.log.info({ voiceProvider: this.voiceProvider }, 'audio pipeline manager initialized');
   }
 
   /**
@@ -351,6 +353,11 @@ export class AudioPipelineManager {
     return this.pipelines.size;
   }
 
+  /** Active voice provider mode ('pipeline' or 'gemini-live'). */
+  get activeVoiceProvider(): 'pipeline' | 'gemini-live' {
+    return this.voiceProvider;
+  }
+
   /** Current Deepgram TTS voice model name. */
   get ttsVoice(): string | undefined {
     return this.voiceConfig.deepgramTtsVoice;
@@ -358,10 +365,16 @@ export class AudioPipelineManager {
 
   /**
    * Update the Deepgram TTS voice and restart all active pipelines so the
-   * new voice takes effect immediately.
-   * @returns The number of pipelines that were restarted.
+   * new voice takes effect immediately. No-op in gemini-live mode (TTS is
+   * handled server-side).
+   * @returns The number of pipelines that were restarted (0 in gemini-live mode).
    */
   async setTtsVoice(voice: string): Promise<number> {
+    if (this.voiceProvider === 'gemini-live') {
+      this.log.info({ voice }, 'TTS voice change ignored — gemini-live mode uses server-side TTS');
+      return 0;
+    }
+
     this.voiceConfig = { ...this.voiceConfig, deepgramTtsVoice: voice };
     this.log.info({ voice }, 'TTS voice updated — restarting active pipelines');
 
