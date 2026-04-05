@@ -661,7 +661,8 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
       respondJson(res, 403, { ok: false, message: DNS_REBIND_ERROR });
       return;
     }
-    const pathname = new URL(req.url ?? '/', `http://${DASHBOARD_HOST}`).pathname;
+    const parsedUrl = new URL(req.url ?? '/', `http://${DASHBOARD_HOST}`);
+    const pathname = parsedUrl.pathname;
 
     try {
       if (method === 'GET' && pathname === '/') {
@@ -943,10 +944,12 @@ export async function startDashboardServer(opts: DashboardServerOptions = {}): P
       }
 
       if (method === 'GET' && pathname === '/api/traces') {
+        const limitParam = parsedUrl.searchParams.get('limit');
+        const limit = limitParam !== null ? Math.max(1, Math.min(200, Math.floor(Number(limitParam)))) : 50;
         const tracesResponse: DashboardTracesApiResponse = {
           ok: true,
           summary: globalTraceStore.summary(),
-          recentTraces: globalTraceStore.listRecent(20),
+          recentTraces: globalTraceStore.listRecent(Number.isFinite(limit) ? limit : 50),
         };
         respondJson(res, 200, tracesResponse);
         return;
