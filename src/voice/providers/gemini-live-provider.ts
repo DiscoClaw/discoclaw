@@ -32,6 +32,8 @@ const GEMINI_LIVE_WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.a
 const DEFAULT_MODEL = 'gemini-2.0-flash-live-001';
 const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 500;
+/** Resume handles are valid for ~2 minutes server-side; expire locally at 90s to avoid racing. */
+const RESUME_HANDLE_TTL_MS = 90_000;
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -51,6 +53,7 @@ export class GeminiLiveProvider {
   private _state: GeminiLiveState = 'idle';
   private retryCount = 0;
   private resumeHandle: string | null = null;
+  private resumeHandleUpdatedAt = 0;
   private listener: ((event: GeminiLiveEvent) => void) | null = null;
 
   constructor(opts: GeminiLiveOpts) {
@@ -184,7 +187,13 @@ export class GeminiLiveProvider {
     }
 
     if (this.resumeHandle) {
-      setup.sessionResumption = { handle: this.resumeHandle };
+      const age = Date.now() - this.resumeHandleUpdatedAt;
+      if (age < RESUME_HANDLE_TTL_MS) {
+        setup.sessionResumption = { handle: this.resumeHandle };
+      } else {
+        this.log.warn({ ageMs: age, ttlMs: RESUME_HANDLE_TTL_MS }, 'Gemini Live resume handle expired — starting fresh session');
+        this.resumeHandle = null;
+      }
     }
 
     return { setup };
@@ -234,9 +243,14 @@ export class GeminiLiveProvider {
 
       // Setup complete acknowledgement
       if (parsed.setupComplete != null) {
+        const wasReconnect = this.retryCount > 0;
+        const attempt = this.retryCount;
         this._state = 'open';
         this.retryCount = 0;
         this.log.info('Gemini Live session setup complete');
+        if (wasReconnect) {
+          this.emit({ type: 'reconnected', attempt });
+        }
         this.emit({ type: 'setup_complete' });
         onSetupComplete?.();
         return;
@@ -307,6 +321,7 @@ export class GeminiLiveProvider {
         const update = parsed.sessionResumptionUpdate as { newHandle?: string };
         if (update.newHandle) {
           this.resumeHandle = update.newHandle;
+          this.resumeHandleUpdatedAt = Date.now();
           this.log.info('Gemini Live session resume handle updated');
         }
         return;
@@ -329,6 +344,7 @@ export class GeminiLiveProvider {
         'Gemini Live exhausted reconnect retries',
       );
       this._state = 'stopped';
+      this.emit({ type: 'reconnect_failed', attempts: this.retryCount });
       this.emit({ type: 'error', error: 'exhausted reconnect retries' });
       return;
     }
@@ -339,6 +355,12 @@ export class GeminiLiveProvider {
       { attempt: this.retryCount, maxRetries: MAX_RETRIES, delayMs: delay },
       'Gemini Live reconnecting after unexpected close',
     );
+    this.emit({
+      type: 'reconnecting',
+      attempt: this.retryCount,
+      maxRetries: MAX_RETRIES,
+      hasResumeHandle: this.resumeHandle != null && (Date.now() - this.resumeHandleUpdatedAt) < RESUME_HANDLE_TTL_MS,
+    });
 
     setTimeout(() => {
       if (this._state === 'stopped') return;

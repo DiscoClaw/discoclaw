@@ -36,6 +36,8 @@ export type GeminiLiveResponderOpts = {
   onBotResponse?: (text: string) => void;
   /** Called when Gemini requests tool execution. */
   onToolCall?: (calls: GeminiFunctionCall[]) => void;
+  /** Called when the session terminally fails (all reconnect retries exhausted). */
+  onSessionTerminated?: () => void;
   /** Override for testing — supply a custom AudioPlayer factory. */
   createPlayer?: () => AudioPlayer;
 };
@@ -50,6 +52,7 @@ export class GeminiLiveResponder {
   private readonly provider: GeminiLiveProvider;
   private readonly onBotResponse?: (text: string) => void;
   private readonly onToolCall?: (calls: GeminiFunctionCall[]) => void;
+  private readonly onSessionTerminated?: () => void;
   private readonly playerFactory: () => AudioPlayer;
 
   private player: AudioPlayer | null = null;
@@ -63,6 +66,7 @@ export class GeminiLiveResponder {
     this.provider = opts.provider;
     this.onBotResponse = opts.onBotResponse;
     this.onToolCall = opts.onToolCall;
+    this.onSessionTerminated = opts.onSessionTerminated;
     this.playerFactory = opts.createPlayer ?? (() => createAudioPlayer());
   }
 
@@ -134,6 +138,15 @@ export class GeminiLiveResponder {
       case 'tool_call':
         this.handleToolCall(event.functionCalls);
         break;
+      case 'reconnecting':
+        this.handleReconnecting(event.attempt, event.maxRetries, event.hasResumeHandle);
+        break;
+      case 'reconnected':
+        this.log.info({ attempt: event.attempt }, 'gemini-live-responder: session reconnected');
+        break;
+      case 'reconnect_failed':
+        this.handleReconnectFailed(event.attempts);
+        break;
       default:
         // setup_complete, error — not handled here
         break;
@@ -193,6 +206,30 @@ export class GeminiLiveResponder {
         this.onBotResponse?.(text);
       } catch (err) {
         this.log.warn({ err }, 'gemini-live-responder: onBotResponse callback error');
+      }
+    }
+  }
+
+  private handleReconnecting(attempt: number, maxRetries: number, hasResumeHandle: boolean): void {
+    this.log.info(
+      { attempt, maxRetries, hasResumeHandle },
+      'gemini-live-responder: session reconnecting — pausing playback',
+    );
+    this.destroyStream();
+    this.player?.stop();
+  }
+
+  private handleReconnectFailed(attempts: number): void {
+    this.log.error(
+      { attempts },
+      'gemini-live-responder: session terminally failed — all reconnect retries exhausted',
+    );
+    this.stop();
+    if (this.onSessionTerminated) {
+      try {
+        this.onSessionTerminated();
+      } catch (err) {
+        this.log.warn({ err }, 'gemini-live-responder: onSessionTerminated callback error');
       }
     }
   }

@@ -33,7 +33,10 @@ export type GeminiLiveEvent =
   | { type: 'interrupted' }
   | { type: 'setup_complete' }
   | { type: 'error'; error: string }
-  | { type: 'tool_call'; functionCalls: GeminiFunctionCall[] };
+  | { type: 'tool_call'; functionCalls: GeminiFunctionCall[] }
+  | { type: 'reconnecting'; attempt: number; maxRetries: number; hasResumeHandle: boolean }
+  | { type: 'reconnected'; attempt: number }
+  | { type: 'reconnect_failed'; attempts: number };
 
 // ---------------------------------------------------------------------------
 // Constructor options

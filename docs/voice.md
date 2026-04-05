@@ -388,6 +388,63 @@ The directive instructs the model to: answer first then explain (if at all), dro
 
 `DISCOCLAW_VOICE_SYSTEM_PROMPT` layers additional instructions on top of the built-in directive. Use it to set persona, topic scope, or domain-specific tone. Any instructions it contains are appended after the telegraphic style directive, so they can refine but not override the core brevity requirement.
 
+## Gemini Live Session Resilience
+
+Gemini Live voice sessions survive transient WebSocket drops through three cooperating mechanisms: resume handle TTL tracking, reconnect lifecycle events, and terminal failure teardown wiring.
+
+### Resume Handle TTL Tracking
+
+The Gemini Live API sends `sessionResumptionUpdate` messages containing a resume handle that allows reconnecting to an existing server-side session instead of starting fresh. `GeminiLiveProvider` stores the handle and timestamps each update.
+
+Resume handles are valid for approximately 2 minutes server-side. The provider expires them locally at **90 seconds** (`RESUME_HANDLE_TTL_MS`) to avoid racing the server-side expiry. When `buildSetupMessage()` constructs the reconnect payload:
+
+- If the handle is **within TTL**: the setup message includes `sessionResumption: { handle }`, and Gemini resumes the prior session (conversation context, pending turns, and server-side state are preserved).
+- If the handle is **expired**: the provider logs a warning, clears the stale handle, and starts a fresh session. The user may notice a context break but the voice pipeline continues without operator intervention.
+
+### Reconnect Lifecycle Events
+
+The provider emits typed lifecycle events (`GeminiLiveEvent`) at each stage of a reconnect attempt, and the `GeminiLiveResponder` reacts accordingly:
+
+| Event | When | Responder behavior |
+|-------|------|-------------------|
+| `reconnecting` | WebSocket closes unexpectedly, retry scheduled | Pauses playback, destroys the audio stream. Fields: `attempt`, `maxRetries`, `hasResumeHandle` (whether a non-expired handle will be sent). |
+| `reconnected` | Reconnect succeeds (`setupComplete` received after retry) | Logs the successful reconnect. Audio streaming resumes on the next server turn. |
+| `reconnect_failed` | All retry attempts exhausted (`MAX_RETRIES = 3`) | Triggers terminal failure (see below). |
+
+The `hasResumeHandle` field on `reconnecting` tells operators whether the reconnect will resume the prior session or start fresh — useful for diagnosing "context lost after reconnect" reports.
+
+### Terminal Failure Teardown
+
+When `GeminiLiveProvider` exhausts all reconnect retries, it transitions to the `stopped` state and emits `reconnect_failed`. The `GeminiLiveResponder` handles this by:
+
+1. Stopping playback and clearing the audio stream and accumulated transcript.
+2. Calling the `onSessionTerminated` callback.
+
+`AudioPipelineManager` wires `onSessionTerminated` to `stopPipeline(guildId)`, which tears down the entire guild pipeline (Gemini provider, responder, STT shim, audio receiver). This ensures a terminally failed Gemini session does not leave orphaned audio components consuming resources. The Discord voice connection itself remains managed by `VoiceConnectionManager` — if the user is still in the channel, the next `voiceStateUpdate` or manual `voiceJoin` will re-establish the pipeline from scratch.
+
+### Reconnect Sequence
+
+```
+WebSocket closes unexpectedly
+  → handleUnexpectedClose()
+    → retryCount < MAX_RETRIES?
+      YES → emit 'reconnecting' { attempt, maxRetries, hasResumeHandle }
+          → wait (500ms × 2^(attempt-1)) exponential backoff
+            → doConnect()
+              → buildSetupMessage() includes resume handle if within 90s TTL
+                → setupComplete received?
+                  YES → emit 'reconnected' { attempt }
+                       → emit 'setup_complete'
+                       → resume normal audio streaming
+                  NO  → recurse handleUnexpectedClose()
+      NO  → emit 'reconnect_failed' { attempts: 3 }
+          → state → 'stopped'
+          → GeminiLiveResponder.handleReconnectFailed()
+            → stop playback
+            → onSessionTerminated()
+              → AudioPipelineManager.stopPipeline(guildId)
+```
+
 ## Troubleshooting
 
 ### Missing API Keys
@@ -456,6 +513,8 @@ If the Gemini Live WebSocket disconnects unexpectedly, the provider retries up t
 - Invalid or expired `GEMINI_API_KEY`
 - Network/firewall blocking outbound WebSocket to `wss://generativelanguage.googleapis.com`
 - Gemini API quota exhaustion
+
+See [Gemini Live Session Resilience](#gemini-live-session-resilience) for the full reconnect lifecycle.
 
 ### Cartesia WebSocket Requires Node 22+
 
