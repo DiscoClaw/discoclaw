@@ -48,6 +48,7 @@ export class GeminiLiveProvider {
   private ws: WebSocket | null = null;
   private _state: GeminiLiveState = 'idle';
   private retryCount = 0;
+  private resumeHandle: string | null = null;
   private listener: ((event: GeminiLiveEvent) => void) | null = null;
 
   constructor(opts: GeminiLiveOpts) {
@@ -130,6 +131,7 @@ export class GeminiLiveProvider {
   private buildSetupMessage(): object {
     const generationConfig: Record<string, unknown> = {
       responseModalities: this.responseModalities,
+      contextWindowCompression: { slidingWindow: {} },
     };
     if (this.voiceName) {
       generationConfig.speechConfig = {
@@ -140,12 +142,19 @@ export class GeminiLiveProvider {
     const setup: Record<string, unknown> = {
       model: `models/${this.model}`,
       generationConfig,
+      realtimeInputConfig: {
+        activityHandling: 'START_OF_ACTIVITY_INTERRUPTS',
+      },
     };
 
     if (this.systemInstruction) {
       setup.systemInstruction = {
         parts: [{ text: this.systemInstruction }],
       };
+    }
+
+    if (this.resumeHandle) {
+      setup.sessionResumption = { handle: this.resumeHandle };
     }
 
     return { setup };
@@ -172,7 +181,10 @@ export class GeminiLiveProvider {
       });
 
       ws.on('close', (code: number, reason: Buffer) => {
-        if (this._state === 'stopped') return;
+        if (this._state === 'stopped') {
+          reject(new Error('Gemini Live WebSocket closed: disconnect() called'));
+          return;
+        }
 
         if (this._state === 'connecting' || this._state === 'setup') {
           reject(
@@ -193,6 +205,7 @@ export class GeminiLiveProvider {
       // Setup complete acknowledgement
       if (parsed.setupComplete != null) {
         this._state = 'open';
+        this.retryCount = 0;
         this.log.info('Gemini Live session setup complete');
         this.emit({ type: 'setup_complete' });
         onSetupComplete?.();
@@ -238,6 +251,16 @@ export class GeminiLiveProvider {
         const errMsg = err.message ?? `code ${err.code ?? 'unknown'}`;
         this.log.error({ error: parsed.error }, 'Gemini Live server error');
         this.emit({ type: 'error', error: errMsg });
+        return;
+      }
+
+      // Session resumption update — store handle for reconnection
+      if (parsed.sessionResumptionUpdate != null) {
+        const update = parsed.sessionResumptionUpdate as { newHandle?: string };
+        if (update.newHandle) {
+          this.resumeHandle = update.newHandle;
+          this.log.info('Gemini Live session resume handle updated');
+        }
         return;
       }
 

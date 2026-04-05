@@ -122,7 +122,7 @@ describe('GeminiLiveProvider', () => {
     expect(url.searchParams.get('key')).toBe('my-api-key');
   });
 
-  it('sends setup message with model and default config on open', async () => {
+  it('sends setup message with model, default config, compression, and activity handling on open', async () => {
     const provider = makeProvider();
     await connectWithSetup(provider);
 
@@ -130,6 +130,12 @@ describe('GeminiLiveProvider', () => {
     expect(setupMsg.setup).toBeDefined();
     expect(setupMsg.setup.model).toBe('models/gemini-2.0-flash-live-001');
     expect(setupMsg.setup.generationConfig.responseModalities).toEqual(['AUDIO']);
+    expect(setupMsg.setup.generationConfig.contextWindowCompression).toEqual({
+      slidingWindow: {},
+    });
+    expect(setupMsg.setup.realtimeInputConfig).toEqual({
+      activityHandling: 'START_OF_ACTIVITY_INTERRUPTS',
+    });
   });
 
   it('sends custom model, systemInstruction, and voiceName in setup', async () => {
@@ -362,6 +368,21 @@ describe('GeminiLiveProvider', () => {
     expect(provider.state).toBe('stopped');
   });
 
+  it('disconnect during connect rejects the connect promise', async () => {
+    const provider = makeProvider();
+    const connectPromise = provider.connect();
+    // Wait for WS to open and enter setup state
+    await new Promise((r) => setTimeout(r, 5));
+    expect(provider.state).toBe('setup');
+
+    // Disconnect while setup is in progress
+    await provider.disconnect();
+
+    // The connect promise should reject, not hang
+    await expect(connectPromise).rejects.toThrow('disconnect() called');
+    expect(provider.state).toBe('stopped');
+  });
+
   it('sendAudio after disconnect throws', async () => {
     const provider = makeProvider();
     await connectWithSetup(provider);
@@ -376,54 +397,88 @@ describe('GeminiLiveProvider', () => {
   // Reconnection
   // -----------------------------------------------------------------------
 
-  it('reconnects on unexpected close up to retry limit', async () => {
+  it('resets retry counter after successful reconnect so long-lived sessions survive', async () => {
     vi.useFakeTimers();
     const log = createLogger();
     const provider = makeProvider({ log });
 
-    // Initial connect — microtask fires auto-open
+    // Initial connect
     const connectP = provider.connect();
-    await vi.advanceTimersByTimeAsync(0); // flush microtask for auto-open
+    await vi.advanceTimersByTimeAsync(0);
     lastCreatedWs!._receiveMessage({ setupComplete: {} });
     await connectP;
 
-    // Trigger unexpected close — should schedule reconnect
-    lastCreatedWs!._triggerClose(1006);
-    expect(log.warn).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(log.warn).mock.calls[0]![1]).toContain('reconnecting');
+    // Simulate 5 successive drop-then-reconnect cycles — each should succeed
+    // because the retry counter resets after each successful reconnect.
+    for (let i = 0; i < 5; i++) {
+      lastCreatedWs!._triggerClose(1006);
+      // First retry delay is always 500ms (retryCount goes 0→1, backoff = 500 * 2^0)
+      await vi.advanceTimersByTimeAsync(500);
+      await vi.advanceTimersByTimeAsync(0);
+      lastCreatedWs!._receiveMessage({ setupComplete: {} });
+      expect(provider.state).toBe('open');
+    }
 
-    // Advance past first retry (500ms) — microtask opens, then send setup
-    await vi.advanceTimersByTimeAsync(500);
+    // All 5 reconnects succeeded — provider is still alive
+    expect(log.error).not.toHaveBeenCalled();
+
+    vi.useRealTimers();
+  });
+
+  it('exhausts retries when consecutive reconnect attempts fail', async () => {
+    vi.useFakeTimers();
+    const log = createLogger();
+
+    // Factory that produces websockets which open but never complete setup
+    let closeCount = 0;
+    function failingWsFactory(url: string): MockWebSocket {
+      const ws = new MockWebSocket(url);
+      lastCreatedWs = ws;
+      // After the first successful connect, make all subsequent WS connections
+      // close immediately after open (simulating persistent failure)
+      if (closeCount > 0) {
+        const origEmit = ws.emit.bind(ws);
+        ws.emit = function (event: string, ...args: unknown[]) {
+          origEmit(event, ...args);
+          if (event === 'open') {
+            queueMicrotask(() => ws._triggerClose(1006));
+          }
+          return true;
+        } as typeof ws.emit;
+      }
+      return ws;
+    }
+
+    const provider = new GeminiLiveProvider({
+      apiKey: 'key',
+      log,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      wsFactory: failingWsFactory as any,
+    });
+
+    // Initial connect succeeds
+    const connectP = provider.connect();
     await vi.advanceTimersByTimeAsync(0);
     lastCreatedWs!._receiveMessage({ setupComplete: {} });
+    await connectP;
 
-    // Trigger another close
+    // Trigger first unexpected close — all subsequent reconnects will fail
+    closeCount = 1;
     lastCreatedWs!._triggerClose(1006);
-    expect(log.warn).toHaveBeenCalledTimes(2);
 
-    // Advance past second retry (1000ms)
-    await vi.advanceTimersByTimeAsync(1000);
-    await vi.advanceTimersByTimeAsync(0);
-    lastCreatedWs!._receiveMessage({ setupComplete: {} });
+    // Exhaust all 3 retries (500ms, 1000ms, 2000ms)
+    for (const delay of [500, 1000, 2000]) {
+      await vi.advanceTimersByTimeAsync(delay);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+    }
 
-    // Trigger third close
-    lastCreatedWs!._triggerClose(1006);
-    expect(log.warn).toHaveBeenCalledTimes(3);
-
-    // Advance past third retry (2000ms)
-    await vi.advanceTimersByTimeAsync(2000);
-    await vi.advanceTimersByTimeAsync(0);
-    lastCreatedWs!._receiveMessage({ setupComplete: {} });
-
-    // Fourth close — retries exhausted
-    lastCreatedWs!._triggerClose(1006);
-    expect(log.error).toHaveBeenCalled();
+    expect(provider.state).toBe('stopped');
     expect(
       vi.mocked(log.error).mock.calls.some(
         (c) => typeof c[1] === 'string' && c[1].includes('exhausted'),
       ),
     ).toBe(true);
-    expect(provider.state).toBe('stopped');
 
     vi.useRealTimers();
   });
@@ -447,6 +502,48 @@ describe('GeminiLiveProvider', () => {
     expect(log.warn).not.toHaveBeenCalled();
 
     vi.useRealTimers();
+  });
+
+  // -----------------------------------------------------------------------
+  // Session resume handle
+  // -----------------------------------------------------------------------
+
+  it('captures session resume handle from server and includes it on reconnect', async () => {
+    vi.useFakeTimers();
+    const provider = makeProvider();
+
+    // Initial connect
+    const connectP = provider.connect();
+    await vi.advanceTimersByTimeAsync(0);
+    lastCreatedWs!._receiveMessage({ setupComplete: {} });
+    await connectP;
+
+    // Server sends a session resumption update
+    lastCreatedWs!._receiveMessage({
+      sessionResumptionUpdate: { newHandle: 'resume-token-abc' },
+    });
+
+    // Trigger unexpected close — should reconnect with resume handle
+    lastCreatedWs!._triggerClose(1006);
+    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Check the setup message on reconnect includes the resume handle
+    const reconnectSetup = JSON.parse(lastCreatedWs!.sent[0] as string);
+    expect(reconnectSetup.setup.sessionResumption).toEqual({
+      handle: 'resume-token-abc',
+    });
+
+    lastCreatedWs!._receiveMessage({ setupComplete: {} });
+    vi.useRealTimers();
+  });
+
+  it('does not include sessionResumption on first connect', async () => {
+    const provider = makeProvider();
+    await connectWithSetup(provider);
+
+    const setupMsg = JSON.parse(lastCreatedWs!.sent[0] as string);
+    expect(setupMsg.setup.sessionResumption).toBeUndefined();
   });
 
   // -----------------------------------------------------------------------
