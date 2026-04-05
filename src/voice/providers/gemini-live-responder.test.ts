@@ -234,6 +234,47 @@ describe('GeminiLiveResponder', () => {
   });
 
   // -----------------------------------------------------------------------
+  // input_transcript events
+  // -----------------------------------------------------------------------
+
+  describe('input_transcript events', () => {
+    it('fires onInputTranscript callback with the transcript text', () => {
+      const onInputTranscript = vi.fn();
+      const { responder, provider } = createResponder({ onInputTranscript });
+      responder.start();
+
+      provider._inject({ type: 'input_transcript', text: 'hello world' });
+
+      expect(onInputTranscript).toHaveBeenCalledWith('hello world');
+    });
+
+    it('does not crash when onInputTranscript throws', () => {
+      const onInputTranscript = vi.fn(() => { throw new Error('callback error'); });
+      const { responder, provider, log } = createResponder({ onInputTranscript });
+      responder.start();
+
+      provider._inject({ type: 'input_transcript', text: 'hello' });
+
+      expect(onInputTranscript).toHaveBeenCalled();
+      expect(log.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ err: expect.any(Error) }),
+        'gemini-live-responder: onInputTranscript callback error',
+      );
+    });
+
+    it('is ignored when no callback is provided', () => {
+      const { responder, provider, log } = createResponder();
+      responder.start();
+
+      // Should not throw
+      provider._inject({ type: 'input_transcript', text: 'hello' });
+
+      // No warn logged — the event is simply a no-op
+      expect(log.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // interrupted events
   // -----------------------------------------------------------------------
 

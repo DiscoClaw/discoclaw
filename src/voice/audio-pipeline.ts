@@ -199,6 +199,13 @@ export class AudioPipelineManager {
                 });
               }
             : undefined,
+          onInputTranscript: mirror
+            ? (text) => {
+                mirror.postUserTranscription('User', text).catch((err) => {
+                  this.log.warn({ guildId, err }, 'transcript-mirror: failed to post user transcription');
+                });
+              }
+            : undefined,
           onSessionTerminated: () => {
             this.log.error({ guildId }, 'gemini-live session terminally failed — attempting fallback to standard pipeline');
             void this.fallbackToPipeline(guildId, connection);

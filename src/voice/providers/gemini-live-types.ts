@@ -30,6 +30,7 @@ export type GeminiFunctionCall = {
 export type GeminiLiveEvent =
   | { type: 'audio'; data: Buffer }
   | { type: 'text'; text: string }
+  | { type: 'input_transcript'; text: string }
   | { type: 'turn_complete' }
   | { type: 'interrupted' }
   | { type: 'setup_complete' }
