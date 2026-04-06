@@ -10,6 +10,11 @@ import type { LoggerLike } from '../../logging/logger-like.js';
 import type { GeminiToolsConfig } from './gemini-tool-mapper.js';
 import type { TokenBudget } from './gemini-live-token-estimator.js';
 
+export type GeminiLiveHistoryTurn = {
+  role: 'user' | 'model';
+  parts: Array<{ text: string }>;
+};
+
 export const DEFAULT_GEMINI_LIVE_MODEL = 'gemini-3.1-flash-live-preview';
 
 /**
@@ -95,4 +100,6 @@ export type GeminiLiveOpts = {
   sessionRotationMs?: number;
   /** Token budget overrides for compression safety warnings. */
   tokenBudget?: Partial<TokenBudget>;
+  /** Enables 3.1-style initial history seeding via clientContent after setup. */
+  initialHistoryInClientContent?: boolean;
 };

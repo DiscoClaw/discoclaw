@@ -144,6 +144,8 @@ export interface VoicePromptParts {
   userText: string;
 }
 
+export type VoiceSystemInstructionParts = Omit<VoicePromptParts, 'userText'>;
+
 export type VoicePromptSectionKey =
   | 'rootPolicy'
   | 'identity'
@@ -175,6 +177,28 @@ function estimateSection(chars: number): VoicePromptSectionEstimate {
     estTokens: estimateTokensFromChars(safeChars),
     included: safeChars > 0,
   };
+}
+
+function buildVoiceContextSections(parts: VoiceSystemInstructionParts): string[] {
+  const sections: string[] = [];
+
+  sections.push(buildPromptPreamble(parts.identity, { skipTrackedTools: true }));
+
+  if (parts.actionsSection) {
+    sections.push(parts.actionsSection);
+  }
+
+  if (parts.voiceSystemPrompt) {
+    sections.push(parts.voiceSystemPrompt);
+  }
+
+  sections.push(VOICE_STYLE_INSTRUCTION);
+
+  if (parts.durableMemory) {
+    sections.push(`---\nDurable memory (user-specific notes):\n${parts.durableMemory}`);
+  }
+
+  return sections;
 }
 
 export function buildVoicePromptSectionEstimates(parts: VoicePromptParts): {
@@ -221,34 +245,24 @@ export function buildVoicePromptSectionEstimates(parts: VoicePromptParts): {
  * 8. User text
  */
 export function buildVoicePrompt(parts: VoicePromptParts): string {
-  const sections: string[] = [];
-
-  // 1. Root policy + identity.
-  sections.push(buildPromptPreamble(parts.identity, { skipTrackedTools: true }));
-
-  // 2. Actions section.
-  if (parts.actionsSection) {
-    sections.push(parts.actionsSection);
-  }
-
-  // 3. Voice system prompt (user-configurable).
-  if (parts.voiceSystemPrompt) {
-    sections.push(parts.voiceSystemPrompt);
-  }
-
-  // 4. Voice style instruction.
-  sections.push(VOICE_STYLE_INSTRUCTION);
-
-  // 5. Durable memory.
-  if (parts.durableMemory) {
-    sections.push(`---\nDurable memory (user-specific notes):\n${parts.durableMemory}`);
-  }
+  const sections = buildVoiceContextSections(parts);
 
   // 6. Separator + user text.
   sections.push(VOICE_INTERNAL_CONTEXT_SEPARATOR);
   sections.push(parts.userText);
 
   return sections.join('\n\n');
+}
+
+/**
+ * Build the static session instruction used by live voice providers.
+ *
+ * This contains the same persistent voice context as the classic per-turn
+ * prompt, excluding the current user utterance and the internal-context
+ * separator that only makes sense for single-shot prompt assembly.
+ */
+export function buildVoiceSystemInstruction(parts: VoiceSystemInstructionParts): string {
+  return buildVoiceContextSections(parts).join('\n\n');
 }
 
 /**

@@ -58,18 +58,29 @@ export class ConversationBuffer {
   }
 
   /**
-   * Format the stored turns as a conversation log string.
-   * Returns empty string when the buffer is empty.
+   * Return the stored turns from oldest to newest.
+   * Useful for replaying history into providers that support explicit seeding.
    */
-  getHistory(): string {
-    if (this.count === 0) return '';
+  toTurns(): Turn[] {
+    if (this.count === 0) return [];
 
-    const lines: string[] = [];
-    // Read from oldest to newest.
+    const turns: Turn[] = [];
     const start = this.count < CAPACITY ? 0 : this.head;
     for (let i = 0; i < this.count; i++) {
       const idx = (start + i) % CAPACITY;
       const turn = this.buffer[idx]!;
+      turns.push({ user: turn.user, assistant: turn.assistant });
+    }
+    return turns;
+  }
+
+  /**
+   * Format the stored turns as a conversation log string.
+   * Returns empty string when the buffer is empty.
+   */
+  getHistory(): string {
+    const lines: string[] = [];
+    for (const turn of this.toTurns()) {
       lines.push(`[User]: ${turn.user}`);
       lines.push(`[Assistant]: ${turn.assistant}`);
     }

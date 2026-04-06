@@ -20,6 +20,7 @@ import { GeminiLiveProvider } from './providers/gemini-live-provider.js';
 import { GeminiLiveResponder } from './providers/gemini-live-responder.js';
 import {
   DEFAULT_GEMINI_LIVE_MODEL,
+  type GeminiLiveHistoryTurn,
   normalizeGeminiLiveModel,
   supportsGeminiLiveAsyncFunctionCalling,
 } from './providers/gemini-live-types.js';
@@ -57,6 +58,8 @@ export type AudioPipelineOpts = {
   botDisplayName?: string;
   /** Optional async callback that returns initial turn pairs for conversation history backfill on join. */
   backfill?: () => Promise<Turn[]>;
+  /** Optional async callback that builds the static Gemini Live system instruction for a new session. */
+  buildGeminiSystemInstruction?: () => Promise<string | undefined>;
   /** Voice provider mode: 'pipeline' (default STT/TTS) or 'gemini-live' (Gemini Live WebSocket). */
   voiceProvider?: VoicePipelineMode;
   /** API key for Gemini Live (required when voiceProvider is 'gemini-live'). */
@@ -103,6 +106,7 @@ export class AudioPipelineManager {
   private readonly transcriptMirror?: TranscriptMirrorLike;
   private readonly botDisplayName: string;
   private readonly backfill?: () => Promise<Turn[]>;
+  private readonly buildGeminiSystemInstruction?: () => Promise<string | undefined>;
   private readonly voiceProvider: VoicePipelineMode;
   private readonly geminiApiKey?: string;
   private readonly enabledTools: string[];
@@ -129,6 +133,7 @@ export class AudioPipelineManager {
     this.transcriptMirror = opts.transcriptMirror;
     this.botDisplayName = opts.botDisplayName ?? 'Bot';
     this.backfill = opts.backfill;
+    this.buildGeminiSystemInstruction = opts.buildGeminiSystemInstruction;
     this.voiceProvider = opts.voiceProvider ?? 'pipeline';
     this.geminiApiKey = opts.geminiApiKey;
     this.enabledTools = opts.enabledTools ?? [];
@@ -181,18 +186,37 @@ export class AudioPipelineManager {
         const apiKey = this.geminiApiKey;
         if (!apiKey) throw new Error('geminiApiKey is required for gemini-live voice provider');
 
+        const buffer = new ConversationBuffer();
+        if (this.backfill) {
+          try {
+            const turns = await this.backfill();
+            buffer.backfill(turns);
+            this.log.info({ guildId, turns: turns.length }, 'gemini-live conversation buffer backfilled');
+          } catch (err) {
+            this.log.warn({ guildId, err }, 'gemini-live conversation backfill failed — proceeding with empty history');
+          }
+        }
+
         const geminiLiveModel = normalizeGeminiLiveModel(this.runtimeModel) ?? DEFAULT_GEMINI_LIVE_MODEL;
         const supportsAsyncFunctionCalling = supportsGeminiLiveAsyncFunctionCalling(geminiLiveModel);
         const tools = buildGeminiToolDeclarations(this.enabledTools, { nonBlocking: supportsAsyncFunctionCalling });
+        const systemInstruction = await this.buildGeminiSystemInstruction?.();
+        const initialHistory = toGeminiLiveHistoryTurns(buffer.toTurns());
         const provider = new GeminiLiveProvider({
           apiKey,
           log: this.log,
           model: geminiLiveModel,
+          systemInstruction,
           responseModalities: ['AUDIO'],
           tools,
+          initialHistoryInClientContent: initialHistory.length > 0,
           sessionRotationMs: this.sessionRotationMs,
         });
         await provider.connect();
+        if (initialHistory.length > 0) {
+          provider.sendInitialHistory(initialHistory);
+          this.log.info({ guildId, turns: initialHistory.length }, 'gemini-live conversation history seeded');
+        }
 
         if (!supportsAsyncFunctionCalling && this.silentTools.size > 0) {
           this.log.info(
@@ -203,24 +227,37 @@ export class AudioPipelineManager {
 
         const mirror = this.transcriptMirror;
         const botName = this.botDisplayName;
+        let latestInputTranscript: string | undefined;
         const responder = new GeminiLiveResponder({
           log: this.log,
           connection,
           provider,
           onBotResponse: mirror
             ? (text) => {
+                if (latestInputTranscript && text.trim()) {
+                  buffer.push(latestInputTranscript, text);
+                  latestInputTranscript = undefined;
+                }
                 mirror.postBotResponse(botName, text).catch((err) => {
                   this.log.warn({ guildId, err }, 'transcript-mirror: failed to post bot response');
                 });
               }
-            : undefined,
+            : (text) => {
+                if (latestInputTranscript && text.trim()) {
+                  buffer.push(latestInputTranscript, text);
+                  latestInputTranscript = undefined;
+                }
+              },
           onInputTranscript: mirror
             ? (text) => {
+                if (text.trim()) latestInputTranscript = text.trim();
                 mirror.postUserTranscription('User', text).catch((err) => {
                   this.log.warn({ guildId, err }, 'transcript-mirror: failed to post user transcription');
                 });
               }
-            : undefined,
+            : (text) => {
+                if (text.trim()) latestInputTranscript = text.trim();
+              },
           onSessionTerminated: () => {
             this.log.error({ guildId }, 'gemini-live session terminally failed — no fallback (fallback disabled)');
           },
@@ -327,6 +364,7 @@ export class AudioPipelineManager {
           connection,
           sttProvider: sttShim,
           receiver,
+          buffer,
           geminiProvider: provider,
           geminiResponder: responder,
           mode: 'gemini-live',
@@ -539,4 +577,13 @@ export class AudioPipelineManager {
     await Promise.all(entries.map(([guildId, pipeline]) => this.startPipeline(guildId, pipeline.connection)));
     return entries.length;
   }
+}
+
+function toGeminiLiveHistoryTurns(turns: Turn[]): GeminiLiveHistoryTurn[] {
+  const history: GeminiLiveHistoryTurn[] = [];
+  for (const turn of turns) {
+    history.push({ role: 'user', parts: [{ text: turn.user }] });
+    history.push({ role: 'model', parts: [{ text: turn.assistant }] });
+  }
+  return history;
 }

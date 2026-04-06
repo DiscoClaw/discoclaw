@@ -22,7 +22,13 @@ import type { ActionCategoryFlags, ActionContext } from './discord/actions.js';
 import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildAllResultLines, appendActionResults } from './discord/actions.js';
 import { DiscordTransportClient } from './discord/transport-client.js';
 import { buildVoiceActionFlags } from './voice/voice-action-flags.js';
-import { loadVoiceIdentity, buildVoicePrompt, buildVoiceFollowUpPrompt, buildVoicePromptSectionEstimates } from './voice/voice-prompt-builder.js';
+import {
+  loadVoiceIdentity,
+  buildVoicePrompt,
+  buildVoiceFollowUpPrompt,
+  buildVoicePromptSectionEstimates,
+  buildVoiceSystemInstruction,
+} from './voice/voice-prompt-builder.js';
 import { sanitizeForVoice, sanitizeVoiceReplyForSpeech } from './voice/voice-sanitize.js';
 import type { Turn } from './voice/conversation-buffer.js';
 import type { SubsystemContexts } from './discord/actions.js';
@@ -2372,6 +2378,16 @@ if (taskCtx) {
       };
     }
 
+    const buildGeminiSystemInstruction = async (): Promise<string> => {
+      const identity = await loadVoiceIdentity(workspaceCwd);
+      return buildVoiceSystemInstruction({
+        identity,
+        durableMemory: '',
+        voiceSystemPrompt: cfg.voiceSystemPrompt,
+        actionsSection: '',
+      });
+    };
+
     audioPipeline = new AudioPipelineManager({
       log,
       voiceConfig: {
@@ -2400,6 +2416,7 @@ if (taskCtx) {
       transcriptMirror,
       botDisplayName,
       backfill,
+      buildGeminiSystemInstruction,
       onTranscription: (guildId, result) => {
         if (result.isFinal && result.text.trim()) {
           log.info({ guildId, text: result.text, confidence: result.confidence }, 'voice:transcription');

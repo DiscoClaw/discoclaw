@@ -21,6 +21,7 @@ import WebSocket from 'ws';
 import type { LoggerLike } from '../../logging/logger-like.js';
 import {
   DEFAULT_GEMINI_LIVE_MODEL,
+  type GeminiLiveHistoryTurn,
   type GeminiFunctionCall,
   type GeminiLiveEvent,
   type GeminiLiveOpts,
@@ -41,8 +42,8 @@ const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 500;
 /** Default session rotation threshold — 13 minutes (Gemini sessions cap at ~15 min). */
 const DEFAULT_SESSION_ROTATION_MS = 780_000;
-/** Resume handles are valid for ~2 minutes server-side; expire locally at 90s to avoid racing. */
-const RESUME_HANDLE_TTL_MS = 90_000;
+/** Session resumption handles remain valid for roughly 2 hours after termination. */
+const RESUME_HANDLE_TTL_MS = 2 * 60 * 60 * 1000;
 
 type GeminiFunctionResponseScheduling = 'INTERRUPT' | 'WHEN_IDLE' | 'SILENT';
 
@@ -60,6 +61,7 @@ export class GeminiLiveProvider {
   private readonly tools?: GeminiToolsConfig;
   private readonly wsFactory: (url: string) => WebSocket;
   private readonly sessionRotationMs: number;
+  private readonly initialHistoryInClientContent: boolean;
 
   private ws: WebSocket | null = null;
   private _state: GeminiLiveState = 'idle';
@@ -84,6 +86,7 @@ export class GeminiLiveProvider {
     this.wsFactory = opts.wsFactory ?? ((url) => new WebSocket(url));
     this.sessionRotationMs = opts.sessionRotationMs ?? DEFAULT_SESSION_ROTATION_MS;
     this.tokenEstimator = new GeminiLiveTokenEstimator(opts.tokenBudget);
+    this.initialHistoryInClientContent = opts.initialHistoryInClientContent ?? false;
   }
 
   /** Current connection state. */
@@ -155,6 +158,31 @@ export class GeminiLiveProvider {
     this.ws!.send(JSON.stringify({
       realtimeInput: {
         text,
+      },
+    }));
+  }
+
+  /**
+   * Seed the session with prior conversation turns before realtime audio starts.
+   * For Gemini 3.1, this is the supported path for initial history backfill.
+   */
+  sendInitialHistory(turns: GeminiLiveHistoryTurn[]): void {
+    if (this._state !== 'open') {
+      throw new Error('Cannot sendInitialHistory before connect() completes or after disconnect()');
+    }
+    if (turns.length === 0) return;
+
+    for (const turn of turns) {
+      for (const part of turn.parts) {
+        this.tokenEstimator.addText(part.text);
+      }
+    }
+    this.checkTokenThreshold();
+
+    this.ws!.send(JSON.stringify({
+      clientContent: {
+        turns,
+        turnComplete: false,
       },
     }));
   }
@@ -255,6 +283,12 @@ export class GeminiLiveProvider {
 
     if (this.tools) {
       setup.tools = [this.tools];
+    }
+
+    if (this.initialHistoryInClientContent) {
+      setup.historyConfig = {
+        initialHistoryInClientContent: true,
+      };
     }
 
     if (this.resumeHandle) {
