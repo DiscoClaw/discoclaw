@@ -682,7 +682,6 @@ describe('runDashboard', () => {
       runtimeOverrides: {
         fastRuntime: 'openrouter',
         voiceRuntime: 'anthropic',
-        ttsVoice: 'alloy',
       },
       envDefaults: {
         ...makeDoctorContext().envDefaults,
@@ -721,7 +720,6 @@ describe('runDashboard', () => {
     expect(saveModelConfigMock).toHaveBeenCalledWith('/repo/data/models.json', {});
     expect(saveOverridesMock).toHaveBeenCalledWith('/repo/data/runtime-overrides.json', {
       voiceRuntime: 'anthropic',
-      ttsVoice: 'alloy',
     });
     expect(frames.some((frame) => frame.includes('Reset fast to default: capable. Cleared fastRuntime override. Changes take effect on next service restart.'))).toBe(true);
   });
@@ -732,7 +730,6 @@ describe('runDashboard', () => {
       runtimeOverrides: {
         fastRuntime: 'openrouter',
         voiceRuntime: 'anthropic',
-        ttsVoice: 'alloy',
       },
       envDefaults: {
         ...makeDoctorContext().envDefaults,
@@ -771,7 +768,6 @@ describe('runDashboard', () => {
     expect(saveModelConfigMock).toHaveBeenCalledWith('/repo/data/models.json', {});
     expect(saveOverridesMock).toHaveBeenCalledWith('/repo/data/runtime-overrides.json', {
       fastRuntime: 'openrouter',
-      ttsVoice: 'alloy',
     });
     expect(frames.some((frame) => frame.includes('Reset voice to default: capable. Cleared voiceRuntime override. Changes take effect on next service restart.'))).toBe(true);
   });

@@ -900,7 +900,6 @@ describe('startDashboardServer', () => {
     const ctx = makeDoctorContext({
       runtimeOverrides: {
         fastRuntime: 'openrouter',
-        ttsVoice: 'alloy',
       },
       runtimeOverridesFile: {
         exists: true,
@@ -908,7 +907,6 @@ describe('startDashboardServer', () => {
         raw: {},
         values: {
           fastRuntime: 'openrouter',
-          ttsVoice: 'alloy',
         },
       },
     });
@@ -944,7 +942,7 @@ describe('startDashboardServer', () => {
     expect(updateEnvKeyMock).toHaveBeenCalledWith('/repo/.env', 'PRIMARY_RUNTIME', 'codex-cli');
     expect(saveOverridesMock).toHaveBeenCalledWith(
       '/repo/data/runtime-overrides.json',
-      { ttsVoice: 'alloy' },
+      {},
     );
     expect(saveModelConfigMock).toHaveBeenCalledWith(
       '/repo/data/models.json',
@@ -979,12 +977,11 @@ describe('startDashboardServer', () => {
     expect(updateEnvKeyMock).toHaveBeenCalledWith('/repo/.env', 'PRIMARY_RUNTIME', 'claude-cli');
   });
 
-  it('preserves ttsVoice when clearing overrides via /api/preset', async () => {
+  it('clears legacy voice overrides when applying /api/preset', async () => {
     const ctx = makeDoctorContext({
       runtimeOverrides: {
         fastRuntime: 'openrouter',
         voiceRuntime: 'anthropic',
-        ttsVoice: 'shimmer',
       },
     });
     const saveOverridesMock = vi.fn(async () => undefined);
@@ -1002,7 +999,7 @@ describe('startDashboardServer', () => {
 
     expect(saveOverridesMock).toHaveBeenCalledWith(
       '/repo/data/runtime-overrides.json',
-      { ttsVoice: 'shimmer' },
+      {},
     );
   });
 

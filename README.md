@@ -39,7 +39,7 @@ No gateways, no proxies, no web UI. Discord *is* the interface.
 
 ## Voice — the bot talks back
 
-Real-time voice with STT (Deepgram), TTS (Cartesia), barge-in, and transcript mirroring. Off by default. [Setup guide →](docs/voice.md)
+Real-time voice with Gemini Live, barge-in, tool calls, and transcript mirroring. Off by default. [Setup guide →](docs/voice.md)
 
 ## Self-management
 

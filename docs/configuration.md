@@ -37,7 +37,7 @@ For npm-managed daemon installs, readiness is currently constrained by service e
 Model/runtime state is intentionally split across three storage modes:
 
 - `models.json` stores persisted model strings per role (`chat`, `fast`, `plan-run`, `voice`, forge roles, cron roles, etc.).
-- `runtime-overrides.json` stores persisted runtime-only overlays such as `fastRuntime` and `voiceRuntime` (plus non-model keys such as `ttsVoice`).
+- `runtime-overrides.json` stores persisted runtime-only overlays such as `fastRuntime` and `voiceRuntime`.
 - Live chat runtime swaps stay in memory only. `!models set chat <runtime>` changes the active chat runtime immediately, but there is no persisted `chatRuntime` overlay.
 
 On first run, `models.json` is scaffolded from the instance startup defaults. After that:
@@ -322,24 +322,19 @@ The same forum-boundary rule applies to tasks: `DISCOCLAW_TASKS_FORUM` is the di
 
 ## Voice
 
-See [docs/voice.md](voice.md) for the full setup guide and provider details.
+See [docs/voice.md](voice.md) for the full Gemini Live setup guide.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DISCOCLAW_VOICE_ENABLED` | `false` | Master switch for voice subsystem |
 | `DISCOCLAW_VOICE_AUTO_JOIN` | `false` | Auto-join voice channels when users enter |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key (required for direct Messages API voice responses) |
+| `GEMINI_API_KEY` | — | Gemini API key required for Gemini Live voice |
 | `DISCOCLAW_VOICE_MODEL` | follows startup chat model | Model override for voice responses |
 | `DISCOCLAW_VOICE_SYSTEM_PROMPT` | — | System prompt override for voice (max 4000 chars) |
-| `DISCOCLAW_STT_PROVIDER` | `deepgram` | Speech-to-text provider: `deepgram`, `whisper`, `openai` |
-| `DISCOCLAW_TTS_PROVIDER` | `cartesia` | Text-to-speech provider: `cartesia`, `deepgram`, `kokoro`, `openai` |
+| `DISCOCLAW_GEMINI_SESSION_ROTATION_MS` | `780000` | Proactive Gemini Live session rotation interval in milliseconds |
 | `DISCOCLAW_VOICE_HOME_CHANNEL` | — | Voice channel name or ID for prompt context |
 | `DISCOCLAW_VOICE_LOG_CHANNEL` | `voice-log` | Text channel for transcript mirror |
-| `DEEPGRAM_API_KEY` | — | Deepgram API key (required for Deepgram STT/TTS) |
-| `DEEPGRAM_STT_MODEL` | `nova-3-general` | Deepgram STT model |
-| `DEEPGRAM_TTS_VOICE` | `aura-2-asteria-en` | Deepgram TTS voice |
-| `DEEPGRAM_TTS_SPEED` | `1.3` | Deepgram TTS playback speed multiplier (0.5–1.5) |
-| `CARTESIA_API_KEY` | — | Cartesia API key (required for Cartesia TTS) |
 
 ## Webhook
 

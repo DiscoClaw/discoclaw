@@ -7,17 +7,13 @@
  * helper functions (no mocking of child_process).
  */
 
-import { describe, expect, it, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import {
-  verifyPushStatus,
-  formatPushWarning,
-} from './verify-push.js';
-import type { PushVerificationResult } from './verify-push.js';
 import type { PlanPhase } from './plan-manager.js';
+import type { PushVerificationResult } from './verify-push.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -38,12 +34,27 @@ function makePhase(overrides: Partial<PlanPhase> = {}): PlanPhase {
 }
 
 function git(cwd: string, args: string[]): string {
+  const env = { ...process.env } as NodeJS.ProcessEnv;
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('GIT')) delete env[key];
+  }
+  env.GIT_CEILING_DIRECTORIES = cwd;
+  env.GIT_AUTHOR_NAME = 'Test';
+  env.GIT_AUTHOR_EMAIL = 'test@test';
+  env.GIT_COMMITTER_NAME = 'Test';
+  env.GIT_COMMITTER_EMAIL = 'test@test';
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf-8',
     stdio: 'pipe',
-    env: { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@test', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@test' },
+    env,
   }).trim();
+}
+
+async function loadVerifyPushModule() {
+  vi.resetModules();
+  vi.unmock('execa');
+  return import('./verify-push.js');
 }
 
 /** Create a temp dir with an initialized git repo and one initial commit. */
@@ -97,6 +108,7 @@ afterEach(() => {
 
 describe('verifyPushStatus', () => {
   it('returns git-unavailable warning for non-repo directory', async () => {
+    const { verifyPushStatus } = await loadVerifyPushModule();
     const nonRepo = path.join(tmpBase, 'not-a-repo');
     fs.mkdirSync(nonRepo);
     const result = await verifyPushStatus(nonRepo, [makePhase({ status: 'done', gitCommit: 'abc1234' })]);
@@ -107,6 +119,7 @@ describe('verifyPushStatus', () => {
   });
 
   it('returns no warning when there are no done phases with commits', async () => {
+    const { verifyPushStatus } = await loadVerifyPushModule();
     initRepo(workDir);
     const result = await verifyPushStatus(workDir, [
       makePhase({ status: 'pending' }),
@@ -119,6 +132,7 @@ describe('verifyPushStatus', () => {
   });
 
   it('warns when branch has no remote tracking branch', async () => {
+    const { verifyPushStatus } = await loadVerifyPushModule();
     initRepo(workDir);
     const hash = makeCommit(workDir, 'file1.ts', 'phase 1 work');
     const phases = [makePhase({ status: 'done', gitCommit: hash })];
@@ -132,6 +146,7 @@ describe('verifyPushStatus', () => {
   });
 
   it('warns about multiple unpushed phase commits with no remote', async () => {
+    const { verifyPushStatus } = await loadVerifyPushModule();
     initRepo(workDir);
     const hash1 = makeCommit(workDir, 'a.ts', 'phase 1');
     const hash2 = makeCommit(workDir, 'b.ts', 'phase 2');
@@ -147,6 +162,7 @@ describe('verifyPushStatus', () => {
   });
 
   it('returns clean result when all phase commits are pushed', async () => {
+    const { verifyPushStatus } = await loadVerifyPushModule();
     initRepo(workDir);
     addBareRemote(workDir, bareDir);
     const hash = makeCommit(workDir, 'file1.ts', 'phase 1 work');
@@ -163,6 +179,7 @@ describe('verifyPushStatus', () => {
   });
 
   it('detects unpushed phase commits when remote exists but commits not pushed', async () => {
+    const { verifyPushStatus } = await loadVerifyPushModule();
     initRepo(workDir);
     addBareRemote(workDir, bareDir);
     const hash = makeCommit(workDir, 'file1.ts', 'local-only work');
@@ -178,6 +195,7 @@ describe('verifyPushStatus', () => {
   });
 
   it('differentiates pushed vs unpushed commits in mixed scenario', async () => {
+    const { verifyPushStatus } = await loadVerifyPushModule();
     initRepo(workDir);
     addBareRemote(workDir, bareDir);
 
@@ -201,6 +219,7 @@ describe('verifyPushStatus', () => {
   });
 
   it('ignores non-done phases even if they have gitCommit', async () => {
+    const { verifyPushStatus } = await loadVerifyPushModule();
     initRepo(workDir);
     addBareRemote(workDir, bareDir);
     const hash = makeCommit(workDir, 'wip.ts', 'work in progress');
@@ -218,6 +237,7 @@ describe('verifyPushStatus', () => {
   });
 
   it('works on a non-main branch with tracking', async () => {
+    const { verifyPushStatus } = await loadVerifyPushModule();
     initRepo(workDir);
     addBareRemote(workDir, bareDir);
 
@@ -237,6 +257,7 @@ describe('verifyPushStatus', () => {
   });
 
   it('handles detached HEAD gracefully', async () => {
+    const { verifyPushStatus } = await loadVerifyPushModule();
     initRepo(workDir);
     const headHash = git(workDir, ['rev-parse', 'HEAD']);
     git(workDir, ['checkout', headHash]);
@@ -247,6 +268,7 @@ describe('verifyPushStatus', () => {
   });
 
   it('includes prCheck field in results', async () => {
+    const { verifyPushStatus } = await loadVerifyPushModule();
     initRepo(workDir);
     addBareRemote(workDir, bareDir);
     const hash = makeCommit(workDir, 'file.ts', 'phase work');
@@ -266,7 +288,8 @@ describe('verifyPushStatus', () => {
 // ---------------------------------------------------------------------------
 
 describe('formatPushWarning', () => {
-  it('returns undefined when there is no warning', () => {
+  it('returns undefined when there is no warning', async () => {
+    const { formatPushWarning } = await loadVerifyPushModule();
     const result: PushVerificationResult = {
       branch: 'main',
       hasRemote: true,
@@ -277,7 +300,8 @@ describe('formatPushWarning', () => {
     expect(formatPushWarning(result)).toBeUndefined();
   });
 
-  it('formats warning with emoji and push guidance when no PR', () => {
+  it('formats warning with emoji and push guidance when no PR', async () => {
+    const { formatPushWarning } = await loadVerifyPushModule();
     const result: PushVerificationResult = {
       branch: 'main',
       hasRemote: false,
@@ -293,7 +317,8 @@ describe('formatPushWarning', () => {
     expect(formatted).toContain('local-only');
   });
 
-  it('includes PR URL when PR exists', () => {
+  it('includes PR URL when PR exists', async () => {
+    const { formatPushWarning } = await loadVerifyPushModule();
     const result: PushVerificationResult = {
       branch: 'feature/test',
       hasRemote: true,

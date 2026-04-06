@@ -341,7 +341,7 @@ Centralized env-var parsing into a typed `DiscoclawConfig` object. Handles boole
 | `!memory` | Memory read/write subcommands (see section 4) | `src/discord/memory-commands.ts` | **done** |
 | `!plan` | Plan management subcommands, including targeted phase controls (`run-phase`, `skip-to`) and regeneration resequencing (`phases --regenerate --keep-done`) | `src/discord/plan-commands.ts` | **done** |
 | `!forge` | Forge control subcommands | `src/discord/forge-commands.ts` | **done** |
-| `!voice` | Voice subsystem commands: `status` (connection + config), `set <name>` (switch Deepgram TTS voice at runtime, ephemeral), `help` | `src/discord/voice-command.ts` (primary), `src/discord/voice-status-command.ts` (status renderer) | **done** |
+| `!voice` | Voice subsystem commands: `status` (connection + config) and `help` | `src/discord/voice-command.ts` (primary), `src/discord/voice-status-command.ts` (status renderer) | **done** |
 | `!secret` | DM-only command to securely set/unset `.env` secrets (e.g. API keys); bypasses AI runtime, no echo | `src/discord/secret-commands.ts` | **done** |
 
 ## 22. npm Publishing
@@ -355,21 +355,16 @@ CI/CD pipeline for publishing DiscoClaw to npm on versioned releases.
 
 ## 23. Voice System (`src/voice/`)
 
-Real-time voice chat: STT transcription, AI response generation, TTS synthesis, and Discord voice playback. See `docs/voice.md` for setup.
+Real-time voice chat: Gemini Live audio I/O, AI response generation, tool calls, and Discord voice playback. See `docs/voice.md` for setup.
 
 | Component | File(s) | Status |
 |-----------|---------|--------|
 | Voice types (`VoiceConfig`, `AudioFrame`, `SttProvider`, `TtsProvider`) | `src/voice/types.ts` | **done** |
 | Voice connection manager (per-guild connections, reconnect logic) | `src/voice/connection-manager.ts` | **done** |
-| Audio pipeline manager (orchestrates STT/TTS/responder lifecycle per guild) | `src/voice/audio-pipeline.ts` | **done** |
-| Audio receiver (Opus decode, 48kHz→16kHz downsample, feed STT) | `src/voice/audio-receiver.ts` | **done** |
-| Voice responder (AI invoke → TTS → audio playback, generation-based cancellation) | `src/voice/voice-responder.ts` | **done** |
-| Deepgram STT provider (Nova-3 streaming via WebSocket) | `src/voice/stt-deepgram.ts` | **done** |
-| Cartesia TTS provider (Sonic-3 via WebSocket, PCM s16le output) | `src/voice/tts-cartesia.ts` | **done** |
-| Deepgram TTS provider (Aura REST streaming, PCM s16le output) | `src/voice/tts-deepgram.ts` | **done** |
+| Audio pipeline manager (orchestrates Gemini Live session lifecycle per guild) | `src/voice/audio-pipeline.ts` | **done** |
+| Audio receiver (Opus decode, 48kHz→16kHz downsample, feed Gemini Live input audio) | `src/voice/audio-receiver.ts` | **done** |
+| Voice responder utilities (shared Discord audio helpers used by Gemini Live playback) | `src/voice/voice-responder.ts` | **done** |
 | Opus decoder factory (`@discordjs/opus` wrapper) | `src/voice/opus.ts` | **done** |
-| STT provider factory | `src/voice/stt-factory.ts` | **done** |
-| TTS provider factory | `src/voice/tts-factory.ts` | **done** |
 | Presence handler (auto-join/leave based on user voice state) | `src/voice/presence-handler.ts` | **done** |
 | Transcript mirror (posts voice conversation text to Discord channel) | `src/voice/transcript-mirror.ts` | **done** |
 | Voice action flags (restricted action subset for voice invocations) | `src/voice/voice-action-flags.ts` | **done** |
@@ -379,7 +374,7 @@ Real-time voice chat: STT transcription, AI response generation, TTS synthesis, 
 | Gemini Live pipeline integration (`gemini-live` provider wires GeminiLiveProvider + GeminiLiveResponder into AudioPipelineManager; end-to-end Discord audio → Gemini Live WebSocket → playback + transcript mirror; tool call dispatch wired — model tool requests are routed to `executeToolCall()` with NON_BLOCKING scheduling and results sent back via `sendToolResponse()`) | `src/voice/audio-pipeline.ts`, `src/voice/providers/gemini-live-provider.ts`, `src/voice/providers/gemini-live-responder.ts` | **done** |
 | Gemini tool mapper (converts OpenAI function-calling schemas to Gemini-compatible function declarations; uppercase type names, `additionalProperties` stripping, recursive schema conversion; wired into session setup via `GeminiLiveProvider.tools`) | `src/voice/providers/gemini-tool-mapper.ts`, `src/voice/providers/gemini-tool-mapper.test.ts` | **done** |
 
-Config: `DISCOCLAW_VOICE_ENABLED`, `DISCOCLAW_STT_PROVIDER`, `DEEPGRAM_STT_MODEL`, `DISCOCLAW_TTS_PROVIDER`, `DEEPGRAM_TTS_VOICE`, `DEEPGRAM_TTS_SPEED`, `DISCOCLAW_VOICE_HOME_CHANNEL`, `DEEPGRAM_API_KEY` (STT + TTS), `CARTESIA_API_KEY`.
+Config: `DISCOCLAW_VOICE_ENABLED`, `GEMINI_API_KEY`, `DISCOCLAW_GEMINI_SESSION_ROTATION_MS`, `DISCOCLAW_VOICE_HOME_CHANNEL`, `DISCOCLAW_VOICE_LOG_CHANNEL`, `DISCOCLAW_VOICE_MODEL`.
 
 ---
 
