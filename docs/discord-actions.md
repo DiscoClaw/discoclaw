@@ -107,11 +107,12 @@ Reaction prompt types (in `src/discord/reaction-prompts.ts`):
 Query actions (read-only actions that can trigger an auto-follow-up loop):
 - `src/discord/action-categories.ts`
 
-Integration points (where actions are included in the prompt and executed):
-- `src/discord.ts` (normal message handling)
+Integration points (where actions are wired into runtime flows, prompts, execution, and follow-ups):
+- `src/discord.ts` (top-level Discord event wire-up)
+- `src/discord/message-coordinator.ts` (normal message handling, action execution, and auto-follow-up loop)
 - `src/cron/executor.ts` (cron jobs)
 - `src/discord/deferred-runner.ts` (deferred action execution)
-- `src/discord/reaction-handler.ts` (reaction-based prompt resolution)
+- `src/discord/reaction-handler.ts` (reaction-based prompt resolution, action execution, and auto-follow-up loop)
 - `src/index.ts` (startup JSON healing for persisted action-related stores, including reaction prompts)
 
 Env wiring:
@@ -203,7 +204,9 @@ Capability/gating note (important):
   - On the normal manual message finalization path, "no action results" is only acceptable when the prose did not claim Discord-managed work. If the prose claimed a Discord-managed start/perform action but no actionable blocks survived parsing/execution, the posted result is a visible warning/failure so operators are not left with a silent no-op.
 
 6. Optional auto-follow-up:
-  - If any action type is listed in `QUERY_ACTION_TYPES` (`src/discord/action-categories.ts`) and at least one of those query actions succeeded, `src/discord.ts` can automatically invoke the model again with the results.
+  - If any action type is listed in `QUERY_ACTION_TYPES` (`src/discord/action-categories.ts`) and at least one of those query actions succeeded, the normal message and reaction follow-up handlers in `src/discord/message-coordinator.ts` and `src/discord/reaction-handler.ts` can automatically invoke the model again with the results.
+  - Before successful query results are reinjected, `buildCappedResultLines(...)` in `src/discord/actions.ts` microcompacts oversized multiline summaries instead of pasting the full raw payload back into the prompt. The retained signal is biased toward continuation-critical details already exposed by current summaries and errors: identifiers, file/system paths, labeled status/context fields, section headers with first values, actionable error lines, and retry or next-action clues.
+  - Repetitive bulk text that does not materially help the next turn is omitted behind omission markers, then the compacted result still passes through the existing hard character cap.
   - This is intended for "read/list/info" actions where the model needs returned data to keep reasoning.
 
 ## Image Attachment Metadata in Read Actions
