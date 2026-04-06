@@ -18,6 +18,11 @@ import type { TranscriptMirrorLike } from './transcript-mirror.js';
 import { ConversationBuffer, type Turn } from './conversation-buffer.js';
 import { GeminiLiveProvider } from './providers/gemini-live-provider.js';
 import { GeminiLiveResponder } from './providers/gemini-live-responder.js';
+import {
+  DEFAULT_GEMINI_LIVE_MODEL,
+  normalizeGeminiLiveModel,
+  supportsGeminiLiveAsyncFunctionCalling,
+} from './providers/gemini-live-types.js';
 import { buildGeminiToolDeclarations, buildToolSchemas, OPENAI_TO_DISCO_NAME } from '../runtime/openai-tool-schemas.js';
 import { executeToolCall } from '../runtime/openai-tool-exec.js';
 
@@ -58,7 +63,7 @@ export type AudioPipelineOpts = {
   geminiApiKey?: string;
   /** Enabled tool names for Gemini Live tool use (e.g. ['Read', 'Bash']). */
   enabledTools?: string[];
-  /** Tool names that use SILENT scheduling for Gemini Live function responses. */
+  /** Tool names that use SILENT scheduling when the selected Gemini Live model supports scheduled responses. */
   silentTools?: string[];
   /** Timer-based session rotation interval in ms for Gemini Live (default 13 min). */
   sessionRotationMs?: number;
@@ -176,15 +181,25 @@ export class AudioPipelineManager {
         const apiKey = this.geminiApiKey;
         if (!apiKey) throw new Error('geminiApiKey is required for gemini-live voice provider');
 
-        const tools = buildGeminiToolDeclarations(this.enabledTools, { nonBlocking: true });
+        const geminiLiveModel = normalizeGeminiLiveModel(this.runtimeModel) ?? DEFAULT_GEMINI_LIVE_MODEL;
+        const supportsAsyncFunctionCalling = supportsGeminiLiveAsyncFunctionCalling(geminiLiveModel);
+        const tools = buildGeminiToolDeclarations(this.enabledTools, { nonBlocking: supportsAsyncFunctionCalling });
         const provider = new GeminiLiveProvider({
           apiKey,
           log: this.log,
+          model: geminiLiveModel,
           responseModalities: ['AUDIO'],
           tools,
           sessionRotationMs: this.sessionRotationMs,
         });
         await provider.connect();
+
+        if (!supportsAsyncFunctionCalling && this.silentTools.size > 0) {
+          this.log.info(
+            { guildId, model: geminiLiveModel, count: this.silentTools.size },
+            'gemini-live: current model does not support scheduled tool responses; silent tool scheduling disabled',
+          );
+        }
 
         const mirror = this.transcriptMirror;
         const botName = this.botDisplayName;
@@ -228,14 +243,14 @@ export class AudioPipelineManager {
                 const logFn = (msg: string) => this.log.info({ guildId }, msg);
                 const execOpts = { enableHybridPipeline: false as const, allowedToolNames };
 
-                // Fire-and-forget (NON_BLOCKING) — Gemini 3.1 can continue speaking
-                // while the client runs tools and returns scheduled responses later.
+                // Gemini 3.1 Live only supports synchronous function calling.
+                // Gemini 2.5 Live can opt into NON_BLOCKING declarations and scheduled responses.
                 void (async () => {
                   const results = await Promise.all(
                     calls.map(async (call) => {
-                      const scheduling: 'SILENT' | 'INTERRUPT' = this.isSilentTool(call.name)
-                        ? 'SILENT'
-                        : 'INTERRUPT';
+                      const scheduling: 'SILENT' | 'INTERRUPT' | undefined = supportsAsyncFunctionCalling
+                        ? (this.isSilentTool(call.name) ? 'SILENT' : 'INTERRUPT')
+                        : undefined;
                       try {
                         const res = await executeToolCall(
                           call.name,
@@ -252,7 +267,9 @@ export class AudioPipelineManager {
                     }),
                   );
 
-                  const silentCount = results.filter((r) => r.scheduling === 'SILENT').length;
+                  const silentCount = supportsAsyncFunctionCalling
+                    ? results.filter((r) => r.scheduling === 'SILENT').length
+                    : 0;
                   if (silentCount > 0) {
                     this.log.info(
                       { guildId, count: silentCount },

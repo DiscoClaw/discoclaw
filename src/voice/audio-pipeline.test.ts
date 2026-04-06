@@ -127,8 +127,11 @@ vi.mock('../runtime/openai-tool-schemas.js', () => ({
     read_file: 'Read',
     bash: 'Bash',
   },
-  buildGeminiToolDeclarations: vi.fn((enabledTools: string[]) => ({
-    functionDeclarations: enabledTools.map((name) => ({ name })),
+  buildGeminiToolDeclarations: vi.fn((enabledTools: string[], opts?: { nonBlocking?: boolean }) => ({
+    functionDeclarations: enabledTools.map((name) => ({
+      name,
+      ...(opts?.nonBlocking ? { behavior: 'NON_BLOCKING' } : {}),
+    })),
   })),
   buildToolSchemas: vi.fn((enabledTools: string[]) =>
     enabledTools.map((name) => ({
@@ -863,6 +866,49 @@ describe('AudioPipelineManager', () => {
       expect(mockGeminiResponder.start).toHaveBeenCalled();
     });
 
+    it('uses synchronous tool declarations for the default 3.1 live model', async () => {
+      const opts = createGeminiOpts({ enabledTools: ['Read', 'Bash'] });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+      const toolSchemas = await import('../runtime/openai-tool-schemas.js');
+      const { GeminiLiveProvider: ProviderMock } = await import('./providers/gemini-live-provider.js');
+
+      await mgr.startPipeline('g1', connection);
+
+      expect(toolSchemas.buildGeminiToolDeclarations).toHaveBeenCalledWith(
+        ['Read', 'Bash'],
+        { nonBlocking: false },
+      );
+
+      const providerCalls = (ProviderMock as ReturnType<typeof vi.fn>).mock.calls;
+      expect(providerCalls.at(-1)?.[0]).toEqual(expect.objectContaining({
+        model: 'gemini-3.1-flash-live-preview',
+      }));
+    });
+
+    it('preserves NON_BLOCKING tool declarations for explicit 2.5 live models', async () => {
+      const opts = createGeminiOpts({
+        enabledTools: ['Read'],
+        runtimeModel: 'gemini-2.5-flash-live-preview',
+      });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+      const toolSchemas = await import('../runtime/openai-tool-schemas.js');
+      const { GeminiLiveProvider: ProviderMock } = await import('./providers/gemini-live-provider.js');
+
+      await mgr.startPipeline('g1', connection);
+
+      expect(toolSchemas.buildGeminiToolDeclarations).toHaveBeenCalledWith(
+        ['Read'],
+        { nonBlocking: true },
+      );
+
+      const providerCalls = (ProviderMock as ReturnType<typeof vi.fn>).mock.calls;
+      expect(providerCalls.at(-1)?.[0]).toEqual(expect.objectContaining({
+        model: 'gemini-2.5-flash-live-preview',
+      }));
+    });
+
     it('calls provider.disconnect() and responder.destroy() on stopPipeline', async () => {
       const opts = createGeminiOpts();
       const mgr = new AudioPipelineManager(opts);
@@ -1054,7 +1100,7 @@ describe('AudioPipelineManager', () => {
           expect.objectContaining({ enableHybridPipeline: false }),
         );
         expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
-          { id: 'tc-1', name: 'Read', output: 'file contents here', scheduling: 'INTERRUPT' },
+          { id: 'tc-1', name: 'Read', output: 'file contents here' },
         ]);
       });
     });
@@ -1067,7 +1113,7 @@ describe('AudioPipelineManager', () => {
 
       await vi.waitFor(() => {
         expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
-          { id: 'tc-err', name: 'Read', output: 'Error: permission denied', scheduling: 'INTERRUPT' },
+          { id: 'tc-err', name: 'Read', output: 'Error: permission denied' },
         ]);
       });
     });
@@ -1080,7 +1126,7 @@ describe('AudioPipelineManager', () => {
 
       await vi.waitFor(() => {
         expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
-          { id: 'tc-unk', name: 'UnknownTool', output: 'Tool not allowed: UnknownTool', scheduling: 'INTERRUPT' },
+          { id: 'tc-unk', name: 'UnknownTool', output: 'Tool not allowed: UnknownTool' },
         ]);
       });
     });
@@ -1099,8 +1145,8 @@ describe('AudioPipelineManager', () => {
       await vi.waitFor(() => {
         expect(mockExecuteToolCall).toHaveBeenCalledTimes(2);
         expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
-          { id: 'tc-a', name: 'Read', output: 'result-A', scheduling: 'INTERRUPT' },
-          { id: 'tc-b', name: 'Bash', output: 'result-B', scheduling: 'INTERRUPT' },
+          { id: 'tc-a', name: 'Read', output: 'result-A' },
+          { id: 'tc-b', name: 'Bash', output: 'result-B' },
         ]);
       });
     });
@@ -1125,10 +1171,10 @@ describe('AudioPipelineManager', () => {
     });
 
     // -----------------------------------------------------------------------
-    // SILENT tool scheduling
+    // Scheduled tool responses
     // -----------------------------------------------------------------------
 
-    it('sends SILENT-scheduled tool response for silent tools', async () => {
+    it('ignores silent tool scheduling on the default 3.1 live model', async () => {
       mockExecuteToolCall.mockResolvedValue({ result: 'memory contents', ok: true });
       const log = createLogger();
       const opts = createGeminiOpts({
@@ -1153,27 +1199,31 @@ describe('AudioPipelineManager', () => {
       responderOpts.onToolCall!([{ id: 'tc-silent', name: 'MemoryQuery', args: { key: 'test' } }]);
 
       await vi.waitFor(() => {
-        expect(log.info).toHaveBeenCalledWith(
-          expect.objectContaining({ guildId: 'g1', count: 1 }),
-          'gemini-live: SILENT tool execution complete — results scheduled silently',
-        );
+        expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
+          { id: 'tc-silent', name: 'MemoryQuery', output: 'memory contents' },
+        ]);
       });
 
-      expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
-        { id: 'tc-silent', name: 'MemoryQuery', output: 'memory contents', scheduling: 'SILENT' },
-      ]);
+      expect(log.info).toHaveBeenCalledWith(
+        expect.objectContaining({
+          guildId: 'g1',
+          model: 'gemini-3.1-flash-live-preview',
+          count: 1,
+        }),
+        'gemini-live: current model does not support scheduled tool responses; silent tool scheduling disabled',
+      );
     });
 
-    it('sends response only for non-silent tools in a mixed batch', async () => {
+    it('sends SILENT-scheduled tool responses for explicit 2.5 live models', async () => {
       mockExecuteToolCall
-        .mockResolvedValueOnce({ result: 'file data', ok: true })
         .mockResolvedValueOnce({ result: 'memory data', ok: true });
       const log = createLogger();
       const opts = createGeminiOpts({
         log,
-        enabledTools: ['Read', 'MemoryQuery'],
+        enabledTools: ['MemoryQuery'],
         silentTools: ['MemoryQuery'],
         runtimeCwd: '/fake/cwd',
+        runtimeModel: 'gemini-2.5-flash-live-preview',
       });
       const mgr = new AudioPipelineManager(opts);
       const { connection } = createMockConnection();
@@ -1187,16 +1237,17 @@ describe('AudioPipelineManager', () => {
         onToolCall?: (calls: Array<{ id: string; name: string; args: Record<string, unknown> }>) => void;
       };
 
-      // Mixed batch: one normal, one silent
       responderOpts.onToolCall!([
-        { id: 'tc-read', name: 'Read', args: { file_path: '/foo' } },
         { id: 'tc-mem', name: 'MemoryQuery', args: { key: 'test' } },
       ]);
 
       await vi.waitFor(() => {
-        expect(mockExecuteToolCall).toHaveBeenCalledTimes(2);
+        expect(mockExecuteToolCall).toHaveBeenCalledTimes(1);
+        expect(log.info).toHaveBeenCalledWith(
+          expect.objectContaining({ guildId: 'g1', count: 1 }),
+          'gemini-live: SILENT tool execution complete — results scheduled silently',
+        );
         expect(mockGeminiProvider.sendToolResponse).toHaveBeenCalledWith([
-          { id: 'tc-read', name: 'Read', output: 'file data', scheduling: 'INTERRUPT' },
           { id: 'tc-mem', name: 'MemoryQuery', output: 'memory data', scheduling: 'SILENT' },
         ]);
       });

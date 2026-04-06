@@ -10,6 +10,35 @@ import type { LoggerLike } from '../../logging/logger-like.js';
 import type { GeminiToolsConfig } from './gemini-tool-mapper.js';
 import type { TokenBudget } from './gemini-live-token-estimator.js';
 
+export const DEFAULT_GEMINI_LIVE_MODEL = 'gemini-3.1-flash-live-preview';
+
+/**
+ * Returns the caller-provided Gemini Live model when it looks like a live-capable
+ * model ID. Non-live model IDs are ignored so voice mode falls back to the
+ * provider default instead of sending an invalid model to the Live API.
+ */
+export function normalizeGeminiLiveModel(model?: string): string | undefined {
+  const trimmed = model?.trim();
+  if (!trimmed) return undefined;
+  return trimmed.startsWith('gemini-') && trimmed.includes('live') ? trimmed : undefined;
+}
+
+/**
+ * Gemini 3.1 Flash Live currently supports synchronous function calling only.
+ * Gemini 2.5 Flash Live supports NON_BLOCKING declarations and response scheduling.
+ */
+export function supportsGeminiLiveAsyncFunctionCalling(model: string): boolean {
+  return /^gemini-2\.5-.*live/i.test(model.trim());
+}
+
+/**
+ * Gemini 3.1 Flash Live only supports clientContent for initial history seeding.
+ * Regular conversational text turns must use realtimeInput.text.
+ */
+export function supportsGeminiLiveIncrementalClientContent(model: string): boolean {
+  return /^gemini-2\.5-.*live/i.test(model.trim());
+}
+
 // ---------------------------------------------------------------------------
 // Connection state
 // ---------------------------------------------------------------------------
@@ -50,7 +79,7 @@ export type GeminiLiveEvent =
 export type GeminiLiveOpts = {
   apiKey: string;
   log: LoggerLike;
-  /** Model ID. Defaults to 'gemini-3.1-flash-live-preview'. */
+  /** Model ID. Defaults to DEFAULT_GEMINI_LIVE_MODEL. */
   model?: string;
   /** System instruction text. */
   systemInstruction?: string;
