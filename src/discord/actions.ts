@@ -658,24 +658,165 @@ export function buildAllResultLines(
 }
 
 /**
- * Cap a single result line to approximately `maxChars` characters.
+ * Cap a single result line to `maxChars` characters.
  * If truncated, appends a visible `...[truncated]` suffix.
  */
 export function capResultLine(line: string, maxChars = 1500): string {
   if (line.length <= maxChars) return line;
-  return `${line.slice(0, maxChars)}...[truncated]`;
+  const suffix = '...[truncated]';
+  if (maxChars <= suffix.length) return suffix.slice(0, maxChars);
+  return `${line.slice(0, maxChars - suffix.length)}${suffix}`;
+}
+
+const RESULT_LINE_PREFIX_RE = /^(Done|Failed):\s*/;
+const RESULT_LINE_IMPORTANT_FIELD_RE = /^(Status|Thread|Model|Next run|Last error|State):\s/i;
+const RESULT_LINE_GENERIC_FIELD_RE = /^[A-Z][A-Za-z0-9 /_-]{1,24}:\s/;
+const RESULT_LINE_SECTION_HEADER_RE = /^\*\*[^*\n]+:\*\*$/;
+const RESULT_LINE_ERROR_RE = /\b(error|failed|failure|missing|invalid|denied|not found|cannot|unable|exception|timeout|timed out)\b/i;
+const RESULT_LINE_PATH_RE = /(?:^|[\s(])(?:\/[^\s)`]+|\.{1,2}\/[^\s)`]+|[A-Za-z]:\\\S+)/;
+const RESULT_LINE_ID_RE = /\b(?:id[:=][^\s,)]+|[a-z]+-\d+\b|\d{8,})/i;
+const RESULT_LINE_NEXT_ACTION_RE = /\b(?:retry|rerun|re-run|resume|check|open|use)\b/i;
+const RESULT_LINE_MICROCOMPACT_TRIGGER_LINES = 6;
+const RESULT_LINE_MICROCOMPACT_TRIGGER_CHARS = 500;
+const RESULT_LINE_MAX_RETAINED_LINES = 8;
+const RESULT_LINE_ID_REPRESENTATIVE_COUNT = 4;
+const RESULT_LINE_REMAINDER_REPRESENTATIVE_COUNT = 2;
+
+type ResultLineBodyInfo = {
+  index: number;
+  text: string;
+  isImportantField: boolean;
+  isGenericField: boolean;
+  isSectionHeader: boolean;
+  hasErrorText: boolean;
+  hasPath: boolean;
+  hasId: boolean;
+  hasNextAction: boolean;
+};
+
+function splitResultLine(line: string): { prefix: string; body: string } {
+  const match = RESULT_LINE_PREFIX_RE.exec(line);
+  if (!match) return { prefix: '', body: line };
+  return { prefix: match[0], body: line.slice(match[0].length) };
+}
+
+function parseResultLineBody(body: string): ResultLineBodyInfo[] {
+  return body
+    .split(/\r?\n/)
+    .map((line) => line.trimEnd())
+    .filter((line) => line.trim().length > 0)
+    .map((text, index) => ({
+      index,
+      text,
+      isImportantField: RESULT_LINE_IMPORTANT_FIELD_RE.test(text),
+      isGenericField: RESULT_LINE_GENERIC_FIELD_RE.test(text),
+      isSectionHeader: RESULT_LINE_SECTION_HEADER_RE.test(text),
+      hasErrorText: RESULT_LINE_ERROR_RE.test(text),
+      hasPath: RESULT_LINE_PATH_RE.test(text),
+      hasId: RESULT_LINE_ID_RE.test(text),
+      hasNextAction: RESULT_LINE_NEXT_ACTION_RE.test(text),
+    }));
+}
+
+function takeRepresentativeIndexes(indexes: number[], count: number): number[] {
+  if (indexes.length <= count) return indexes;
+  const headCount = Math.ceil(count / 2);
+  const tailCount = Math.floor(count / 2);
+  return [...indexes.slice(0, headCount), ...indexes.slice(-tailCount)];
+}
+
+function appendUniqueIndexes(target: number[], indexes: number[], maxCount: number): void {
+  for (const index of indexes) {
+    if (target.includes(index)) continue;
+    target.push(index);
+    if (target.length >= maxCount) return;
+  }
+}
+
+function collectSectionValueIndexes(lines: ResultLineBodyInfo[]): number[] {
+  const indexes: number[] = [];
+  for (let i = 0; i < lines.length - 1; i += 1) {
+    if (!lines[i]?.isSectionHeader) continue;
+    indexes.push(lines[i + 1].index);
+  }
+  return indexes;
+}
+
+function buildResultLineOmissionMarker(omittedCount: number): string {
+  return `...[omitted ${omittedCount} line${omittedCount === 1 ? '' : 's'}]`;
+}
+
+function selectInformativeResultBodyIndexes(lines: ResultLineBodyInfo[]): number[] {
+  if (lines.length <= RESULT_LINE_MAX_RETAINED_LINES) return lines.map((line) => line.index);
+
+  const maxCount = Math.min(RESULT_LINE_MAX_RETAINED_LINES, lines.length);
+  const selected: number[] = [];
+  appendUniqueIndexes(selected, [0], maxCount);
+  appendUniqueIndexes(selected, lines.filter((line) => line.isImportantField).map((line) => line.index), maxCount);
+  appendUniqueIndexes(
+    selected,
+    lines
+      .filter((line) => line.hasErrorText || line.hasPath || line.hasNextAction)
+      .map((line) => line.index),
+    maxCount,
+  );
+  appendUniqueIndexes(selected, lines.filter((line) => line.isSectionHeader).map((line) => line.index), maxCount);
+  appendUniqueIndexes(selected, collectSectionValueIndexes(lines), maxCount);
+  appendUniqueIndexes(
+    selected,
+    takeRepresentativeIndexes(
+      lines.filter((line) => line.hasId).map((line) => line.index),
+      RESULT_LINE_ID_REPRESENTATIVE_COUNT,
+    ),
+    maxCount,
+  );
+  appendUniqueIndexes(selected, [lines.length - 1], maxCount);
+  appendUniqueIndexes(
+    selected,
+    takeRepresentativeIndexes(
+      lines
+        .filter((line) => !line.isGenericField && !line.isSectionHeader && !line.hasId)
+        .map((line) => line.index),
+      RESULT_LINE_REMAINDER_REPRESENTATIVE_COUNT,
+    ),
+    maxCount,
+  );
+  return selected.sort((a, b) => a - b);
+}
+
+function microcompactResultLine(line: string, maxChars: number): string {
+  const { prefix, body } = splitResultLine(line);
+  const parsedLines = parseResultLineBody(body);
+  if (parsedLines.length <= 1) return capResultLine(line, maxChars);
+
+  const shouldCompact =
+    parsedLines.length > RESULT_LINE_MICROCOMPACT_TRIGGER_LINES
+    || body.length > Math.min(maxChars, RESULT_LINE_MICROCOMPACT_TRIGGER_CHARS);
+
+  if (!shouldCompact) return capResultLine(line, maxChars);
+
+  const selectedIndexes = selectInformativeResultBodyIndexes(parsedLines);
+  if (selectedIndexes.length >= parsedLines.length) return capResultLine(line, maxChars);
+
+  const selectedIndexSet = new Set(selectedIndexes);
+  const retainedLines = parsedLines
+    .filter((lineInfo) => selectedIndexSet.has(lineInfo.index))
+    .map((lineInfo) => lineInfo.text);
+  const omittedCount = parsedLines.length - retainedLines.length;
+  const compactedBody = `${retainedLines.join('\n')}\n${buildResultLineOmissionMarker(omittedCount)}`;
+  return capResultLine(`${prefix}${compactedBody}`, maxChars);
 }
 
 /**
- * Build result lines for follow-up prompts with per-line length capping.
- * Each line is capped at `maxChars` characters to prevent oversized payloads
- * from crowding out reasoning and action blocks in follow-up prompts.
+ * Build result lines for follow-up prompts with microcompaction before
+ * the final hard cap so oversized payloads preserve continuation-critical
+ * details without crowding out reasoning and action blocks.
  */
 export function buildCappedResultLines(
   results: DiscordActionResult[],
   maxChars = 1500,
 ): string[] {
-  return buildAllResultLines(results).map((line) => capResultLine(line, maxChars));
+  return buildAllResultLines(results).map((line) => microcompactResultLine(line, maxChars));
 }
 
 /**

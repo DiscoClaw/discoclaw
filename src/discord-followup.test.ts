@@ -334,6 +334,144 @@ describe('auto-follow-up for query actions', () => {
     expect(secondPrompt).toContain('Done:');
   });
 
+  it('microcompacts large follow-up payloads while preserving ids and failure clues', async () => {
+    let callCount = 0;
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        callCount++;
+        if (callCount === 1) {
+          yield {
+            type: 'text_final',
+            text: [
+              'Review the latest results.',
+              '<discord-action>{"type":"channelList"}</discord-action>',
+              '<discord-action>{"type":"channelCreate","name":"ops-archive"}</discord-action>',
+            ].join('\n'),
+          } as any;
+        } else {
+          yield { type: 'text_final', text: 'I preserved the key ids and the actionable failure details.' } as any;
+        }
+      }),
+    } as any;
+
+    const executeSpy = vi.spyOn(discordActions, 'executeDiscordActions').mockResolvedValue([
+      {
+        ok: true,
+        summary: [
+          'Messages in #ops:',
+          '[alice] alpha update (id:1001)',
+          '[bob] beta update (id:1002)',
+          '[carol] gamma update (id:1003)',
+          '[dave] delta update (id:1004)',
+          '[erin] epsilon update (id:1005)',
+          '[frank] zeta update (id:1006)',
+          '[grace] eta update (id:1007)',
+          '[heidi] theta update (id:1008)',
+          '[ivan] iota update (id:1009)',
+        ].join('\n'),
+      },
+      {
+        ok: false,
+        error: [
+          'Forge sync failed while opening workspace state',
+          'Workspace: /home/davidmarsh/code/discoclaw/workspace/state.json',
+          'Last error: ENOENT: no such file or directory',
+          'Stack: at openWorkspaceState (src/discord/actions.ts:400:12)',
+          'Stack: at runForgeSync (src/discord/actions.ts:512:8)',
+          'Stack: at async executeForgeAction (src/discord/actions.ts:618:3)',
+          'Retry hint: recreate the state file, then rerun forge sync',
+          'Node: v24.0.0',
+          'cwd: /home/davidmarsh/code/discoclaw',
+        ].join('\n'),
+      },
+    ] as any);
+
+    try {
+      const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+      await handler(makeMsg());
+
+      expect(runtime.invoke).toHaveBeenCalledTimes(2);
+      const secondPrompt = runtime.invoke.mock.calls[1][0].prompt;
+      expect(secondPrompt).toContain('[Auto-follow-up]');
+      expect(secondPrompt).toContain('Done: Messages in #ops:');
+      expect(secondPrompt).toContain('(id:1001)');
+      expect(secondPrompt).toContain('(id:1002)');
+      expect(secondPrompt).toContain('(id:1008)');
+      expect(secondPrompt).toContain('(id:1009)');
+      expect(secondPrompt).toContain('...[omitted 5 lines]');
+      expect(secondPrompt).not.toContain('(id:1005)');
+      expect(secondPrompt).toContain('Failed: Forge sync failed while opening workspace state');
+      expect(secondPrompt).toContain('Workspace: /home/davidmarsh/code/discoclaw/workspace/state.json');
+      expect(secondPrompt).toContain('Last error: ENOENT: no such file or directory');
+      expect(secondPrompt).toContain('Retry hint: recreate the state file, then rerun forge sync');
+      expect(secondPrompt).toContain('cwd: /home/davidmarsh/code/discoclaw');
+      expect(secondPrompt).not.toContain('Stack: at runForgeSync');
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
+  it('keeps posted display output full while compacting the follow-up prompt', async () => {
+    let callCount = 0;
+    const runtime = {
+      invoke: vi.fn(async function* () {
+        callCount++;
+        if (callCount === 1) {
+          yield {
+            type: 'text_final',
+            text: [
+              'Here are the fetched messages.',
+              '<discord-action>{"type":"channelList"}</discord-action>',
+            ].join('\n'),
+          } as any;
+        } else {
+          yield { type: 'text_final', text: 'The compacted follow-up still had enough detail to continue.' } as any;
+        }
+      }),
+    } as any;
+
+    const executeSpy = vi.spyOn(discordActions, 'executeDiscordActions').mockResolvedValue([{
+      ok: true,
+      summary: [
+        'Messages in #ops:',
+        '[alice] alpha update (id:1001)',
+        '[bob] beta update (id:1002)',
+        '[carol] gamma update (id:1003)',
+        '[dave] delta update (id:1004)',
+        '[erin] epsilon update (id:1005)',
+        '[frank] zeta update (id:1006)',
+        '[grace] eta update (id:1007)',
+        '[heidi] theta update (id:1008)',
+        '[ivan] iota update (id:1009)',
+      ].join('\n'),
+    }] as any);
+
+    try {
+      const msg = makeMsg();
+      const handler = createMessageCreateHandler(baseParams(runtime), makeQueue());
+      await handler(msg);
+
+      expect(runtime.invoke).toHaveBeenCalledTimes(2);
+      const secondPrompt = runtime.invoke.mock.calls[1][0].prompt;
+      expect(secondPrompt).toContain('[Auto-follow-up]');
+      expect(secondPrompt).toContain('...[omitted 5 lines]');
+      expect(secondPrompt).not.toContain('(id:1005)');
+
+      const replyObj = await msg.reply.mock.results[0]?.value;
+      if (replyObj) {
+        const allEditContents = replyObj.edit.mock.calls.map((call: unknown[]) => contentFromEditArg(call[0]));
+        const postedContent = allEditContents[allEditContents.length - 1];
+        expect(postedContent).toContain('Done: Messages in #ops:');
+        expect(postedContent).toContain('(id:1001)');
+        expect(postedContent).toContain('(id:1005)');
+        expect(postedContent).toContain('(id:1009)');
+        expect(postedContent).not.toContain('...[omitted 5 lines]');
+      }
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   it('does NOT trigger follow-up for mutation-only actions', async () => {
     const runtime = {
       invoke: vi.fn(async function* () {

@@ -8,6 +8,7 @@ import {
   buildTieredDiscordActionsPromptSection,
   buildDisplayResultLines,
   buildAllResultLines,
+  buildCappedResultLines,
   withoutRequesterGatedActionFlags,
 } from './actions.js';
 import type { ActionCategoryFlags, DiscordActionResult } from './actions.js';
@@ -1072,6 +1073,133 @@ describe('buildAllResultLines', () => {
       'Done: Created #status',
       'Failed: Missing Permissions',
     ]);
+  });
+});
+
+describe('buildCappedResultLines', () => {
+  it('microcompacts multiline readMessages-style payloads to representative id lines', () => {
+    const results: DiscordActionResult[] = [{
+      ok: true,
+      summary: [
+        'Messages in #ops:',
+        '[alice] alpha update (id:1001)',
+        '[bob] beta update (id:1002)',
+        '[carol] gamma update (id:1003)',
+        '[dave] delta update (id:1004)',
+        '[erin] epsilon update (id:1005)',
+        '[frank] zeta update (id:1006)',
+        '[grace] eta update (id:1007)',
+        '[heidi] theta update (id:1008)',
+        '[ivan] iota update (id:1009)',
+      ].join('\n'),
+    }];
+
+    const [line] = buildCappedResultLines(results);
+    expect(line).toContain('Done: Messages in #ops:');
+    expect(line).toContain('(id:1001)');
+    expect(line).toContain('(id:1002)');
+    expect(line).toContain('(id:1008)');
+    expect(line).toContain('(id:1009)');
+    expect(line).toContain('...[omitted 5 lines]');
+    expect(line).not.toContain('(id:1005)');
+  });
+
+  it('keeps continuation-critical labeled fields in cronShow-style blocks', () => {
+    const results: DiscordActionResult[] = [{
+      ok: true,
+      summary: [
+        'Cron nightly-digest',
+        'Status: paused',
+        'Thread: digest-thread-1',
+        'Model: gpt-5.4',
+        'Next run: 2026-04-06T08:00:00.000Z',
+        'Last error: Failed to open /tmp/report.json',
+        'State: {"cursor":"abc123","offset":42}',
+        'Channel: #ops',
+        'Prompt: Summarize the previous run and post only anomalies.',
+        'Cadence: 0 8 * * *',
+      ].join('\n'),
+    }];
+
+    const [line] = buildCappedResultLines(results);
+    expect(line).toContain('Done: Cron nightly-digest');
+    expect(line).toContain('Status: paused');
+    expect(line).toContain('Thread: digest-thread-1');
+    expect(line).toContain('Model: gpt-5.4');
+    expect(line).toContain('Next run: 2026-04-06T08:00:00.000Z');
+    expect(line).toContain('Last error: Failed to open /tmp/report.json');
+    expect(line).toContain('State: {"cursor":"abc123","offset":42}');
+    expect(line).toContain('...[omitted 2 lines]');
+  });
+
+  it('keeps section headings and first values in memoryShow-style blocks', () => {
+    const results: DiscordActionResult[] = [{
+      ok: true,
+      summary: [
+        '**Durable memory:**',
+        '- prefers black coffee',
+        '- uses fish shell',
+        '**By entity:**',
+        '- [project] discoclaw migration',
+        '**Rolling summary:**',
+        'Working on prompt compaction.',
+        '**Short-term memory:**',
+        'Need task-42 and /tmp/report.md for the next reply.',
+        'Extra noisy note A that should be dropped.',
+        'Extra noisy note B that should be dropped.',
+        'Extra noisy note that should be dropped.',
+      ].join('\n'),
+    }];
+
+    const [line] = buildCappedResultLines(results);
+    expect(line).toContain('Done: **Durable memory:**');
+    expect(line).toContain('- prefers black coffee');
+    expect(line).toContain('**By entity:**');
+    expect(line).toContain('- [project] discoclaw migration');
+    expect(line).toContain('**Rolling summary:**');
+    expect(line).toContain('Working on prompt compaction.');
+    expect(line).toContain('**Short-term memory:**');
+    expect(line).toContain('Need task-42 and /tmp/report.md for the next reply.');
+    expect(line).toContain('...[omitted ');
+    expect(line).not.toContain('Extra noisy note B that should be dropped.');
+  });
+
+  it('keeps failed prefixes, paths, and actionable error lines in multiline failures', () => {
+    const results: DiscordActionResult[] = [{
+      ok: false,
+      error: [
+        'Forge sync failed while opening workspace state',
+        'Workspace: /home/davidmarsh/code/discoclaw/workspace/state.json',
+        'Last error: ENOENT: no such file or directory',
+        'Stack: at openWorkspaceState (src/discord/actions.ts:400:12)',
+        'Stack: at runForgeSync (src/discord/actions.ts:512:8)',
+        'Stack: at async executeForgeAction (src/discord/actions.ts:618:3)',
+        'Retry hint: recreate the state file, then rerun forge sync',
+        'Node: v24.0.0',
+        'cwd: /home/davidmarsh/code/discoclaw',
+      ].join('\n'),
+    }];
+
+    const [line] = buildCappedResultLines(results);
+    expect(line).toContain('Failed: Forge sync failed while opening workspace state');
+    expect(line).toContain('Workspace: /home/davidmarsh/code/discoclaw/workspace/state.json');
+    expect(line).toContain('Last error: ENOENT: no such file or directory');
+    expect(line).toContain('Retry hint: recreate the state file, then rerun forge sync');
+    expect(line).toContain('cwd: /home/davidmarsh/code/discoclaw');
+    expect(line).toContain('...[omitted ');
+    expect(line).not.toContain('Stack: at runForgeSync');
+  });
+
+  it('falls back to the final hard cap when retained text is still too long', () => {
+    const results: DiscordActionResult[] = [{
+      ok: true,
+      summary: `Downloaded attachment to /tmp/${'x'.repeat(120)}`,
+    }];
+
+    const [line] = buildCappedResultLines(results, 60);
+    expect(line.length).toBeLessThanOrEqual(60);
+    expect(line).toContain('Done: Downloaded attachment');
+    expect(line.endsWith('...[truncated]')).toBe(true);
   });
 });
 

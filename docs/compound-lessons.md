@@ -174,9 +174,9 @@ Status: active
 
 ### 2026-03-16 - Bound action-result payloads and surface model truncation explicitly
 Tags: #discord #prompting #runtime #workflow
-Lesson: Two reusable patterns for follow-up prompt reliability: (1) action-result payloads (e.g. `readMessages`, `cronShow`) must be bounded/truncated before they are injected into follow-up prompts — unbounded output crowds out the reasoning and action blocks the model needs to produce a useful next turn; (2) model response truncation caused by output-token limits must be surfaced as explicit runtime metadata (e.g. a `finish_reason` or `truncated` flag) rather than inferred from stream termination alone, so the orchestrator can detect incomplete responses and retry or inform the user instead of silently forwarding a cut-off answer.
-Source: task/chat context - oversized `readMessages`/`cronShow` action results caused follow-up prompt failures; silently truncated model responses were mistaken for complete answers
-Applied: docs/compound-lessons.md
+Lesson: Two reusable patterns for follow-up prompt reliability: (1) action-result payloads (e.g. `readMessages`, `cronShow`) must be bounded via microcompaction before they are injected into follow-up prompts, not pasted back as full raw payloads. Keep the continuation-critical details already present in current summaries and errors — identifiers, paths, labeled status/context fields, section headers with first values, actionable failures, and retry/next-action clues — while omitting repetitive bulk text that does not help the next turn; (2) model response truncation caused by output-token limits must be surfaced as explicit runtime metadata (e.g. a `finish_reason` or `truncated` flag) rather than inferred from stream termination alone, so the orchestrator can detect incomplete responses and retry or inform the user instead of silently forwarding a cut-off answer.
+Source: task/chat context - oversized `readMessages`/`cronShow` action results caused follow-up prompt failures; later follow-up-payload refinements showed the bounded path must preserve representative IDs, paths, labeled fields, failure context, and next-step clues instead of only truncating for size. Dedup search on 2026-04-05 found this was the same durable lesson rather than a materially distinct new one, so the before-merge promotion decision for the refinement was: updated existing lesson
+Applied: `docs/discord-actions.md`, `docs/compound-lessons.md`
 Status: active
 
 ### 2026-03-16 - Design self-improvement pipelines as a frozen-input data pipeline before wiring orchestration
@@ -276,4 +276,3 @@ Lesson: When adding an observability layer (traces, metrics), wire the store int
 Source: observability layer implementation — TraceStore was implemented and wired into the message flow first, then extended to reaction handler, cron executor, and defer paths; dashboard API endpoints for `/api/metrics` and `/api/traces` were added after all flows were instrumented
 Applied: `src/observability/trace-store.ts`, `src/observability/metrics.ts`, `src/observability/trace-utils.ts`, `src/discord/message-coordinator.ts`, `src/discord/reaction-handler.ts`, `src/discord/deferred-runner.ts`, `src/cron/executor.ts`, `src/dashboard/api/traces.ts`, `src/dashboard/api/metrics.ts`
 Status: active
-

@@ -10,7 +10,7 @@ import { shouldCanvasPromptBeSurfaced } from '../canvas/canvas-action.js';
 import { discordSessionKey } from './session-key.js';
 import { ensureIndexedDiscordChannelContext, resolveDiscordChannelContext } from './channel-context.js';
 import { fetchMessageHistory } from './message-history.js';
-import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildAllResultLines, appendActionResults } from './actions.js';
+import { parseDiscordActions, executeDiscordActions, buildTieredDiscordActionsPromptSection, buildCappedResultLines, appendActionResults } from './actions.js';
 import type { ActionCategoryFlags, DiscordActionRequest, DiscordActionResult } from './actions.js';
 import { shouldTriggerFollowUp, actionDedupeKey, isDuplicateAction, buildActionHistorySummary } from './action-categories.js';
 import type { ActionHistoryEntry } from './action-categories.js';
@@ -1255,7 +1255,7 @@ function createReactionHandler(
           let nextFollowUp: PendingActionFollowUp | null = null;
           if (shouldQueueFollowUp) {
             const token = buildFollowUpToken();
-            const followUpLines = buildAllResultLines(actionResults);
+            const followUpLines = buildCappedResultLines(actionResults);
             const failureRetryPlaceholder = buildFailureRetryPlaceholder(parsedActions, actionResults);
             const followUpSuffix = failureRetryPlaceholder
               ? `One or more actions failed. If you retry, explicitly tell the user what failed and whether the retry succeeded or failed. Do not announce success before the action confirms it.`
