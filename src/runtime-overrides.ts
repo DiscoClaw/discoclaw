@@ -3,13 +3,12 @@ import path from 'node:path';
 import { parseRuntimeNameForPlacement } from './runtime/runtime-path-contract.js';
 
 export type RuntimeOverrides = {
-  ttsVoice?: string;
   voiceRuntime?: string;
   fastRuntime?: string;
 };
 
 const OVERRIDES_FILENAME = 'runtime-overrides.json';
-const KNOWN_OVERRIDE_KEYS = ['ttsVoice', 'voiceRuntime', 'fastRuntime'] as const;
+const KNOWN_OVERRIDE_KEYS = ['voiceRuntime', 'fastRuntime'] as const;
 
 export function normalizeRuntimeOverrides(
   overrides: RuntimeOverrides,
@@ -82,7 +81,6 @@ export async function loadOverrides(
   const obj = parsed as Record<string, unknown>;
   const overrides: RuntimeOverrides = {};
 
-  if (typeof obj['ttsVoice'] === 'string') overrides.ttsVoice = obj['ttsVoice'];
   if (typeof obj['voiceRuntime'] === 'string') overrides.voiceRuntime = obj['voiceRuntime'];
   if (typeof obj['fastRuntime'] === 'string') overrides.fastRuntime = obj['fastRuntime'];
   return overrides;
@@ -98,6 +96,7 @@ export async function saveOverrides(filePath: string, overrides: RuntimeOverride
   const tmpPath = `${filePath}.tmp.${process.pid}`;
   try {
     const preserved = await readExistingRawObject(filePath);
+    delete preserved['ttsVoice'];
     for (const key of KNOWN_OVERRIDE_KEYS) {
       delete preserved[key];
     }

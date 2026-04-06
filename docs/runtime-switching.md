@@ -135,7 +135,7 @@ Do not print the full `.env` into Discord, terminal transcripts, or audit logs u
 
 Keep the files separate:
 - `models.json` stores model strings per role.
-- `runtime-overrides.json` stores runtime-only overlays such as `voiceRuntime`, `fastRuntime`, and `ttsVoice`.
+- `runtime-overrides.json` stores runtime-only overlays such as `voiceRuntime` and `fastRuntime`.
 - There is no `chatRuntime` key because chat runtime swaps do not persist.
 
 On first run, `models.json` is scaffolded from the startup defaults that instance booted with.

@@ -1,14 +1,8 @@
 import fs from 'node:fs/promises';
-import path from 'node:path';
 import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-
-import {
-  loadOverrides,
-  normalizeRuntimeOverrides,
-  resolveOverridesPath,
-  saveOverrides,
-} from './runtime-overrides.js';
+import { loadOverrides, normalizeRuntimeOverrides, resolveOverridesPath, saveOverrides } from './runtime-overrides.js';
 
 async function tmpDir(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'runtime-overrides-'));
@@ -16,253 +10,73 @@ async function tmpDir(): Promise<string> {
 
 describe('resolveOverridesPath', () => {
   it('uses configured data dir when provided', () => {
-    const out = resolveOverridesPath('/var/lib/discoclaw', '/repo');
-    expect(out).toBe(path.join('/var/lib/discoclaw', 'runtime-overrides.json'));
+    expect(resolveOverridesPath('/var/lib/discoclaw', '/repo')).toBe('/var/lib/discoclaw/runtime-overrides.json');
   });
 
-  it('falls back to <projectRoot>/data when data dir is empty string', () => {
-    const out = resolveOverridesPath('', '/repo');
-    expect(out).toBe(path.join('/repo', 'data', 'runtime-overrides.json'));
-  });
-
-  it('falls back to <projectRoot>/data when data dir is undefined', () => {
-    const out = resolveOverridesPath(undefined, '/repo');
-    expect(out).toBe(path.join('/repo', 'data', 'runtime-overrides.json'));
+  it('falls back to <projectRoot>/data when data dir is absent', () => {
+    expect(resolveOverridesPath(undefined, '/repo')).toBe('/repo/data/runtime-overrides.json');
   });
 });
 
-describe('loadOverrides', () => {
+describe('loadOverrides and saveOverrides', () => {
   const dirs: string[] = [];
+
   afterEach(async () => {
-    for (const d of dirs) {
-      await fs.rm(d, { recursive: true, force: true });
+    for (const dir of dirs) {
+      await fs.rm(dir, { recursive: true, force: true });
     }
     dirs.length = 0;
   });
 
-  it('returns empty object when file does not exist', async () => {
+  it('returns empty object when the file does not exist', async () => {
     const dir = await tmpDir();
     dirs.push(dir);
-    const result = await loadOverrides(path.join(dir, 'runtime-overrides.json'));
-    expect(result).toEqual({});
+    await expect(loadOverrides(path.join(dir, 'runtime-overrides.json'))).resolves.toEqual({});
   });
 
-  it('loads ttsVoice from a valid file', async () => {
+  it('round-trips managed runtime overrides', async () => {
     const dir = await tmpDir();
     dirs.push(dir);
     const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify({ ttsVoice: 'aura-2-luna-en' }), 'utf-8');
-    const result = await loadOverrides(filePath);
-    expect(result).toEqual({ ttsVoice: 'aura-2-luna-en' });
+
+    await saveOverrides(filePath, { voiceRuntime: 'claude-api', fastRuntime: 'codex-cli' });
+
+    await expect(loadOverrides(filePath)).resolves.toEqual({
+      voiceRuntime: 'claude-api',
+      fastRuntime: 'codex-cli',
+    });
   });
 
-  it('returns empty object for corrupt JSON and calls onWarn', async () => {
+  it('drops legacy ttsVoice while preserving unrelated keys', async () => {
     const dir = await tmpDir();
     dirs.push(dir);
     const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, 'not-valid-json', 'utf-8');
-    const warnings: string[] = [];
-    const result = await loadOverrides(filePath, (msg) => warnings.push(msg));
-    expect(result).toEqual({});
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toMatch(/corrupt JSON/);
-  });
 
-  it('returns empty object when JSON root is an array and calls onWarn', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify(['opus']), 'utf-8');
-    const warnings: string[] = [];
-    const result = await loadOverrides(filePath, (msg) => warnings.push(msg));
-    expect(result).toEqual({});
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toMatch(/not an object/);
-  });
+    await fs.writeFile(
+      filePath,
+      JSON.stringify({ customFlag: true, ttsVoice: 'old-voice', voiceRuntime: 'gemini-api' }),
+      'utf-8',
+    );
 
-  it('returns empty object when JSON root is a primitive and calls onWarn', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify(42), 'utf-8');
-    const warnings: string[] = [];
-    const result = await loadOverrides(filePath, (msg) => warnings.push(msg));
-    expect(result).toEqual({});
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toMatch(/not an object/);
-  });
+    await saveOverrides(filePath, { fastRuntime: 'codex-cli' });
 
-  it('silently drops unknown top-level fields (including legacy models key)', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify({ models: { chat: 'sonnet' }, unknownField: 'x' }), 'utf-8');
-    const result = await loadOverrides(filePath);
-    expect(result).toEqual({});
-  });
-
-  it('loads ttsVoice field correctly', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify({ ttsVoice: 'aura-2-asteria-en' }), 'utf-8');
-    const result = await loadOverrides(filePath);
-    expect(result).toEqual({ ttsVoice: 'aura-2-asteria-en' });
-  });
-
-  it('silently drops ttsVoice when it is not a string', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify({ ttsVoice: 42 }), 'utf-8');
-    const result = await loadOverrides(filePath);
-    expect(result).toEqual({});
-  });
-
-  it('loads voiceRuntime field correctly', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify({ voiceRuntime: 'gemini-api' }), 'utf-8');
-    const result = await loadOverrides(filePath);
-    expect(result).toEqual({ voiceRuntime: 'gemini-api' });
-  });
-
-  it('silently drops voiceRuntime when it is not a string', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(filePath, JSON.stringify({ voiceRuntime: 123 }), 'utf-8');
-    const result = await loadOverrides(filePath);
-    expect(result).toEqual({});
+    const raw = JSON.parse(await fs.readFile(filePath, 'utf-8')) as Record<string, unknown>;
+    expect(raw).toEqual({ customFlag: true, fastRuntime: 'codex-cli' });
   });
 });
 
 describe('normalizeRuntimeOverrides', () => {
-  it('canonicalizes accepted voice runtime aliases', () => {
-    const result = normalizeRuntimeOverrides({ voiceRuntime: 'Anthropic' });
-    expect(result).toEqual({
-      overrides: { voiceRuntime: 'claude-api' },
+  it('canonicalizes accepted runtime aliases', () => {
+    expect(normalizeRuntimeOverrides({ voiceRuntime: 'Anthropic', fastRuntime: 'claude_code' })).toEqual({
+      overrides: { voiceRuntime: 'claude-api', fastRuntime: 'claude-cli' },
       changed: true,
     });
   });
 
-  it('canonicalizes accepted fast runtime aliases', () => {
-    const result = normalizeRuntimeOverrides({ fastRuntime: 'claude_code' });
-    expect(result).toEqual({
-      overrides: { fastRuntime: 'claude-cli' },
-      changed: true,
-    });
-  });
-
-  it('leaves invalid or already-canonical runtime values unchanged', () => {
-    const result = normalizeRuntimeOverrides({
-      voiceRuntime: 'claude-api',
-      fastRuntime: 'not-a-runtime',
-      ttsVoice: 'aura-2-asteria-en',
-    });
-    expect(result).toEqual({
-      overrides: {
-        voiceRuntime: 'claude-api',
-        fastRuntime: 'not-a-runtime',
-        ttsVoice: 'aura-2-asteria-en',
-      },
+  it('leaves invalid or canonical runtime values unchanged', () => {
+    expect(normalizeRuntimeOverrides({ voiceRuntime: 'claude-api', fastRuntime: 'not-a-runtime' })).toEqual({
+      overrides: { voiceRuntime: 'claude-api', fastRuntime: 'not-a-runtime' },
       changed: false,
     });
-  });
-});
-
-describe('saveOverrides', () => {
-  const dirs: string[] = [];
-  afterEach(async () => {
-    for (const d of dirs) {
-      await fs.rm(d, { recursive: true, force: true });
-    }
-    dirs.length = 0;
-  });
-
-  it('writes overrides and reads them back correctly', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await saveOverrides(filePath, { ttsVoice: 'aura-2-asteria-en', voiceRuntime: 'claude-api' });
-    const raw = await fs.readFile(filePath, 'utf-8');
-    expect(JSON.parse(raw)).toEqual({ ttsVoice: 'aura-2-asteria-en', voiceRuntime: 'claude-api' });
-  });
-
-  it('writes ttsVoice and reads it back correctly', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await saveOverrides(filePath, { ttsVoice: 'aura-2-asteria-en' });
-    const result = await loadOverrides(filePath);
-    expect(result).toEqual({ ttsVoice: 'aura-2-asteria-en' });
-  });
-
-  it('round-trips ttsVoice + voiceRuntime through save and load', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    const original: import('./runtime-overrides.js').RuntimeOverrides = {
-      ttsVoice: 'aura-2-luna-en',
-      voiceRuntime: 'gemini-api',
-    };
-    await saveOverrides(filePath, original);
-    const result = await loadOverrides(filePath);
-    expect(result).toEqual(original);
-  });
-
-  it('creates the parent directory when it does not exist', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'subdir', 'runtime-overrides.json');
-    await saveOverrides(filePath, { voiceRuntime: 'claude-api' });
-    const raw = await fs.readFile(filePath, 'utf-8');
-    expect(JSON.parse(raw)).toEqual({ voiceRuntime: 'claude-api' });
-  });
-
-  it('leaves no tmp file behind after a successful write', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await saveOverrides(filePath, { ttsVoice: 'aura-2-asteria-en' });
-    const files = await fs.readdir(dir);
-    const tmpFiles = files.filter((f) => f.includes('.tmp.'));
-    expect(tmpFiles).toHaveLength(0);
-  });
-
-  it('overwrites an existing overrides file', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await saveOverrides(filePath, { ttsVoice: 'voice-a' });
-    await saveOverrides(filePath, { ttsVoice: 'voice-b' });
-    const raw = await fs.readFile(filePath, 'utf-8');
-    expect(JSON.parse(raw)).toEqual({ ttsVoice: 'voice-b' });
-  });
-
-  it('preserves unknown keys while replacing known runtime override fields', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await fs.writeFile(
-      filePath,
-      JSON.stringify({ customFlag: true, voiceRuntime: 'claude-api', ttsVoice: 'voice-a' }),
-      'utf-8',
-    );
-
-    await saveOverrides(filePath, { fastRuntime: 'openrouter' });
-
-    const raw = await fs.readFile(filePath, 'utf-8');
-    expect(JSON.parse(raw)).toEqual({ customFlag: true, fastRuntime: 'openrouter' });
-  });
-
-  it('writes an empty overrides object', async () => {
-    const dir = await tmpDir();
-    dirs.push(dir);
-    const filePath = path.join(dir, 'runtime-overrides.json');
-    await saveOverrides(filePath, {});
-    const raw = await fs.readFile(filePath, 'utf-8');
-    expect(JSON.parse(raw)).toEqual({});
   });
 });

@@ -200,19 +200,15 @@ describe('init wizard helpers', () => {
         DISCORD_TOKEN: 'a.b.c',
         DISCORD_ALLOW_USER_IDS: '1000000000000000001',
         DISCOCLAW_VOICE_ENABLED: '1',
-        DEEPGRAM_API_KEY: 'dg-key',
+        GEMINI_API_KEY: 'gm-key',
         DISCOCLAW_DISCORD_ACTIONS_VOICE: '1',
-        DISCOCLAW_STT_PROVIDER: 'deepgram',
-        DISCOCLAW_TTS_PROVIDER: 'deepgram',
       },
       new Date('2026-02-26T00:00:00.000Z'),
     );
 
     expect(content).toContain('# VOICE');
     expect(content).toContain('DISCOCLAW_VOICE_ENABLED=1');
-    expect(content).toContain('DEEPGRAM_API_KEY=dg-key');
-    expect(content).toContain('DISCOCLAW_STT_PROVIDER=deepgram');
-    expect(content).toContain('DISCOCLAW_TTS_PROVIDER=deepgram');
+    expect(content).toContain('GEMINI_API_KEY=gm-key');
   });
 
   it('omits voice section when no voice vars are provided', () => {
@@ -700,7 +696,7 @@ describe('runInitWizard', () => {
       '5000000000000000001', // DISCORD_GUILD_ID
       '', // provider selection -> default (Claude)
       'y', // enable voice -> yes
-      'dg-test-key', // Deepgram API key
+      'gemini-test-key', // Gemini API key
     ];
 
     process.chdir(tmpDir);
@@ -721,9 +717,7 @@ describe('runInitWizard', () => {
     const newEnv = fs.readFileSync(path.join(tmpDir, '.env'), 'utf8');
     expect(newEnv).toContain('# VOICE');
     expect(newEnv).toContain('DISCOCLAW_VOICE_ENABLED=1');
-    expect(newEnv).toContain('DEEPGRAM_API_KEY=dg-test-key');
-    expect(newEnv).toContain('DISCOCLAW_STT_PROVIDER=deepgram');
-    expect(newEnv).toContain('DISCOCLAW_TTS_PROVIDER=deepgram');
+    expect(newEnv).toContain('GEMINI_API_KEY=gemini-test-key');
     expect(newEnv).toContain('DISCOCLAW_DISCORD_ACTIONS_VOICE=1');
   });
 });

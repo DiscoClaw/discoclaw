@@ -23,7 +23,7 @@ export function handleHelpCommand(): string {
     '- `!update` — check for or apply code updates; `!update help` for details',
     '- `!restart` — restart the discoclaw service; `!restart help` for details',
     '- `!stop` — abort all active AI streams and cancel any running forge',
-    '- `!voice status` — show voice subsystem status (STT/TTS providers, connections)',
+    '- `!voice status` — show Gemini Live voice status and active connections',
     '- `!help` — this message',
   ].join('\n');
 }

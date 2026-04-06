@@ -95,7 +95,7 @@ export const KNOWN_RUNTIMES = new Set([
   'openai',
   'openrouter',
 ]);
-const KNOWN_RUNTIME_OVERRIDE_KEYS = new Set(['ttsVoice', 'voiceRuntime', 'fastRuntime']);
+const KNOWN_RUNTIME_OVERRIDE_KEYS = new Set(['voiceRuntime', 'fastRuntime']);
 
 const DEPRECATED_ENV_VARS: Record<
   string,
@@ -241,7 +241,6 @@ async function readRuntimeOverridesFileState(filePath: string): Promise<RuntimeO
     }
     const obj = parsed as Record<string, unknown>;
     const overrides: RuntimeOverrides = {};
-    if (typeof obj['ttsVoice'] === 'string') overrides.ttsVoice = obj['ttsVoice'];
     if (typeof obj['voiceRuntime'] === 'string') overrides.voiceRuntime = obj['voiceRuntime'];
     if (typeof obj['fastRuntime'] === 'string') overrides.fastRuntime = obj['fastRuntime'];
     const unknownKeys = Object.keys(obj).filter((key) => !KNOWN_RUNTIME_OVERRIDE_KEYS.has(key));
@@ -716,30 +715,12 @@ export function detectMissingSecrets(ctx: DoctorContext): DoctorFinding[] {
 
   const voiceEnabled = parseBoolean(ctx.env.DISCOCLAW_VOICE_ENABLED, false);
   if (voiceEnabled) {
-    const sttProvider = trimValue(ctx.env.DISCOCLAW_STT_PROVIDER) ?? 'deepgram';
-    const ttsProvider = trimValue(ctx.env.DISCOCLAW_TTS_PROVIDER) ?? 'cartesia';
-    const voiceSecretTargets: Array<{ label: string; provider: string; secretKey: string }> = [];
-    if (sttProvider === 'deepgram') {
-      voiceSecretTargets.push({ label: 'DISCOCLAW_STT_PROVIDER', provider: sttProvider, secretKey: 'DEEPGRAM_API_KEY' });
-    } else if (sttProvider === 'openai') {
-      voiceSecretTargets.push({ label: 'DISCOCLAW_STT_PROVIDER', provider: sttProvider, secretKey: 'OPENAI_API_KEY' });
-    }
-
-    if (ttsProvider === 'cartesia') {
-      voiceSecretTargets.push({ label: 'DISCOCLAW_TTS_PROVIDER', provider: ttsProvider, secretKey: 'CARTESIA_API_KEY' });
-    } else if (ttsProvider === 'deepgram') {
-      voiceSecretTargets.push({ label: 'DISCOCLAW_TTS_PROVIDER', provider: ttsProvider, secretKey: 'DEEPGRAM_API_KEY' });
-    } else if (ttsProvider === 'openai') {
-      voiceSecretTargets.push({ label: 'DISCOCLAW_TTS_PROVIDER', provider: ttsProvider, secretKey: 'OPENAI_API_KEY' });
-    }
-
-    for (const target of voiceSecretTargets) {
-      if (hasSecret(ctx.env, target.secretKey)) continue;
+    if (!hasSecret(ctx.env, 'GEMINI_API_KEY')) {
       findings.push({
-        id: `missing-secret:${target.label}:${target.secretKey}`,
+        id: 'missing-secret:DISCOCLAW_VOICE_ENABLED:GEMINI_API_KEY',
         severity: 'error',
-        message: `${target.label}=${target.provider} requires ${target.secretKey}, but it is not set.`,
-        recommendation: `Set ${target.secretKey} or switch ${target.label} to a provider that is already configured.`,
+        message: 'DISCOCLAW_VOICE_ENABLED=1 requires GEMINI_API_KEY, but it is not set.',
+        recommendation: 'Set GEMINI_API_KEY or disable voice on this install.',
         autoFixable: false,
       });
     }

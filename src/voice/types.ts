@@ -6,11 +6,11 @@
  */
 
 // ---------------------------------------------------------------------------
-// VoicePipelineMode — pipeline variant selector
+// VoicePipelineMode — voice runtime selector
 // ---------------------------------------------------------------------------
 
-/** Voice pipeline mode: separate STT/AI/TTS stages or bidirectional Gemini Live WebSocket. */
-export type VoicePipelineMode = 'pipeline' | 'gemini-live';
+/** Voice runtime mode: Gemini Live is the only supported voice stack. */
+export type VoicePipelineMode = 'gemini-live';
 
 // ---------------------------------------------------------------------------
 // VoiceConfig — focused subset of DiscoclawConfig for the voice subsystem
@@ -18,15 +18,7 @@ export type VoicePipelineMode = 'pipeline' | 'gemini-live';
 
 export type VoiceConfig = {
   enabled: boolean;
-  sttProvider: 'deepgram' | 'whisper' | 'openai';
-  ttsProvider: 'cartesia' | 'deepgram' | 'kokoro' | 'openai';
   homeChannel?: string;
-  deepgramApiKey?: string;
-  deepgramSttModel?: string;
-  deepgramTtsVoice?: string;
-  deepgramTtsSpeed?: number;
-  cartesiaApiKey?: string;
-  openaiApiKey?: string;
 };
 
 // ---------------------------------------------------------------------------

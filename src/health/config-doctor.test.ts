@@ -303,8 +303,6 @@ describe('detectMissingSecrets', () => {
     await writeEnv(cwd, [
       'PRIMARY_RUNTIME=openrouter',
       'DISCOCLAW_VOICE_ENABLED=1',
-      'DISCOCLAW_STT_PROVIDER=deepgram',
-      'DISCOCLAW_TTS_PROVIDER=cartesia',
       'DISCOCLAW_COLD_STORAGE_ENABLED=1',
       'DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN=1',
       'IMAGEGEN_DEFAULT_MODEL=imagen-4.0-generate-001',
@@ -319,8 +317,7 @@ describe('detectMissingSecrets', () => {
     expect(findings.map((finding) => finding.id)).toEqual([
       'missing-secret:PRIMARY_RUNTIME:OPENROUTER_API_KEY',
       'missing-secret:runtime-overrides.voiceRuntime:OPENAI_API_KEY',
-      'missing-secret:DISCOCLAW_STT_PROVIDER:DEEPGRAM_API_KEY',
-      'missing-secret:DISCOCLAW_TTS_PROVIDER:CARTESIA_API_KEY',
+      'missing-secret:DISCOCLAW_VOICE_ENABLED:GEMINI_API_KEY',
       'missing-secret:DISCOCLAW_COLD_STORAGE_ENABLED:COLD_STORAGE_API_KEY-or-OPENAI_API_KEY',
       'missing-secret:DISCOCLAW_DISCORD_ACTIONS_IMAGEGEN:OPENAI_API_KEY-or-IMAGEGEN_GEMINI_API_KEY',
       'missing-secret:IMAGEGEN_DEFAULT_MODEL:IMAGEGEN_GEMINI_API_KEY',

@@ -6,8 +6,8 @@ Completeness pass for this index was cross-checked against:
 
 - `package.json`
 - `.context/runtime.md`
-- `src/voice/tts-factory.ts`
-- `src/voice/stt-factory.ts`
+- `src/voice/audio-pipeline.ts`
+- `src/voice/providers/gemini-live-provider.ts`
 - `src/cold-storage/embeddings.ts`
 - `src/cold-storage/openai-compat.ts`
 - `src/discord/actions-imagegen.ts`
@@ -24,8 +24,8 @@ Completeness pass for this index was cross-checked against:
 | Provider | What DiscoClaw uses | Official docs |
 |----------|----------------------|---------------|
 | Anthropic | Claude model families via `src/runtime/anthropic-rest.ts` and Claude Code CLI runtime | Models overview: <https://docs.anthropic.com/en/docs/about-claude/models/overview><br>Messages API: <https://platform.claude.com/docs/en/api/messages><br>Claude Code docs: <https://code.claude.com/docs/en/overview> |
-| OpenAI | OpenAI-compatible runtime, Codex runtime docs, OpenAI voice, embeddings, and image generation | Model IDs: <https://developers.openai.com/api/model-ids/><br>API reference overview: <https://platform.openai.com/docs/api-reference><br>Codex docs: <https://developers.openai.com/codex/><br>Codex app-server API: <https://developers.openai.com/codex/app-server> |
-| Google | Gemini API runtime and Gemini/Imagen image generation | Gemini models: <https://ai.google.dev/models/gemini><br>Gemini API docs: <https://ai.google.dev/gemini-api/docs> |
+| OpenAI | OpenAI-compatible runtime, Codex runtime docs, embeddings, and image generation | Model IDs: <https://developers.openai.com/api/model-ids/><br>API reference overview: <https://platform.openai.com/docs/api-reference><br>Codex docs: <https://developers.openai.com/codex/><br>Codex app-server API: <https://developers.openai.com/codex/app-server> |
+| Google | Gemini API runtime, Gemini Live voice, and Gemini/Imagen image generation | Gemini models: <https://ai.google.dev/models/gemini><br>Gemini API docs: <https://ai.google.dev/gemini-api/docs><br>Gemini Live API: <https://ai.google.dev/gemini-api/docs/live> |
 | OpenRouter | OpenRouter runtime through `src/runtime/openai-compat.ts` | Model list: <https://openrouter.ai/models><br>API docs: <https://openrouter.ai/docs/api/reference/overview> |
 
 ## Discord
@@ -53,11 +53,8 @@ Completeness pass for this index was cross-checked against:
 
 | Provider | Used in DiscoClaw | Official docs |
 |----------|-------------------|---------------|
-| Deepgram STT | `src/voice/stt-deepgram.ts` with Nova-3 streaming (`nova-3-general`) | STT API overview: <https://developers.deepgram.com/docs/speech-to-text><br>Streaming API: <https://developers.deepgram.com/reference/speech-to-text/listen-streaming><br>Nova-3 models: <https://developers.deepgram.com/docs/models-languages-overview> |
-| Deepgram TTS | `src/voice/tts-deepgram.ts` with Aura (`aura-2-asteria-en`) | TTS API overview: <https://developers.deepgram.com/docs/text-to-speech><br>Speak endpoint: <https://developers.deepgram.com/reference/text-to-speech/speak-streaming><br>Aura voices/models: <https://developers.deepgram.com/docs/tts-models> |
-| Cartesia TTS | `src/voice/tts-cartesia.ts` with Sonic-3 over WebSocket | API docs: <https://docs.cartesia.ai/api-reference><br>TTS WebSocket: <https://docs.cartesia.ai/api-reference/tts/websocket> |
-| OpenAI TTS | `src/voice/tts-openai.ts` (`/v1/audio/speech`, default `tts-1`) | Audio speech API reference: <https://platform.openai.com/docs/api-reference/audio/createSpeech> |
-| OpenAI STT | `src/voice/stt-openai.ts` (`/v1/audio/transcriptions`, `whisper-1`) | Audio transcription API reference: <https://platform.openai.com/docs/api-reference/audio/createTranscription> |
+| Gemini Live | `src/voice/audio-pipeline.ts` and the Gemini Live provider handle speech recognition, reasoning, and speech synthesis in one session | Live API overview: <https://ai.google.dev/gemini-api/docs/live><br>Realtime guide: <https://ai.google.dev/gemini-api/docs/live-guide> |
+| Anthropic Messages API (optional voice runtime) | `!models set voice claude-api` can switch voice response generation to direct Anthropic API calls while Discord audio transport stays on Gemini Live | API overview: <https://docs.anthropic.com/en/api/messages> |
 
 ## Image Generation
 

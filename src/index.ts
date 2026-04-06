@@ -1285,10 +1285,6 @@ if (currentOverridesState.fastRuntime) {
     );
   }
 }
-if (currentOverridesState.ttsVoice) {
-  log.info({ ttsVoice: currentOverridesState.ttsVoice }, 'runtime-overrides: ttsVoice override will be applied');
-}
-
 // Track which roles have active file-backed overrides (used by !models show).
 // Only mark as override if the stored value differs from env defaults.
 const overrideSources = detectOverrideSources(currentModelConfig, envModelDefaults);
@@ -1455,8 +1451,6 @@ const botParams = {
   spawnCtx: undefined as SpawnContext | undefined,
   voiceCtx: undefined as import('./discord/actions-voice.js').VoiceContext | undefined,
   voiceStatusCtx: undefined as import('./discord/actions-voice.js').VoiceContext | undefined,
-  setTtsVoice: undefined as ((voice: string) => Promise<number>) | undefined,
-  getTtsVoice: undefined as (() => string | undefined) | undefined,
   configCtx: undefined as import('./discord/actions-config.js').ConfigContext | undefined,
   deferOpts: undefined as ConfigureDeferredSchedulerOpts | undefined,
   messageHistoryBudget,
@@ -1519,13 +1513,8 @@ const botParams = {
   voiceEnabled: cfg.voiceEnabled,
   voiceAutoJoin: cfg.voiceAutoJoin,
   voiceModelCtx: voiceModelRef,
-  voiceSttProvider: cfg.voiceSttProvider,
-  voiceTtsProvider: cfg.voiceTtsProvider,
   voiceHomeChannel: cfg.voiceHomeChannel,
-  deepgramApiKey: cfg.deepgramApiKey,
-  deepgramSttModel: cfg.deepgramSttModel,
-  deepgramTtsVoice: cfg.deepgramTtsVoice,
-  cartesiaApiKey: cfg.cartesiaApiKey,
+  geminiApiKey: cfg.geminiApiKey,
   botStatus: cfg.botStatus,
   botActivity: cfg.botActivity,
   botActivityType: cfg.botActivityType,
@@ -2392,19 +2381,10 @@ if (taskCtx) {
       log,
       voiceConfig: {
         enabled: cfg.voiceEnabled,
-        sttProvider: cfg.voiceSttProvider,
-        ttsProvider: cfg.voiceTtsProvider,
         homeChannel: cfg.voiceHomeChannel,
-        deepgramApiKey: cfg.deepgramApiKey,
-        deepgramSttModel: cfg.deepgramSttModel,
-        deepgramTtsVoice: overrides.ttsVoice ?? cfg.deepgramTtsVoice,
-        deepgramTtsSpeed: cfg.deepgramTtsSpeed,
-        cartesiaApiKey: cfg.cartesiaApiKey,
-        openaiApiKey: cfg.openaiApiKey,
       },
       allowedUserIds: allowUserIds,
       createDecoder: opusDecoderFactory,
-      voiceProvider: cfg.voicePipelineProvider,
       geminiApiKey: cfg.geminiApiKey,
       enabledTools: runtimeTools,
       invokeAi: voiceInvokeAi,
@@ -2438,17 +2418,6 @@ if (taskCtx) {
     });
 
     botParams.voiceStatusCtx = { voiceManager };
-
-    botParams.setTtsVoice = async (voice: string) => {
-      const count = await audioPipeline!.setTtsVoice(voice);
-      botParams.deepgramTtsVoice = voice;
-      currentOverridesState.ttsVoice = voice;
-      saveOverrides(overridesPath, currentOverridesState).catch((err) =>
-        log.warn({ err, voice }, 'runtime-overrides: ttsVoice save failed'),
-      );
-      return count;
-    };
-    botParams.getTtsVoice = () => audioPipeline!.ttsVoice;
 
     if (cfg.discordActionsVoice) {
       botParams.voiceCtx = { voiceManager };

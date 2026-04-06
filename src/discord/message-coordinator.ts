@@ -440,20 +440,11 @@ export type BotParams = {
   // Voice subsystem config — threaded from DiscoclawConfig.
   voiceEnabled?: boolean;
   voiceAutoJoin?: boolean;
-  voiceSttProvider?: 'deepgram' | 'whisper' | 'openai';
-  voiceTtsProvider?: 'cartesia' | 'deepgram' | 'kokoro' | 'openai';
+  voiceModelCtx?: { model: string };
   voiceHomeChannel?: string;
-  deepgramApiKey?: string;
-  deepgramSttModel?: string;
-  deepgramTtsVoice?: string;
-  cartesiaApiKey?: string;
-  openaiApiKey?: string;
+  geminiApiKey?: string;
   /** Always-present voice manager ref for status command — set when voiceEnabled, independent of discordActionsVoice. */
   voiceStatusCtx?: VoiceContext;
-  /** Update the Deepgram TTS voice on the live audio pipeline — set when voiceEnabled. */
-  setTtsVoice?: (voice: string) => Promise<number>;
-  /** Read the current live Deepgram TTS voice directly from the audio pipeline. */
-  getTtsVoice?: () => string | undefined;
 };
 
 export type QueueLike = Pick<KeyedQueue, 'run'> & { size?: () => number };
@@ -1227,15 +1218,12 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           const connMap = (params.voiceCtx ?? params.voiceStatusCtx)?.voiceManager.listConnections() ?? new Map();
           const voiceSnapshot: VoiceStatusSnapshot = {
             enabled: params.voiceEnabled ?? false,
-            sttProvider: params.voiceSttProvider ?? 'deepgram',
-            ttsProvider: params.voiceTtsProvider ?? 'cartesia',
+            provider: 'gemini-live',
+            geminiKeySet: Boolean(params.geminiApiKey),
+            model: params.voiceModelCtx?.model,
             homeChannel: params.voiceHomeChannel,
-            deepgramKeySet: Boolean(params.deepgramApiKey),
-            cartesiaKeySet: Boolean(params.cartesiaApiKey),
             autoJoin: params.voiceAutoJoin ?? false,
             actionsEnabled: params.discordActionsVoice ?? false,
-            deepgramSttModel: params.deepgramSttModel,
-            deepgramTtsVoice: params.getTtsVoice?.() ?? params.deepgramTtsVoice,
             connections: [...connMap.entries()].map(([guildId, info]) => ({
               guildId,
               channelId: info.channelId,
@@ -1246,10 +1234,8 @@ export function createMessageCreateHandler(params: Omit<BotParams, 'token'>, que
           };
           const voiceReply = await handleVoiceCommand(voiceCmd, {
             voiceEnabled: params.voiceEnabled ?? false,
-            ttsProvider: params.voiceTtsProvider ?? 'cartesia',
             statusSnapshot: voiceSnapshot,
             botDisplayName: params.botDisplayName,
-            setTtsVoice: params.setTtsVoice,
           });
           await msg.reply({ content: voiceReply, allowedMentions: NO_MENTIONS });
           return;

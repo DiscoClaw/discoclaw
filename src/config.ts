@@ -165,17 +165,9 @@ export type DiscoclawConfig = {
   voiceAutoJoin: boolean;
   voiceModel: string;
   voiceSystemPrompt?: string;
-  voiceSttProvider: 'deepgram' | 'whisper' | 'openai';
-  voiceTtsProvider: 'cartesia' | 'deepgram' | 'kokoro' | 'openai';
-  voicePipelineProvider: 'pipeline' | 'gemini-live';
   geminiSessionRotationMs: number;
   voiceHomeChannel?: string;
   voiceLogChannel?: string;
-  deepgramApiKey?: string;
-  deepgramSttModel: string;
-  deepgramTtsVoice: string;
-  deepgramTtsSpeed?: number;
-  cartesiaApiKey?: string;
 
   forgeDrafterRuntime?: string;
   forgeAuditorRuntime?: string;
@@ -929,9 +921,6 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
 
   const voiceEnabled = parseBoolean(env, 'DISCOCLAW_VOICE_ENABLED', false);
   const voiceAutoJoin = parseBoolean(env, 'DISCOCLAW_VOICE_AUTO_JOIN', false);
-  const voiceSttProvider = parseEnum(env, 'DISCOCLAW_STT_PROVIDER', ['deepgram', 'whisper', 'openai'] as const, 'deepgram')!;
-  const voiceTtsProvider = parseEnum(env, 'DISCOCLAW_TTS_PROVIDER', ['cartesia', 'deepgram', 'kokoro', 'openai'] as const, 'cartesia')!;
-  const voicePipelineProvider = parseEnum(env, 'DISCOCLAW_VOICE_PIPELINE_PROVIDER', ['pipeline', 'gemini-live'] as const, 'pipeline')!;
   const geminiSessionRotationMs = parseNonNegativeInt(env, 'DISCOCLAW_GEMINI_SESSION_ROTATION_MS', 780_000);
   let voiceHomeChannel = parseTrimmedString(env, 'DISCOCLAW_VOICE_HOME_CHANNEL');
   if (!voiceHomeChannel) {
@@ -944,19 +933,6 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     }
   }
   const voiceLogChannel = parseTrimmedString(env, 'DISCOCLAW_VOICE_LOG_CHANNEL');
-  const deepgramApiKey = parseTrimmedString(env, 'DEEPGRAM_API_KEY');
-  const deepgramSttModel = parseTrimmedString(env, 'DEEPGRAM_STT_MODEL') ?? 'nova-3-general';
-  const deepgramTtsVoice = parseTrimmedString(env, 'DEEPGRAM_TTS_VOICE') ?? 'aura-2-asteria-en';
-  const deepgramTtsSpeed = (() => {
-    const raw = parseTrimmedString(env, 'DEEPGRAM_TTS_SPEED');
-    if (raw == null) return 1.3;
-    const n = parseFloat(raw);
-    if (!Number.isFinite(n) || n < 0.5 || n > 1.5) {
-      throw new Error(`DEEPGRAM_TTS_SPEED must be a number between 0.5 and 1.5, got "${raw}"`);
-    }
-    return n;
-  })();
-  const cartesiaApiKey = parseTrimmedString(env, 'CARTESIA_API_KEY');
   const voiceModelRaw = parseTrimmedString(env, 'DISCOCLAW_VOICE_MODEL');
   const voiceSystemPrompt = (() => {
     const raw = parseTrimmedString(env, 'DISCOCLAW_VOICE_SYSTEM_PROMPT');
@@ -967,26 +943,11 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
     return raw;
   })();
 
-  if (voiceEnabled && voiceSttProvider === 'deepgram' && !deepgramApiKey) {
-    warnings.push('DISCOCLAW_VOICE_ENABLED=1 with STT provider "deepgram" but DEEPGRAM_API_KEY is not set; voice STT will fail at runtime.');
-  }
-  if (voiceEnabled && voiceSttProvider === 'openai' && !openaiApiKey) {
-    warnings.push('DISCOCLAW_VOICE_ENABLED=1 with STT provider "openai" but OPENAI_API_KEY is not set; voice STT will fail at runtime.');
-  }
-  if (voiceEnabled && voiceTtsProvider === 'cartesia' && !cartesiaApiKey) {
-    warnings.push('DISCOCLAW_VOICE_ENABLED=1 with TTS provider "cartesia" but CARTESIA_API_KEY is not set; voice TTS will fail at runtime.');
-  }
-  if (voiceEnabled && voiceTtsProvider === 'deepgram' && !deepgramApiKey) {
-    warnings.push('DISCOCLAW_VOICE_ENABLED=1 with TTS provider "deepgram" but DEEPGRAM_API_KEY is not set; voice TTS will fail at runtime.');
-  }
-  if (voiceEnabled && voiceTtsProvider === 'openai' && !openaiApiKey) {
-    warnings.push('DISCOCLAW_VOICE_ENABLED=1 with TTS provider "openai" but OPENAI_API_KEY is not set; voice TTS will fail at runtime.');
-  }
   if (voiceEnabled && !voiceHomeChannel) {
     warnings.push('DISCOCLAW_VOICE_ENABLED=1 but DISCOCLAW_VOICE_HOME_CHANNEL is not set; voice actions will be disabled (no target channel for action execution).');
   }
-  if (voiceEnabled && voicePipelineProvider === 'gemini-live' && !geminiApiKey) {
-    warnings.push('DISCOCLAW_VOICE_PIPELINE_PROVIDER=gemini-live but GEMINI_API_KEY is not set; voice pipeline will fail at runtime.');
+  if (voiceEnabled && !geminiApiKey) {
+    warnings.push('DISCOCLAW_VOICE_ENABLED=1 but GEMINI_API_KEY is not set; Gemini Live voice will fail at runtime.');
   }
 
   const coldStorageEnabled = parseBoolean(env, 'DISCOCLAW_COLD_STORAGE_ENABLED', false);
@@ -1195,17 +1156,9 @@ export function parseConfig(env: NodeJS.ProcessEnv): ParseResult {
       voiceAutoJoin,
       voiceModel,
       voiceSystemPrompt,
-      voiceSttProvider,
-      voiceTtsProvider,
-      voicePipelineProvider,
       geminiSessionRotationMs,
       voiceHomeChannel,
       voiceLogChannel,
-      deepgramApiKey,
-      deepgramSttModel,
-      deepgramTtsVoice,
-      deepgramTtsSpeed,
-      cartesiaApiKey,
 
       forgeDrafterRuntime,
       forgeAuditorRuntime,

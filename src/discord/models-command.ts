@@ -159,7 +159,7 @@ export function handleModelsCommand(cmd: ModelsCommand, opts: ModelsCommandOpts)
       '',
       '**Note:** `!models set imagegen <model>` changes the default image generation model at runtime (persisted). Use `!models reset imagegen` to revert to the env/fallback default.',
       '',
-      '**TTS voice:** Use `!voice set <name>` to switch the Deepgram TTS voice at runtime (e.g. `!voice set aura-2-luna-en`). See `!voice help` for details.',
+      '**Voice note:** `!voice set` is gone. Gemini Live owns the output voice now; use `!voice status` for current voice runtime details.',
     ].join('\n');
   }
 

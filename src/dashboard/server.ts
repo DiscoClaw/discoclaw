@@ -577,11 +577,7 @@ async function applyPreset(
   const primaryRuntime = presetToPrimaryRuntime(preset);
   await deps.updateEnvKey(ctx.configPaths.env, 'PRIMARY_RUNTIME', primaryRuntime);
 
-  const preservedOverrides: RuntimeOverrides = {};
-  if (ctx.runtimeOverrides.ttsVoice) {
-    preservedOverrides.ttsVoice = ctx.runtimeOverrides.ttsVoice;
-  }
-  await deps.saveOverrides(ctx.configPaths.runtimeOverrides, preservedOverrides);
+  await deps.saveOverrides(ctx.configPaths.runtimeOverrides, {});
   await deps.saveModelConfig(ctx.configPaths.models, { ...MODEL_DEFAULTS });
 
   return {

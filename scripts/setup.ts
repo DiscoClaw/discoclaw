@@ -217,18 +217,16 @@ if (configOptional.toLowerCase() === 'y') {
 
 // --- Voice setup ---
 const enableVoice = await ask(
-  '\nEnable voice chat? (requires a Deepgram API key — you can skip this and enable later) [y/N] ',
+  '\nEnable voice chat? (requires a Gemini API key — you can skip this and enable later) [y/N] ',
 );
 if (enableVoice.toLowerCase() === 'y') {
-  const deepgramKey = await askValidated(
-    'Deepgram API key: ',
-    (val) => (val ? null : 'Deepgram API key is required'),
+  const geminiKey = await askValidated(
+    'Gemini API key: ',
+    (val) => (val ? null : 'Gemini API key is required'),
   );
   values.DISCOCLAW_VOICE_ENABLED = '1';
-  values.DEEPGRAM_API_KEY = deepgramKey;
+  values.GEMINI_API_KEY = geminiKey;
   values.DISCOCLAW_DISCORD_ACTIONS_VOICE = '1';
-  values.DISCOCLAW_STT_PROVIDER = 'deepgram';
-  values.DISCOCLAW_TTS_PROVIDER = 'deepgram';
 }
 
 // --- Write .env atomically ---
