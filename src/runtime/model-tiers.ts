@@ -192,7 +192,7 @@ export function remapCrossRuntimeTierModel(
   if (!sourceTier) return null;
 
   const targetModel = tierMap[targetRuntimeId]?.[sourceTier];
-  if (!targetModel || normalizeModelLookup(targetModel) === normalized) return null;
+  if (targetModel === undefined || normalizeModelLookup(targetModel) === normalized) return null;
 
   return {
     sourceRuntimeId,

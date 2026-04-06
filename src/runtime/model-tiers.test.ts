@@ -306,6 +306,16 @@ describe('remapCrossRuntimeTierModel', () => {
     });
   });
 
+  it('preserves adapter-default sentinels when the target runtime tier is intentionally blank', () => {
+    initTierOverrides({ DISCOCLAW_TIER_CODEX_FAST: '' });
+    expect(remapCrossRuntimeTierModel('gpt-5-mini', 'codex')).toEqual({
+      sourceRuntimeId: 'openai',
+      sourceTier: 'fast',
+      targetRuntimeId: 'codex',
+      model: '',
+    });
+  });
+
   it('does not remap ambiguous cross-runtime models', () => {
     expect(remapCrossRuntimeTierModel('gpt-5.4', 'codex')).toBeNull();
   });
