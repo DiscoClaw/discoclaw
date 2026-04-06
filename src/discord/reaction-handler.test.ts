@@ -2446,6 +2446,64 @@ describe('reaction prompt interception', () => {
     expect(followUpPrompt).toContain('Failed:');
   });
 
+  it('microcompacts multiline action results in reaction auto-follow-up prompts', async () => {
+    const invokeCalls: any[] = [];
+    const executeSpy = vi.spyOn(discordActions, 'executeDiscordActions').mockResolvedValue([{
+      ok: true,
+      summary: [
+        'Messages in #ops:',
+        '[alice] alpha update (id:1001)',
+        '[bob] beta update (id:1002)',
+        '[carol] gamma update (id:1003)',
+        '[dave] delta update (id:1004)',
+        '[erin] epsilon update (id:1005)',
+        '[frank] zeta update (id:1006)',
+        '[grace] eta update (id:1007)',
+        '[heidi] theta update (id:1008)',
+        '[ivan] iota update (id:1009)',
+      ].join('\n'),
+    }]);
+
+    const runtime: RuntimeAdapter = {
+      id: 'claude_code',
+      capabilities: new Set(['streaming_text']),
+      async *invoke(p): AsyncIterable<EngineEvent> {
+        invokeCalls.push(p);
+        if (invokeCalls.length === 1) {
+          yield { type: 'text_final', text: '<discord-action>{"type":"channelList"}</discord-action>' };
+        } else {
+          yield { type: 'text_final', text: 'Compacted follow-up handled.' };
+        }
+        yield { type: 'done' };
+      },
+    };
+
+    const params = makeParams({
+      runtime,
+      discordActionsEnabled: true,
+      discordActionsChannels: true,
+      actionFollowupDepth: 1,
+    });
+
+    try {
+      const handler = createReactionAddHandler(params, mockQueue());
+      await handler(mockReaction() as any, mockUser() as any);
+
+      expect(invokeCalls).toHaveLength(2);
+      const followUpPrompt: string = invokeCalls[1].prompt;
+      expect(followUpPrompt).toContain('[Auto-follow-up]');
+      expect(followUpPrompt).toContain('Done: Messages in #ops:');
+      expect(followUpPrompt).toContain('(id:1001)');
+      expect(followUpPrompt).toContain('(id:1002)');
+      expect(followUpPrompt).toContain('(id:1008)');
+      expect(followUpPrompt).toContain('(id:1009)');
+      expect(followUpPrompt).toContain('...[omitted 5 lines]');
+      expect(followUpPrompt).not.toContain('(id:1005)');
+    } finally {
+      executeSpy.mockRestore();
+    }
+  });
+
   it('posts the follow-up placeholder, starts the watchdog, and carries the same lifecycle token through completion', async () => {
     const order: string[] = [];
     const invokeCalls: any[] = [];
