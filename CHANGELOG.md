@@ -4,8 +4,24 @@ All notable changes to DiscoClaw are documented here.
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-04-05
+
+17 commits. Gemini Live voice support, observability surfaces, and post-integration fixes.
+
+### Added
+- Gemini Live voice provider support, including session resume, proactive rotation, tool-call dispatch, and speech transcription mirroring
+- Dashboard traces and metrics API surfaces for runtime observability
+
 ### Changed
-- Added the stable `pnpm release:rehearsal` source-checkout entrypoint for the blessed Claude 1.0 rehearsal path; the runtime/harness fixes for the earlier ready-boundary and cleanup-path failures are now in repo, and final 1.0 release-readiness is pending one successful authoritative closeout artifact from a live repo-local `.env` rehearsal run, as tracked in [CLAUDE SOURCE-CHECKOUT STATUS.md](CLAUDE%20SOURCE-CHECKOUT%20STATUS.md).
+- Audio pipeline, voice config, and prompt assembly now support Gemini Live end to end
+- Voice docs and examples updated for the new Gemini Live path
+- Added the stable `pnpm release:rehearsal` source-checkout entrypoint for the blessed Claude 1.0 rehearsal path; the runtime and harness fixes for the earlier ready-boundary and cleanup-path failures are now in repo
+
+### Fixed
+- Gemini Live 3.1 websocket, tool-calling, and end-of-turn handling regressions
+- Dashboard chat runtime persistence
+- Codex fast-tier remap fallback
+- Voice context restoration after Gemini Live reconnects
 
 ### Removed
 - Codex app-server native transport path (`CODEX_APP_SERVER_URL` / `CODEX_APP_SERVER_NATIVE` env vars) — Codex now uses `codex exec` exclusively
