@@ -26,6 +26,7 @@ export type TaskData = {
   issue_type?: string;
   owner?: string;
   external_ref?: string;
+  thread_origin_guild?: string;
   labels?: string[];
   comments?: Array<{ author: string; body: string; created_at: string }>;
   created_at?: string;
@@ -50,6 +51,7 @@ export type TaskUpdateParams = {
   status?: TaskStatus;
   owner?: string;
   externalRef?: string;
+  threadOriginGuild?: string;
 };
 
 export type TaskListParams = {

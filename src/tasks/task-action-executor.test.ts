@@ -4,6 +4,7 @@ import { executeTaskAction } from './task-action-executor.js';
 import { taskActionsPromptSection } from './task-action-prompt.js';
 import type { TaskActionRunContext } from './task-action-executor.js';
 import type { TaskContext } from './task-context.js';
+import type { TaskData } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Mocks — override thread ops and related modules
@@ -59,11 +60,11 @@ vi.mock('./task-sync-engine.js', () => {
 
 function makeCtx(): TaskActionRunContext {
   return {
-    guild: {} as any,
+    guild: { id: 'guild-current' } as any,
     client: {
       channels: {
         cache: {
-          get: () => undefined,
+          get: vi.fn(() => undefined),
         },
       },
     } as any,
@@ -72,8 +73,8 @@ function makeCtx(): TaskActionRunContext {
   };
 }
 
-function makeStore() {
-  const defaultTask = (id: string) => ({
+function makeTask(id: string, overrides: Partial<TaskData> = {}): TaskData {
+  return {
     id,
     title: 'Test task',
     description: 'A test',
@@ -86,34 +87,87 @@ function makeStore() {
     comments: [],
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
-  });
+    ...overrides,
+  };
+}
+
+function makeStore(opts?: {
+  initialTasks?: TaskData[];
+  createTaskOverrides?: Partial<TaskData> | ((params: any) => Partial<TaskData>);
+}) {
+  const tasks = new Map<string, TaskData>(
+    (opts?.initialTasks ?? [
+      makeTask('ws-001', { title: 'First' }),
+      makeTask('ws-002', {
+        title: 'Second',
+        status: 'in_progress',
+        priority: 1,
+        external_ref: 'discord:222333444',
+        labels: [],
+      }),
+    ]).map((task) => [task.id, task]),
+  );
 
   return {
-    get: vi.fn((id: string) => {
-      if (id === 'ws-notfound') return undefined;
-      return defaultTask(id);
+    get: vi.fn((id: string) => tasks.get(id)),
+    list: vi.fn((params?: { limit?: number }) => (
+      Array.from(tasks.values()).slice(0, params?.limit ?? 50)
+    )),
+    create: vi.fn((params: any) => {
+      const createTaskOverrides = typeof opts?.createTaskOverrides === 'function'
+        ? opts.createTaskOverrides(params)
+        : (opts?.createTaskOverrides ?? {});
+      const task = makeTask('ws-new', {
+        title: params.title,
+        description: params.description ?? '',
+        priority: params.priority ?? 2,
+        external_ref: '',
+        labels: params.labels ?? [],
+        ...createTaskOverrides,
+      });
+      tasks.set(task.id, task);
+      return task;
     }),
-    list: vi.fn(() => [
-      { id: 'ws-001', title: 'First', status: 'open', priority: 2 },
-      { id: 'ws-002', title: 'Second', status: 'in_progress', priority: 1 },
-    ]),
-    create: vi.fn((params: any) => ({
-      id: 'ws-new',
-      title: params.title,
-      description: params.description ?? '',
-      status: 'open' as const,
-      priority: params.priority ?? 2,
-      issue_type: 'task',
-      owner: '',
-      external_ref: '',
-      labels: params.labels ?? [],
-      comments: [],
-      created_at: '2026-01-01T00:00:00Z',
-      updated_at: '2026-01-01T00:00:00Z',
-    })),
-    update: vi.fn((id: string) => defaultTask(id)),
-    close: vi.fn((id: string) => ({ ...defaultTask(id), status: 'closed' as const })),
-    addLabel: vi.fn((id: string) => defaultTask(id)),
+    update: vi.fn((id: string, params: any) => {
+      const prev = tasks.get(id);
+      if (!prev) throw new Error(`task not found: ${id}`);
+      const updated = makeTask(id, {
+        ...prev,
+        ...(params.title !== undefined ? { title: params.title } : {}),
+        ...(params.description !== undefined ? { description: params.description } : {}),
+        ...(params.priority !== undefined ? { priority: params.priority } : {}),
+        ...(params.status !== undefined ? { status: params.status } : {}),
+        ...(params.owner !== undefined ? { owner: params.owner } : {}),
+        ...(params.externalRef !== undefined ? { external_ref: params.externalRef } : {}),
+        ...(params.threadOriginGuild !== undefined ? { thread_origin_guild: params.threadOriginGuild } : {}),
+        updated_at: '2026-01-02T00:00:00Z',
+      });
+      tasks.set(id, updated);
+      return updated;
+    }),
+    close: vi.fn((id: string) => {
+      const prev = tasks.get(id);
+      if (!prev) throw new Error(`task not found: ${id}`);
+      const updated = makeTask(id, {
+        ...prev,
+        status: 'closed',
+        closed_at: '2026-01-02T00:00:00Z',
+        updated_at: '2026-01-02T00:00:00Z',
+      });
+      tasks.set(id, updated);
+      return updated;
+    }),
+    addLabel: vi.fn((id: string, label: string) => {
+      const prev = tasks.get(id);
+      if (!prev) throw new Error(`task not found: ${id}`);
+      const updated = makeTask(id, {
+        ...prev,
+        labels: [...new Set([...(prev.labels ?? []), label])],
+        updated_at: '2026-01-02T00:00:00Z',
+      });
+      tasks.set(id, updated);
+      return updated;
+    }),
     reload: vi.fn(async () => ({ added: [], updated: [], removed: [] })),
   };
 }
@@ -152,15 +206,24 @@ describe('TASK_ACTION_TYPES', () => {
 });
 
 describe('executeTaskAction', () => {
-  it('taskCreate returns created task summary', async () => {
+  it('taskCreate returns a real Discord thread URL and structured thread metadata', async () => {
     const result = await executeTaskAction(
       { type: 'taskCreate', title: 'New task', priority: 1 },
       makeCtx(),
       makeTaskCtx(),
     );
+
+    const success = result as Extract<typeof result, { ok: true }>;
     expect(result.ok).toBe(true);
-    expect((result as any).summary).toContain('ws-new');
-    expect((result as any).summary).toContain('New task');
+    expect(success.summary).toContain('ws-new');
+    expect(success.summary).toContain('New task');
+    expect(success.summary).toContain('Thread: https://discord.com/channels/guild-current/thread-new');
+    expect(success.thread).toEqual({
+      externalRef: 'discord:thread-new',
+      threadId: 'thread-new',
+      threadGuildId: 'guild-current',
+      threadUrl: 'https://discord.com/channels/guild-current/thread-new',
+    });
   });
 
   it('taskCreate calls forumCountSync.requestUpdate', async () => {
@@ -192,27 +255,21 @@ describe('executeTaskAction', () => {
       makeTaskCtx(),
     );
     expect(result.ok).toBe(true);
+    expect((result as any).summary).not.toContain('Thread:');
+    expect((result as any).thread).toBeUndefined();
     expect(createTaskThread).not.toHaveBeenCalled();
   });
 
-  it('taskCreate skips thread creation when task is already linked before direct lifecycle step', async () => {
+  it('taskCreate backfills missing origin guild data for already-linked tasks', async () => {
     const { createTaskThread } = await import('./thread-ops.js');
     (createTaskThread as any).mockClear?.();
 
-    const store = makeStore();
-    (store.get as any).mockImplementation((id: string) => ({
-      id,
-      title: 'Already linked',
-      status: 'open',
-      priority: 2,
-      issue_type: 'task',
-      owner: '',
-      external_ref: 'discord:thread-existing',
-      labels: ['feature'],
-      comments: [],
-      created_at: '2026-01-01T00:00:00Z',
-      updated_at: '2026-01-01T00:00:00Z',
-    }));
+    const store = makeStore({
+      createTaskOverrides: {
+        title: 'Already linked',
+        external_ref: 'discord:thread-existing',
+      },
+    });
 
     const result = await executeTaskAction(
       { type: 'taskCreate', title: 'Task already linked' },
@@ -221,7 +278,14 @@ describe('executeTaskAction', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect((result as any).summary).toContain('thread linked');
+    expect((result as any).summary).toContain('Thread: https://discord.com/channels/guild-current/thread-existing');
+    expect((result as any).thread).toEqual({
+      externalRef: 'discord:thread-existing',
+      threadId: 'thread-existing',
+      threadGuildId: 'guild-current',
+      threadUrl: 'https://discord.com/channels/guild-current/thread-existing',
+    });
+    expect(store.update).toHaveBeenCalledWith('ws-new', { threadOriginGuild: 'guild-current' });
     expect(createTaskThread).not.toHaveBeenCalled();
   });
 
@@ -463,8 +527,86 @@ describe('executeTaskAction', () => {
       makeTaskCtx(),
     );
     expect(result.ok).toBe(true);
-    expect((result as any).summary).toContain('Test task');
+    expect((result as any).summary).toContain('First');
     expect((result as any).summary).toContain('ws-001');
+  });
+
+  it('taskShow shows External ref for linked tasks even without canonical thread URL data', async () => {
+    const store = makeStore({
+      initialTasks: [
+        makeTask('ws-001', {
+          title: 'Linked elsewhere',
+          external_ref: 'gh:123',
+          thread_origin_guild: undefined,
+        }),
+      ],
+    });
+
+    const result = await executeTaskAction(
+      { type: 'taskShow', taskId: 'ws-001' },
+      makeCtx(),
+      makeTaskCtx({ store: store as any }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('External ref: gh:123');
+    expect((result as any).summary).not.toContain('Thread:');
+    expect((result as any).thread).toEqual({ externalRef: 'gh:123' });
+  });
+
+  it('taskShow only emits Thread when stored origin guild data exists', async () => {
+    const store = makeStore({
+      initialTasks: [
+        makeTask('ws-001', {
+          title: 'Thread-linked',
+          external_ref: 'discord:111222333',
+          thread_origin_guild: 'guild-stored',
+        }),
+      ],
+    });
+
+    const result = await executeTaskAction(
+      { type: 'taskShow', taskId: 'ws-001' },
+      makeCtx(),
+      makeTaskCtx({ store: store as any }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect((result as any).summary).toContain('External ref: discord:111222333');
+    expect((result as any).summary).toContain('Thread: https://discord.com/channels/guild-stored/111222333');
+    expect((result as any).thread).toEqual({
+      externalRef: 'discord:111222333',
+      threadId: '111222333',
+      threadGuildId: 'guild-stored',
+      threadUrl: 'https://discord.com/channels/guild-stored/111222333',
+    });
+  });
+
+  it('taskShow does not perform live Discord lookups', async () => {
+    const { resolveTasksForum } = await import('./thread-ops.js');
+    (resolveTasksForum as any).mockClear?.();
+
+    const ctx = makeCtx();
+    const cacheGet = ctx.client.channels.cache.get as ReturnType<typeof vi.fn>;
+
+    const result = await executeTaskAction(
+      { type: 'taskShow', taskId: 'ws-001' },
+      ctx,
+      makeTaskCtx({
+        store: makeStore({
+          initialTasks: [
+            makeTask('ws-001', {
+              external_ref: 'discord:111222333',
+              thread_origin_guild: 'guild-stored',
+            }),
+          ],
+        }) as any,
+      }),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(resolveTasksForum).not.toHaveBeenCalled();
+    expect(cacheGet).not.toHaveBeenCalled();
   });
 
   it('taskShow fails for unknown task', async () => {

@@ -30,6 +30,14 @@ export type TaskStoreOptions = {
   persistPath?: string;
 };
 
+type TaskDataWithThreadOriginGuild = TaskData & {
+  thread_origin_guild?: string;
+};
+
+type TaskUpdateParamsWithThreadOriginGuild = TaskUpdateParams & {
+  threadOriginGuild?: string;
+};
+
 // ---------------------------------------------------------------------------
 // TaskStore
 // ---------------------------------------------------------------------------
@@ -271,14 +279,18 @@ export class TaskStore extends EventEmitter<TaskStoreEventMap> {
     const prev = this.tasks.get(id);
     if (!prev) throw new Error(`task not found: ${id}`);
     const now = new Date().toISOString();
-    const updated: TaskData = {
+    const updateParams = params as TaskUpdateParamsWithThreadOriginGuild;
+    const updated: TaskDataWithThreadOriginGuild = {
       ...prev,
-      ...(params.title !== undefined && { title: params.title }),
-      ...(params.description !== undefined && { description: params.description }),
-      ...(params.priority !== undefined && { priority: params.priority }),
-      ...(params.status !== undefined && { status: params.status }),
-      ...(params.owner !== undefined && { owner: params.owner }),
-      ...(params.externalRef !== undefined && { external_ref: params.externalRef }),
+      ...(updateParams.title !== undefined && { title: updateParams.title }),
+      ...(updateParams.description !== undefined && { description: updateParams.description }),
+      ...(updateParams.priority !== undefined && { priority: updateParams.priority }),
+      ...(updateParams.status !== undefined && { status: updateParams.status }),
+      ...(updateParams.owner !== undefined && { owner: updateParams.owner }),
+      ...(updateParams.externalRef !== undefined && { external_ref: updateParams.externalRef }),
+      ...(updateParams.threadOriginGuild !== undefined && {
+        thread_origin_guild: updateParams.threadOriginGuild,
+      }),
       updated_at: now,
     };
     this.tasks.set(id, updated);
