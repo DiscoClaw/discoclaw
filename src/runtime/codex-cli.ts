@@ -49,7 +49,8 @@ function normalizeInvokeParams(
 ): RuntimeInvokeParams {
   const requestedModel = params.model || opts.defaultModel;
   const remappedModel = remapCrossRuntimeTierModel(requestedModel, 'codex');
-  const effectiveModel = remappedModel?.model ?? requestedModel;
+  const normalizedModel = remappedModel?.model ?? requestedModel;
+  const effectiveModel = normalizedModel || opts.defaultModel;
   const effectiveReasoningEffort = params.reasoningEffort
     ?? (remappedModel ? resolveReasoningEffort(remappedModel.sourceTier, 'codex') : undefined);
 
@@ -67,7 +68,7 @@ function normalizeInvokeParams(
 
   return {
     ...params,
-    model: effectiveModel,
+    model: normalizedModel,
     ...(effectiveReasoningEffort ? { reasoningEffort: effectiveReasoningEffort } : {}),
     systemPrompt: mergeSystemPrompt(params.systemPrompt, opts.appendSystemPrompt),
     ...(opts.disableSessions ? { sessionKey: undefined } : {}),

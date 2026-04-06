@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CODEX_RUNTIME_CAPABILITIES } from './tool-capabilities.js';
+import { initTierOverrides } from './model-tiers.js';
 import type { EngineEvent, RuntimeCapability } from './types.js';
 
 const { mockExeca } = vi.hoisted(() => {
@@ -163,11 +164,13 @@ describe('Codex CLI runtime adapter', () => {
 
   beforeEach(() => {
     mockExeca.mockReset();
+    initTierOverrides({});
     delete process.env.DISCOCLAW_CLI_LAUNCHER_STATE_HARDENING;
     delete process.env.DISCOCLAW_CODEX_STABLE_HOME;
   });
 
   afterEach(() => {
+    initTierOverrides({});
     if (originalHardening === undefined) {
       delete process.env.DISCOCLAW_CLI_LAUNCHER_STATE_HARDENING;
     } else {
@@ -354,6 +357,43 @@ describe('Codex CLI runtime adapter', () => {
       expect.objectContaining({
         requestedModel: 'gpt-5-mini',
         effectiveModel: 'gpt-5.1-codex-mini',
+        sourceRuntimeId: 'openai',
+        sourceTier: 'fast',
+      }),
+      'codex:model remapped to codex-compatible tier default',
+    );
+  });
+
+  it('falls back to the codex default model when the codex fast tier is configured as adapter-default sentinel', async () => {
+    initTierOverrides({ DISCOCLAW_TIER_CODEX_FAST: '' });
+    const log = {
+      debug: vi.fn(),
+      warn: vi.fn(),
+    };
+    mockExeca.mockReturnValue(createMockSubprocess({
+      stdout: 'cli remap ok',
+      exitCode: 0,
+    }));
+
+    const rt = createCodexCliRuntime({
+      codexBin: 'codex',
+      defaultModel: 'gpt-5.4',
+      log,
+    });
+
+    await collectEvents(rt.invoke({
+      prompt: 'Summarize',
+      model: 'gpt-5-mini',
+      cwd: '/tmp/non-default-cwd',
+    }));
+
+    const callArgs = mockExeca.mock.calls[0][1] as string[];
+    const modelIdx = callArgs.indexOf('-m');
+    expect(callArgs[modelIdx + 1]).toBe('gpt-5.4');
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestedModel: 'gpt-5-mini',
+        effectiveModel: 'gpt-5.4',
         sourceRuntimeId: 'openai',
         sourceTier: 'fast',
       }),
