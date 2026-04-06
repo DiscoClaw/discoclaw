@@ -44,6 +44,8 @@ export type AudioReceiverOpts = {
   createDecoder: OpusDecoderFactory;
   /** Called every time an allowlisted user begins a speaking burst (barge-in signal). */
   onUserSpeaking?: (userId: string) => void;
+  /** Called when an allowlisted user's speaking burst ends and the receive stream is cleaned up. */
+  onUserSilence?: (userId: string) => void;
 };
 
 // ---------------------------------------------------------------------------
@@ -57,6 +59,7 @@ export class AudioReceiver {
   private readonly log: LoggerLike;
   private readonly createDecoder: OpusDecoderFactory;
   private readonly onUserSpeaking?: (userId: string) => void;
+  private readonly onUserSilence?: (userId: string) => void;
   private readonly decoders = new Map<string, OpusDecoder>();
   private running = false;
 
@@ -67,6 +70,7 @@ export class AudioReceiver {
     this.log = opts.log;
     this.createDecoder = opts.createDecoder;
     this.onUserSpeaking = opts.onUserSpeaking;
+    this.onUserSilence = opts.onUserSilence;
   }
 
   /** Begin listening for audio from allowlisted users. */
@@ -169,6 +173,11 @@ export class AudioReceiver {
       decoder.destroy();
       this.decoders.delete(userId);
       this.log.info({ userId }, 'cleaned up user audio decoder');
+      try {
+        this.onUserSilence?.(userId);
+      } catch (err) {
+        this.log.error({ err, userId }, 'onUserSilence callback error');
+      }
     }
   }
 }

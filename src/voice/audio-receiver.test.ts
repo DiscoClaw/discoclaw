@@ -277,6 +277,26 @@ describe('AudioReceiver', () => {
     expect(log.info).toHaveBeenCalledWith({ userId: '111' }, 'cleaned up user audio decoder');
   });
 
+  it('calls onUserSilence when a speaking burst ends', () => {
+    const { connection, speakingEmitter, streams } = createMockConnection();
+    const onUserSilence = vi.fn();
+    const recv = new AudioReceiver({
+      connection,
+      allowedUserIds: new Set(['111']),
+      sttProvider: createMockStt(),
+      log: createLogger(),
+      createDecoder: createMockDecoder,
+      onUserSilence,
+    });
+
+    recv.start();
+    speakingEmitter.emit('start', '111');
+
+    streams.get('111')!.emit('end');
+
+    expect(onUserSilence).toHaveBeenCalledWith('111');
+  });
+
   it('cleans up decoder on stream error', () => {
     const { connection, speakingEmitter, streams } = createMockConnection();
     const decoder = createMockDecoder();

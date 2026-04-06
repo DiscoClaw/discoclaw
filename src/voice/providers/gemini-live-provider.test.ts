@@ -229,6 +229,16 @@ describe('GeminiLiveProvider', () => {
     );
   });
 
+  it('sendAudioStreamEnd sends realtimeInput audioStreamEnd', async () => {
+    const provider = makeProvider();
+    await connectWithSetup(provider);
+
+    provider.sendAudioStreamEnd();
+
+    const msg = JSON.parse(lastCreatedWs!.sent[1] as string);
+    expect(msg.realtimeInput).toEqual({ audioStreamEnd: true });
+  });
+
   // -----------------------------------------------------------------------
   // Sending text
   // -----------------------------------------------------------------------
@@ -386,6 +396,24 @@ describe('GeminiLiveProvider', () => {
     });
 
     expect(events).toContainEqual({ type: 'interrupted' });
+  });
+
+  it('does not drop turnComplete or transcription when interrupted is present in the same serverContent', async () => {
+    const provider = makeProvider();
+    const events = collectEvents(provider);
+    await connectWithSetup(provider);
+
+    lastCreatedWs!._receiveMessage({
+      serverContent: {
+        interrupted: true,
+        turnComplete: true,
+        outputTranscription: { text: 'partial reply' },
+      },
+    });
+
+    expect(events).toContainEqual({ type: 'interrupted' });
+    expect(events).toContainEqual({ type: 'turn_complete' });
+    expect(events).toContainEqual({ type: 'text', text: 'partial reply' });
   });
 
   it('emits input_transcript event from serverContent with inputTranscription', async () => {

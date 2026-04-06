@@ -124,6 +124,18 @@ export class GeminiLiveProvider {
     }));
   }
 
+  /** Signal that the current realtime audio stream has ended so Gemini can flush buffered input. */
+  sendAudioStreamEnd(): void {
+    if (this._state !== 'open') {
+      throw new Error('Cannot sendAudioStreamEnd before connect() completes or after disconnect()');
+    }
+    this.ws!.send(JSON.stringify({
+      realtimeInput: {
+        audioStreamEnd: true,
+      },
+    }));
+  }
+
   /** Send a text message to the session. */
   sendText(text: string): void {
     if (this._state !== 'open') {
@@ -326,7 +338,6 @@ export class GeminiLiveProvider {
         // Interrupted signal
         if (sc.interrupted === true) {
           this.emit({ type: 'interrupted' });
-          return;
         }
 
         // Input audio transcription (server-side STT of user speech)

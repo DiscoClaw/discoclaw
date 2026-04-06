@@ -72,6 +72,7 @@ let mockGeminiProvider: {
   connect: ReturnType<typeof vi.fn>;
   disconnect: ReturnType<typeof vi.fn>;
   sendAudio: ReturnType<typeof vi.fn>;
+  sendAudioStreamEnd: ReturnType<typeof vi.fn>;
   sendToolResponse: ReturnType<typeof vi.fn>;
   onEvent: ReturnType<typeof vi.fn>;
   state: string;
@@ -89,6 +90,7 @@ vi.mock('./providers/gemini-live-provider.js', () => ({
       connect: vi.fn(async () => {}),
       disconnect: vi.fn(async () => {}),
       sendAudio: vi.fn(),
+      sendAudioStreamEnd: vi.fn(),
       sendToolResponse: vi.fn(),
       onEvent: vi.fn(),
       state: 'open',
@@ -974,6 +976,19 @@ describe('AudioPipelineManager', () => {
       );
     });
 
+    it('signals audioStreamEnd when a user speaking burst ends', async () => {
+      const opts = createGeminiOpts();
+      const mgr = new AudioPipelineManager(opts);
+      const { connection, speakingEmitter, streams } = createMockConnection();
+
+      await mgr.startPipeline('g1', connection);
+
+      speakingEmitter.emit('start', '111');
+      streams.get('111')!.emit('end');
+
+      expect(mockGeminiProvider.sendAudioStreamEnd).toHaveBeenCalled();
+    });
+
     it('throws when geminiApiKey is missing', async () => {
       const log = createLogger();
       const opts = createGeminiOpts({ geminiApiKey: undefined, log });
@@ -1266,6 +1281,7 @@ describe('AudioPipelineManager', () => {
           connect: vi.fn(async () => { throw new Error('connection refused'); }),
           disconnect: vi.fn(async () => {}),
           sendAudio: vi.fn(),
+          sendAudioStreamEnd: vi.fn(),
           sendToolResponse: vi.fn(),
           onEvent: vi.fn(),
           state: 'idle',
