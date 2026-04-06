@@ -7,6 +7,7 @@ import {
   extractUserEssentials,
   loadVoiceIdentity,
   buildVoicePrompt,
+  buildVoiceSystemInstruction,
   buildVoiceFollowUpPrompt,
   buildVoicePromptSectionEstimates,
   VOICE_INTERNAL_CONTEXT_SEPARATOR,
@@ -228,6 +229,23 @@ describe('loadVoiceIdentity', () => {
 
     expect(soulIdx).toBeLessThan(identityIdx);
     expect(identityIdx).toBeLessThan(userIdx);
+  });
+});
+
+describe('buildVoiceSystemInstruction', () => {
+  it('builds the static voice context without the user-turn separator', () => {
+    const result = buildVoiceSystemInstruction({
+      identity: 'identity block',
+      durableMemory: '',
+      actionsSection: '',
+      voiceSystemPrompt: 'custom voice system prompt',
+    });
+
+    expect(result).toContain(buildPromptPreamble('identity block', { skipTrackedTools: true }));
+    expect(result).toContain('custom voice system prompt');
+    expect(result).toContain(VOICE_STYLE_INSTRUCTION);
+    expect(result).not.toContain(VOICE_INTERNAL_CONTEXT_SEPARATOR);
+    expect(result).not.toContain('Current user message:');
   });
 });
 

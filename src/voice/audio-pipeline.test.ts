@@ -73,6 +73,7 @@ let mockGeminiProvider: {
   disconnect: ReturnType<typeof vi.fn>;
   sendAudio: ReturnType<typeof vi.fn>;
   sendAudioStreamEnd: ReturnType<typeof vi.fn>;
+  sendInitialHistory: ReturnType<typeof vi.fn>;
   sendToolResponse: ReturnType<typeof vi.fn>;
   onEvent: ReturnType<typeof vi.fn>;
   state: string;
@@ -91,6 +92,7 @@ vi.mock('./providers/gemini-live-provider.js', () => ({
       disconnect: vi.fn(async () => {}),
       sendAudio: vi.fn(),
       sendAudioStreamEnd: vi.fn(),
+      sendInitialHistory: vi.fn(),
       sendToolResponse: vi.fn(),
       onEvent: vi.fn(),
       state: 'open',
@@ -868,6 +870,46 @@ describe('AudioPipelineManager', () => {
       expect(mockGeminiResponder.start).toHaveBeenCalled();
     });
 
+    it('passes built systemInstruction into GeminiLiveProvider setup', async () => {
+      const buildGeminiSystemInstruction = vi.fn(async () => 'voice system instruction');
+      const opts = createGeminiOpts({ buildGeminiSystemInstruction });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+      const { GeminiLiveProvider: ProviderMock } = await import('./providers/gemini-live-provider.js');
+
+      await mgr.startPipeline('g1', connection);
+
+      expect(buildGeminiSystemInstruction).toHaveBeenCalled();
+      const providerCalls = (ProviderMock as ReturnType<typeof vi.fn>).mock.calls;
+      expect(providerCalls.at(-1)?.[0]).toEqual(expect.objectContaining({
+        systemInstruction: 'voice system instruction',
+      }));
+    });
+
+    it('backfills and seeds initial history into Gemini Live before audio starts', async () => {
+      const backfill = vi.fn(async () => [
+        { user: 'first user', assistant: 'first reply' },
+        { user: 'second user', assistant: 'second reply' },
+      ]);
+      const opts = createGeminiOpts({ backfill });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+      const { GeminiLiveProvider: ProviderMock } = await import('./providers/gemini-live-provider.js');
+
+      await mgr.startPipeline('g1', connection);
+
+      const providerCalls = (ProviderMock as ReturnType<typeof vi.fn>).mock.calls;
+      expect(providerCalls.at(-1)?.[0]).toEqual(expect.objectContaining({
+        initialHistoryInClientContent: true,
+      }));
+      expect(mockGeminiProvider.sendInitialHistory).toHaveBeenCalledWith([
+        { role: 'user', parts: [{ text: 'first user' }] },
+        { role: 'model', parts: [{ text: 'first reply' }] },
+        { role: 'user', parts: [{ text: 'second user' }] },
+        { role: 'model', parts: [{ text: 'second reply' }] },
+      ]);
+    });
+
     it('uses synchronous tool declarations for the default 3.1 live model', async () => {
       const opts = createGeminiOpts({ enabledTools: ['Read', 'Bash'] });
       const mgr = new AudioPipelineManager(opts);
@@ -1045,6 +1087,31 @@ describe('AudioPipelineManager', () => {
       await vi.waitFor(() => {
         expect(mirror.postBotResponse).toHaveBeenCalledWith('GeminiBot', 'Hello from Gemini');
       });
+    });
+
+    it('records completed Gemini Live turns in the local conversation buffer', async () => {
+      const backfill = vi.fn(async () => []);
+      const opts = createGeminiOpts({ backfill });
+      const mgr = new AudioPipelineManager(opts);
+      const { connection } = createMockConnection();
+      const { GeminiLiveResponder: ResponderMock } = await import('./providers/gemini-live-responder.js');
+
+      await mgr.startPipeline('g1', connection);
+
+      const constructorCalls = (ResponderMock as ReturnType<typeof vi.fn>).mock.calls;
+      const lastCall = constructorCalls[constructorCalls.length - 1];
+      const responderOpts = lastCall[0] as {
+        onInputTranscript?: (text: string) => void;
+        onBotResponse?: (text: string) => void;
+      };
+
+      responderOpts.onInputTranscript?.('hello there');
+      responderOpts.onBotResponse?.('general kenobi');
+
+      expect(backfill).toHaveBeenCalled();
+      const pipeline = (mgr as unknown as { pipelines: Map<string, { buffer?: { getHistory(): string } }> }).pipelines.get('g1');
+      expect(pipeline?.buffer?.getHistory()).toContain('[User]: hello there');
+      expect(pipeline?.buffer?.getHistory()).toContain('[Assistant]: general kenobi');
     });
 
     it('wires onInputTranscript to transcriptMirror.postUserTranscription', async () => {
@@ -1282,6 +1349,7 @@ describe('AudioPipelineManager', () => {
           disconnect: vi.fn(async () => {}),
           sendAudio: vi.fn(),
           sendAudioStreamEnd: vi.fn(),
+          sendInitialHistory: vi.fn(),
           sendToolResponse: vi.fn(),
           onEvent: vi.fn(),
           state: 'idle',

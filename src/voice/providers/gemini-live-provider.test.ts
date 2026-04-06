@@ -162,6 +162,16 @@ describe('GeminiLiveProvider', () => {
     });
   });
 
+  it('includes historyConfig when initialHistoryInClientContent is enabled', async () => {
+    const provider = makeProvider({ initialHistoryInClientContent: true });
+    await connectWithSetup(provider);
+
+    const setupMsg = JSON.parse(lastCreatedWs!.sent[0] as string);
+    expect(setupMsg.setup.historyConfig).toEqual({
+      initialHistoryInClientContent: true,
+    });
+  });
+
   it('includes tools in setup message when provided', async () => {
     const tools = {
       functionDeclarations: [
@@ -272,6 +282,32 @@ describe('GeminiLiveProvider', () => {
     expect(() => provider.sendText('hello')).toThrow(
       'Cannot sendText before connect()',
     );
+  });
+
+  it('sendInitialHistory sends clientContent turns without completing the turn', async () => {
+    const provider = makeProvider({ initialHistoryInClientContent: true });
+    await connectWithSetup(provider);
+
+    provider.sendInitialHistory([
+      { role: 'user', parts: [{ text: 'Earlier user question' }] },
+      { role: 'model', parts: [{ text: 'Earlier model answer' }] },
+    ]);
+
+    const msg = JSON.parse(lastCreatedWs!.sent[1] as string);
+    expect(msg.clientContent).toEqual({
+      turns: [
+        { role: 'user', parts: [{ text: 'Earlier user question' }] },
+        { role: 'model', parts: [{ text: 'Earlier model answer' }] },
+      ],
+      turnComplete: false,
+    });
+  });
+
+  it('sendInitialHistory throws when not connected', () => {
+    const provider = makeProvider();
+    expect(() => provider.sendInitialHistory([
+      { role: 'user', parts: [{ text: 'hello' }] },
+    ])).toThrow('Cannot sendInitialHistory before connect()');
   });
 
   // -----------------------------------------------------------------------
@@ -978,11 +1014,11 @@ describe('GeminiLiveProvider', () => {
       vi.useRealTimers();
     });
 
-    it('rotation with expired resume handle falls through to fresh session', async () => {
+    it('rotation with a long-expired resume handle falls through to fresh session', async () => {
       vi.useFakeTimers();
-      // Use a rotation threshold longer than the resume handle TTL (90s)
+      // Use a rotation threshold longer than the resume handle TTL (2h)
       // so the handle expires before rotation fires.
-      const provider = makeProvider({ sessionRotationMs: 100_000 });
+      const provider = makeProvider({ sessionRotationMs: 7_300_000 });
 
       const connectP = provider.connect();
       await vi.advanceTimersByTimeAsync(0);
@@ -994,11 +1030,11 @@ describe('GeminiLiveProvider', () => {
         sessionResumptionUpdate: { newHandle: 'handle-xyz' },
       });
 
-      // Advance past the resume handle TTL (90s) but before rotation threshold
-      await vi.advanceTimersByTimeAsync(91_000);
+      // Advance past the resume handle TTL (2h) but before rotation threshold
+      await vi.advanceTimersByTimeAsync(7_210_000);
 
       // Now advance to rotation threshold
-      await vi.advanceTimersByTimeAsync(9_000);
+      await vi.advanceTimersByTimeAsync(90_000);
       // Process close microtask + reconnect backoff + open microtask
       await vi.advanceTimersByTimeAsync(0);
       await vi.advanceTimersByTimeAsync(500);
