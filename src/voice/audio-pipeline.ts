@@ -312,6 +312,13 @@ export class AudioPipelineManager {
           log: this.log,
           createDecoder: this.createDecoder,
           onUserSpeaking: () => {},
+          onUserSilence: () => {
+            try {
+              provider.sendAudioStreamEnd();
+            } catch (err) {
+              this.log.warn({ guildId, err }, 'gemini-live: sendAudioStreamEnd error (non-fatal)');
+            }
+          },
         });
 
         receiver.start();
