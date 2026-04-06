@@ -1,5 +1,6 @@
 import { execa } from 'execa';
 import type { PlanPhase } from './plan-manager.js';
+import path from 'node:path';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,11 +25,12 @@ export type PushVerificationResult = {
 // Git helpers
 // ---------------------------------------------------------------------------
 
-function localGitEnv(): NodeJS.ProcessEnv {
+function localGitEnv(cwd: string): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const key of Object.keys(env)) {
     if (key.startsWith('GIT')) delete env[key];
   }
+  env.GIT_CEILING_DIRECTORIES = path.resolve(cwd);
   return env;
 }
 
@@ -36,7 +38,7 @@ async function gitIsAvailable(cwd: string): Promise<boolean> {
   try {
     await execa('git', ['rev-parse', '--is-inside-work-tree'], {
       cwd,
-      env: localGitEnv(),
+      env: localGitEnv(cwd),
       stdio: 'pipe',
     });
     return true;
@@ -49,7 +51,7 @@ async function getCurrentBranch(cwd: string): Promise<string | null> {
   try {
     const result = await execa('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd,
-      env: localGitEnv(),
+      env: localGitEnv(cwd),
       stdio: 'pipe',
     });
     const branch = result.stdout.trim();
@@ -63,7 +65,7 @@ async function fetchOrigin(cwd: string): Promise<void> {
   try {
     await execa('git', ['fetch', 'origin'], {
       cwd,
-      env: localGitEnv(),
+      env: localGitEnv(cwd),
       stdio: 'pipe',
     });
   } catch {
@@ -75,7 +77,7 @@ async function hasUpstream(cwd: string, branch: string): Promise<boolean> {
   try {
     await execa('git', ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`], {
       cwd,
-      env: localGitEnv(),
+      env: localGitEnv(cwd),
       stdio: 'pipe',
     });
     return true;
@@ -89,7 +91,7 @@ async function countUnpushedCommits(cwd: string, branch: string): Promise<number
     const result = await execa(
       'git',
       ['rev-list', '--count', `${branch}@{upstream}..HEAD`],
-      { cwd, env: localGitEnv(), stdio: 'pipe' },
+      { cwd, env: localGitEnv(cwd), stdio: 'pipe' },
     );
     return parseInt(result.stdout.trim(), 10) || 0;
   } catch {
@@ -106,14 +108,14 @@ async function isCommitOnRemote(cwd: string, branch: string, shortHash: string):
     // Resolve the short hash to a full hash first
     const result = await execa('git', ['rev-parse', shortHash], {
       cwd,
-      env: localGitEnv(),
+      env: localGitEnv(cwd),
       stdio: 'pipe',
     });
     const fullHash = result.stdout.trim();
     // Check if the commit is an ancestor of (reachable from) the upstream
     await execa('git', ['merge-base', '--is-ancestor', fullHash, `${branch}@{upstream}`], {
       cwd,
-      env: localGitEnv(),
+      env: localGitEnv(cwd),
       stdio: 'pipe',
     });
     return true;
@@ -138,7 +140,7 @@ async function checkPRExists(
     const result = await execa(
       'gh',
       ['pr', 'list', '--head', branchName, '--json', 'number,state,url', '--limit', '1'],
-      { cwd, env: localGitEnv(), stdio: 'pipe', timeout: 5_000 },
+      { cwd, env: localGitEnv(cwd), stdio: 'pipe', timeout: 5_000 },
     );
     const prs = JSON.parse(result.stdout.trim() || '[]');
     if (Array.isArray(prs) && prs.length > 0) {

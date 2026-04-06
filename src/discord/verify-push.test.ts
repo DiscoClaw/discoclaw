@@ -42,6 +42,7 @@ function git(cwd: string, args: string[]): string {
   for (const key of Object.keys(env)) {
     if (key.startsWith('GIT')) delete env[key];
   }
+  env.GIT_CEILING_DIRECTORIES = cwd;
   env.GIT_AUTHOR_NAME = 'Test';
   env.GIT_AUTHOR_EMAIL = 'test@test';
   env.GIT_COMMITTER_NAME = 'Test';
