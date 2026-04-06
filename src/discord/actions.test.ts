@@ -1104,32 +1104,31 @@ describe('buildCappedResultLines', () => {
     expect(line).not.toContain('(id:1005)');
   });
 
-  it('keeps continuation-critical labeled fields in cronShow-style blocks', () => {
+  it('keeps task thread jump URLs in multiline closeout blocks for follow-up reuse', () => {
     const results: DiscordActionResult[] = [{
       ok: true,
       summary: [
-        'Cron nightly-digest',
-        'Status: paused',
-        'Thread: digest-thread-1',
-        'Model: gpt-5.4',
-        'Next run: 2026-04-06T08:00:00.000Z',
-        'Last error: Failed to open /tmp/report.json',
-        'State: {"cursor":"abc123","offset":42}',
-        'Channel: #ops',
-        'Prompt: Summarize the previous run and post only anomalies.',
-        'Cadence: 0 8 * * *',
+        'Task ws-204 closed',
+        'Status: done',
+        'Thread: https://discord.com/channels/111111111111111111/222222222222222222/333333333333333333',
+        'Project: discoclaw',
+        'Assignee: ClawBot',
+        'Updated by: @weston',
+        'Note: Closeout posted in the linked Discord thread.',
+        'Artifacts: /tmp/task-closeout.md',
+        'Next action: use taskShow ws-204 if you need the stored linkage later.',
+        'Watcher: ops',
       ].join('\n'),
     }];
 
     const [line] = buildCappedResultLines(results);
-    expect(line).toContain('Done: Cron nightly-digest');
-    expect(line).toContain('Status: paused');
-    expect(line).toContain('Thread: digest-thread-1');
-    expect(line).toContain('Model: gpt-5.4');
-    expect(line).toContain('Next run: 2026-04-06T08:00:00.000Z');
-    expect(line).toContain('Last error: Failed to open /tmp/report.json');
-    expect(line).toContain('State: {"cursor":"abc123","offset":42}');
-    expect(line).toContain('...[omitted 2 lines]');
+    expect(line).toContain('Done: Task ws-204 closed');
+    expect(line).toContain('Status: done');
+    expect(line).toContain('Thread: https://discord.com/channels/111111111111111111/222222222222222222/333333333333333333');
+    expect(line).toContain('Artifacts: /tmp/task-closeout.md');
+    expect(line).toContain('Next action: use taskShow ws-204 if you need the stored linkage later.');
+    expect(line).toContain('...[omitted 4 lines]');
+    expect(line).not.toContain('Assignee: ClawBot');
   });
 
   it('keeps section headings and first values in memoryShow-style blocks', () => {

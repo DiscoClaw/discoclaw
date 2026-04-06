@@ -2,6 +2,14 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { TaskStore } from './store.js';
 import type { TaskData } from './types.js';
 
+type TaskDataWithThreadOriginGuild = TaskData & {
+  thread_origin_guild?: string;
+};
+
+type TaskUpdateParamsWithThreadOriginGuild = Parameters<TaskStore['update']>[1] & {
+  threadOriginGuild?: string;
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -488,6 +496,65 @@ describe('TaskStore — persistence', () => {
     expect(loaded.status).toBe('closed');
     expect(loaded.title).toBe('Updated T');
     expect(loaded.close_reason).toBe('done');
+
+    await fsp.default.unlink(path).catch(() => {});
+  });
+
+  it('persists thread origin guild when update provides it', async () => {
+    const fsp = await import('node:fs/promises');
+    const path = '/tmp/discoclaw-test-store-thread-origin-guild.jsonl';
+    await fsp.default.unlink(path).catch(() => {});
+
+    const store1 = new TaskStore({ prefix: 'ws', persistPath: path });
+    const task = store1.create({ title: 'T' });
+    store1.update(task.id, {
+      externalRef: 'discord:123',
+      threadOriginGuild: 'guild-456',
+    } as TaskUpdateParamsWithThreadOriginGuild);
+    await store1.flush();
+
+    const persisted = JSON.parse(
+      (await fsp.default.readFile(path, 'utf8')).trim(),
+    ) as TaskDataWithThreadOriginGuild;
+    expect(persisted.external_ref).toBe('discord:123');
+    expect(persisted.thread_origin_guild).toBe('guild-456');
+
+    const store2 = new TaskStore({ prefix: 'ws', persistPath: path });
+    await store2.load();
+    const loaded = store2.get(task.id) as TaskDataWithThreadOriginGuild | undefined;
+    expect(loaded?.thread_origin_guild).toBe('guild-456');
+
+    await fsp.default.unlink(path).catch(() => {});
+  });
+
+  it('keeps legacy tasks without thread origin guild readable and writable', async () => {
+    const fsp = await import('node:fs/promises');
+    const path = '/tmp/discoclaw-test-store-legacy-thread-origin-guild.jsonl';
+    await fsp.default.unlink(path).catch(() => {});
+
+    const legacyTask = {
+      id: 'ws-001',
+      title: 'Legacy task',
+      status: 'open',
+      external_ref: 'discord:123',
+      created_at: '2026-04-06T00:00:00.000Z',
+      updated_at: '2026-04-06T00:00:00.000Z',
+    };
+    await fsp.default.writeFile(path, `${JSON.stringify(legacyTask)}\n`, 'utf8');
+
+    const store = new TaskStore({ prefix: 'ws', persistPath: path });
+    await store.load();
+    const loaded = store.get('ws-001') as TaskDataWithThreadOriginGuild | undefined;
+    expect(loaded?.thread_origin_guild).toBeUndefined();
+
+    store.update('ws-001', { title: 'Legacy task updated' });
+    await store.flush();
+
+    const rewritten = JSON.parse(
+      (await fsp.default.readFile(path, 'utf8')).trim(),
+    ) as TaskDataWithThreadOriginGuild;
+    expect(rewritten.title).toBe('Legacy task updated');
+    expect(rewritten.thread_origin_guild).toBeUndefined();
 
     await fsp.default.unlink(path).catch(() => {});
   });

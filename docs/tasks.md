@@ -68,6 +68,16 @@ The sync pipeline runs automatically on task mutations. To force a full sync man
 
 Or use the `taskSync` Discord action.
 
+## Discord Action Output
+
+Discord task actions expose thread linkage conservatively:
+
+- `taskCreate` emits the real Discord thread jump URL when the create flow linked a thread in the current guild.
+- `taskShow` emits `Thread:` only when the stored task record already includes both the Discord thread ID and the origin guild ID needed to reconstruct that URL canonically.
+- If the task record does not store enough linkage data for a canonical Discord thread URL, `taskShow` emits `External ref:` only.
+
+`taskShow` remains a store-only read path. It does not perform live Discord validation or fetch missing metadata to invent a thread URL.
+
 ## Tag Map
 
 Forum tags on task threads are managed via a tag map file (`DISCOCLAW_TASKS_TAG_MAP`). This JSON file maps tag names to Discord forum tag IDs. Example:

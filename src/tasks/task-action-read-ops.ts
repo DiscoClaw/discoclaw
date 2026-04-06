@@ -6,6 +6,7 @@ import type {
   TaskActionResult,
   TaskActionRunContext,
 } from './task-action-runner-types.js';
+import { getTaskActionThreadMetadata } from './task-action-runner-types.js';
 
 function resolveTaskId(action: { taskId?: string }): string {
   return (action.taskId ?? '').trim();
@@ -31,9 +32,12 @@ export async function handleTaskShow(
     `Status: ${task.status} | Priority: P${task.priority}`,
   ];
   if (task.owner) lines.push(`Owner: ${task.owner}`);
+  const thread = getTaskActionThreadMetadata(task);
+  if (thread) lines.push(`External ref: ${thread.externalRef}`);
+  if (thread?.threadUrl) lines.push(`Thread: ${thread.threadUrl}`);
   if (task.labels?.length) lines.push(`Labels: ${task.labels.join(', ')}`);
   if (task.description) lines.push(`\n${task.description.slice(0, 500)}`);
-  return { ok: true, summary: lines.join('\n') };
+  return { ok: true, summary: lines.join('\n'), ...(thread ? { thread } : {}) };
 }
 
 export async function handleTaskList(

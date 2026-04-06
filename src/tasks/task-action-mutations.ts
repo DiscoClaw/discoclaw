@@ -19,6 +19,7 @@ import type {
   TaskActionResult,
   TaskActionRunContext,
 } from './task-action-runner-types.js';
+import { getTaskActionThreadMetadata } from './task-action-runner-types.js';
 
 /** Pre-computed set for filtering status names from tag candidates. */
 const STATUS_NAME_SET = new Set<string>(TASK_STATUSES);
@@ -103,10 +104,32 @@ export async function handleTaskCreate(
     scheduleRepairSync(taskCtx, task.id, ctx);
   }
 
+  let linkedTask = taskCtx.store.get(task.id) ?? task;
+  const storedThread = getTaskActionThreadMetadata(linkedTask);
+  const linkedThreadId = storedThread?.threadId ?? (threadId || undefined);
+  const guildId = ctx.guild.id?.trim() || undefined;
+  if (linkedThreadId && guildId && !linkedTask.thread_origin_guild) {
+    try {
+      linkedTask = taskService.update(task.id, {
+        ...(storedThread ? {} : { externalRef: `discord:${linkedThreadId}` }),
+        threadOriginGuild: guildId,
+      });
+    } catch (err) {
+      taskCtx.log?.warn(
+        { err, taskId: task.id, threadId: linkedThreadId, guildId },
+        'tasks:thread origin guild update failed',
+      );
+    }
+  }
+
+  const thread = getTaskActionThreadMetadata(linkedTask);
   taskThreadCache.invalidate();
   taskCtx.forumCountSync?.requestUpdate();
-  const threadNote = threadId ? ' (thread linked)' : '';
-  return { ok: true, summary: `Task ${task.id} created: "${task.title}"${threadNote}` };
+  const summary = [
+    `Task ${task.id} created: "${task.title}"`,
+    ...(thread?.threadUrl ? [`Thread: ${thread.threadUrl}`] : []),
+  ].join('\n');
+  return { ok: true, summary, ...(thread ? { thread } : {}) };
 }
 
 export async function handleTaskUpdate(
