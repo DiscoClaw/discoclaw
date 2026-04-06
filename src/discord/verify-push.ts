@@ -28,6 +28,12 @@ function localGitEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  delete env.GIT_OBJECT_DIRECTORY;
+  delete env.GIT_ALTERNATE_OBJECT_DIRECTORIES;
+  delete env.GIT_COMMON_DIR;
+  delete env.GIT_PREFIX;
+  delete env.GIT_NAMESPACE;
   return env;
 }
 

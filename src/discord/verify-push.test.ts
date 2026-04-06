@@ -38,11 +38,26 @@ function makePhase(overrides: Partial<PlanPhase> = {}): PlanPhase {
 }
 
 function git(cwd: string, args: string[]): string {
+  const env = {
+    ...process.env,
+    GIT_DIR: undefined,
+    GIT_WORK_TREE: undefined,
+    GIT_INDEX_FILE: undefined,
+    GIT_OBJECT_DIRECTORY: undefined,
+    GIT_ALTERNATE_OBJECT_DIRECTORIES: undefined,
+    GIT_COMMON_DIR: undefined,
+    GIT_PREFIX: undefined,
+    GIT_NAMESPACE: undefined,
+    GIT_AUTHOR_NAME: 'Test',
+    GIT_AUTHOR_EMAIL: 'test@test',
+    GIT_COMMITTER_NAME: 'Test',
+    GIT_COMMITTER_EMAIL: 'test@test',
+  };
   return execFileSync('git', args, {
     cwd,
     encoding: 'utf-8',
     stdio: 'pipe',
-    env: { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@test', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@test' },
+    env,
   }).trim();
 }
 
