@@ -1,6 +1,9 @@
-import { execa } from 'execa';
 import type { PlanPhase } from './plan-manager.js';
+import { execFile } from 'node:child_process';
 import path from 'node:path';
+import { promisify } from 'node:util';
+
+const execFileAsync = promisify(execFile);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,13 +37,28 @@ function localGitEnv(cwd: string): NodeJS.ProcessEnv {
   return env;
 }
 
+async function runCommand(
+  command: string,
+  args: string[],
+  cwd: string,
+  options: { timeout?: number } = {},
+): Promise<{ stdout: string; stderr: string }> {
+  const result = await execFileAsync(command, args, {
+    cwd,
+    env: localGitEnv(cwd),
+    encoding: 'utf8',
+    timeout: options.timeout,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return {
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
+}
+
 async function gitIsAvailable(cwd: string): Promise<boolean> {
   try {
-    await execa('git', ['rev-parse', '--is-inside-work-tree'], {
-      cwd,
-      env: localGitEnv(cwd),
-      stdio: 'pipe',
-    });
+    await runCommand('git', ['rev-parse', '--is-inside-work-tree'], cwd);
     return true;
   } catch {
     return false;
@@ -49,11 +67,7 @@ async function gitIsAvailable(cwd: string): Promise<boolean> {
 
 async function getCurrentBranch(cwd: string): Promise<string | null> {
   try {
-    const result = await execa('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
-      cwd,
-      env: localGitEnv(cwd),
-      stdio: 'pipe',
-    });
+    const result = await runCommand('git', ['rev-parse', '--abbrev-ref', 'HEAD'], cwd);
     const branch = result.stdout.trim();
     return branch && branch !== 'HEAD' ? branch : null;
   } catch {
@@ -63,11 +77,7 @@ async function getCurrentBranch(cwd: string): Promise<string | null> {
 
 async function fetchOrigin(cwd: string): Promise<void> {
   try {
-    await execa('git', ['fetch', 'origin'], {
-      cwd,
-      env: localGitEnv(cwd),
-      stdio: 'pipe',
-    });
+    await runCommand('git', ['fetch', 'origin'], cwd);
   } catch {
     // Best-effort — remote may be unreachable
   }
@@ -75,11 +85,7 @@ async function fetchOrigin(cwd: string): Promise<void> {
 
 async function hasUpstream(cwd: string, branch: string): Promise<boolean> {
   try {
-    await execa('git', ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`], {
-      cwd,
-      env: localGitEnv(cwd),
-      stdio: 'pipe',
-    });
+    await runCommand('git', ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`], cwd);
     return true;
   } catch {
     return false;
@@ -88,11 +94,7 @@ async function hasUpstream(cwd: string, branch: string): Promise<boolean> {
 
 async function countUnpushedCommits(cwd: string, branch: string): Promise<number> {
   try {
-    const result = await execa(
-      'git',
-      ['rev-list', '--count', `${branch}@{upstream}..HEAD`],
-      { cwd, env: localGitEnv(cwd), stdio: 'pipe' },
-    );
+    const result = await runCommand('git', ['rev-list', '--count', `${branch}@{upstream}..HEAD`], cwd);
     return parseInt(result.stdout.trim(), 10) || 0;
   } catch {
     return 0;
@@ -106,18 +108,10 @@ async function countUnpushedCommits(cwd: string, branch: string): Promise<number
 async function isCommitOnRemote(cwd: string, branch: string, shortHash: string): Promise<boolean> {
   try {
     // Resolve the short hash to a full hash first
-    const result = await execa('git', ['rev-parse', shortHash], {
-      cwd,
-      env: localGitEnv(cwd),
-      stdio: 'pipe',
-    });
+    const result = await runCommand('git', ['rev-parse', shortHash], cwd);
     const fullHash = result.stdout.trim();
     // Check if the commit is an ancestor of (reachable from) the upstream
-    await execa('git', ['merge-base', '--is-ancestor', fullHash, `${branch}@{upstream}`], {
-      cwd,
-      env: localGitEnv(cwd),
-      stdio: 'pipe',
-    });
+    await runCommand('git', ['merge-base', '--is-ancestor', fullHash, `${branch}@{upstream}`], cwd);
     return true;
   } catch {
     return false;
@@ -137,10 +131,11 @@ async function checkPRExists(
   cwd: string,
 ): Promise<{ available: boolean; exists: boolean; url?: string }> {
   try {
-    const result = await execa(
+    const result = await runCommand(
       'gh',
       ['pr', 'list', '--head', branchName, '--json', 'number,state,url', '--limit', '1'],
-      { cwd, env: localGitEnv(cwd), stdio: 'pipe', timeout: 5_000 },
+      cwd,
+      { timeout: 5_000 },
     );
     const prs = JSON.parse(result.stdout.trim() || '[]');
     if (Array.isArray(prs) && prs.length > 0) {
