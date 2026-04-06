@@ -19,7 +19,14 @@
 
 import WebSocket from 'ws';
 import type { LoggerLike } from '../../logging/logger-like.js';
-import type { GeminiFunctionCall, GeminiLiveEvent, GeminiLiveOpts, GeminiLiveState } from './gemini-live-types.js';
+import {
+  DEFAULT_GEMINI_LIVE_MODEL,
+  type GeminiFunctionCall,
+  type GeminiLiveEvent,
+  type GeminiLiveOpts,
+  type GeminiLiveState,
+  supportsGeminiLiveIncrementalClientContent,
+} from './gemini-live-types.js';
 import type { GeminiToolsConfig } from './gemini-tool-mapper.js';
 import { GeminiLiveTokenEstimator } from './gemini-live-token-estimator.js';
 
@@ -30,7 +37,6 @@ export type { GeminiFunctionCall, GeminiLiveEvent, GeminiLiveOpts, GeminiLiveSta
 // ---------------------------------------------------------------------------
 
 const GEMINI_LIVE_WS_BASE = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
-const DEFAULT_MODEL = 'gemini-3.1-flash-live-preview';
 const MAX_RETRIES = 3;
 const BASE_BACKOFF_MS = 500;
 /** Default session rotation threshold — 13 minutes (Gemini sessions cap at ~15 min). */
@@ -69,7 +75,7 @@ export class GeminiLiveProvider {
 
   constructor(opts: GeminiLiveOpts) {
     this.apiKey = opts.apiKey;
-    this.model = opts.model ?? DEFAULT_MODEL;
+    this.model = opts.model ?? DEFAULT_GEMINI_LIVE_MODEL;
     this.log = opts.log;
     this.systemInstruction = opts.systemInstruction;
     this.responseModalities = opts.responseModalities ?? ['AUDIO'];
@@ -125,10 +131,18 @@ export class GeminiLiveProvider {
     }
     this.tokenEstimator.addText(text);
     this.checkTokenThreshold();
+    if (supportsGeminiLiveIncrementalClientContent(this.model)) {
+      this.ws!.send(JSON.stringify({
+        clientContent: {
+          turns: [{ role: 'user', parts: [{ text }] }],
+          turnComplete: true,
+        },
+      }));
+      return;
+    }
     this.ws!.send(JSON.stringify({
-      clientContent: {
-        turns: [{ role: 'user', parts: [{ text }] }],
-        turnComplete: true,
+      realtimeInput: {
+        text,
       },
     }));
   }

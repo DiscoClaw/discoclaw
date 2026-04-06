@@ -233,8 +233,18 @@ describe('GeminiLiveProvider', () => {
   // Sending text
   // -----------------------------------------------------------------------
 
-  it('sendText sends clientContent message', async () => {
+  it('sendText sends realtimeInput text for the default 3.1 live model', async () => {
     const provider = makeProvider();
+    await connectWithSetup(provider);
+
+    provider.sendText('Hello there');
+
+    const msg = JSON.parse(lastCreatedWs!.sent[1] as string);
+    expect(msg.realtimeInput).toEqual({ text: 'Hello there' });
+  });
+
+  it('sendText preserves clientContent for explicit 2.5 live models', async () => {
+    const provider = makeProvider({ model: 'gemini-2.5-flash-live-preview' });
     await connectWithSetup(provider);
 
     provider.sendText('Hello there');
