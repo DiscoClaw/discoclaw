@@ -4,6 +4,20 @@ All notable changes to DiscoClaw are documented here.
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-04-06
+
+3 commits. Breaking voice-path cleanup, follow-up microcompaction, and real task thread links.
+
+### Added
+- Real Discord task thread links are now returned from task mutations and exposed in task read surfaces
+
+### Changed
+- Follow-up action context now uses microcompaction to keep recent tool/action state without bloating prompt size
+- `!task` surfaces now preserve the backing Discord thread reference instead of reducing it to a generic "thread linked" summary
+
+### Removed
+- Voice now runs on Gemini Live only; the legacy STT/TTS pipeline and voice runtime switching path were removed
+
 ## [1.3.0] — 2026-04-05
 
 17 commits. Gemini Live voice support, observability surfaces, and post-integration fixes.
@@ -206,7 +220,8 @@ Task sync overhaul and init wizard improvements.
 
 Initial release series. Core orchestrator, Discord integration, task/cron subsystems, Claude Code and OpenAI-compatible runtime adapters, image generation, CI/CD pipeline for npm publishing via OIDC Trusted Publisher.
 
-[Unreleased]: https://github.com/DiscoClaw/discoclaw/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/DiscoClaw/discoclaw/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/DiscoClaw/discoclaw/compare/v1.3.0...v2.0.0
 [0.8.0]: https://github.com/DiscoClaw/discoclaw/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/DiscoClaw/discoclaw/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/DiscoClaw/discoclaw/compare/v0.5.8...v0.6.0
